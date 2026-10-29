@@ -1,0 +1,8757 @@
+{
+  "coordinateSystem": "512 square, manually estimated from inspected rest proportions; picture-left/right not anatomical naming",
+  "reference": "production-v4/calibration-probe-20261029/shared/raw/open-common-rest-v2.png (provisional, not accepted)",
+  "durationSeconds": 4.2,
+  "fpsForGuide": 24,
+  "keyIntent": [
+    [
+      0,
+      "REST",
+      143,
+      319,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0.45,
+      "BRACE",
+      143,
+      319,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0.65,
+      "RELEASE",
+      143,
+      319,
+      -2,
+      1,
+      0,
+      0
+    ],
+    [
+      0.85,
+      "CLEAR EDGE",
+      132,
+      322,
+      -3,
+      2,
+      0,
+      4
+    ],
+    [
+      1.1,
+      "APPROACH",
+      116,
+      309,
+      -4,
+      4,
+      1,
+      15
+    ],
+    [
+      1.4,
+      "APPROACH",
+      106,
+      282,
+      -5,
+      6,
+      2,
+      28
+    ],
+    [
+      1.7,
+      "OPEN ATTENTION",
+      106,
+      263,
+      -4,
+      7,
+      3,
+      35
+    ],
+    [
+      1.9,
+      "PEAK",
+      106,
+      263,
+      -4,
+      7,
+      3,
+      35
+    ],
+    [
+      2.14,
+      "TURN DOWN",
+      104,
+      280,
+      -3,
+      5,
+      2,
+      30
+    ],
+    [
+      2.4,
+      "LOWER",
+      120,
+      316,
+      -1,
+      3,
+      1,
+      18
+    ],
+    [
+      2.7,
+      "ARRIVE",
+      143,
+      319,
+      0,
+      1,
+      0,
+      0
+    ],
+    [
+      2.9,
+      "TAKE LOAD",
+      143,
+      319,
+      0.7,
+      0,
+      0,
+      0
+    ],
+    [
+      3.2,
+      "SETTLE",
+      143,
+      319,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      4.2,
+      "REST",
+      143,
+      319,
+      0,
+      0,
+      0,
+      0
+    ]
+  ],
+  "samples": [
+    {
+      "time": 0.0,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.04167,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.08333,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.125,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.16667,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.20833,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.25,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.29167,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.33333,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.375,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.41667,
+      "phase": "REST",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.45833,
+      "phase": "BRACE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.00084997106484,
+        244.9920910493827
+      ],
+      "neck": [
+        262.0010199652778,
+        189.9920910493827
+      ],
+      "head": [
+        262.0010199652778,
+        104.99209104938272
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0008499710648,
+        214.9920910493827
+      ],
+      "shoulderR": [
+        304.00084997106484,
+        215.9920910493827
+      ],
+      "elbowL": [
+        201.76648125776353,
+        288.9583509011085
+      ],
+      "elbowR": [
+        341.99499477356665,
+        279.4936261546581
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0033998842592592353,
+      "headWorldPitchDeg": 0.0008499710648148088,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.5,
+      "phase": "BRACE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.02734375,
+        244.75
+      ],
+      "neck": [
+        262.0328125,
+        189.75
+      ],
+      "head": [
+        262.0328125,
+        104.75
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.02734375,
+        214.75
+      ],
+      "shoulderR": [
+        304.02734375,
+        215.75
+      ],
+      "elbowL": [
+        201.63961832146256,
+        288.7114681254903
+      ],
+      "elbowR": [
+        341.9133029462381,
+        279.31613953812973
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.10937499999999996,
+      "headWorldPitchDeg": 0.02734374999999999,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.54167,
+      "phase": "BRACE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0809642650463,
+        244.2764274691358
+      ],
+      "neck": [
+        262.0971571180556,
+        189.2764274691358
+      ],
+      "head": [
+        262.0971571180556,
+        104.2764274691358
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0809642650463,
+        214.2764274691358
+      ],
+      "shoulderR": [
+        304.0809642650463,
+        215.2764274691358
+      ],
+      "elbowL": [
+        201.38703271210133,
+        288.22737562254383
+      ],
+      "elbowR": [
+        341.75217835011205,
+        278.9700663144486
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.3238570601851849,
+      "headWorldPitchDeg": 0.08096426504629622,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.58333,
+      "phase": "BRACE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.14814814814815,
+        243.71604938271605
+      ],
+      "neck": [
+        262.1777777777778,
+        188.71604938271605
+      ],
+      "head": [
+        262.1777777777778,
+        103.71604938271605
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.14814814814815,
+        213.71604938271605
+      ],
+      "shoulderR": [
+        304.14814814814815,
+        214.71604938271605
+      ],
+      "elbowL": [
+        201.08037552780235,
+        287.65243265340257
+      ],
+      "elbowR": [
+        341.55939588342585,
+        278.5627293503516
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.5925925925925928,
+      "headWorldPitchDeg": 0.1481481481481482,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.9987160493827
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.625,
+      "phase": "BRACE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.21533203125,
+        243.21354166666666
+      ],
+      "neck": [
+        262.2583984375,
+        188.21354166666666
+      ],
+      "head": [
+        262.2583984375,
+        103.21354166666667
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.21533203125,
+        213.21354166666666
+      ],
+      "shoulderR": [
+        304.21533203125,
+        214.21354166666666
+      ],
+      "elbowL": [
+        200.79788493264005,
+        287.13458775861665
+      ],
+      "elbowR": [
+        341.3853206174304,
+        278.20097753108627
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.8613281249999999,
+      "headWorldPitchDeg": 0.21533203124999997,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.794125
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.66667,
+      "phase": "RELEASE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.270482678123,
+        242.89264169472503
+      ],
+      "neck": [
+        262.32457921374765,
+        187.89264169472503
+      ],
+      "head": [
+        262.32457921374765,
+        102.89264169472503
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.27048267812305,
+        212.89264169472503
+      ],
+      "shoulderR": [
+        304.270482678123,
+        213.89264169472503
+      ],
+      "elbowL": [
+        200.4339398551374,
+        286.79312166046947
+      ],
+      "elbowR": [
+        341.2755048011064,
+        277.97562178833107
+      ],
+      "wristL": [
+        142.85867344299606,
+        319.05902777777777
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 1.081930712492153,
+      "headWorldPitchDeg": 0.2704826781230382,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.3406913580247
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.70833,
+      "phase": "RELEASE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.3195973963238,
+        242.65307948487398
+      ],
+      "neck": [
+        262.3835168755885,
+        187.65307948487398
+      ],
+      "head": [
+        262.3835168755885,
+        102.653079484874
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.31959739632376,
+        212.65307948487398
+      ],
+      "shoulderR": [
+        304.3195973963238,
+        213.65307948487398
+      ],
+      "elbowL": [
+        198.49521365272963,
+        286.42351091920517
+      ],
+      "elbowR": [
+        341.1945968757984,
+        277.81096608807144
+      ],
+      "wristL": [
+        141.4495420481585,
+        319.61675347222223
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 1.278389585295041,
+      "headWorldPitchDeg": 0.3195973963237603,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        268.78309104938273
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.75,
+      "phase": "RELEASE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.3681144067797,
+        242.44490358126723
+      ],
+      "neck": [
+        262.4417372881356,
+        187.44490358126723
+      ],
+      "head": [
+        262.4417372881356,
+        102.44490358126721
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.36811440677965,
+        212.44490358126723
+      ],
+      "shoulderR": [
+        304.3681144067797,
+        213.44490358126723
+      ],
+      "elbowL": [
+        195.15977886662367,
+        285.86973968309246
+      ],
+      "elbowR": [
+        341.12510992539757,
+        277.67046921088473
+      ],
+      "wristL": [
+        138.97486033519553,
+        320.5
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 1.472457627118644,
+      "headWorldPitchDeg": 0.368114406779661,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        268.266
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.79167,
+      "phase": "RELEASE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.41902224821484,
+        242.25585837860933
+      ],
+      "neck": [
+        262.5028266978578,
+        187.25585837860933
+      ],
+      "head": [
+        262.5028266978578,
+        102.25585837860933
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.41902224821484,
+        212.25585837860933
+      ],
+      "shoulderR": [
+        304.41902224821484,
+        213.25585837860933
+      ],
+      "elbowL": [
+        191.0832763910844,
+        285.04430445650024
+      ],
+      "elbowR": [
+        341.06314733014204,
+        277.54588946415225
+      ],
+      "wristL": [
+        135.98807433917855,
+        321.38324652777777
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 1.6760889928593847,
+      "headWorldPitchDeg": 0.4190222482148462,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        267.92408031387106
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.83333,
+      "phase": "RELEASE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.4753094593534,
+        242.07368827160494
+      ],
+      "neck": [
+        262.5703713512241,
+        187.07368827160494
+      ],
+      "head": [
+        262.5703713512241,
+        102.07368827160494
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.4753094593534,
+        212.07368827160494
+      ],
+      "shoulderR": [
+        304.4753094593534,
+        213.07368827160494
+      ],
+      "elbowL": [
+        187.04040510639754,
+        283.9904742829617
+      ],
+      "elbowR": [
+        341.00470117794526,
+        277.4289797453422
+      ],
+      "wristL": [
+        133.04263009517896,
+        321.94097222222223
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 1.9012378374136851,
+      "headWorldPitchDeg": 0.4753094593534213,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        267.67992817059485
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.875,
+      "phase": "CLEAR EDGE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.5407876205637,
+        241.88983251906305
+      ],
+      "neck": [
+        262.6489451446765,
+        186.88983251906305
+      ],
+      "head": [
+        262.6489451446765,
+        101.88092450801334
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.54078762056372,
+        211.88983251906305
+      ],
+      "shoulderR": [
+        304.5407876205637,
+        212.88983251906305
+      ],
+      "elbowL": [
+        183.8055860308007,
+        282.92539695710974
+      ],
+      "elbowR": [
+        340.9472990053295,
+        277.31471846223656
+      ],
+      "wristL": [
+        130.45694401700797,
+        321.78311685012704
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 2.163150482254893,
+      "headWorldPitchDeg": 0.5407876205637232,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        267.46863300619833
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.91667,
+      "phase": "CLEAR EDGE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.61862378569225,
+        241.71213095968898
+      ],
+      "neck": [
+        262.7423485428307,
+        186.71213095968898
+      ],
+      "head": [
+        262.7423485428307,
+        101.65458989154901
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.61862378569225,
+        211.71213095968898
+      ],
+      "shoulderR": [
+        304.61862378569225,
+        212.71213095968898
+      ],
+      "elbowL": [
+        181.12758126035962,
+        281.8845680063885
+      ],
+      "elbowR": [
+        340.89472041996396,
+        277.21054034302944
+      ],
+      "wristL": [
+        127.65541794823899,
+        320.57213384764947
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 2.474495142768951,
+      "headWorldPitchDeg": 0.6186237856922377,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        267.2779392153862
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 0.95833,
+      "phase": "CLEAR EDGE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.7048606541742,
+        241.5411607012702
+      ],
+      "neck": [
+        262.845832785009,
+        186.5411607012702
+      ],
+      "head": [
+        262.845832785009,
+        101.40454458708972
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.70486065417415,
+        211.5411607012702
+      ],
+      "shoulderR": [
+        304.7048606541742,
+        212.5411607012702
+      ],
+      "elbowL": [
+        178.94498644977318,
+        280.9128327365717
+      ],
+      "elbowR": [
+        340.84634624454463,
+        277.1150952207111
+      ],
+      "wristL": [
+        124.71562702702796,
+        318.53166547495846
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 2.8194426166966666,
+      "headWorldPitchDeg": 0.7048606541741667,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        267.09559119286297
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.0,
+      "phase": "CLEAR EDGE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.7949748103755,
+        241.3761632802155
+      ],
+      "neck": [
+        262.9539697724506,
+        186.3761632802155
+      ],
+      "head": [
+        262.9539697724506,
+        101.14363510341994
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.7949748103755,
+        211.3761632802155
+      ],
+      "shoulderR": [
+        304.7949748103755,
+        212.3761632802155
+      ],
+      "elbowL": [
+        177.19627240599155,
+        280.0370082036087
+      ],
+      "elbowR": [
+        340.8009032076062,
+        277.0257813784958
+      ],
+      "wristL": [
+        121.80942829447382,
+        315.92986960203217
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 3.1798992415020133,
+      "headWorldPitchDeg": 0.7949748103755033,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.91164506753114
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.04167,
+      "phase": "CLEAR EDGE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.88444283866227,
+        241.21638023293372
+      ],
+      "neck": [
+        263.0613314063947,
+        186.21638023293372
+      ],
+      "head": [
+        263.0613314063947,
+        100.88470794932415
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.88444283866224,
+        211.21638023293372
+      ],
+      "shoulderR": [
+        304.88444283866227,
+        212.21638023293372
+      ],
+      "elbowL": [
+        175.81691331043078,
+        279.2684097921275
+      ],
+      "elbowR": [
+        340.75711431867603,
+        276.94003464835595
+      ],
+      "wristL": [
+        119.10867879167549,
+        313.03490409884904
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 3.537771354648965,
+      "headWorldPitchDeg": 0.8844428386622413,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.7330847832891
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.08333,
+      "phase": "CLEAR EDGE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.96874132340037,
+        241.0610530958336
+      ],
+      "neck": [
+        263.16248958808046,
+        186.0610530958336
+      ],
+      "head": [
+        263.16248958808046,
+        100.64060963358683
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.96874132340037,
+        211.0610530958336
+      ],
+      "shoulderR": [
+        304.96874132340037,
+        212.0610530958336
+      ],
+      "elbowL": [
+        174.78997754129506,
+        278.62762927506503
+      ],
+      "elbowR": [
+        340.71370080502777,
+        276.85532654385383
+      ],
+      "wristL": [
+        116.78523555973193,
+        310.1149268353875
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 3.8749652936014938,
+      "headWorldPitchDeg": 0.9687413234003734,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.5613468156333
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.125,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.0460160033422,
+        240.90372416615511
+      ],
+      "neck": [
+        263.25521920401064,
+        185.90372416615511
+      ],
+      "head": [
+        263.25521920401064,
+        100.41326462425823
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.0460160033422,
+        210.90372416615511
+      ],
+      "shoulderR": [
+        305.0460160033422,
+        211.90372416615511
+      ],
+      "elbowL": [
+        174.10599447692204,
+        278.1251126369733
+      ],
+      "elbowR": [
+        340.6676818817538,
+        276.76586196662237
+      ],
+      "wristL": [
+        114.87351176616684,
+        307.2371890301145
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 4.1840640133688005,
+      "headWorldPitchDeg": 1.0460160033422001,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.39567270097257
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.16667,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.1238256194944,
+        240.72674290824486
+      ],
+      "neck": [
+        263.3485907433933,
+        185.72674290824486
+      ],
+      "head": [
+        263.3485907433933,
+        100.17106116757233
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.1238256194944,
+        210.72674290824486
+      ],
+      "shoulderR": [
+        305.1238256194944,
+        211.72674290824486
+      ],
+      "elbowL": [
+        173.54681694359658,
+        277.65127146902194
+      ],
+      "elbowR": [
+        340.6135964338479,
+        276.661141862456
+      ],
+      "wristL": [
+        112.9530997577317,
+        303.8123386796582
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 4.495302477977602,
+      "headWorldPitchDeg": 1.1238256194944005,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.2353039757156
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.20833,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.2013628766291,
+        240.54173298016659
+      ],
+      "neck": [
+        263.44163545195494,
+        185.54173298016659
+      ],
+      "head": [
+        263.44163545195494,
+        99.92300317617982
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.2013628766291,
+        210.54173298016659
+      ],
+      "shoulderR": [
+        305.2013628766291,
+        211.54173298016659
+      ],
+      "elbowL": [
+        173.0207855159235,
+        277.17813775061956
+      ],
+      "elbowR": [
+        340.55587076703904,
+        276.5498768686591
+      ],
+      "wristL": [
+        111.07268012595192,
+        299.9472448607583
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 4.8054515065164045,
+      "headWorldPitchDeg": 1.2013628766291011,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.0794821762713
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.25,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.2767034990792,
+        240.36325966850828
+      ],
+      "neck": [
+        263.53204419889505,
+        185.36325966850828
+      ],
+      "head": [
+        263.53204419889505,
+        99.68297651933702
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.2767034990792,
+        210.36325966850828
+      ],
+      "shoulderR": [
+        305.2767034990792,
+        211.36325966850828
+      ],
+      "elbowL": [
+        172.50920357074023,
+        276.71302190204085
+      ],
+      "elbowR": [
+        340.4999651061221,
+        276.442610016847
+      ],
+      "wristL": [
+        109.34031852472758,
+        295.836095976144
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 5.106813996316758,
+      "headWorldPitchDeg": 1.2767034990791895,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.92373071413954
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.29167,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.34792321117754,
+        240.20588825985797
+      ],
+      "neck": [
+        263.6175078534131,
+        185.20588825985797
+      ],
+      "head": [
+        263.6175078534131,
+        99.46486706630023
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.34792321117754,
+        210.20588825985797
+      ],
+      "shoulderR": [
+        305.34792321117754,
+        211.20588825985797
+      ],
+      "elbowL": [
+        172.04610883211606,
+        276.2890870252214
+      ],
+      "elbowR": [
+        340.45144619441834,
+        276.34990313586235
+      ],
+      "wristL": [
+        107.86408060795887,
+        291.67308042854455
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 5.391692844710204,
+      "headWorldPitchDeg": 1.347923211177551,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.7486916839082
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.33333,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.4130977372571,
+        240.08418404080365
+      ],
+      "neck": [
+        263.6957172847085,
+        185.08418404080365
+      ],
+      "head": [
+        263.6957172847085,
+        99.28256068632578
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.41309773725706,
+        210.08418404080365
+      ],
+      "shoulderR": [
+        305.4130977372571,
+        211.08418404080365
+      ],
+      "elbowL": [
+        171.70860395719305,
+        275.9629142883549
+      ],
+      "elbowR": [
+        340.41596684304824,
+        276.2823370388975
+      ],
+      "wristL": [
+        106.75203202954592,
+        287.6523866206891
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 5.652390949028286,
+      "headWorldPitchDeg": 1.4130977372570714,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.56387614911824
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.375,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.47030280165063,
+        240.0127122979333
+      ],
+      "neck": [
+        263.76436336198077,
+        185.0127122979333
+      ],
+      "head": [
+        263.76436336198077,
+        99.14994324866994
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.47030280165063,
+        210.0127122979333
+      ],
+      "shoulderR": [
+        305.47030280165063,
+        211.0127122979333
+      ],
+      "elbowL": [
+        171.6060141694172,
+        275.80944440092446
+      ],
+      "elbowR": [
+        340.39922134334915,
+        276.25051306947523
+      ],
+      "wristL": [
+        106.1122384433889,
+        283.9682029553069
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 5.8812112066025515,
+      "headWorldPitchDeg": 1.4703028016506379,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.3838493963577
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.41667,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.51874714220395,
+        240.00891632373114
+      ],
+      "neck": [
+        263.8224965706447,
+        185.00891632373114
+      ],
+      "head": [
+        263.8224965706447,
+        99.08260459533608
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.51874714220392,
+        210.00891632373114
+      ],
+      "shoulderR": [
+        305.51874714220395,
+        211.00891632373114
+      ],
+      "elbowL": [
+        171.82278606209047,
+        275.89201132455423
+      ],
+      "elbowR": [
+        340.4083070615054,
+        276.26777479242844
+      ],
+      "wristL": [
+        106.0,
+        280.7253160970955
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.074988568815729,
+      "headWorldPitchDeg": 1.5187471422039323,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.2231767122146
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.45833,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.56674025491543,
+        240.09872256515774
+      ],
+      "neck": [
+        263.8800883058985,
+        185.09872256515774
+      ],
+      "head": [
+        263.8800883058985,
+        99.09751693244169
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.5667402549154,
+        210.09872256515774
+      ],
+      "shoulderR": [
+        305.56674025491543,
+        211.09872256515774
+      ],
+      "elbowL": [
+        171.98781085706835,
+        276.04154249647706
+      ],
+      "elbowR": [
+        340.4556529765037,
+        276.3579270431882
+      ],
+      "wristL": [
+        106.0,
+        277.30993450676925
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.266961019661637,
+      "headWorldPitchDeg": 1.5667402549154092,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.0964233832769
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.5,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.6141975308642,
+        240.25925925925927
+      ],
+      "neck": [
+        263.93703703703704,
+        185.25925925925927
+      ],
+      "head": [
+        263.93703703703704,
+        99.17592592592594
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.6141975308642,
+        210.25925925925927
+      ],
+      "shoulderR": [
+        305.6141975308642,
+        211.25925925925927
+      ],
+      "elbowL": [
+        171.95663072551207,
+        276.161976932685
+      ],
+      "elbowR": [
+        340.5315898977459,
+        276.50322994082666
+      ],
+      "wristL": [
+        106.0,
+        273.7697262479871
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.45679012345679,
+      "headWorldPitchDeg": 1.6141975308641976,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.01815469613257
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.54167,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.65843978623684,
+        240.45837620027436
+      ],
+      "neck": [
+        263.9901277434842,
+        185.45837620027436
+      ],
+      "head": [
+        263.9901277434842,
+        99.29291516632372
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.65843978623684,
+        210.45837620027436
+      ],
+      "shoulderR": [
+        305.65843978623684,
+        211.45837620027436
+      ],
+      "elbowL": [
+        171.73849524195506,
+        276.2264335086125
+      ],
+      "elbowR": [
+        340.62209512514806,
+        276.6775666685853
+      ],
+      "wristL": [
+        106.0,
+        270.35700054422375
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.633759144947418,
+      "headWorldPitchDeg": 1.6584397862368545,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.0044194101509
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.58333,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.6967878372199,
+        240.6639231824417
+      ],
+      "neck": [
+        264.0361454046639,
+        185.6639231824417
+      ],
+      "head": [
+        264.0361454046639,
+        99.4235682441701
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.69678783721994,
+        210.6639231824417
+      ],
+      "shoulderR": [
+        305.6967878372199,
+        211.6639231824417
+      ],
+      "elbowL": [
+        171.39581029912748,
+        276.23406074468323
+      ],
+      "elbowR": [
+        340.7133820626258,
+        276.8547057276242
+      ],
+      "wristL": [
+        106.0,
+        267.3240666189539
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.7871513488797435,
+      "headWorldPitchDeg": 1.6967878372199359,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.08357750342935
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.625,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.7265625,
+        240.84375
+      ],
+      "neck": [
+        264.071875,
+        185.84375
+      ],
+      "head": [
+        264.071875,
+        99.54296875
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.7265625,
+        210.84375
+      ],
+      "shoulderR": [
+        305.7265625,
+        211.84375
+      ],
+      "elbowL": [
+        171.02867119355489,
+        276.2047195375315
+      ],
+      "elbowR": [
+        340.791980406697,
+        277.0082838127167
+      ],
+      "wristL": [
+        106.0,
+        264.92323369565213
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.906250000000001,
+      "headWorldPitchDeg": 1.7265625000000002,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.2373240740741
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.66667,
+      "phase": "APPROACH",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.7450845907636,
+        240.96570644718793
+      ],
+      "neck": [
+        264.0941015089163,
+        185.96570644718793
+      ],
+      "head": [
+        264.0941015089163,
+        99.62620027434842
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.7450845907636,
+        210.96570644718793
+      ],
+      "shoulderR": [
+        305.7450845907636,
+        211.96570644718793
+      ],
+      "elbowL": [
+        170.75411014019764,
+        276.1702439196663
+      ],
+      "elbowR": [
+        340.8446892270652,
+        277.1118326127192
+      ],
+      "wristL": [
+        106.0,
+        263.4068109977933
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.980338363054413,
+      "headWorldPitchDeg": 1.7450845907636032,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.4335089163237
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.70833,
+      "phase": "OPEN ATTENTION",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.75,
+        241.0
+      ],
+      "neck": [
+        264.1,
+        186.0
+      ],
+      "head": [
+        264.1,
+        99.65
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.75,
+        211.0
+      ],
+      "shoulderR": [
+        305.75,
+        212.0
+      ],
+      "elbowL": [
+        170.67482705368252,
+        276.15928362701607
+      ],
+      "elbowR": [
+        340.85941368966553,
+        277.14084026452167
+      ],
+      "wristL": [
+        106.0,
+        263.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 7.0,
+      "headWorldPitchDeg": 1.75,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.639981824417
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.75,
+      "phase": "OPEN ATTENTION",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.75,
+        241.0
+      ],
+      "neck": [
+        264.1,
+        186.0
+      ],
+      "head": [
+        264.1,
+        99.65
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.75,
+        211.0
+      ],
+      "shoulderR": [
+        305.75,
+        212.0
+      ],
+      "elbowL": [
+        170.67482705368252,
+        276.15928362701607
+      ],
+      "elbowR": [
+        340.85941368966553,
+        277.14084026452167
+      ],
+      "wristL": [
+        106.0,
+        263.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 7.0,
+      "headWorldPitchDeg": 1.75,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.8245925925926
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.79167,
+      "phase": "OPEN ATTENTION",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.75,
+        241.0
+      ],
+      "neck": [
+        264.1,
+        186.0
+      ],
+      "head": [
+        264.1,
+        99.65
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.75,
+        211.0
+      ],
+      "shoulderR": [
+        305.75,
+        212.0
+      ],
+      "elbowL": [
+        170.67482705368252,
+        276.15928362701607
+      ],
+      "elbowR": [
+        340.85941368966553,
+        277.14084026452167
+      ],
+      "wristL": [
+        106.0,
+        263.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 7.0,
+      "headWorldPitchDeg": 1.75,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        265.95519101508916
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.83333,
+      "phase": "OPEN ATTENTION",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.75,
+        241.0
+      ],
+      "neck": [
+        264.1,
+        186.0
+      ],
+      "head": [
+        264.1,
+        99.65
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.75,
+        211.0
+      ],
+      "shoulderR": [
+        305.75,
+        212.0
+      ],
+      "elbowL": [
+        170.67482705368252,
+        276.15928362701607
+      ],
+      "elbowR": [
+        340.85941368966553,
+        277.14084026452167
+      ],
+      "wristL": [
+        106.0,
+        263.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 7.0,
+      "headWorldPitchDeg": 1.75,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.875,
+      "phase": "OPEN ATTENTION",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.75,
+        241.0
+      ],
+      "neck": [
+        264.1,
+        186.0
+      ],
+      "head": [
+        264.1,
+        99.65
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.75,
+        211.0
+      ],
+      "shoulderR": [
+        305.75,
+        212.0
+      ],
+      "elbowL": [
+        170.67482705368252,
+        276.15928362701607
+      ],
+      "elbowR": [
+        340.85941368966553,
+        277.14084026452167
+      ],
+      "wristL": [
+        106.0,
+        263.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 7.0,
+      "headWorldPitchDeg": 1.75,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.91667,
+      "phase": "PEAK",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.74525631491343,
+        241.00799898888795
+      ],
+      "neck": [
+        264.09430757789613,
+        186.00799898888795
+      ],
+      "head": [
+        264.09430757789613,
+        99.66226830546584
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.74525631491346,
+        211.00799898888795
+      ],
+      "shoulderR": [
+        305.74525631491343,
+        212.00799898888795
+      ],
+      "elbowL": [
+        170.67249088285172,
+        276.1685785208993
+      ],
+      "elbowR": [
+        340.8615813929002,
+        277.14511370098705
+      ],
+      "wristL": [
+        105.97240440672154,
+        263.1340547481919
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.9810252596538,
+      "headWorldPitchDeg": 1.74525631491345,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 1.95833,
+      "phase": "PEAK",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.6972204809672,
+        241.09072798499852
+      ],
+      "neck": [
+        264.03666457716065,
+        186.09072798499852
+      ],
+      "head": [
+        264.03666457716065,
+        99.78822955212803
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.6972204809672,
+        211.09072798499852
+      ],
+      "shoulderR": [
+        305.6972204809672,
+        212.09072798499852
+      ],
+      "elbowL": [
+        170.650088029312,
+        276.26509800048956
+      ],
+      "elbowR": [
+        340.8841809891162,
+        277.18971269442363
+      ],
+      "wristL": [
+        105.70297898448217,
+        264.5231634614545
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.788881923868771,
+      "headWorldPitchDeg": 1.6972204809671927,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.0,
+      "phase": "PEAK",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.61055834716785,
+        241.24529476084123
+      ],
+      "neck": [
+        263.93267001660143,
+        186.24529476084123
+      ],
+      "head": [
+        263.93267001660143,
+        100.02079224839017
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.61055834716788,
+        211.24529476084123
+      ],
+      "shoulderR": [
+        305.61055834716785,
+        212.24529476084123
+      ],
+      "elbowL": [
+        170.5882464782256,
+        276.43300580636384
+      ],
+      "elbowR": [
+        340.9268741974315,
+        277.27419475741516
+      ],
+      "wristL": [
+        105.24768518518518,
+        267.12650002221346
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.4422333886714895,
+      "headWorldPitchDeg": 1.6105583471678724,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.0
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.04167,
+      "phase": "PEAK",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.50158814803825,
+        241.44947596270518
+      ],
+      "neck": [
+        263.80190577764586,
+        186.44947596270518
+      ],
+      "head": [
+        263.80190577764586,
+        100.32304662947077
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.50158814803822,
+        211.44947596270518
+      ],
+      "shoulderR": [
+        305.50158814803825,
+        212.44947596270518
+      ],
+      "elbowL": [
+        170.45476181511935,
+        276.62401059081145
+      ],
+      "elbowR": [
+        340.98407360230345,
+        277.3878561857124
+      ],
+      "wristL": [
+        104.73210975008574,
+        270.5797566634412
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 6.006352592152945,
+      "headWorldPitchDeg": 1.5015881480382363,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.0039543507737
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.08333,
+      "phase": "PEAK",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.38662811810104,
+        241.68104823687932
+      ],
+      "neck": [
+        263.66395374172123,
+        186.68104823687932
+      ],
+      "head": [
+        263.66395374172123,
+        100.6580829305884
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.38662811810104,
+        211.68104823687932
+      ],
+      "shoulderR": [
+        305.38662811810104,
+        212.68104823687932
+      ],
+      "elbowL": [
+        170.2422926125608,
+        276.8030543628735
+      ],
+      "elbowR": [
+        341.05028345036555,
+        277.5201081339926
+      ],
+      "wristL": [
+        104.28183942043896,
+        274.51862561810987
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 5.54651247240412,
+      "headWorldPitchDeg": 1.38662811810103,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.076569403947
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.125,
+      "phase": "PEAK",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.281996491879,
+        241.91778822965273
+      ],
+      "neck": [
+        263.5383957902548,
+        186.91778822965273
+      ],
+      "head": [
+        263.5383957902548,
+        100.98899138696163
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.281996491879,
+        211.91778822965273
+      ],
+      "shoulderR": [
+        305.281996491879,
+        212.91778822965273
+      ],
+      "elbowL": [
+        170.00277253825186,
+        276.9668186392585
+      ],
+      "elbowR": [
+        341.12018477104385,
+        277.66054273443984
+      ],
+      "wristL": [
+        104.0224609375,
+        278.5787991191917
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 5.127985967516009,
+      "headWorldPitchDeg": 1.2819964918790023,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.2236890392978
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.16667,
+      "phase": "TURN DOWN",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.19671324991435,
+        242.1629098937656
+      ],
+      "neck": [
+        263.4360558998972,
+        187.1629098937656
+      ],
+      "head": [
+        263.4360558998972,
+        101.31086796884269
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.19671324991435,
+        212.1629098937656
+      ],
+      "shoulderR": [
+        305.19671324991435,
+        213.1629098937656
+      ],
+      "elbowL": [
+        170.0540486072078,
+        277.28581770515143
+      ],
+      "elbowR": [
+        341.1969341095021,
+        277.81570641534614
+      ],
+      "wristL": [
+        104.30325968849554,
+        283.0158924487258
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 4.786852999657366,
+      "headWorldPitchDeg": 1.1967132499143416,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.42308990311517
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.20833,
+      "phase": "TURN DOWN",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.1139152920566,
+        242.47960271168407
+      ],
+      "neck": [
+        263.33669835046794,
+        187.47960271168407
+      ],
+      "head": [
+        263.33669835046794,
+        101.70207894883312
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.1139152920566,
+        212.47960271168407
+      ],
+      "shoulderR": [
+        305.1139152920566,
+        213.47960271168407
+      ],
+      "elbowL": [
+        170.85995742345048,
+        278.0743156871652
+      ],
+      "elbowR": [
+        341.3010946763171,
+        278.0279415610406
+      ],
+      "wristL": [
+        105.83308839202407,
+        289.3661846188222
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 4.455661168226394,
+      "headWorldPitchDeg": 1.1139152920565984,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.65254864168804
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.25,
+      "phase": "TURN DOWN",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        260.0319997367671,
+        242.84210878553728
+      ],
+      "neck": [
+        263.2383996841205,
+        187.84210878553728
+      ],
+      "head": [
+        263.2383996841205,
+        102.13830902244692
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        205.03199973676706,
+        212.84210878553728
+      ],
+      "shoulderR": [
+        305.0319997367671,
+        213.84210878553728
+      ],
+      "elbowL": [
+        171.90213434689386,
+        279.01167897644063
+      ],
+      "elbowR": [
+        341.4218430783626,
+        278.2764109977452
+      ],
+      "wristL": [
+        108.34006463290943,
+        296.7842222292951
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 4.127998947068277,
+      "headWorldPitchDeg": 1.0319997367670692,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        266.8898419013055
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.29167,
+      "phase": "TURN DOWN",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.9513282538834,
+        243.21636597696158
+      ],
+      "neck": [
+        263.14159390466006,
+        188.21636597696158
+      ],
+      "head": [
+        263.14159390466006,
+        102.58517054846655
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.9513282538834,
+        213.21636597696158
+      ],
+      "shoulderR": [
+        304.9513282538834,
+        214.21636597696158
+      ],
+      "elbowL": [
+        172.82038000791766,
+        279.87671524708674
+      ],
+      "elbowR": [
+        341.54595097190384,
+        278.5345872530956
+      ],
+      "wristL": [
+        111.47118888285121,
+        304.21345184631195
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 3.805313015533539,
+      "headWorldPitchDeg": 0.9513282538833847,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        267.1296029492408
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.33333,
+      "phase": "TURN DOWN",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.8722625132432,
+        243.56831214759336
+      ],
+      "neck": [
+        263.04671501589183,
+        188.56831214759336
+      ],
+      "head": [
+        263.04671501589183,
+        103.00827588567451
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.8722625132432,
+        213.56831214759336
+      ],
+      "shoulderR": [
+        304.8722625132432,
+        214.56831214759336
+      ],
+      "elbowL": [
+        173.7059099622196,
+        280.68506466635955
+      ],
+      "elbowR": [
+        341.6606968953287,
+        278.77587475290477
+      ],
+      "wristL": [
+        114.87346161354901,
+        310.59732003604046
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 3.4890500529727,
+      "headWorldPitchDeg": 0.872262513243175,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        267.4385092007491
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.375,
+      "phase": "TURN DOWN",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.7951641846841,
+        243.86388515906893
+      ],
+      "neck": [
+        262.95419702162087,
+        188.86388515906893
+      ],
+      "head": [
+        262.95419702162087,
+        103.37323739285326
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.79516418468407,
+        213.86388515906893
+      ],
+      "shoulderR": [
+        304.7951641846841,
+        214.86388515906893
+      ],
+      "elbowL": [
+        175.2546106352876,
+        281.71191899937446
+      ],
+      "elbowR": [
+        341.7538389064648,
+        278.97360644070926
+      ],
+      "wristL": [
+        118.19388329670232,
+        314.8792733646479
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 3.1806567387362965,
+      "headWorldPitchDeg": 0.7951641846840741,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        267.7973161647957
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.41667,
+      "phase": "LOWER",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.72018720889173,
+        244.07572783981166
+      ],
+      "neck": [
+        262.86422465067005,
+        189.07572783981166
+      ],
+      "head": [
+        262.86422465067005,
+        103.6536730834653
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.7201872088917,
+        214.07572783981166
+      ],
+      "shoulderR": [
+        304.72018720889173,
+        215.07572783981166
+      ],
+      "elbowL": [
+        178.31376930247495,
+        283.203877629544
+      ],
+      "elbowR": [
+        341.81587999006763,
+        279.10626412590415
+      ],
+      "wristL": [
+        121.21742438843492,
+        316.30988006802903
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 2.8807488355668296,
+      "headWorldPitchDeg": 0.7201872088917074,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        268.1719617030171
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.45833,
+      "phase": "LOWER",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.6458575972951,
+        244.24520848181908
+      ],
+      "neck": [
+        262.7750291167541,
+        189.24520848181908
+      ],
+      "head": [
+        262.7750291167541,
+        103.90057350221994
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.6458575972951,
+        214.24520848181908
+      ],
+      "shoulderR": [
+        304.6458575972951,
+        215.24520848181908
+      ],
+      "elbowL": [
+        182.47689692051205,
+        284.84646330431667
+      ],
+      "elbowR": [
+        341.8621581146014,
+        279.2057195476756
+      ],
+      "wristL": [
+        124.84834314447448,
+        317.01709882309916
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 2.5834303891804007,
+      "headWorldPitchDeg": 0.6458575972951002,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        268.5283836770496
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.5,
+      "phase": "LOWER",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.5723166273213,
+        244.39193760667007
+      ],
+      "neck": [
+        262.68677995278557,
+        189.39193760667007
+      ],
+      "head": [
+        262.68677995278557,
+        104.13015452887335
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.5723166273213,
+        214.39193760667007
+      ],
+      "shoulderR": [
+        304.5723166273213,
+        215.39193760667007
+      ],
+      "elbowL": [
+        187.0795978809616,
+        286.29468297053467
+      ],
+      "elbowR": [
+        341.9000515645986,
+        279.2874789570051
+      ],
+      "wristL": [
+        128.98950097826602,
+        317.6242319911548
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 2.289266509285152,
+      "headWorldPitchDeg": 0.572316627321288,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        268.83251994852947
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.54167,
+      "phase": "LOWER",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.5001887328307,
+        244.5229025277794
+      ],
+      "neck": [
+        262.60022647939684,
+        189.5229025277794
+      ],
+      "head": [
+        262.60022647939684,
+        104.34269958385022
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.50018873283068,
+        214.5229025277794
+      ],
+      "shoulderR": [
+        304.5001887328307,
+        215.5229025277794
+      ],
+      "elbowL": [
+        191.6393665791237,
+        287.3967610336299
+      ],
+      "elbowR": [
+        341.93232281563115,
+        279.35733945650344
+      ],
+      "wristL": [
+        133.22984354958473,
+        318.12667511521755
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 2.0007549313227275,
+      "headWorldPitchDeg": 0.5001887328306819,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.05352944727844
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.58333,
+      "phase": "LOWER",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.43009834768367,
+        244.6450905585618
+      ],
+      "neck": [
+        262.51611801722044,
+        189.6450905585618
+      ],
+      "head": [
+        262.51611801722044,
+        104.53849208757521
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.4300983476837,
+        214.6450905585618
+      ],
+      "shoulderR": [
+        304.43009834768367,
+        215.6450905585618
+      ],
+      "elbowL": [
+        195.74755696439937,
+        288.1339568930451
+      ],
+      "elbowR": [
+        341.96169074993645,
+        279.421101501166
+      ],
+      "wristL": [
+        137.1583165182058,
+        318.5198237383092
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 1.7203933907347726,
+      "headWorldPitchDeg": 0.43009834768369315,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.22620981880607
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.625,
+      "phase": "LOWER",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.36266990574074,
+        244.7654890124321
+      ],
+      "neck": [
+        262.43520388688887,
+        189.7654890124321
+      ],
+      "head": [
+        262.43520388688887,
+        104.717815460473
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.36266990574074,
+        214.7654890124321
+      ],
+      "shoulderR": [
+        304.36266990574074,
+        215.7654890124321
+      ],
+      "elbowL": [
+        199.0359737172972,
+        288.5735258899702
+      ],
+      "elbowR": [
+        341.99084017409007,
+        279.48456623625975
+      ],
+      "wristL": [
+        140.36386554390447,
+        318.7990734034513
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 1.4506796229629402,
+      "headWorldPitchDeg": 0.36266990574073504,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.37530019556755
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.66667,
+      "phase": "LOWER",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.2985278408622,
+        244.89108520280504
+      ],
+      "neck": [
+        262.35823340903465,
+        189.89108520280504
+      ],
+      "head": [
+        262.35823340903465,
+        104.88095312296825
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.29852784086222,
+        214.89108520280504
+      ],
+      "shoulderR": [
+        304.2985278408622,
+        215.89108520280504
+      ],
+      "elbowL": [
+        201.1538027848012,
+        288.82423544220563
+      ],
+      "elbowR": [
+        342.0224255626689,
+        279.5535352080842
+      ],
+      "wristL": [
+        142.43543628645594,
+        318.9598196536658
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 1.194111363448875,
+      "headWorldPitchDeg": 0.29852784086221873,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.50778789097757
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": false
+      },
+      "settle": 0
+    },
+    {
+      "time": 2.70833,
+      "phase": "ARRIVE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.2379038642121,
+        245.02972053512184
+      ],
+      "neck": [
+        262.2854846370545,
+        190.02972053512184
+      ],
+      "head": [
+        262.2854846370545,
+        105.02972053512185
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.2379038642121,
+        215.02972053512184
+      ],
+      "shoulderR": [
+        304.2379038642121,
+        216.02972053512184
+      ],
+      "elbowL": [
+        201.78211875327779,
+        288.98896011672457
+      ],
+      "elbowR": [
+        342.0592915960714,
+        279.6343007950085
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.9516154568483579,
+      "headWorldPitchDeg": 0.23790386421208948,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.7504447825718
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.11978456412089525
+    },
+    {
+      "time": 2.75,
+      "phase": "ARRIVE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.1711379716981,
+        245.20556799674267
+      ],
+      "neck": [
+        262.20536556603776,
+        190.20556799674267
+      ],
+      "head": [
+        262.20536556603776,
+        105.20556799674267
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.1711379716981,
+        215.20556799674267
+      ],
+      "shoulderR": [
+        304.1711379716981,
+        216.20556799674267
+      ],
+      "elbowL": [
+        201.87415151468133,
+        289.16990976503183
+      ],
+      "elbowR": [
+        342.107959849253,
+        279.74136535406456
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.6845518867924538,
+      "headWorldPitchDeg": 0.17113797169811346,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.2259197241451
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.47501523274275564
+    },
+    {
+      "time": 2.79167,
+      "phase": "ARRIVE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.1025295084294,
+        245.39833830038305
+      ],
+      "neck": [
+        262.1230354101153,
+        190.39833830038305
+      ],
+      "head": [
+        262.1230354101153,
+        105.39833830038303
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.10252950842943,
+        215.39833830038305
+      ],
+      "shoulderR": [
+        304.1025295084294,
+        216.39833830038305
+      ],
+      "elbowL": [
+        201.97395938840688,
+        289.3677183791977
+      ],
+      "elbowR": [
+        342.16196363620486,
+        279.86076398577205
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.41011803371768135,
+      "headWorldPitchDeg": 0.10252950842942034,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.3821642559231
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.5066562326764587
+    },
+    {
+      "time": 2.83333,
+      "phase": "ARRIVE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0438504542278,
+        245.56918808058873
+      ],
+      "neck": [
+        262.05262054507335,
+        190.56918808058873
+      ],
+      "head": [
+        262.05262054507335,
+        105.56918808058873
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.04385045422782,
+        215.56918808058873
+      ],
+      "shoulderR": [
+        304.0438504542278,
+        216.56918808058873
+      ],
+      "elbowL": [
+        202.06152266114483,
+        289.54263180548753
+      ],
+      "elbowR": [
+        342.20999639907217,
+        279.9674948696256
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.17540181691125012,
+      "headWorldPitchDeg": 0.04385045422781253,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.373720505809
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.3621198573592316
+    },
+    {
+      "time": 2.875,
+      "phase": "ARRIVE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0068727889151,
+        245.67927397190553
+      ],
+      "neck": [
+        262.0082473466981,
+        190.67927397190553
+      ],
+      "head": [
+        262.0082473466981,
+        105.67927397190553
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0068727889151,
+        215.67927397190553
+      ],
+      "shoulderR": [
+        304.0068727889151,
+        216.67927397190553
+      ],
+      "elbowL": [
+        202.1175084519141,
+        289.65515046148874
+      ],
+      "elbowR": [
+        342.2409823606687,
+        280.03661660285195
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.027491155660377187,
+      "headWorldPitchDeg": 0.006872788915094297,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.3558050180507
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.17299792318104154
+    },
+    {
+      "time": 2.91667,
+      "phase": "TAKE LOAD",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.6937585733882
+      ],
+      "neck": [
+        262.0,
+        190.6937585733882
+      ],
+      "head": [
+        262.0,
+        105.69375857338821
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.6937585733882
+      ],
+      "shoulderR": [
+        304.0,
+        216.6937585733882
+      ],
+      "elbowL": [
+        202.12487587233133,
+        289.6699973903613
+      ],
+      "elbowR": [
+        342.24462426461395,
+        280.04475473649916
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.39659821215133
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.021000624987624505
+    },
+    {
+      "time": 2.95833,
+      "phase": "TAKE LOAD",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.63089420438956
+      ],
+      "neck": [
+        262.0,
+        190.63089420438956
+      ],
+      "head": [
+        262.0,
+        105.63089420438958
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.63089420438956
+      ],
+      "shoulderR": [
+        304.0,
+        216.63089420438956
+      ],
+      "elbowL": [
+        202.09324701554272,
+        289.6063245380907
+      ],
+      "elbowR": [
+        342.2224575619943,
+        279.9952669853265
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.48742706817285
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.06370169170471945
+    },
+    {
+      "time": 3.0,
+      "phase": "TAKE LOAD",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.5185185185185
+      ],
+      "neck": [
+        262.0,
+        190.5185185185185
+      ],
+      "head": [
+        262.0,
+        105.51851851851852
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.5185185185185
+      ],
+      "shoulderR": [
+        304.0,
+        216.5185185185185
+      ],
+      "elbowL": [
+        202.03647433582142,
+        289.4924637084711
+      ],
+      "elbowR": [
+        342.1827275039439,
+        279.90684015870363
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.58358292032597
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.08697432723099947
+    },
+    {
+      "time": 3.04167,
+      "phase": "TAKE LOAD",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.37913665980795
+      ],
+      "neck": [
+        262.0,
+        190.37913665980795
+      ],
+      "head": [
+        262.0,
+        105.37913665980795
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.37913665980795
+      ],
+      "shoulderR": [
+        304.0,
+        216.37913665980795
+      ],
+      "elbowL": [
+        201.96564037756644,
+        289.3511677318734
+      ],
+      "elbowR": [
+        342.13326203488674,
+        279.79722813675687
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.6255837976844
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.07132261520998551
+    },
+    {
+      "time": 3.08333,
+      "phase": "TAKE LOAD",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.2352537722908
+      ],
+      "neck": [
+        262.0,
+        190.2352537722908
+      ],
+      "head": [
+        262.0,
+        105.2352537722908
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.2352537722908
+      ],
+      "shoulderR": [
+        304.0,
+        216.2352537722908
+      ],
+      "elbowL": [
+        201.89203096732686,
+        289.20522380444163
+      ],
+      "elbowR": [
+        342.08198115038465,
+        279.68415219977925
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.60084238375896
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.040653363840462815
+    },
+    {
+      "time": 3.125,
+      "phase": "TAKE LOAD",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.109375
+      ],
+      "neck": [
+        262.0,
+        190.109375
+      ],
+      "head": [
+        262.0,
+        105.109375
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.109375
+      ],
+      "shoulderR": [
+        304.0,
+        216.109375
+      ],
+      "elbowL": [
+        201.82722314847408,
+        289.0774697487055
+      ],
+      "elbowR": [
+        342.03693513754564,
+        279.58528826906723
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.5218667706568
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.012006377491319666
+    },
+    {
+      "time": 3.16667,
+      "phase": "TAKE LOAD",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.02400548696846
+      ],
+      "neck": [
+        262.0,
+        190.02400548696846
+      ],
+      "head": [
+        262.0,
+        105.02400548696845
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.02400548696846
+      ],
+      "shoulderR": [
+        304.0,
+        216.02400548696846
+      ],
+      "elbowL": [
+        201.78305272983255,
+        288.9907895511773
+      ],
+      "elbowR": [
+        342.00628871860977,
+        279.5182730852145
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.4030553172019
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.006511558628528398
+    },
+    {
+      "time": 3.20833,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.26596534027686
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.013952617368744438
+    },
+    {
+      "time": 3.25,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.1361304702028
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.013345285017595056
+    },
+    {
+      "time": 3.29167,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.04016479012745
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.008798500689886956
+    },
+    {
+      "time": 3.33333,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.00367200289645
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.0036720028964386574
+    },
+    {
+      "time": 3.375,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.9998747041656
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.00012529583439189446
+    },
+    {
+      "time": 3.41667,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.997964867153
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.0020351328470446053
+    },
+    {
+      "time": 3.45833,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.99763014964884
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.0023698503511653543
+    },
+    {
+      "time": 3.5,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.99821034413463
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.0017896558653614427
+    },
+    {
+      "time": 3.54167,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.999076152191
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.0009238478090216742
+    },
+    {
+      "time": 3.58333,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.9998138451234
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -0.00018615487661154356
+    },
+    {
+      "time": 3.625,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.00025166336775
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.00025166336776283153
+    },
+    {
+      "time": 3.66667,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0003965843347
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.00039658433468931794
+    },
+    {
+      "time": 3.70833,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.00034513785806
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.0003451378580455544
+    },
+    {
+      "time": 3.75,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.00020919890954
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 0.00020919890953703758
+    },
+    {
+      "time": 3.79167,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0000730187087
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 7.301870867502193e-05
+    },
+    {
+      "time": 3.83333,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.9999799298325
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -2.0070167542415044e-05
+    },
+    {
+      "time": 3.875,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.99993850544183
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -6.149455817573463e-05
+    },
+    {
+      "time": 3.91667,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.9999367520265
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -6.324797349662629e-05
+    },
+    {
+      "time": 3.95833,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.9999559227948
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -4.407720519969346e-05
+    },
+    {
+      "time": 4.0,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.9999797527789
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -2.0247221049884588e-05
+    },
+    {
+      "time": 4.04167,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        269.99999841271864
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": -1.5872813812239478e-06
+    },
+    {
+      "time": 4.08333,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0000084967562
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 8.496756193455872e-06
+    },
+    {
+      "time": 4.125,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0000109777279
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 1.0977727903107376e-05
+    },
+    {
+      "time": 4.16667,
+      "phase": "SETTLE",
+      "pelvis": [
+        254,
+        324
+      ],
+      "chest": [
+        259.0,
+        245.0
+      ],
+      "neck": [
+        262.0,
+        190.0
+      ],
+      "head": [
+        262.0,
+        105.0
+      ],
+      "headRadii": [
+        73,
+        83
+      ],
+      "shoulderL": [
+        204.0,
+        215.0
+      ],
+      "shoulderR": [
+        304.0,
+        216.0
+      ],
+      "elbowL": [
+        201.7706002946093,
+        288.96640978818425
+      ],
+      "elbowR": [
+        341.99765700012813,
+        279.49943356047055
+      ],
+      "wristL": [
+        143.0,
+        319.0
+      ],
+      "wristR": [
+        282,
+        307
+      ],
+      "kneeL": [
+        224,
+        353
+      ],
+      "kneeR": [
+        260,
+        355
+      ],
+      "ankleL": [
+        194,
+        445
+      ],
+      "ankleR": [
+        250,
+        451
+      ],
+      "trunkPitchDeg": 0.0,
+      "headWorldPitchDeg": 0.0,
+      "expressionDepth": -12,
+      "screenDepth": 0,
+      "expressiveArmDepth": {
+        "shoulder": -12,
+        "elbow": -12,
+        "wrist": -12
+      },
+      "palmOrientation": "three-quarter open, thumb inward; fingers together; no palm flip",
+      "followMarker": [
+        347,
+        270.0000087678482
+      ],
+      "contact": {
+        "seat": true,
+        "laptopOnLap": true,
+        "rightWristBase": true,
+        "leftWristBase": true
+      },
+      "settle": 8.767848199718858e-06
+    }
+  ],
+  "limits": [
+    "explicit schematic depth ordering, not final anatomical/cloth proof",
+    "PCHIP smooths guide coordinates only, never final raster art",
+    "no production source acceptance or automatic painting claim"
+  ],
+  "screenPlane": {
+    "coordinateConvention": "depth relative to rigid screen plane, positive toward viewer",
+    "planeZ": 0,
+    "hingeProjected": [
+      [
+        138,
+        303
+      ],
+      [
+        240,
+        307
+      ]
+    ],
+    "expressiveArmZ": -12,
+    "occlusion": "same polygon mask for full upper arm, forearm, cuff and palm; no front redraw",
+    "route": "below lower edge then around picture-left silhouette; no crossing of plane"
+  }
+}

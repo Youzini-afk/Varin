@@ -1,0 +1,11 @@
+{
+  "rightWristMaxDrift": 0.0,
+  "pelvisMaxDrift": 0.0,
+  "upperArmLengthMaxError": 5.684341886080802e-14,
+  "forearmLengthMaxError": 5.684341886080802e-14,
+  "screenLocalPlaneZ": 0,
+  "allExpressiveSegmentEndpointZ": -12,
+  "segmentScreenPlaneCrossings": 0,
+  "sameRestEnd": true,
+  "scope": "Schematic coordinate and explicit layer ordering only; not final anatomy/cloth or aesthetic acceptance"
+}

@@ -1,0 +1,45 @@
+{
+  "status": "unselected / rejected-as-continuous-animation-rough",
+  "method": "One built-in imagegen call; viewed approved identity and same-call eight-phase layout board; whole-body rough linework; no pixel compositing or image editing",
+  "inputs": [
+    "references/identity.png",
+    "references/eight-pose-layout-board.png"
+  ],
+  "prompt": "exact-prompt.txt",
+  "output": "raw/whole-phrase-rough-v1.png",
+  "callCount": 1,
+  "artQualityPass": false,
+  "runtimeModified": false,
+  "files": [
+    {
+      "path": "references/identity.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "bytes": 332071
+    },
+    {
+      "path": "references/eight-pose-layout-board.png",
+      "sha256": "7a9c4864c2ac164b0b845a681540e57be4f1cae056c91b5c0701f80c41701146",
+      "bytes": 200847
+    },
+    {
+      "path": "references/eight-pose-layout-board.svg",
+      "sha256": "bee317694772103245cedfab6b97a6a46e2bf842a8a86e76137770e52072d7d3",
+      "bytes": 38054
+    },
+    {
+      "path": "references/pose-time-data.json",
+      "sha256": "38e726e00ab9e3a3043f9b1ba3b3a8489ef2c945f0891ed4f843a2a1af34dcb2",
+      "bytes": 160943
+    },
+    {
+      "path": "exact-prompt.txt",
+      "sha256": "e3261d52e16e4876b7bfd4f1ba0da89120d47a2882db033a06d46c4e46711881",
+      "bytes": 3592
+    },
+    {
+      "path": "raw/whole-phrase-rough-v1.png",
+      "sha256": "ce186f6a769f3dc5d0b5702deed2067d75eac9e1c74b2ec0674034ac69d7f162",
+      "bytes": 2198690
+    }
+  ]
+}
