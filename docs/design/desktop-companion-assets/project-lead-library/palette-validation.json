@@ -1,0 +1,456 @@
+{
+  "scope": "Only paired lower cape lining fills; all geometry, face and other garment colors unchanged",
+  "formula": "78% original avatar primary + 22% ivory #fffaf0",
+  "passed": true,
+  "minimumCapeContrast": 4.45,
+  "checks": [
+    {
+      "id": "slope-lilac",
+      "color": "#d3c4ef",
+      "changedPixels": 247,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.24
+    },
+    {
+      "id": "dome-ivory",
+      "color": "#eee4d7",
+      "changedPixels": 254,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 6.79
+    },
+    {
+      "id": "taper-sage",
+      "color": "#bbcaaa",
+      "changedPixels": 251,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.93
+    },
+    {
+      "id": "pebble-blue",
+      "color": "#a0c3d9",
+      "changedPixels": 260,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.59
+    },
+    {
+      "id": "overlap-coral",
+      "color": "#f2ab9b",
+      "changedPixels": 266,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.5
+    },
+    {
+      "id": "notch-ochre",
+      "color": "#eece8b",
+      "changedPixels": 278,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.62
+    },
+    {
+      "id": "slant-mint",
+      "color": "#add0c1",
+      "changedPixels": 249,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.1
+    },
+    {
+      "id": "round-lilac",
+      "color": "#c8bddd",
+      "changedPixels": 242,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.78
+    },
+    {
+      "id": "tile-blue",
+      "color": "#a9bed1",
+      "changedPixels": 231,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.45
+    },
+    {
+      "id": "fold-sage",
+      "color": "#c3cab3",
+      "changedPixels": 248,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.04
+    },
+    {
+      "id": "cap-coral",
+      "color": "#e2b1ac",
+      "changedPixels": 257,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.51
+    },
+    {
+      "id": "wave-ivory",
+      "color": "#e4dbc8",
+      "changedPixels": 249,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 6.2
+    },
+    {
+      "id": "capsule-sky",
+      "color": "#b6d2e0",
+      "changedPixels": 244,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.39
+    },
+    {
+      "id": "pillar-lilac",
+      "color": "#d3c3e1",
+      "changedPixels": 160,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.14
+    },
+    {
+      "id": "lozenge-mint",
+      "color": "#b9d5c4",
+      "changedPixels": 189,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.43
+    },
+    {
+      "id": "wedge-apricot",
+      "color": "#edc3a1",
+      "changedPixels": 263,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.25
+    },
+    {
+      "id": "arch-butter",
+      "color": "#eddda4",
+      "changedPixels": 239,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 6.28
+    },
+    {
+      "id": "oval-rose",
+      "color": "#dfb7c1",
+      "changedPixels": 252,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.74
+    },
+    {
+      "id": "squircle-periwinkle",
+      "color": "#bdc7e2",
+      "changedPixels": 244,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.05
+    },
+    {
+      "id": "shield-sage",
+      "color": "#bfcaaf",
+      "changedPixels": 207,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.99
+    },
+    {
+      "id": "sail-ivory",
+      "color": "#e6dcc8",
+      "changedPixels": 246,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 6.27
+    },
+    {
+      "id": "lean-coral",
+      "color": "#e6af9e",
+      "changedPixels": 193,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.46
+    },
+    {
+      "id": "bridge-aqua",
+      "color": "#b3d5d1",
+      "changedPixels": 262,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.42
+    },
+    {
+      "id": "crest-lilac",
+      "color": "#c7b8db",
+      "changedPixels": 255,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.59
+    },
+    {
+      "id": "step-blue",
+      "color": "#a8c6d9",
+      "changedPixels": 245,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.77
+    },
+    {
+      "id": "offset-peach",
+      "color": "#efcab6",
+      "changedPixels": 241,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.6
+    },
+    {
+      "id": "orbit-sage",
+      "color": "#c8d1b4",
+      "changedPixels": 226,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.37
+    },
+    {
+      "id": "cushion-ochre",
+      "color": "#e1c997",
+      "changedPixels": 250,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.28
+    },
+    {
+      "id": "curve-mint",
+      "color": "#b3cebd",
+      "changedPixels": 246,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.07
+    },
+    {
+      "id": "bevel-rose",
+      "color": "#dab2be",
+      "changedPixels": 237,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.5
+    },
+    {
+      "id": "drift-blue",
+      "color": "#b0c0d7",
+      "changedPixels": 276,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.61
+    },
+    {
+      "id": "stack-ivory",
+      "color": "#e8dfce",
+      "changedPixels": 219,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 6.45
+    },
+    {
+      "id": "tilt-pistachio",
+      "color": "#d3d8ae",
+      "changedPixels": 224,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.77
+    },
+    {
+      "id": "fan-coral",
+      "color": "#ecb5a3",
+      "changedPixels": 208,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.75
+    },
+    {
+      "id": "mound-lavender",
+      "color": "#d0c3de",
+      "changedPixels": 250,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.09
+    },
+    {
+      "id": "tab-butter",
+      "color": "#ead79d",
+      "changedPixels": 255,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.97
+    },
+    {
+      "id": "span-jade",
+      "color": "#a9c7ba",
+      "changedPixels": 267,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.7
+    },
+    {
+      "id": "ripple-peach",
+      "color": "#eec5ac",
+      "changedPixels": 253,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.37
+    },
+    {
+      "id": "facet-blue",
+      "color": "#a9bfd0",
+      "changedPixels": 228,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.49
+    },
+    {
+      "id": "comma-lilac",
+      "color": "#cbbddb",
+      "changedPixels": 187,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.81
+    },
+    {
+      "id": "inset-sage",
+      "color": "#bcc8ab",
+      "changedPixels": 241,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.87
+    },
+    {
+      "id": "pocket-rose",
+      "color": "#e3c0c4",
+      "changedPixels": 210,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.12
+    },
+    {
+      "id": "rise-ivory",
+      "color": "#e1d8c5",
+      "changedPixels": 241,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 6.02
+    },
+    {
+      "id": "sweep-aqua",
+      "color": "#a9cecd",
+      "changedPixels": 238,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.03
+    },
+    {
+      "id": "bend-ochre",
+      "color": "#e5cda4",
+      "changedPixels": 184,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.52
+    },
+    {
+      "id": "twin-periwinkle",
+      "color": "#c5cce5",
+      "changedPixels": 230,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.34
+    },
+    {
+      "id": "arc-apricot",
+      "color": "#e1c0a2",
+      "changedPixels": 222,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.98
+    },
+    {
+      "id": "tuck-jade",
+      "color": "#b5c9b3",
+      "changedPixels": 242,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.86
+    },
+    {
+      "id": "plate-lavender",
+      "color": "#ccc2de",
+      "changedPixels": 229,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.01
+    },
+    {
+      "id": "drop-melon",
+      "color": "#eac1af",
+      "changedPixels": 248,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.17
+    },
+    {
+      "id": "ribbon-blue",
+      "color": "#afc7db",
+      "changedPixels": 219,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.88
+    },
+    {
+      "id": "cove-sage",
+      "color": "#c3ceb3",
+      "changedPixels": 244,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.2
+    },
+    {
+      "id": "terrace-ivory",
+      "color": "#e8dfcf",
+      "changedPixels": 252,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 6.45
+    },
+    {
+      "id": "slide-rose",
+      "color": "#e0bec9",
+      "changedPixels": 217,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.03
+    },
+    {
+      "id": "ramp-mint",
+      "color": "#b3d1c3",
+      "changedPixels": 247,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.21
+    },
+    {
+      "id": "echo-ochre",
+      "color": "#ebd19f",
+      "changedPixels": 216,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.75
+    },
+    {
+      "id": "lens-lilac",
+      "color": "#c8bfde",
+      "changedPixels": 220,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.86
+    },
+    {
+      "id": "ledge-aqua",
+      "color": "#afccca",
+      "changedPixels": 169,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5
+    },
+    {
+      "id": "swell-apricot",
+      "color": "#e5c3a4",
+      "changedPixels": 216,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.15
+    },
+    {
+      "id": "parcel-periwinkle",
+      "color": "#bdc8e3",
+      "changedPixels": 237,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.09
+    },
+    {
+      "id": "scoop-pistachio",
+      "color": "#d0d5b2",
+      "changedPixels": 257,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 5.62
+    },
+    {
+      "id": "beam-coral",
+      "color": "#e6b7a9",
+      "changedPixels": 252,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.75
+    },
+    {
+      "id": "chamfer-jade",
+      "color": "#b3cab9",
+      "changedPixels": 207,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 4.9
+    },
+    {
+      "id": "float-butter",
+      "color": "#eedcad",
+      "changedPixels": 263,
+      "outsideLiningPixels": 0,
+      "contrastToDarkCape": 6.28
+    }
+  ]
+}

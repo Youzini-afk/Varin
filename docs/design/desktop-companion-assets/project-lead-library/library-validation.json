@@ -1,0 +1,9 @@
+{
+  "count": 64,
+  "missing": [],
+  "extra": [],
+  "reviewedFourGeometryUnchanged": true,
+  "originalIdentitySource": "packages/ui/src/components/ui/agent-avatar-art.ts",
+  "originalIdentitySourceSha256": "4b206489693a6f0ad75b79c0eae58d4e850da3474151887b9381a3c8a265e542",
+  "scope": "Static role assets only; no animation/native acceptance implied"
+}

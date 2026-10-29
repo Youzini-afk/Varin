@@ -1,0 +1,904 @@
+{
+  "avatarSourceSha256": "4b206489693a6f0ad75b79c0eae58d4e850da3474151887b9381a3c8a265e542",
+  "preservedFourSourceSha256": "3bb6e24acd851634963eb8aec6d71dae9697d16ba39bd6db03462b7988ee439d",
+  "preservedFourUnchanged": true,
+  "profileCount": 64,
+  "metrics": [
+    {
+      "id": "slope-lilac",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        8,
+        60.5
+      ],
+      "sourceGeometrySha256": "0d6d773b82ae663e9dcdd04ac3110f17dcd7bef0137b727d4ffde318697bbd87",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 59.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "dome-ivory",
+      "preserved": false,
+      "contactRow": 43,
+      "measuredShoulders": [
+        5,
+        59.5
+      ],
+      "sourceGeometrySha256": "8cb6a0b7e2b0faf32e552413911877d16addeeffcbd0b4af6226479e08655995",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 53.25,
+      "exceptionNote": "Domed low head: shallow collar and broad shoulder span."
+    },
+    {
+      "id": "taper-sage",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5.5,
+        59.75
+      ],
+      "sourceGeometrySha256": "b29877943b63845749efa4b4cf98658d7560d1540c2b3a270943bd2bccaf90a1",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "pebble-blue",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        4,
+        59.5
+      ],
+      "sourceGeometrySha256": "cef84fd9b57ab27510f7d09871d498cb880eaa9a310c0a786d9f69eb90501b51",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "overlap-coral",
+      "preserved": true,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6.5,
+        62
+      ],
+      "sourceGeometrySha256": "6feb7f3bffc8cdbea1c7e46b3f3227a3dc5a5fd8291a62333e089a754b4c6803",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "notch-ochre",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        3,
+        61.75
+      ],
+      "sourceGeometrySha256": "7a2de1227390f7198bd5cc1a9da4ee018d42bacf82a49abc2428e62007a54f09",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "slant-mint",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        7,
+        61
+      ],
+      "sourceGeometrySha256": "4bd47b0c176e13e2b7efbd2c76d3a0adfa46591b99467ada4d7bf991e3465723",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "round-lilac",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5.75,
+        57.5
+      ],
+      "sourceGeometrySha256": "f7fa10dc54a6126b731e0c3c2f38a60648f7e0ee230cc8d3fcc4c6acdc1fd357",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "tile-blue",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        56.75
+      ],
+      "sourceGeometrySha256": "48b599bde0ccfc16959ac08d3f3c9bbb0158cf4caebecce8ae9df0336aa1720a",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "fold-sage",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        7.25,
+        60.25
+      ],
+      "sourceGeometrySha256": "ce130873df3a9de579f0b0ba7cddb7ff7c103011f0df4dcafeb43b9ba61ece51",
+      "lowerContourClamps": 2,
+      "manualNecklineOverride": true,
+      "sourceMaxY": 58,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "cap-coral",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5,
+        59.75
+      ],
+      "sourceGeometrySha256": "76f56bfa2e88b21c1714c4a3dc09ee23930d9b2eddc064656f9b69a9f3af795a",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "wave-ivory",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        4.75,
+        58
+      ],
+      "sourceGeometrySha256": "a3cf5dadf1143870d0c6387ba15a153f5fae77dbf0e9c3f946a32d90ba850ee9",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "capsule-sky",
+      "preserved": false,
+      "contactRow": 43,
+      "measuredShoulders": [
+        5.75,
+        58
+      ],
+      "sourceGeometrySha256": "c9dd25b1787fafb4bc0189fcc676ae5479763af73be0c520256dbc515f65c757",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 50.75,
+      "exceptionNote": "Low wide capsule: shallow contactcurve follows curved loweredge rather than forcing a deepV."
+    },
+    {
+      "id": "pillar-lilac",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        16,
+        47.75
+      ],
+      "sourceGeometrySha256": "0f2a121bb247cfcae66e861a37d1b496da863463cb2f3d2d4d42cb959af33cd8",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 59.75,
+      "exceptionNote": "Narrow pillar: narrower cape and8.5pxfolio; collar centered on real neck."
+    },
+    {
+      "id": "lozenge-mint",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        12.5,
+        52.5
+      ],
+      "sourceGeometrySha256": "35d8df392ac122b1cf56343d884e3602366b155f59eadecff05f00bc4e9fe4e6",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 60,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "wedge-apricot",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5,
+        60.25
+      ],
+      "sourceGeometrySha256": "20ac8164a5c11bd59774a2eea96c56cb4f5589ee0be84c35fadb7934bdfc06f0",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "arch-butter",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6.5,
+        57.25
+      ],
+      "sourceGeometrySha256": "49cfa506cb9df87042f5cfdf04bf8f037ff0b80dc0366014e6fc5d118d20ba15",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "oval-rose",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        4.5,
+        59
+      ],
+      "sourceGeometrySha256": "42e71ae16264f1736b7b1f96450d637ef4015721e35a324e5f9c71235656fb3e",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "squircle-periwinkle",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5.75,
+        58
+      ],
+      "sourceGeometrySha256": "f37e83844bd8840c26a9f2c6e35bf33ce4e55e956d9a804b414a3747e55dd05f",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "shield-sage",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        9.25,
+        54.5
+      ],
+      "sourceGeometrySha256": "6e95547d25d626924dfdd7814d60446da1af006e07115a0c5113fb9092187b9a",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 59.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "sail-ivory",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5.25,
+        57.25
+      ],
+      "sourceGeometrySha256": "3b0e06ba809be16e6a91b1237bdc0526713a1c036d7766a5929d9dffe3c504d1",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Swept upperhead retained; cape fitted to actual lower support rather than diagonal top."
+    },
+    {
+      "id": "lean-coral",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        17.25,
+        58.5
+      ],
+      "sourceGeometrySha256": "00f924df2bed6eaa81eab9a64f871bcf8c4cf7cab41378a0d7749cfb1e459359",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 56.75,
+      "exceptionNote": "Leaning right body: clasp shifted to supportedneck, not fixedglobalx32."
+    },
+    {
+      "id": "bridge-aqua",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        4,
+        59.75
+      ],
+      "sourceGeometrySha256": "dabd05898d014c0c48b939ca25d4a95ae562e5bde4d8074bfebfc7a9fe4742d3",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "crest-lilac",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5,
+        59.75
+      ],
+      "sourceGeometrySha256": "59c78871cdd2dda7ee0752ee7c1e8b914f6f83dff26361865e7d0d6b2e32b382",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "step-blue",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        58.5
+      ],
+      "sourceGeometrySha256": "eec82e9c405bda6d43457cff33f2bb459001418d39b446c36cccd883fdee47fa",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 56.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "offset-peach",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        57.75
+      ],
+      "sourceGeometrySha256": "adbd52ac068324f09d6b4bf9b611c2983998671186385ebbf82904e7cddaabf2",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 56.75,
+      "exceptionNote": "Two offset layers treated as one composite shoulder, never body-only width."
+    },
+    {
+      "id": "orbit-sage",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        7.25,
+        56.5
+      ],
+      "sourceGeometrySha256": "c5711c3bdbfc09b414b524798ef81f16380a2ab3a2944c45e869ecdbb8c22bf5",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58.25,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "cushion-ochre",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5.25,
+        58.25
+      ],
+      "sourceGeometrySha256": "53e8f11ad081faa6130cd734246840438071193f923861879915d74f7dc16766",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 56.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "curve-mint",
+      "preserved": false,
+      "contactRow": 43,
+      "measuredShoulders": [
+        6,
+        58.75
+      ],
+      "sourceGeometrySha256": "423dd276cbe360781596b6233c7597a485613773e7b67fbf59a54d1f16f32557",
+      "lowerContourClamps": 2,
+      "manualNecklineOverride": true,
+      "sourceMaxY": 56.75,
+      "exceptionNote": "Lower-left cutout: neckline clamped to true lowercontour socloth doesnot detach below notch."
+    },
+    {
+      "id": "bevel-rose",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        57.25
+      ],
+      "sourceGeometrySha256": "ba606789cbe28835c01d8a7aadd9cbbaf16798593e6680967983853a7a0dfc79",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 59.25,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "drift-blue",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        3,
+        61.25
+      ],
+      "sourceGeometrySha256": "0b855e870148ddb1f42cb09789a57801abff2854febffef23ed3751e851d23d2",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "stack-ivory",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        8,
+        55
+      ],
+      "sourceGeometrySha256": "28832c0b9837a155ef05c19d2a09fe559039b8934a11a87bb51d9d68afa6ce47",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 56.75,
+      "exceptionNote": "Two-layer stackedbody: both layers included; right neckline follows higher accent bottom."
+    },
+    {
+      "id": "tilt-pistachio",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        13.5,
+        60
+      ],
+      "sourceGeometrySha256": "0b4f2a50355634b350561baddaea4ea47df33f7aa1e08bd5f554e4b052330e7a",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 60.25,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "fan-coral",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        9,
+        53.5
+      ],
+      "sourceGeometrySha256": "1800289ca9784f3f07a5c80d2ce3181a4292ca751f5574ed2482400f725b92dd",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 59,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "mound-lavender",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5.25,
+        58.75
+      ],
+      "sourceGeometrySha256": "29ff24454312c85b972c4ac6df51dfe3deb5eda9b14c4e8136678fb13edb258c",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.5,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "tab-butter",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        59.75
+      ],
+      "sourceGeometrySha256": "1ead0a78c068cec73170994e5b40bef8d14d480c692caef7f0252545b51ce04b",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "span-jade",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        3.25,
+        60.5
+      ],
+      "sourceGeometrySha256": "c0fc012d25b071b7daaf21dc084be43e5a74e855ba98528bd701842af93aa34e",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "ripple-peach",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        4,
+        58
+      ],
+      "sourceGeometrySha256": "45bd27e4a1ef0a2ea1f8d4e4dcf0964db0b3f882189b55bc7328419a4383b492",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "facet-blue",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6.75,
+        56.75
+      ],
+      "sourceGeometrySha256": "49472e425caf0de406ec76f5d14bf86364d99b48769957d0f57a6c7693473a07",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "comma-lilac",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        14,
+        54.5
+      ],
+      "sourceGeometrySha256": "8ae0516df0eefecbf36cc2fd0f517886f8f247fe64ef2c2cc8064ce9f83bba5a",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.5,
+      "exceptionNote": "Concave leftside: contact evaluatedbelow inwardturn, preserved head overhang above garment."
+    },
+    {
+      "id": "inset-sage",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        57.75
+      ],
+      "sourceGeometrySha256": "01260d71b551260d7bc0bc01786b3723aba65662fbf85090183d374014b2957c",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Stepped upper silhouette retained; garment fitted below offset shoulder step."
+    },
+    {
+      "id": "pocket-rose",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        9.25,
+        54.5
+      ],
+      "sourceGeometrySha256": "5d323a5b48799f859758126cc590225a747b1591fd36c1c2556da2ad292882bd",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "rise-ivory",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        57.75
+      ],
+      "sourceGeometrySha256": "055df2b5b4984b81c304851a2dbc5af1239285c0c30f0b276dcc88c09d3f522b",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 56.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "sweep-aqua",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5,
+        56.5
+      ],
+      "sourceGeometrySha256": "1433563a0b4f97c2c47cca82e071cc6ba9faf617d9a68bef8e857a297377b3d9",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 59,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "bend-ochre",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        20.25,
+        59.75
+      ],
+      "sourceGeometrySha256": "e451731a05d256ae1ada4535347e46f4772583ddc43e9b8019c8fe186928377d",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "twin-periwinkle",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        7,
+        56.25
+      ],
+      "sourceGeometrySha256": "93244c08d7e6e5a983ff83f024261319e264555c7bc6a822ea774f1051daedd2",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Offset secondbody contributes rightshoulder; folio sits outside savedface on cloth."
+    },
+    {
+      "id": "arc-apricot",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        8,
+        54.75
+      ],
+      "sourceGeometrySha256": "4c2e6d776e5680ad89cc5e860e15d936eab3c92b9ddc20043b8e9f86d9d3da23",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "tuck-jade",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6.75,
+        59
+      ],
+      "sourceGeometrySha256": "915cc8aa8a24e89b26f3ed2fa1b031bb0ffe737147181ba87d120039994234fd",
+      "lowerContourClamps": 2,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "plate-lavender",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6.25,
+        55.75
+      ],
+      "sourceGeometrySha256": "7265deb8fe58b6fdddfeb099141146fce884994c258b5773175d60ac68f0c9d2",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 53.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "drop-melon",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        59
+      ],
+      "sourceGeometrySha256": "1309b8384362419b6c675ddfa4dffe61a6c06dcaf6d3e1770f009f9bcbc3dad2",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 59,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "ribbon-blue",
+      "preserved": true,
+      "contactRow": 44,
+      "measuredShoulders": [
+        9,
+        49.25
+      ],
+      "sourceGeometrySha256": "d92242981233eff8c223004ae8deeb25009d5529fcc3df8fe75731ea0ed3950f",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "cove-sage",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6.25,
+        58.75
+      ],
+      "sourceGeometrySha256": "7283b9331e1726f27415f37171b3b682cc1e075a5e94682b5ddad52cc95c3401",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "terrace-ivory",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5,
+        58.75
+      ],
+      "sourceGeometrySha256": "a4782d0bc698ebe377e1887a529d5730af902b5dd778eb60a02431442724e9c0",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "slide-rose",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        52.25
+      ],
+      "sourceGeometrySha256": "a31a6daa1547b24cec9aa1da3f2b4a795dea0a026616a5651ec7720364c18faa",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58.25,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "ramp-mint",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5.25,
+        58.75
+      ],
+      "sourceGeometrySha256": "002b8386184c0c94bfd3f51a2e5a7f7c04c8a38493b913687b055cf7ff3caf75",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "echo-ochre",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        9,
+        55.25
+      ],
+      "sourceGeometrySha256": "e319f74296a0ea96cfa28433532181da67272b0b514eb98f4921f6c46af87027",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Backecho lobe contributes rightshoulder; contactcurve honors its shorter loweredge."
+    },
+    {
+      "id": "lens-lilac",
+      "preserved": true,
+      "contactRow": 44,
+      "measuredShoulders": [
+        9.75,
+        53.75
+      ],
+      "sourceGeometrySha256": "7fe10f4959722e516eaea9f9f33360e990d250622156984b9c11d15621cd410d",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 59.25,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "ledge-aqua",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6,
+        43
+      ],
+      "sourceGeometrySha256": "4555f4b627040e119734b044e1ce311ab91a710a6ed8a978043a729da5040fa2",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 56.75,
+      "exceptionNote": "Right ledge ends above neck: narrow asymmetric lower support, not full upper-head width."
+    },
+    {
+      "id": "swell-apricot",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        9,
+        55.25
+      ],
+      "sourceGeometrySha256": "ef4e03a22d61748e25c18872116aa1e2e32aa3ccbc90aa82844b4a3b4cc388e0",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "parcel-periwinkle",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        6.5,
+        56.25
+      ],
+      "sourceGeometrySha256": "c4e581410435a3ef2896ee2e6c46d44d07a6145d36579c4888ef2abdf3e7fb1a",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58.75,
+      "exceptionNote": "Offset parcelaccent included incontact silhouette; frontgarment covers lowerbody cleanly."
+    },
+    {
+      "id": "scoop-pistachio",
+      "preserved": true,
+      "contactRow": 44,
+      "measuredShoulders": [
+        5.25,
+        59.25
+      ],
+      "sourceGeometrySha256": "d407c6ab3b5f47df563ae02ba870d7ed098d323521f7ca50810163a41993ae74",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 57.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "beam-coral",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        7.5,
+        61
+      ],
+      "sourceGeometrySha256": "c9df22a487e4293f7589bae5d7a3646d0826527d7d6e146f9e330d309d894a60",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 54.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "chamfer-jade",
+      "preserved": false,
+      "contactRow": 44,
+      "measuredShoulders": [
+        9.25,
+        54.5
+      ],
+      "sourceGeometrySha256": "bb4efb478988ee851e5fab96630ad00d6b75d44928d3ee50635e6e42fd368da1",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 58.75,
+      "exceptionNote": "Silhouette-derived contact width and lower-contour curve; visual audit pending."
+    },
+    {
+      "id": "float-butter",
+      "preserved": false,
+      "contactRow": 45,
+      "measuredShoulders": [
+        4,
+        59.75
+      ],
+      "sourceGeometrySha256": "3d528f3dff38fd712de9279a7a96c13e72ccaa4944c14e00a361682a341d3a54",
+      "lowerContourClamps": 0,
+      "manualNecklineOverride": false,
+      "sourceMaxY": 55.75,
+      "exceptionNote": "Low face plus offset accent: lower collar to preserve low-set eyes; composite outer shoulder used."
+    }
+  ]
+}
