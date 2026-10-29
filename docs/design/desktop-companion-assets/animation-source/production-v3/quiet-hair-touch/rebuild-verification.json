@@ -1,0 +1,25 @@
+{
+  "candidateOnly": true,
+  "independentRebuildExact": {
+    "frames/hair-raise-v1.png": true,
+    "masks/hair-raise-v1.png": true,
+    "frames/hair-raise-v1-provenance.json": true,
+    "frames/hair-near-v2.png": true,
+    "masks/hair-near-v2.png": true,
+    "frames/hair-near-v2-provenance.json": true,
+    "frames/hair-contact-v1.png": true,
+    "masks/hair-contact-v1.png": true,
+    "frames/hair-contact-v1-provenance.json": true,
+    "frames/hair-smooth-v1.png": true,
+    "masks/hair-smooth-v1.png": true,
+    "frames/hair-smooth-v1-provenance.json": true,
+    "frames/hair-detach-v1.png": true,
+    "masks/hair-detach-v1.png": true,
+    "frames/hair-detach-v1-provenance.json": true,
+    "manifest.json": true,
+    "generation-inputs.json": true
+  },
+  "actualReachableSourceCount": 7,
+  "manifestAllReferencesMatchSHA": true,
+  "notEvidence": "This deterministic rebuild is not a normal-speed or native lifecycle acceptance."
+}

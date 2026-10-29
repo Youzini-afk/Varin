@@ -1,0 +1,76 @@
+[
+  {
+    "id": "hair-contact-v1",
+    "tool": "built-in imagegen",
+    "prompt": "prompts/hair-contact-v1.txt",
+    "exactPrompt": "Use case: identity-preserve, precise character gesture edit. Image 1 is the exact transparent seated Varin CLOSED LAPTOP mechanical anchor. Image 2 is her real same-camera hand-release preparatory pose, for hand continuity only. Create ONE genuine next keyframe: with her IMAGE-LEFT hand (character's right), she gently touches one small loose side lock of hair beside the IMAGE-LEFT cheek/shoulder, two or three fingers lightly laid along that strand near jaw-to-shoulder height. Palm naturally turned toward her hair, fingers visible and anatomically coherent, elbow softly bent, not covering face or pendant. This is the start of smoothing the lock downward, not grabbing a fistful or waving. IMAGE-RIGHT hand remains exactly resting on and supporting the closed laptop as image1. Face quietly relaxed, blue eyes softly following the near hand/hair, small closed-mouth neutral smile, head/skull position and size essentially unchanged, natural upright neck no side roll. Only acting arm/sleeve and tiny contacted hair lock move. Preserve head silhouette/bun/hair ornament, hollow diamond necklace, blue-gray clothes, closed laptop exact shape/location, pelvis/knees/boots/stool and all non-action areas. Same full square 512 viewport, no zoom/recenter, no mirrored image, no additional prop. Genuine transparent background, one full character frame, no sheet. Do not open the computer, touch the viewer-right ornament or pendant, shake whole head, resize/rotate character, or create extra hands.\n",
+    "inputs": [
+      {
+        "path": "references/closed-rest-rigid-v2.png",
+        "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+      },
+      {
+        "path": "references/yawn-hand-release-v1.png",
+        "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69"
+      }
+    ],
+    "raw": "raw/hair-contact-v1.png",
+    "rawSHA256": "1b7d16c080bc6e154683b4f8c2db0a99822a33b25531c9c9cdbc72ee587ebd2a"
+  },
+  {
+    "id": "hair-smooth-v1",
+    "tool": "built-in imagegen",
+    "prompt": "prompts/hair-smooth-v1.txt",
+    "exactPrompt": "Use case: identity-preserve precise gesture continuation. Edit this exact transparent Varin hair-contact frame. Draw ONE next real keyframe of smoothing a small side hair lock: her IMAGE-LEFT hand slides gently DOWN along that SAME thin hair lock by roughly 25 pixels in the 512 canvas, from beside lower cheek to shoulder/upper chest height. Two or three relaxed fingertips still brush the hair surface; lock follows hand slightly downward, not a fist grabbing a thick bundle. Forearm lowers naturally, elbow stays softly bent and sleeve follows gravity. The other IMAGE-RIGHT hand stays fixed on closed laptop, supporting it. Face/head/skull, neck, main hair silhouette, ornament, hollow pendant, body/pelvis/knees/boots/stool and CLOSED laptop all remain exactly in place. Do not touch necklace or ornament, do not shift whole head, change expression, or open computer. Change only acting arm/sleeve and small contacted hair lock, retaining same identity/colors/anatomy. One full transparent 512 square frame, same camera, no crop/zoom/mirror. This is the smooth-down CONTACT stage, not yet hand-release.\n",
+    "inputs": [
+      {
+        "path": "frames/hair-contact-v1.png",
+        "sha256": "2ee95097391a9ca7064fe2edd614d15c756680b734a60284005727d68f161086"
+      }
+    ],
+    "raw": "raw/hair-smooth-v1.png",
+    "rawSHA256": "85971bb6eb1a05322c973b3fdebd1a52f627e6f67d55bba8974ef63458bf787f"
+  },
+  {
+    "id": "hair-raise-v1",
+    "tool": "built-in imagegen",
+    "prompt": "prompts/hair-raise-v1.txt",
+    "exactPrompt": "Precise identity-preserving animation edit of this exact CLOSED laptop Varin hand-release pose. Change only her IMAGE-LEFT forearm/hand and its sleeve: raise this hand a SMALL distance from its current low position to mid-chest height, fingertips at approximately x193,y235 in the same 512x512 coordinate canvas. Her fingertips must remain WELL BELOW her chin, approximately level with the lower half of the blue chest garment and pendant height but safely to the LEFT of the pendant; do not reach cheek or mouth or side hair yet. Palm faces slightly inward, relaxed half-open fingers; elbow is softly bent. This is the FIRST HALF of raising a hand from laptop toward side hair, not the final hair touch. Keep a clearly visible gap to hair. Other right-side hand supports CLOSED laptop exactly unchanged. Freeze head/eyes/face/hair/neck/pendant, torso, laptop shape, knees/boots/stool, camera, all colors. No new props, no extra hands, no finger pointing, no nod/roll. Full exact square512 transparent viewport one frame.\n",
+    "inputs": [
+      {
+        "path": "references/yawn-hand-release-v1.png",
+        "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69"
+      }
+    ],
+    "raw": "raw/hair-raise-v1.png",
+    "rawSHA256": "1e42252d8dd8704052c2d72e3763898133f1c5dc88a42fdb9e2e682d144901b7"
+  },
+  {
+    "id": "hair-near-v2",
+    "tool": "built-in imagegen",
+    "prompt": "prompts/hair-near-v2.txt",
+    "exactPrompt": "Identity-preserving precise local animation edit. This image is the EARLY raised hand pose of seated Varin. Create the next real intermediate approaching hair: move ONLY the active IMAGE-LEFT hand about 12 pixels left and 18 pixels UP in the 512 canvas (fingertips approximately x202,y202), turning palm gently toward the thin side hair lock beside her shoulder. Fingers softly bent, not yet touching, small air gap to hair. This must be visibly BETWEEN current chest-level hand and a later cheek-level hair-contact: do not raise all the way to cheek/ear height. Keep elbow/sleeve naturally following. Other hand and closed laptop are fixed. Face/head/hair ornament/pendant/torso/pelvis/legs/stool all unchanged, natural upright neck. No new props, no open computer, no head motion, no body transforms. Same exact full512 transparent frame, change only active arm and sleeve.\n",
+    "inputs": [
+      {
+        "path": "frames/hair-raise-v1.png",
+        "sha256": "9778d643d1e9197bdabc385838a0da036208a605710882284bb8371fb5ff5448"
+      }
+    ],
+    "raw": "raw/hair-near-v2.png",
+    "rawSHA256": "5742b1323f2d5d3972b550fb38554ece6ab364286669481cebeff790d0b2dcd5"
+  },
+  {
+    "id": "hair-detach-v1",
+    "tool": "built-in imagegen",
+    "prompt": "prompts/hair-detach-v1.txt",
+    "exactPrompt": "Use case: identity-preserve, genuine exit drawing for a hair-smoothing gesture. Edit this exact Varin frame where IMAGE-LEFT fingers are brushing a side hair lock. Draw the next pose AFTER contact releases: lower that hand and move it slightly inward toward the laptop, with relaxed fingers turned gently downward at mid-chest height (around x210,y235 in the512canvas). There must be a clear visible air gap between fingertips and hair; the small hair lock has settled back beside the shoulder, no strand remains hooked between fingers. Elbow and sleeve naturally follow. This is the detach-and-lower stage before hand returns to closed laptop, not another hair-contact pose, not hand on necklace. Keep the other IMAGE-RIGHT hand steady on CLOSED computer exactly. Freeze head/face/eyes/neck/ornament, blue-gray outfit beyond acting sleeve, pendant, laptop, pelvis/knees/boots/stool and camera. No head roll, body scaling, new props, mirror or extra fingers. One full transparent512 square frame, exact viewport. Change only active arm/sleeve and tiny released hair lock.\n",
+    "inputs": [
+      {
+        "path": "frames/hair-smooth-v1.png",
+        "sha256": "8c42ce18965166dcc3c660a40eac77ae4223b7d2a646eec0c1606af0369b2b27"
+      }
+    ],
+    "raw": "raw/hair-detach-v1.png",
+    "rawSHA256": "07f856dd52a795e0d7b482723de75b0233db4f9c947ca1f9eac2c64a74cb1de2"
+  }
+]
