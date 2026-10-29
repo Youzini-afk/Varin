@@ -1,5 +1,9 @@
 const phase = new URLSearchParams(window.location.search).get('stool');
-if (phase === 'lift' || phase === 'landing') {
+if (new URLSearchParams(window.location.search).get('scene') === '1') {
+  const { mountCompanionScene } = await import('@varin/ui/components/companion/sceneRenderer');
+  const root = document.getElementById('root');
+  if (root) mountCompanionScene(root);
+} else if (phase === 'lift' || phase === 'landing') {
   // Decorative native surface: no RuntimeAPIs, Host subscription or desktop preload.
   const root = document.getElementById('root');
   if (root) {

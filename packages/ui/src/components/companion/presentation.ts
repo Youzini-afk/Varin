@@ -7,6 +7,13 @@ export type ObservationHealth = 'unselected' | 'synchronizing' | 'current' | 'un
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
+/** Shared gate for a real unresolved permission, not any control-shaped result. */
+export function unresolvedPermissionId(operation: ThreadSnapshot['operations'][number]): string | null {
+  const permission = record(record(operation.result?.kind === 'control' ? operation.result.value : undefined)?.permission);
+  return operation.phase === 'waiting' && !operation.cancel_requested && permission?.decision === null
+    && typeof permission.id === 'string' && record(permission.call) && record(permission.scope) ? permission.id : null;
+}
+
 export function projectCompanionIntent(snapshot: ThreadSnapshot | undefined, health: ObservationHealth): CompanionIntent {
   if (health === 'unknown') return { state: 'E04', reason: 'Current Host facts unavailable; last snapshot is not current evidence' };
   if (health === 'synchronizing') return { state: 'E05', reason: 'Synchronizing the selected branch' };
@@ -21,11 +28,7 @@ export function projectCompanionIntent(snapshot: ThreadSnapshot | undefined, hea
     if (pending.length || activeChildren || (run && !['cancelled', 'completed', 'failed'].includes(run.state))) return { state: 'E02', reason: 'Cancellation requested; work has not fully settled' };
   }
   const focusedPending = run ? pending.filter(operation => operation.run_id === run.id) : pending;
-  if (focusedPending.some(operation => {
-    const permission = record(record(operation.result?.kind === 'control' ? operation.result.value : undefined)?.permission);
-    return operation.phase === 'waiting' && !operation.cancel_requested && permission?.decision === null
-      && typeof permission.id === 'string' && record(permission.call) && record(permission.scope);
-  })) return { state: 'W02', reason: 'An unresolved Host permission decision is waiting' };
+  if (focusedPending.some(operation => unresolvedPermissionId(operation) !== null)) return { state: 'W02', reason: 'An unresolved Host permission decision is waiting' };
   if (focusedPending.some(operation => operation.executor === 'ask_user')) return { state: 'W03', reason: 'An existing ask_user operation is unresolved' };
   // Only exact admitted identities may classify activity; no generated prose/arguments.
   const classified = focusedPending.map(operationPresentation).filter(value => value !== null);

@@ -362,11 +362,26 @@ export type DesktopWebRenderResult = {
 // Command map — desktop_* commands with typed args and results
 // ---------------------------------------------------------------------------
 
+/** Decorative companion data only: no content, execution or approval capability. */
+export interface DesktopCompanionScene {
+  revision: number;
+  scope: string;
+  kind: 'reading' | 'editing' | 'searching' | 'dispatch' | 'question' | 'permission' | null;
+  phase: 'active' | 'resolve' | 'withdraw';
+  outcome: 'allowed' | 'denied' | 'answered' | null;
+  count: number | null;
+  suppressed: boolean;
+  reducedMotion: boolean;
+  menuOpen: boolean;
+  cue: 'transition' | 'engaged';
+}
+
 export interface VarinDesktopCommandMap {
   // --- window/chrome ---
   desktop_start_window_drag: { args: void; result: null };
   desktop_get_companion: { args: void; result: { enabled: boolean; visible: boolean } };
   desktop_set_companion: { args: { enabled: boolean }; result: { enabled: boolean; visible: boolean } };
+  desktop_companion_scene: { args: { descriptor: DesktopCompanionScene; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number } }; result: null };
   desktop_companion_stool: { args: { phase: 'clear' } | { phase: 'lift' | 'landing'; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number } }; result: null };
   desktop_companion_drag: { args: { phase: 'start'; anchor: { x: number; y: number } } | { phase: 'move' | 'end' }; result: null };
   desktop_companion_passthrough: { args: { enabled: boolean }; result: { supported: boolean; enabled: boolean } };
@@ -535,6 +550,7 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_start_window_drag: true,
   desktop_get_companion: true,
   desktop_set_companion: true,
+  desktop_companion_scene: true,
   desktop_companion_stool: true,
   desktop_companion_drag: true,
   desktop_companion_passthrough: true,
@@ -655,6 +671,7 @@ export const VARIN_REMOTE_SAFE_DESKTOP_COMMANDS = [
   'desktop_start_window_drag',
   'desktop_get_companion',
   'desktop_set_companion',
+  'desktop_companion_scene',
   'desktop_companion_stool',
   'desktop_companion_drag',
   'desktop_companion_passthrough',

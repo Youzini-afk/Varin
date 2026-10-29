@@ -24,6 +24,7 @@ import {
 } from 'electron';
 import contextMenu from 'electron-context-menu';
 import { CompanionStoolWindows } from './companion-stool.js';
+import { CompanionSceneWindows, type CompanionSceneViewport } from './companion-scene.js';
 import { CompanionWindowMovement, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect, captureCompanionPlacement, restoreCompanionPlacement } from './companion-window.js';
 import { createComputerFeedback } from './computer-feedback.js';
 import { createComputerControls } from './computer-controls.js';
@@ -598,7 +599,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 
 // Companion windows are auxiliary displays, not foreground conversation surfaces.
 const companionMovement = new CompanionWindowMovement(bounds => screen.getDisplayMatching(bounds).workArea);
-const isCompanionAuxWindow = (window: BrowserWindow): boolean => window.__varinLabel === 'companion' || window.__varinLabel === 'companion-stool';
+const isCompanionAuxWindow = (window: BrowserWindow): boolean => window.__varinLabel === 'companion' || window.__varinLabel === 'companion-stool' || window.__varinLabel === 'companion-scene';
 const companionDragOrigins = new Map<number, Electron.Rectangle>();
 const isConversationWindow = (window: BrowserWindow): boolean =>
   !window.isDestroyed() && !isCompanionAuxWindow(window);
@@ -2362,7 +2363,7 @@ const canUseTitleBarOverlay = (browserWindow: BrowserWindow | null | undefined):
 };
 
 interface BrowserWindowCreationInput {
-  presentation?: 'companion' | 'companion-stool';
+  presentation?: 'companion' | 'companion-stool' | 'companion-scene';
   fixedBounds?: Electron.Rectangle;
   label?: string | undefined;
   restoreGeometry?: boolean | undefined;
@@ -2379,12 +2380,14 @@ const createBrowserWindow = ({
   runtimeConfig = {},
 }: BrowserWindowCreationInput): BrowserWindow => {
   const stool = presentation === 'companion-stool';
-  const companion = presentation === 'companion' || stool;
+  const scene = presentation === 'companion-scene';
+  const decorative = stool || scene;
+  const companion = presentation === 'companion' || decorative;
   const saved = restoreGeometry ? readWindowState() : null;
   const useSaved = saved !== null;
   const restoredBounds = saved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
   const desktopLocalOrigin = state.localOrigin || state.sidecarUrl || '';
-  const rendererRuntimeConfig = stool ? { apiBaseUrl: '', clientToken: '', requestHeaders: {}, relayHostId: '' } : buildRendererRuntimeConfig(url, runtimeConfig);
+  const rendererRuntimeConfig = decorative ? { apiBaseUrl: '', clientToken: '', requestHeaders: {}, relayHostId: '' } : buildRendererRuntimeConfig(url, runtimeConfig);
   const desktopApiBaseUrl = rendererRuntimeConfig.apiBaseUrl;
   const desktopClientToken = rendererRuntimeConfig.clientToken;
   const desktopRequestHeaders = rendererRuntimeConfig.requestHeaders || {};
@@ -2403,10 +2406,10 @@ const createBrowserWindow = ({
       : {}),
     width: companion ? 360 : restoredBounds?.width ?? 1280,
     height: companion ? 480 : restoredBounds?.height ?? 800,
-    minWidth: stool ? 1 : companion ? 240 : MIN_WINDOW_WIDTH,
-    minHeight: stool ? 1 : companion ? 300 : MIN_WINDOW_HEIGHT,
+    minWidth: decorative ? 1 : companion ? 240 : MIN_WINDOW_WIDTH,
+    minHeight: decorative ? 1 : companion ? 300 : MIN_WINDOW_HEIGHT,
     ...(fixedBounds ?? {}),
-    ...(stool ? { focusable: false } : {}),
+    ...(decorative ? { focusable: false } : {}),
     ...(windowIconPath ? { icon: windowIconPath } : {}),
     show: false,
     backgroundColor: companion || useVibrancy ? '#00000000' : '#151313',
@@ -2422,7 +2425,7 @@ const createBrowserWindow = ({
     titleBarOverlay: titleBarOverlayEnabled,
     ...(!companion && process.platform === 'darwin' ? { trafficLightPosition: { x: 16, y: 17 } } : {}),
     webPreferences: {
-      ...(stool ? {} : { preload: path.join(__dirname, 'preload.mjs') }),
+      ...(decorative ? {} : { preload: path.join(__dirname, 'preload.mjs') }),
       backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -2430,14 +2433,14 @@ const createBrowserWindow = ({
       // from Electron's Node layer. contextIsolation + nodeIntegration:false
       // keep the renderer world walled off from Node. Do NOT flip to true —
       // the preload would fail to load and the desktop bridge would be unavailable.
-      sandbox: stool,
+      sandbox: decorative,
     },
   };
 
   const browserWindow = new BrowserWindow(options);
   browserWindow.__varinLabel = label || nextWindowLabel();
   browserWindow.__varinRuntimeConfig = rendererRuntimeConfig;
-  browserWindow.__varinInitScript = stool ? '' : buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__varinInitScript = decorative ? '' : buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__varinTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
   if (useSaved && saved?.maximized) {
@@ -2483,11 +2486,20 @@ const createBrowserWindow = ({
     browserWindow.on('focus', refreshTrafficLights);
   }
 
-  if (companion && !stool) browserWindow.on('blur', () => {
+  if (companion && !decorative) browserWindow.on('blur', () => {
     companionMovement.forget(browserWindow.id);
     companionStools.clear(browserWindow.id);
     if (!browserWindow.isDestroyed()) browserWindow.setIgnoreMouseEvents(false);
   });
+  if (presentation === 'companion') {
+    const refreshScene = () => companionScenes.refresh(browserWindow.id);
+    browserWindow.on('show', refreshScene);
+    browserWindow.on('hide', refreshScene);
+    browserWindow.on('minimize', refreshScene);
+    browserWindow.on('restore', refreshScene);
+    // A new owner document has a new presentation revision sequence.
+    browserWindow.webContents.on('did-start-loading', () => companionScenes.clear(browserWindow.id));
+  }
   browserWindow.on('resize', () => {
     if (process.platform === 'darwin') {
       emitToWindow(browserWindow, 'varin:window-resized');
@@ -2503,6 +2515,7 @@ const createBrowserWindow = ({
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('move', () => {
+    if (presentation === 'companion') companionScenes.refresh(browserWindow.id);
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('close', (event) => {
@@ -2533,6 +2546,7 @@ const createBrowserWindow = ({
     companionMovement.forget(browserWindow.id);
     companionDragOrigins.delete(browserWindow.id);
     companionStools.clear(browserWindow.id);
+    companionScenes.clear(browserWindow.id);
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       state.mainWindow = null;
@@ -2587,6 +2601,7 @@ const createBrowserWindow = ({
   };
 
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (decorative) return { action: 'deny' };
     if (isAllowedNavigationUrl(url)) {
       return { action: 'allow' };
     }
@@ -2596,6 +2611,7 @@ const createBrowserWindow = ({
   });
 
   browserWindow.webContents.on('will-navigate', (event, url) => {
+    if (decorative && url !== browserWindow.webContents.getURL()) { event.preventDefault(); return; }
     if (isAllowedNavigationUrl(url)) return;
     event.preventDefault();
     const externalUrl = normalizeExternalHttpUrl(url);
@@ -2642,7 +2658,8 @@ const createBrowserWindow = ({
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
     }
-    if (stool) browserWindow.setIgnoreMouseEvents(true);
+    if (decorative) browserWindow.setIgnoreMouseEvents(true);
+    if (scene) return; // Scene owner publishes data before allowing its inert surface to appear.
     if (companion) browserWindow.showInactive();
     else { browserWindow.show(); browserWindow.focus(); }
     if (useVibrancy) applyMacVibrancy(browserWindow);
@@ -2803,6 +2820,7 @@ const recoverCompanionPlacement = () => {
   if (!bounds) return;
   companionMovement.forget(window.id); companionStools.clear(window.id); companionDragOrigins.delete(window.id);
   window.setPosition(bounds.x, bounds.y);
+  companionScenes.refresh(window.id);
   void persistCompanionPlacement(window);
 };
 
@@ -2840,7 +2858,27 @@ const companionStools = new CompanionStoolWindows((bounds, phase, owner) => {
       window.webContents.once('did-finish-load', () => { loaded = true; start(); });
     } };
 });
-app.on('before-quit', () => companionStools.clearAll());
+const companionScenes = new CompanionSceneWindows(bounds => {
+  const base = shouldUsePackagedUi() ? buildPackagedUiUrl('/companion.html') : state.localOrigin || state.sidecarUrl;
+  if (!base) throw new Error('Local companion UI is unavailable');
+  const url = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
+  url.searchParams.set('scene', '1');
+  const window = createBrowserWindow({ label: 'companion-scene', presentation: 'companion-scene', fixedBounds: bounds, url: url.toString() });
+  window.setIgnoreMouseEvents(true);
+  return {
+    isDestroyed: () => window.isDestroyed(), close: () => window.close(), hide: () => window.hide(),
+    showInactive: () => window.showInactive(), setBounds: (value) => window.setBounds(value),
+    setAlwaysOnTop: (value) => { if (window.isAlwaysOnTop() !== value) window.setAlwaysOnTop(value); },
+    publish: async (value) => { await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('varin-companion-scene',{detail:${JSON.stringify(value)}}))`); },
+    onReady: (callback) => {
+      let ready = false, loaded = false;
+      const start = () => { if (ready && loaded && !window.isDestroyed()) callback(); };
+      window.once('ready-to-show', () => { ready = true; start(); });
+      window.webContents.once('did-finish-load', () => { loaded = true; start(); });
+    },
+  };
+}, bounds => screen.getDisplayMatching(bounds).workArea);
+app.on('before-quit', () => { companionStools.clearAll(); companionScenes.clearAll(); });
 
 const companionStatus = () => ({ enabled: readSettingsRoot().desktopCompanionEnabled === true,
   visible: BrowserWindow.getAllWindows().some((window: BrowserWindow) => !window.isDestroyed() && window.__varinLabel === 'companion' && window.isVisible()) });
@@ -3933,6 +3971,12 @@ const handleInvoke = async (
       return companionStatus();
     }
 
+    case 'desktop_companion_scene': {
+      const owner = requireCompanionWindow(browserWindow);
+      companionScenes.update(owner, args.descriptor, args.viewport as CompanionSceneViewport);
+      companionScenes.block(owner.id, companionMovement.isDragging(owner.id));
+      return null;
+    }
     case 'desktop_companion_stool': {
       const owner = requireCompanionWindow(browserWindow);
       if (args.phase === 'clear') { companionStools.clear(owner.id); return null; }
@@ -3951,6 +3995,7 @@ const handleInvoke = async (
         const point = args.phase === 'end' ? null : screen.getCursorScreenPoint();
         const wasDragging = companionMovement.isDragging(companionOwner.id);
         companionMovement.drag(companionOwner, { phase: args.phase, anchor: args.anchor, screenX: point?.x, screenY: point?.y });
+        if (args.phase === 'start') companionScenes.block(companionOwner.id, true);
         if (args.phase === 'end' && wasDragging) await persistCompanionPlacement(companionOwner);
         if (origin) companionDragOrigins.set(companionOwner.id, origin);
         return null;
@@ -4725,8 +4770,11 @@ const handleInvoke = async (
       return null;
     }
 
-    case 'desktop_set_window_pinned':
-      return setMiniChatPinned(browserWindow, args.pinned === true);
+    case 'desktop_set_window_pinned': {
+      const result = setMiniChatPinned(browserWindow, args.pinned === true);
+      if (browserWindow?.__varinLabel === 'companion') companionScenes.refresh(browserWindow.id);
+      return result;
+    }
 
     case 'desktop_get_window_pinned':
       return { pinned: Boolean(browserWindow?.__varinPinned) };

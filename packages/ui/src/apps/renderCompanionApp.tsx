@@ -8,6 +8,8 @@ import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
 import { projectCompanionIntent, newlyAnsweredQuestion, type ObservationHealth } from '@/components/companion/presentation';
 import { initializeLocale, I18nProvider, useI18n, type I18nKey } from '@/lib/i18n';
+import { CompanionSceneFacts, reviewSceneFact, type SceneFact } from '@/components/companion/sceneFacts';
+import { useCompanionScene } from '@/components/companion/useCompanionScene';
 import catalog from '../../../../tools/desktop-companion-animation/coverage.json';
 
 function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
@@ -22,6 +24,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [liveCompletion, setLiveCompletion] = React.useState<string | null>(null);
   const pendingQuestions = React.useRef(new Set<string>());
   const [liveAnswer, setLiveAnswer] = React.useState<string | null>(null);
+  const sceneFacts = React.useRef(new CompanionSceneFacts());
+  const sceneScope = React.useRef(0);
+  const [sceneFact, setSceneFact] = React.useState<SceneFact>(() => sceneFacts.current.reset());
   const [health, setHealth] = React.useState<ObservationHealth>('unselected');
   const [connection, setConnection] = React.useState('No thread selected');
   const [error, setError] = React.useState('');
@@ -64,6 +69,10 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const companionWindow = useCompanionWindow(canvas, review, () => beforeNativeLift.current());
   const displayedDrawing = React.useRef<{ packageId: string; exposure: number } | null>(null);
   const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current });
+  const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation) : sceneFact;
+  useCompanionScene(canvas, sceneCurrent, `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
+    companionWindow.phase !== 'rest' || (!reviewRoute && health !== 'current') || manualReview, controlsOpen,
+    assetList.find(item => item.id === automatic.packageId)?.action === ({ reading: 'reading', editing: 'editing', searching: 'browsing', dispatch: 'dispatch', question: 'query', permission: 'permission' } as const)[sceneCurrent.kind ?? 'reading']);
   React.useEffect(() => {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'understood') setLiveAnswer(null);
@@ -103,12 +112,15 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   }, [controlsOpen, apis.threads, generation]);
   React.useEffect(() => {
     if (selected) setLocalAction(null);
+    sceneScope.current++; setSceneFact(sceneFacts.current.reset());
     setSnapshot(undefined); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null);
     if (!apis.threads || !selected || selected.generation !== generation) { setConnection('No thread selected'); setHealth('unselected'); return; }
     let closed = false;
     setConnection('Synchronizing current Host snapshot'); setHealth('synchronizing');
     const projection = new ThreadProjection(apis.threads, selected.identity,
       value => { if (!closed) {
+        // Observe each projection callback before React can coalesce short tool snapshots.
+        setSceneFact(sceneFacts.current.observe(value, 'current'));
         const answered = newlyAnsweredQuestion(pendingQuestions.current, value);
         if (answered) setLiveAnswer(answered);
         pendingQuestions.current = new Set(value.operations.filter(operation => operation.executor === 'ask_user' && operation.phase !== 'terminal').map(operation => operation.id));
@@ -119,7 +131,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         if (nextRun?.state === 'completed' && previous?.id === nextRun.id && !['completed','failed','cancelled'].includes(previous.state)) setLiveCompletion(nextRun.id);
         previousRun.current = nextRun ? { id: nextRun.id, state: nextRun.state } : null;
         setSnapshot(value); setHealth('current'); setConnection('Observing existing thread — read only'); } },
-      cause => { if (!closed) { setHealth('unknown'); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null); setConnection(`Connection unknown: ${String(cause)}`); } },
+      cause => { if (!closed) { setSceneFact(sceneFacts.current.reset()); setHealth('unknown'); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null); setConnection(`Connection unknown: ${String(cause)}`); } },
       undefined, undefined, undefined, { contextInspection: false });
     projection.start();
     return () => { closed = true; projection.close(); };
