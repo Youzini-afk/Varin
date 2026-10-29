@@ -36,7 +36,11 @@ describe('atelier scene renderer',()=>{
   s.update(scene('dispatch',{team:{members:[member],overflowCount:0}}));tick(700);expect(jobs.size).toBe(0);
   const avatarPath=AGENT_AVATAR_ART['ribbon-blue'].body;expect(root.innerHTML).toContain(avatarPath);
   s.update(scene('reading',{revision:2,team:{members:[member],overflowCount:0}}));tick(800);expect(root.innerHTML.split(avatarPath)).toHaveLength(2);tick(1400);expect(root.innerHTML).toContain(avatarPath);
-  s.update(scene('reading',{revision:3,team:{members:[{...member,state:'leaving'}],overflowCount:0}}));tick(1500);expect(jobs.size).toBe(1);tick(2100);expect(jobs.size).toBe(0);
+  Object.assign(document,{hidden:true});document.dispatchEvent(new Event('visibilitychange'));
+  Object.assign(document,{hidden:false});document.dispatchEvent(new Event('visibilitychange'));
+  s.update(scene('reading',{revision:3,team:{members:[member],overflowCount:0}}));tick(1450);
+  expect(root.innerHTML).toContain(avatarPath);
+  s.update(scene('reading',{revision:4,team:{members:[{...member,state:'leaving'}],overflowCount:0}}));tick(1500);expect(jobs.size).toBe(1);tick(2100);expect(jobs.size).toBe(0);
   s.dispose();
  });
  it('missing identities retire neutrally for 500ms without retaining stale work',()=>{

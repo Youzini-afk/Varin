@@ -1,3 +1,4 @@
+import { hasCurrentChildWork } from './childTeam';
 import { operationPresentation } from './toolPresentation';
 import type { ThreadSnapshot } from '@varin/application-client';
 
@@ -20,7 +21,7 @@ export function projectCompanionIntent(snapshot: ThreadSnapshot | undefined, hea
   if (health === 'unselected' || !snapshot) return { state: 'L07', reason: 'No branch observed' };
   const run = snapshot.activeRun;
   if (run && snapshot.identity && (run.thread_id !== snapshot.identity.threadId || run.branch_id !== snapshot.identity.branchId)) return { state: 'E04', reason: 'Run identity does not match the observed branch' };
-  const activeChildren = Object.values(snapshot.childActivity ?? {}).some(child => child.state !== 'preparation_failed');
+  const activeChildren = hasCurrentChildWork(snapshot);
   const pending = snapshot.operations.filter(operation => operation.phase !== 'terminal');
   if (snapshot.operations.some(operation => operation.effect === 'unknown')) return { state: 'E06', reason: 'An operation effect requires reconciliation' };
   if (run?.cancel_requested || pending.some(operation => operation.cancel_requested)) {

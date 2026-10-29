@@ -3,10 +3,13 @@ import type { CompanionIntent, ObservationHealth } from './presentation';
 
 export interface CompanionProgress {
   runId: string;
+  requestId?: string;
   kind: 'output' | 'thinking' | 'retry';
   /** A visual activity lease, or the actual provider retry time; never a completion clock. */
   until: number;
   attempt?: number;
+  /** Only actual provider text events get a serial; cached cumulative snapshots do not. */
+  textEvent?: number;
 }
 
 /** Keeps only lengths/type/identity, never model text or reasoning. */
@@ -16,6 +19,7 @@ export class CompanionProgressFacts {
   private lengths = new Map<string, number>();
   private retryKey: string | undefined;
   private active: CompanionProgress | null = null;
+  private serial = 0;
   reset(): null { this.runId = undefined; this.requestId = undefined; this.lengths.clear(); this.retryKey = undefined; this.active = null; return null; }
   observe(parts: StreamingTextPart[], context: { runId: string; requestId?: string; activity?: 'text' | 'thinking' | 'retry' | 'provider' } | undefined, now: number): CompanionProgress | null {
     if (!context || !parts.length) return this.reset();
@@ -43,10 +47,10 @@ export class CompanionProgressFacts {
     const key = retry ? `${retry.attempt}:${retry.retryAt}` : undefined;
     const freshRetry = key !== undefined && key !== this.retryKey;
     this.retryKey = key;
-    if (activity) this.active = { runId: context.runId, kind: activity, until: now + 1400 };
+    if (activity) this.active = { runId: context.runId, ...(context.requestId ? { requestId: context.requestId } : {}), kind: activity, until: now + 1400, ...(context.activity === 'text' ? { textEvent: ++this.serial } : {}) };
     // Validate the provider's timestamp; do not invent an arbitrary timeout ceiling.
     else if ((context.activity === 'retry' || freshRetry && context.activity !== 'provider') && retry && Number.isSafeInteger(retry.retryAt) && Number.isFinite(new Date(retry.retryAt).getTime()) && retry.retryAt > now && Number.isSafeInteger(retry.attempt) && retry.attempt >= 0) {
-      this.active = { runId: context.runId, kind: 'retry', until: retry.retryAt, attempt: retry.attempt };
+      this.active = { runId: context.runId, ...(context.requestId ? { requestId: context.requestId } : {}), kind: 'retry', until: retry.retryAt, attempt: retry.attempt };
     }
     if (this.active && this.active.until <= now) this.active = null;
     return this.active;

@@ -74,7 +74,7 @@ export function companionSceneLayout(content: Bounds, viewport: unknown, workAre
 
 type SceneEntry = {
   owner: CompanionSceneOwner; window: CompanionSceneWindow; descriptor: CompanionSceneDescriptor;
-  viewport: CompanionSceneViewport; receivedAt: number; ready: boolean; blocked: boolean; queue: Promise<void>; lastPayload?: string;
+  viewport: CompanionSceneViewport; receivedAt: number; ready: boolean; blocked: boolean; queue: Promise<void>; lastPayload?: string; teamRetiresAt?: number; retirementTimer?: ReturnType<typeof setTimeout>;
 };
 /** One inert surface per companion. Its owner is the only presentation source. */
 export class CompanionSceneWindows {
@@ -99,6 +99,16 @@ export class CompanionSceneWindows {
         created.ready = true; this.refresh(owner.id);
       });
     } else {
+      const retiring = entry.descriptor.scope === descriptor.scope && !descriptor.suppressed && !descriptor.menuOpen
+        && !!entry.descriptor.team?.members.length && !descriptor.team?.members.length;
+      if (retiring) {
+        clearTimeout(entry.retirementTimer);
+        entry.teamRetiresAt = Date.now() + 600;
+        const retiringEntry = entry;
+        entry.retirementTimer = setTimeout(() => { if (this.entries.get(owner.id) === retiringEntry) this.refresh(owner.id); }, 600);
+      } else if (descriptor.scope !== entry.descriptor.scope || descriptor.suppressed || descriptor.menuOpen || descriptor.team?.members.length) {
+        clearTimeout(entry.retirementTimer); delete entry.retirementTimer; delete entry.teamRetiresAt;
+      }
       if (entry.descriptor.scope !== descriptor.scope || entry.descriptor.kind !== descriptor.kind || entry.descriptor.phase !== descriptor.phase || entry.descriptor.outcome !== descriptor.outcome) entry.receivedAt = Date.now();
       entry.descriptor = descriptor; entry.viewport = { ...viewport };
     }
@@ -107,12 +117,15 @@ export class CompanionSceneWindows {
 
   block(ownerId: number, blocked: boolean): void {
     const entry = this.entries.get(ownerId); if (!entry) return;
-    entry.blocked = blocked; this.refresh(ownerId);
+    entry.blocked = blocked;
+    if (blocked) { clearTimeout(entry.retirementTimer); delete entry.retirementTimer; delete entry.teamRetiresAt; }
+    this.refresh(ownerId);
   }
 
   refresh(ownerId: number): void {
     const entry = this.entries.get(ownerId); if (!entry) return;
     if (entry.owner.isDestroyed() || entry.window.isDestroyed()) { this.clear(ownerId); return; }
+    if (!entry.owner.isVisible() || entry.owner.isMinimized()) { clearTimeout(entry.retirementTimer); delete entry.retirementTimer; delete entry.teamRetiresAt; }
     // Native input suppression happens synchronously, before queued renderer work.
     if (!this.visible(entry)) entry.window.hide();
     if (!entry.ready) return;
@@ -137,13 +150,13 @@ export class CompanionSceneWindows {
   private visible(entry: SceneEntry): boolean {
     const age = Date.now() - entry.receivedAt;
     const expired = entry.descriptor.phase === 'withdraw' ? age >= 600 : entry.descriptor.phase === 'resolve' && age >= 900;
-    const hasTeam = !!entry.descriptor.team?.members.length;
+    const hasTeam = !!entry.descriptor.team?.members.length || Date.now() < (entry.teamRetiresAt ?? 0);
     return (hasTeam || !expired) && !entry.blocked && !entry.descriptor.suppressed && (entry.descriptor.kind !== null || hasTeam)
       && !entry.owner.isDestroyed() && entry.owner.isVisible() && !entry.owner.isMinimized();
   }
   clear(ownerId: number): void {
     const entry = this.entries.get(ownerId); if (!entry) return;
-    this.entries.delete(ownerId); if (!entry.window.isDestroyed()) entry.window.close();
+    this.entries.delete(ownerId); clearTimeout(entry.retirementTimer); if (!entry.window.isDestroyed()) entry.window.close();
   }
   clearAll(): void { for (const id of this.entries.keys()) this.clear(id); }
 }

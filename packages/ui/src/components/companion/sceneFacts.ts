@@ -1,3 +1,4 @@
+import { companionChildEvidence } from './childTeam';
 import type { DesktopCompanionScene, ThreadSnapshot } from '@varin/application-client';
 import { projectCompanionIntent, unresolvedPermissionId, type ObservationHealth } from './presentation';
 import { operationPresentation } from './toolPresentation';
@@ -24,7 +25,9 @@ export class CompanionSceneFacts {
     const intent = projectCompanionIntent(snapshot, health);
     if (health !== 'current' || intent.state?.startsWith('E')) return this.reset();
     const pending = snapshot.operations.filter(op => op.phase !== 'terminal' && (!snapshot.activeRun || op.run_id === snapshot.activeRun.id));
-    const children = Object.values(snapshot.childActivity ?? {}).filter(child => child.state !== 'preparation_failed').length;
+    const children = snapshot.children !== undefined && snapshot.childExecutions !== undefined
+      ? companionChildEvidence(snapshot).filter(child => !['completed','failed','cancelled','preparation_failed'].includes(child.state)).length
+      : Object.values(snapshot.childActivity ?? {}).filter(child => child.state !== 'preparation_failed').length;
     let kind = intent.state ? kinds[intent.state] ?? null : null;
     if (!kind && !intent.state) {
       // Mixed real tool categories: retain one readable primary, never infer from prose.

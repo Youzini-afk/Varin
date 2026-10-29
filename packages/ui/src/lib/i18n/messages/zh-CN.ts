@@ -1,3 +1,4 @@
+import { companionAttentionZh } from './companion-attention';
 import { dict as enDict, type I18nKey } from './en';
 import { externalAgentZh } from './external-agents';
 import { toolHeadingMessages } from './tool-headings';
@@ -9,6 +10,7 @@ import { toolMessagesZhCN } from './tool-interactions';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...companionAttentionZh,
   "companion.observing": "正在联动所选会话",
   "companion.unavailable": "暂时无法读取会话状态",
   "companion.controls": "桌宠设置",

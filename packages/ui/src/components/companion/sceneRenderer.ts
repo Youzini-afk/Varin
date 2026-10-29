@@ -178,6 +178,7 @@ function artwork(d: DesktopCompanionScene, elapsed: number, cueElapsed = elapsed
 export function mountCompanionScene(root: HTMLElement) {
   root.style.cssText='position:fixed;inset:0;overflow:hidden;pointer-events:none;user-select:none';
   root.setAttribute('aria-hidden','true');
+  let resetRoster=false;
   let teamBeats = new Map<string, TeamBeat>();
   let departing = new Map<string,{ member: TeamMember; at: number }>();
   let current: SceneUpdate | null=null, previous: SceneUpdate|null=null, started=0, previousAt=0, lastRevision=-1, frame=0, phaseStarted=0, previousElapsed=0, cueStarted=0;
@@ -231,7 +232,7 @@ export function mountCompanionScene(root: HTMLElement) {
     if (current && (current.descriptor.suppressed || current.descriptor.menuOpen) && !value.descriptor.suppressed && !value.descriptor.menuOpen) {
       started=phaseStarted=cueStarted=performance.now(); previous=null;
     }
-    const firstRoster=current?.descriptor.scope!==value.descriptor.scope || !current?.descriptor.team || current.descriptor.suppressed || current.descriptor.menuOpen;
+    const firstRoster=resetRoster || current?.descriptor.scope!==value.descriptor.scope || !current?.descriptor.team || current.descriptor.suppressed || current.descriptor.menuOpen;
     const hidden=value.descriptor.suppressed || value.descriptor.menuOpen || document.hidden;
     const members=value.descriptor.team?.members??[], keys=new Set(members.map(member=>member.key));
     if(firstRoster || hidden)departing.clear();
@@ -258,12 +259,13 @@ export function mountCompanionScene(root: HTMLElement) {
       occupied.add(seat);nextBeats.set(key,{at:value.at,entering:false,state:'leaving',seat});
     }
     teamBeats=nextBeats;
+    resetRoster=hidden;
     current=value;
     if(frame)cancelAnimationFrame(frame);
     frame=requestAnimationFrame(render);
   };
   const event=(e:Event)=>update((e as CustomEvent<SceneUpdate>).detail);
-  const visibility=()=>{if(frame)cancelAnimationFrame(frame);if(document.hidden){departing.clear();teamBeats.clear();root.replaceChildren();}else {started=performance.now();frame=requestAnimationFrame(render);}};
+  const visibility=()=>{if(frame)cancelAnimationFrame(frame);if(document.hidden){resetRoster=true;departing.clear();teamBeats.clear();root.replaceChildren();}else {started=performance.now();frame=requestAnimationFrame(render);}};
   window.addEventListener('varin-companion-scene',event);document.addEventListener('visibilitychange',visibility);
   document.documentElement.dataset.varinCompanionSceneReady = 'true';
   window.dispatchEvent(new Event('varin-companion-scene-ready'));

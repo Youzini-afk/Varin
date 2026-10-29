@@ -100,3 +100,21 @@ it('keeps factual child seats across primary changes and admits a team-only quie
   f.manager.update(f.owner,descriptor(3,{kind:null,phase:'withdraw',team:{members:[],overflowCount:0},suppressed:true}),viewport);await flush();
   expect(f.windows[0]?.visible).toBe(false);
 });
+
+
+it('allows only the existing same-scope final spirit a bounded neutral departure', async () => {
+  vi.useFakeTimers();
+  try {
+    const f=fixture(), team={members:[{key:'member-1',avatar:'slope-lilac' as const,state:'running' as const}],overflowCount:0};
+    f.manager.update(f.owner,descriptor(1,{kind:null,team}),viewport);f.windows[0]?.ready?.();await flush();
+    f.manager.update(f.owner,descriptor(2,{kind:null,team:{members:[],overflowCount:0}}),viewport);await flush();
+    expect(f.windows[0]?.visible).toBe(true);
+    expect(f.windows[0]?.payloads.at(-1)?.descriptor.team?.members).toEqual([]);
+    await vi.advanceTimersByTimeAsync(200);
+    f.manager.update(f.owner,descriptor(3,{kind:null,team}),viewport);await flush();
+    await vi.advanceTimersByTimeAsync(500);await flush();expect(f.windows[0]?.visible).toBe(true);
+    f.manager.update(f.owner,descriptor(4,{kind:null,team:{members:[],overflowCount:0}}),viewport);await flush();
+    await vi.advanceTimersByTimeAsync(600);await flush();expect(f.windows[0]?.visible).toBe(false);
+    f.manager.clearAll();
+  } finally { vi.useRealTimers(); }
+});

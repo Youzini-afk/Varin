@@ -1,3 +1,4 @@
+import { companionAttentionEn } from './companion-attention';
 import { browserMessages } from './browser';
 import { externalAgentEn } from './external-agents';
 import { officeReaderMessages } from './office';
@@ -9,6 +10,7 @@ import { chatExperienceMessages } from './chat-experience';
 import { toolMessagesEn } from './tool-interactions';
 
 export const dict = {
+  ...companionAttentionEn,
   "companion.observing": "Observing the selected conversation",
   "companion.unavailable": "Conversation status is currently unavailable",
   "companion.controls": "Companion controls",
