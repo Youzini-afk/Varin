@@ -107,3 +107,11 @@ python tools/desktop-companion-animation/build_upright_bundle.py --root "$SOURCE
 ```
 
 Preparation writes only reproducible inventory/recovery JSON below the source root's `integration` directory. The source-specific authored recovery mapping and local-event manifest are included in the repository. `integration/portable-runtime-verification.json` records the independent rebuild: candidate and selected runtime artifact bytes match, with no external source dependency. The original acceptance ledger's JSON key ordering differs from the first independent reconstruction but its parsed contents are identical; subsequent selections sort filenames deterministically. Final native QA fields are appended afterward and are intentionally separate from the reproducible source-art selection.
+
+### Authored performance replacement
+
+`build_interaction_expansion.py --performance-manifest <manifest>` replaces explicitly named display actions while retaining the frozen upright mechanical base. It is mutually exclusive with the older director/local manifest inputs and does not import their v3 display plans. Without this option, the existing build path is unchanged.
+
+The manifest declares `canvas: [512, 512]`, `geometryReference: "varin-upright-v2"`, `replaceActions`, and nonempty `sequences` with unique `id`, `kind` (`action` or `bridge`), actual source hashes and positive finite `durationMs`. Actions must exactly cover the declared replacements; bridges do not trigger actions. Optional loops use authored `[start, endExclusive]` frame indices. `ordinaryRecoveryByActualSource` records each actual source path/hash and its real recovery frames; the detached index must cover new source and recovery contacts. Source images must already use the actual 512×512 registered canvas: the builder does not resize raw artwork or infer compatible anatomy from metadata. Visual registration, complete motion and contact review precede this input.
+
+The output remains a candidate. Successful compilation neither selects artwork nor installs it into the application; rejected drawings and diagnostic previews stay outside the repository.

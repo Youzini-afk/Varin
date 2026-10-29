@@ -1,6 +1,7 @@
 """Append authored interactions to the immutable selected upright base; never install or accept art."""
-import argparse,copy,hashlib,importlib.util,json,shutil
+import argparse,copy,hashlib,importlib.util,json,math,shutil
 from pathlib import Path
+from PIL import Image
 from compile_upright_pickup import compile_pickup
 
 parser=argparse.ArgumentParser(description=__doc__)
@@ -10,8 +11,11 @@ parser.add_argument('--base-bundle',type=Path,required=True,help='immutable sele
 parser.add_argument('--output',type=Path,required=True)
 parser.add_argument('--director-manifest',type=Path,help='Optional explicit authored management sequences; review-only, not a production selection')
 parser.add_argument('--local-interaction-manifest',type=Path,action='append',help='Optional exact local hover/repeat source contract; candidate only')
+parser.add_argument('--performance-manifest',type=Path,help='Explicit replacement performances and actual-source recovery; excludes legacy v3 display plans, keeps mechanical base; candidate only')
 parser.add_argument('--detached-index',type=Path,required=True,help='explicit immutable new-source no-stool index')
 a=parser.parse_args();R=a.root.resolve();B=a.base_source.resolve();OUT=a.output.resolve();OUT.mkdir(parents=True,exist_ok=True)
+if a.performance_manifest and (a.director_manifest or a.local_interaction_manifest):
+ parser.error('--performance-manifest cannot mix with legacy director/local manifests')
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 BASE_SHA='399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268'
 if sha(a.base_bundle)!=BASE_SHA:raise ValueError('Base is not the frozen upright selected bundle; rebuild v2, do not use mutable selected v3 output')
@@ -30,72 +34,119 @@ sources={};plans=[];recovery={};provenance=[]
 def frame(root,f):
  path=(root/f['source']).resolve();h=sha(path)
  if h!=f.get('sourceSHA256',f.get('sha256')):raise ValueError(f'Source SHA mismatch: {path}')
+ if a.performance_manifest:
+  ms=f.get('durationMs')
+  if isinstance(ms,bool) or not isinstance(ms,(int,float)) or not math.isfinite(ms) or ms<=0:
+   raise ValueError('Replacement exposure must be finite and positive')
+  with Image.open(path) as image:
+   if image.size!=(512,512):
+    raise ValueError('Replacement source must be registered to an actual 512x512 canvas; never silently resize raw art: '+str(path))
  sources[h]=path
  return {'sha256':h,'durationMs':f['durationMs'],'cue':f.get('cue'),'phase':f.get('phase','act'),'pauseSafe':f.get('pauseSafe',False)}
-manifest=R/'task-reactions/manifest.json';task=json.loads(manifest.read_text());provenance.append({'source':str(manifest.relative_to(R)),'sha256':sha(manifest)})
-for name,action in task['actions'].items():
- plans.append({'name':name,'action':action.get('publicAction',name),'frames':[frame(manifest.parent,f) for f in action['frames']],'contract':action['phaseContract'],'root':manifest.parent})
-for h,r in task['ordinaryRecoveryBySourceSHA'].items():
- path=manifest.parent/r['source']
- if sha(path)!=h:raise ValueError('Recovery source mismatch')
- sources[h]=path;recovery[h]={'steps':[frame(manifest.parent,f) for f in r['steps']]}
-# Explicit authored blink sources, rather than an invented deform or full-body loop.
-for p in plans:
- blink=p['contract'].get('holdBlink')
- if blink:
-  p['blink']=[]
-  for name,ms in [('half',45),('closed',75),('half',45)]:
-   path=p['root']/blink[name];h=sha(path);sources[h]=path
-   p['blink'].append({'sha256':h,'durationMs':ms,'cue':'OBSERVE_REST','phase':'hold','pauseSafe':False})
-
-# The complete local chain is already authored as E/H/X sequences. Preserve it;
-# normalize identical source poses by SHA rather than trusting family labels.
 localPlans=[]
-localManifest=R/'companionship/manifest.json'
-if localManifest.exists():
- local=json.loads(localManifest.read_text());provenance.append({'source':str(localManifest.relative_to(R)),'sha256':sha(localManifest)})
- for sequence in local['sequences']:
-  localPlans.append({**sequence,'frames':[frame(localManifest.parent,f) for f in sequence['frames']]})
- for row in local['safeRecoveryByActualSource']:
-  h=row['actualSourceSHA256']
-  recovery[h]={'steps':[frame(localManifest.parent,f) for f in row['frames']]}
+replacementActions=None
+if a.performance_manifest:
+ performancePath=a.performance_manifest.resolve()
+ performance=json.loads(performancePath.read_text())
+ provenance.append({'source':str(performancePath.relative_to(R)),'sha256':sha(performancePath)})
+ if performance.get('canvas')!=[512,512] or performance.get('geometryReference')!='varin-upright-v2':
+  raise ValueError('Replacement drawings must be explicitly registered to the existing 512px upright mechanical canvas')
+ declared=performance.get('replaceActions')
+ if not isinstance(declared,list) or not declared or any(not isinstance(x,str) or not x for x in declared) or len(set(declared))!=len(declared):
+  raise ValueError('replaceActions must name each replaced display action once')
+ replacementActions=set(declared)
+ sequences=performance.get('sequences')
+ if not isinstance(sequences,list) or not sequences:
+  raise ValueError('Replacement performances need authored sequences')
+ ids=set()
+ for sequence in sequences:
+  name=sequence.get('id');kind=sequence.get('kind')
+  if not isinstance(name,str) or not name or name in ids or name in baseIds:
+   raise ValueError('Replacement sequence IDs must be unique and not shadow mechanical package IDs')
+  ids.add(name)
+  loop=sequence.get('loop')
+  if loop is not None and (not isinstance(loop,list) or len(loop)!=2 or any(type(x) is not int for x in loop) or not 0<=loop[0]<loop[1]<=len(sequence.get('frames',[]))):
+   raise ValueError('Replacement loop must be an authored [start,endExclusive] frame range')
+  if kind not in ('action','bridge') or not sequence.get('frames'):
+   raise ValueError('Replacement sequences must be nonempty authored actions or bridges')
+  if kind=='action' and sequence.get('action') not in replacementActions:
+   raise ValueError('Every replacement action must be explicitly declared')
+  if kind=='bridge' and sequence.get('action') is not None:
+   raise ValueError('A recovery bridge must not trigger a display action')
+  localPlans.append({**sequence,'frames':[frame(performancePath.parent,f) for f in sequence['frames']]})
+ if {p.get('action') for p in localPlans if p['kind']=='action'}!=replacementActions:
+  raise ValueError('Every replaced action requires an authored replacement')
+ for row in performance.get('ordinaryRecoveryByActualSource',[]):
+  h=row['actualSourceSHA256'];path=(performancePath.parent/row['source']).resolve()
+  if sha(path)!=h or h in recovery:
+   raise ValueError('Duplicate or mismatched actual-source recovery')
+  frame(performancePath.parent,{'source':row['source'],'sha256':h,'durationMs':1})
+  recovery[h]={'steps':[frame(performancePath.parent,f) for f in row['frames']]}
+else:
+ manifest=R/'task-reactions/manifest.json';task=json.loads(manifest.read_text());provenance.append({'source':str(manifest.relative_to(R)),'sha256':sha(manifest)})
+ for name,action in task['actions'].items():
+  plans.append({'name':name,'action':action.get('publicAction',name),'frames':[frame(manifest.parent,f) for f in action['frames']],'contract':action['phaseContract'],'root':manifest.parent})
+ for h,r in task['ordinaryRecoveryBySourceSHA'].items():
+  path=manifest.parent/r['source']
+  if sha(path)!=h:raise ValueError('Recovery source mismatch')
+  sources[h]=path;recovery[h]={'steps':[frame(manifest.parent,f) for f in r['steps']]}
+ # Explicit authored blink sources, rather than an invented deform or full-body loop.
+ for p in plans:
+  blink=p['contract'].get('holdBlink')
+  if blink:
+   p['blink']=[]
+   for name,ms in [('half',45),('closed',75),('half',45)]:
+    path=p['root']/blink[name];h=sha(path);sources[h]=path
+    p['blink'].append({'sha256':h,'durationMs':ms,'cue':'OBSERVE_REST','phase':'hold','pauseSafe':False})
 
-# New local responses are opt-in, so the frozen prior candidate stays rebuildable.
-for localInput in a.local_interaction_manifest or []:
- localPath=localInput.resolve();local=json.loads(localPath.read_text())
- provenance.append({'source':str(localPath.relative_to(R)),'sha256':sha(localPath)})
- def local_frame(f):return frame(localPath.parent,{**f,'sourceSHA256':f['actualSourceSHA']})
- for name,action in local['actions'].items():
-  if action.get('wholeSequenceLoop') is not False:raise ValueError('Local response must be finite')
-  localPlans.append({'id':name,'kind':'action','action':action.get('publicAction',name),'loop':None,'frames':[local_frame(f) for f in action['frames']]})
- for h,steps in local['ordinaryRecoveryByActualSHA'].items():
-  # Existing shared endpoints retain their already authored cross-family recovery.
-  if h not in recovery:recovery[h]={'steps':[local_frame(f) for f in steps]}
+ # The complete local chain is already authored as E/H/X sequences. Preserve it;
+ # normalize identical source poses by SHA rather than trusting family labels.
+ localManifest=R/'companionship/manifest.json'
+ if localManifest.exists():
+  local=json.loads(localManifest.read_text());provenance.append({'source':str(localManifest.relative_to(R)),'sha256':sha(localManifest)})
+  for sequence in local['sequences']:
+   localPlans.append({**sequence,'frames':[frame(localManifest.parent,f) for f in sequence['frames']]})
+  for row in local['safeRecoveryByActualSource']:
+   h=row['actualSourceSHA256']
+   recovery[h]={'steps':[frame(localManifest.parent,f) for f in row['frames']]}
 
-# Management performances retain directional action identity. Project execution
-# detail is not their trigger and must never be inferred from these source cues.
-if a.director_manifest:
- directorPath=a.director_manifest.resolve();director=json.loads(directorPath.read_text())
- provenance.append({'source':str(directorPath.relative_to(R)),'sha256':sha(directorPath)})
- for name,action in director['actions'].items():
-  localPlans.append({'id':name,'kind':'action','action':name,'loop':None,'frames':[frame(directorPath.parent,f) for f in action['frames']]})
- for h,row in director['ordinaryRecoveryBySourceSHA'].items():
-  path=directorPath.parent/row['actualSource']
-  if sha(path)!=h:raise ValueError('Director actual recovery source mismatch')
-  sources[h]=path;steps=[frame(directorPath.parent,f) for f in row['frames']]
-  # A group's own rest has no internal return; keep its existing cross-family
-  # real hand recovery rather than erasing that route with an empty endpoint.
-  if steps or h not in recovery:recovery[h]={'steps':steps}
+ # New local responses are opt-in, so the frozen prior candidate stays rebuildable.
+ for localInput in a.local_interaction_manifest or []:
+  localPath=localInput.resolve();local=json.loads(localPath.read_text())
+  provenance.append({'source':str(localPath.relative_to(R)),'sha256':sha(localPath)})
+  def local_frame(f):return frame(localPath.parent,{**f,'sourceSHA256':f['actualSourceSHA']})
+  for name,action in local['actions'].items():
+   if action.get('wholeSequenceLoop') is not False:raise ValueError('Local response must be finite')
+   localPlans.append({'id':name,'kind':'action','action':action.get('publicAction',name),'loop':None,'frames':[local_frame(f) for f in action['frames']]})
+  for h,steps in local['ordinaryRecoveryByActualSHA'].items():
+   # Existing shared endpoints retain their already authored cross-family recovery.
+   if h not in recovery:recovery[h]={'steps':[local_frame(f) for f in steps]}
 
-if a.local_interaction_manifest:
- # The normal supervisor starts with a hand holding the laptop edge. Local
- # attention reaches its open-user entrance through the real hand-return image,
- # not the old two-exposure listening-to-neutral convenience return.
- listen='0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a'
- attendPath='question-permission/poses/attend-corrected.png'
- attendHash='fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f'
- provenance.append({'baseSource':attendPath,'sha256':attendHash})
- recovery[listen]={'steps':[frame(B,{'source':attendPath,'sourceSHA256':attendHash,'durationMs':120,'cue':'RECOVERY_ONLY'}),frame(B,{'source':'shared/upright-open-neutral-v2.png','sourceSHA256':sha(B/'shared/upright-open-neutral-v2.png'),'durationMs':160,'cue':'REST','pauseSafe':True})]}
+ # Management performances retain directional action identity. Project execution
+ # detail is not their trigger and must never be inferred from these source cues.
+ if a.director_manifest:
+  directorPath=a.director_manifest.resolve();director=json.loads(directorPath.read_text())
+  provenance.append({'source':str(directorPath.relative_to(R)),'sha256':sha(directorPath)})
+  for name,action in director['actions'].items():
+   localPlans.append({'id':name,'kind':'action','action':name,'loop':None,'frames':[frame(directorPath.parent,f) for f in action['frames']]})
+  for h,row in director['ordinaryRecoveryBySourceSHA'].items():
+   path=directorPath.parent/row['actualSource']
+   if sha(path)!=h:raise ValueError('Director actual recovery source mismatch')
+   sources[h]=path;steps=[frame(directorPath.parent,f) for f in row['frames']]
+   # A group's own rest has no internal return; keep its existing cross-family
+   # real hand recovery rather than erasing that route with an empty endpoint.
+   if steps or h not in recovery:recovery[h]={'steps':steps}
+
+ if a.local_interaction_manifest:
+  # The normal supervisor starts with a hand holding the laptop edge. Local
+  # attention reaches its open-user entrance through the real hand-return image,
+  # not the old two-exposure listening-to-neutral convenience return.
+  listen='0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a'
+  attendPath='question-permission/poses/attend-corrected.png'
+  attendHash='fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f'
+  provenance.append({'baseSource':attendPath,'sha256':attendHash})
+  recovery[listen]={'steps':[frame(B,{'source':attendPath,'sourceSHA256':attendHash,'durationMs':120,'cue':'RECOVERY_ONLY'}),frame(B,{'source':'shared/upright-open-neutral-v2.png','sourceSHA256':sha(B/'shared/upright-open-neutral-v2.png'),'durationMs':160,'cue':'REST','pauseSafe':True})]}
+
 
 # Add only source-exact new entries; the prior 55-entry graph remains untouched.
 rel=R/'relocation';indexPath=a.detached_index.resolve()
@@ -111,6 +162,8 @@ for h in sorted(newOrdinary):
  required={h}|{f['sha256'] for f in route['steps']} if route else {h}
  if not route or not required<=available:missing.append({'sourceSHA256':h,'missingRecovery':not bool(route),'missingDetached':sorted(required-available)})
  else:ready.append({'sha256':h})
+if replacementActions is not None and missing:
+ raise ValueError('Replacement source recovery/detached contacts are incomplete: '+json.dumps(missing))
 core=json.loads((B/'relocation/core-transition-contract-v3.json').read_text())
 nodes,pickSources=compile_pickup(B,json.loads((B/'integration/inventory.json').read_text()),core,extra_detached=detached,extra_recovery=recovery,ordinary_frames=ready)
 for h,f in pickSources.items():sources[h]=B.parent/f['source']
@@ -141,7 +194,7 @@ def add(name,fs,kind='bridge',action=None,loop=None,sceneAction=None):
   h=f['sha256'];q=pose(h)
   out.append({'sha256':h,'page':pageMap[key],'rect':placement['rect'],'offset':placement['offset'],'durationMs':duration,'startMs':time,'pose':q,'phase':f.get('phase','act'),'cue':f.get('cue'),'pauseSafe':f.get('pauseSafe',False),'exitTo':[q] if h in canonical or h in recovery else []})
   time+=duration
- p={'id':name,'canvas':[512,512],'geometryReference':'varin-upright-v2','reviewStatus':'candidate','stage':'motion-candidate','kind':kind,'action':action,'entryPose':out[0]['pose'],'exitPose':out[-1]['pose'],'frames':out,'pages':pages,'durationMs':time,'loop':loop,'sceneAction':sceneAction,'warning':'v3 source candidate: normal-speed/whole-route acceptance required; never auto-promote'}
+ p={'id':name,'canvas':[512,512],'geometryReference':'varin-upright-v2','reviewStatus':'candidate','stage':'motion-candidate','kind':kind,'action':action,'entryPose':out[0]['pose'],'exitPose':out[-1]['pose'],'frames':out,'pages':pages,'durationMs':time,'loop':loop,'sceneAction':sceneAction,'warning':('authored replacement candidate' if replacementActions is not None else 'v3 source candidate')+': normal-speed/whole-route acceptance required; never auto-promote'}
  newPackages.append(p);return p
 for p in plans:
  name=p['name'];fs=p['frames'];c=p['contract'];action=p['action']
@@ -170,14 +223,15 @@ for p in plans:
   add('v3-'+name+'-beat',beat,'action','output-emphasis',sceneAction=action)
 # A generic observation transition admits neutral cancellation/sync holds.
 # It uses the authored external-wait contact drawings, never a permission/answer tail.
-observer=next(p for p in plans if p['name']=='external-wait')
-add('v3-observation-settle',[{**f,'cue':'RECOVERY_ONLY'} for f in observer['frames']])
+if replacementActions is None:
+ observer=next(p for p in plans if p['name']=='external-wait')
+ add('v3-observation-settle',[{**f,'cue':'RECOVERY_ONLY'} for f in observer['frames']])
 for p in localPlans:
  # A tap-specific convenience bridge cannot be a global pose shortcut: it
  # would replay a response during unrelated interruption. Current consumer
  # uses the source-exact neutral recovery followed by its closed tap action.
- if p['id'].endswith('hover-to-tap'):continue
- add('v3-'+p['id'],p['frames'],p['kind'],p.get('action') if p['kind']=='action' else None,p.get('loop'),p.get('action') if (p.get('action') or '').startswith('director-') else None)
+ if replacementActions is None and p['id'].endswith('hover-to-tap'):continue
+ add(p['id'] if replacementActions is not None else 'v3-'+p['id'],p['frames'],p['kind'],p.get('action') if p['kind']=='action' else None,p.get('loop'),p.get('action') if (p.get('action') or '').startswith('director-') else None)
 if a.director_manifest:
  # Explicit new ordering, not a borrowed question/permission sentence. This
  # bridge remains a candidate until the actual hand-contact timing is reviewed.
@@ -219,7 +273,7 @@ for name,n in nodes.items():
  p=add(id,[n],'gesture');p['gesture']=n['gesture']
 # Existing actions superseded by new authored performances cannot win shortest-path selection.
 replaced={p['action'] for p in newPackages if p.get('action')}
-packages=[p for p in packages if p.get('action') not in replaced or p.get('action')=='tap-response' and p['entryPose']!='upright-v2:closed']+newPackages
+packages=[p for p in packages if p.get('action') not in replaced or replacementActions is None and p.get('action')=='tap-response' and p['entryPose']!='upright-v2:closed']+newPackages
 for item in provenance:
  if sha(B/item['baseSource'] if 'baseSource' in item else R/item['source'])!=item['sha256']:raise ValueError('Source changed while compiling; retry after owner freezes source')
 result={**base,'candidateOnly':True,'packages':packages};(OUT/'bundle.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
