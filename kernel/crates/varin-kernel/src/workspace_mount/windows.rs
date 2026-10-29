@@ -10,9 +10,10 @@ use winfsp::{
         DirInfo, DirMarker, FileInfo, FileSecurity, FileSystemContext, ModificationDescriptor,
         OpenFileInfo, VolumeInfo, WideNameInfo,
     },
-    host::{FileSystemHost, VolumeParams},
     FspError, U16CStr,
 };
+mod namespace;
+pub(crate) use namespace::execution_path;
 
 pub(super) fn initialize() -> Result<(), KernelError> {
     static LOADED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
@@ -238,6 +239,7 @@ pub(super) struct Backend {
     open_boundary: Arc<std::sync::RwLock<()>>,
     opens: Arc<std::sync::atomic::AtomicUsize>,
     closing: Arc<std::sync::atomic::AtomicBool>,
+    inodes: namespace::Inodes,
 }
 impl Backend {
     fn retain_writer(&self, node: &Arc<Node>, writable: bool) -> winfsp::Result<Option<Writers>> {
@@ -260,7 +262,7 @@ impl Backend {
         let state = node.state().map_err(native)?;
         let metadata = node.attributes().map_err(native)?;
         *out = FileInfo::default();
-        out.index_number = node.id;
+        out.index_number = self.inodes.get(node.id)?;
         out.creation_time = metadata.created.filetime().map_err(native)?;
         out.last_access_time = metadata.accessed.filetime().map_err(native)?;
         out.last_write_time = metadata.modified.filetime().map_err(native)?;
@@ -880,7 +882,9 @@ impl FileSystemContext for Backend {
 }
 
 pub(crate) struct Mount {
-    host: FileSystemHost<Backend>,
+    namespace: Option<Arc<namespace::Volume>>,
+    name: String,
+    path: std::path::PathBuf,
     session: Arc<Session>,
     errors: Pending,
     writers: Writers,
@@ -889,49 +893,33 @@ pub(crate) struct Mount {
     closing: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Mount {
-    pub(crate) fn start(session: Arc<Session>, target: &Path) -> Result<Self, KernelError> {
-        admit_target(target)?;
+    pub(crate) fn start(session: Arc<Session>, _target: &Path) -> Result<Self, KernelError> {
         session.mount_started();
         initialize()?;
-        session.lookup("")?;
-        let mut params = VolumeParams::new();
-        params
-            .filesystem_name("Varin")
-            .sector_size(4096)
-            .sectors_per_allocation_unit(1)
-            .max_component_length(255)
-            .case_sensitive_search(true)
-            .case_preserved_names(true)
-            .unicode_on_disk(true)
-            .reparse_points(true)
-            .flush_and_purge_on_cleanup(true);
+        let root = session.lookup("")?;
+        let security = root.attributes()?.security.unwrap_or_default();
+        session.forget_cached(&root)?;
+        let namespace = namespace::Volume::acquire(security)?;
+        let name = uuid::Uuid::new_v4().to_string();
+        let path = namespace.path(&name);
         let errors = Arc::new(Mutex::new(BTreeMap::new()));
         let writers = Arc::new(Mutex::new(BTreeMap::new()));
         let open_boundary = Arc::new(std::sync::RwLock::new(()));
         let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let closing = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let mut host = FileSystemHost::<Backend>::new(
-            params,
-            Backend {
+        namespace.insert(&name, Arc::new(Backend {
                 session: session.clone(),
                 errors: errors.clone(),
                 writers: writers.clone(),
                 open_boundary: open_boundary.clone(),
                 opens: opens.clone(),
                 closing: closing.clone(),
-            },
-        )
-        .map_err(|e| KernelError::Storage(format!("WinFsp filesystem creation failed: {e}")))?;
-        host.mount(target)
-            .map_err(|e| KernelError::Storage(format!("WinFsp mount failed: {e}")))?;
-        if let Err(error) = host.start() {
-            host.unmount();
-            return Err(KernelError::Storage(format!(
-                "WinFsp dispatcher failed: {error}"
-            )));
-        }
+                inodes: namespace.inodes(),
+            }))?;
         Ok(Self {
-            host,
+            namespace: Some(namespace),
+            name,
+            path,
             session,
             errors,
             writers,
@@ -940,6 +928,7 @@ impl Mount {
             closing,
         })
     }
+    pub(crate) fn path(&self) -> &Path { &self.path }
     pub(crate) fn wait_ready(&self) -> Result<(), KernelError> {
         self.session.check_mounted()
     }
@@ -1001,20 +990,15 @@ impl Mount {
                 return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_native_handles_active",format!("Waiting for {remaining} original native file/directory handles to close before detaching the workspace"))));
             }
         }
-        // Waiting callbacks can now take the admission lock and reject new
-        // opens. Never hold that lock while joining dispatcher callbacks.
-        // A lost driver has already stopped native dispatch; join the original
-        // dispatcher before draining its saved file state, even if Close could
-        // no longer be delivered for an OS handle.
-        if self.session.is_mount_disconnected(){self.host.stop();}
-        self.host.unmount();
-        self.host.stop();
+        // The volume is shared, but each source retains its own open boundary,
+        // native handles and cleanup. Closing one source cannot unmount siblings.
         if self.session.revoked() {
             self.errors
                 .lock()
                 .map_err(|_| unsupported("Native cleanup registry failed"))?
                 .clear();
-            return self.session.close();
+            self.session.close()?;
+            return self.detach();
         }
         let pending = std::mem::take(&mut *self.errors.lock().unwrap_or_else(|p| p.into_inner()));
         for (key, mut work) in pending {
@@ -1051,6 +1035,23 @@ impl Mount {
         }
         drop(errors);
         self.session.close()?;
+        self.detach()
+    }
+    fn detach(&mut self) -> Result<(), KernelError> {
+        if let Some(namespace) = &self.namespace { namespace.remove(&self.name)?; }
+        self.namespace.take();
         Ok(())
+    }
+}
+impl Drop for Mount {
+    fn drop(&mut self) {
+        if let Some(namespace) = self.namespace.take() {
+            // A lost mount worker must not leave a routable, ownerless source
+            // in a sibling's volume. Existing handles retain their Backend and
+            // the original Session for cleanup; no replacement writer is made.
+            self.closing.store(true, std::sync::atomic::Ordering::Release);
+            self.session.mount_disconnected();
+            let _ = namespace.remove(&self.name);
+        }
     }
 }

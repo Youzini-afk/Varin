@@ -9,7 +9,7 @@ export const unavailableLanguageResult = (message: string): LanguageResult => ({
 const validQuery = (value: unknown): value is LanguageQuery => {
   if (!record(value) || !['runId','threadId','grantId','path'].every(key => text(value[key]))
     || !record(value.source) || !['workspace_id','execution_workspace_id'].every(key => text(record(value.source) ? value.source[key] : undefined))
-    || !['live_root','materialized','fixed_branch'].includes(String(value.source.mode))
+    || !['live_root','materialized','fixed_branch','native_workspace'].includes(String(value.source.mode))
     || !(value.physicalRoot === null || record(value.physicalRoot) && ['hostId','canonicalRoot','rootId'].every(key => text(record(value.physicalRoot) ? value.physicalRoot[key] : undefined)))
 ) return false;
   const noPosition = value.line === undefined && value.character === undefined;

@@ -417,6 +417,8 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
     let parent = Session::open(port.clone(), "parent".into(), grant.clone()).unwrap();
     let mut mount = Mount::start(parent.clone(), &parent_path).unwrap();
     mount.wait_ready().unwrap();
+    #[cfg(windows)]
+    let parent_path = mount.path().to_path_buf();
     let client = std::env::current_exe().unwrap();
     let result = std::process::Command::new(&client)
         .args([
@@ -453,6 +455,8 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
     let child = Session::open(port.clone(), "child".into(), grant).unwrap();
     let mut child_mount = Mount::start(child.clone(), &child_path).unwrap();
     child_mount.wait_ready().unwrap();
+    #[cfg(windows)]
+    let child_path = child_mount.path().to_path_buf();
     let mut command = std::process::Command::new(client);
     command
         .args([
@@ -484,8 +488,22 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
         std::fs::read(child_path.join("written.txt")).unwrap(),
         expected
     );
-    child_mount.stop().unwrap();
-    mount.stop().unwrap();
+    // Windows may deliver native Close after the ordinary process has exited.
+    // Follow the original close notification just like the product owner.
+    let stop = |mount: &mut Mount, session: &Arc<Session>| {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        session.on_native_idle(Arc::new(move || { let _ = sender.send(()); }));
+        loop {
+            match mount.stop() {
+                Err(KernelError::Execution(error)) if error.code == "workspace_native_handles_active" => {
+                    receiver.recv_timeout(std::time::Duration::from_secs(15)).expect("Native close was not delivered");
+                }
+                result => { result.unwrap(); break; }
+            }
+        }
+    };
+    stop(&mut child_mount, &child);
+    stop(&mut mount, &parent);
     drop((child_mount, mount, child, parent, port));
     stopping.send(None).unwrap();
     drop(owner.join().unwrap());

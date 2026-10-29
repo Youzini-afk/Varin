@@ -120,6 +120,77 @@ vitestIt.skipIf(!available || process.platform !== 'win32')('Windows cmd PTY sta
   assert(!output.includes('UNC'), output);
 }, 30_000);
 
+vitestIt.skipIf(!available || process.platform !== 'win32')('Windows native workspaces support realpath and shell execution through one user volume', async () => {
+  const f = await fixture();
+  assert.equal((await f.client.inspectWorkspaceBackend()).dependenciesReady, true);
+  await fs.writeFile(path.join(f.workspace, 'child', 'before.txt'), 'original source');
+  await f.client.adoptWorkspace({ branchId: 'native-parent', rootId: f.address.rootId, operationId: 'native-adopt' });
+  const open = async (branchId: string) => {
+    const opened = await f.client.openWorkspace({ branchId });
+    const address = { branchId, generation: opened.binding.generation };
+    await f.client.mountWorkspace(address);
+    const bound = await f.client.bindWorkspace({ ...address, sourcePath: 'child' });
+    assert(bound.mount?.path && bound.rootId);
+    return { ...address, path: bound.mount.path, rootId: bound.rootId };
+  };
+  const parent = await open('native-parent');
+  assert.match(parent.path, /^\\\\\?\\UNC\\varin-/);
+  assert.equal(await fs.realpath(parent.path), parent.path.replace(/^\\\\\?\\UNC\\/, '\\\\'));
+  await f.client.forkWorkspace({ branchId: parent.branchId, generation: parent.generation,
+    targetBranchId: 'native-child', operationId: 'native-fork' });
+  const child = await open('native-child');
+  const borrower = await f.scoped('native-borrower');
+  assert.equal((await borrower.bindWorkspace({ branchId: child.branchId, generation: child.generation, sourcePath: 'child' })).rootId, child.rootId);
+  const run = async (id: string, command: string, args: string[], mode = 'pipe') => {
+    await borrower.processSpawn({ ...f.spawn(id, '', mode), rootId: child.rootId, cwd: '', command, args });
+    const result = await drain(borrower, id);
+    assert.equal(result.process.exitCode, 0, result.stderr.toString());
+    return stripVTControlCharacters(result.stdout.toString('utf8'));
+  };
+  const probe = "const fs=require('node:fs'); fs.writeFileSync(process.argv[1],'isolated'); process.stdout.write('VARIN_REAL='+fs.realpathSync('.')+'\\nVARIN_CWD='+process.cwd()+'\\n')";
+  let executionRoot = '';
+  for (const mode of ['pipe', 'pty']) {
+    const output = await run(`native-node-${mode}`, process.execPath, ['-e', probe, `node-${mode}.txt`], mode);
+    const real = /VARIN_REAL=([^\r\n]*)/.exec(output)?.[1];
+    const cwd = /VARIN_CWD=([^\r\n]*)/.exec(output)?.[1];
+    assert(real && cwd, output);
+    assert.equal(await fs.realpath(cwd), await fs.realpath(child.path));
+    assert.match(cwd, /^[A-Za-z]:\\/);
+    executionRoot = cwd;
+    assert.equal(await fs.readFile(path.join(child.path, `node-${mode}.txt`), 'utf8'), 'isolated');
+    await assert.rejects(fs.stat(path.join(parent.path, `node-${mode}.txt`)), { code: 'ENOENT' });
+    const cmd = await run(`native-cmd-${mode}`, 'cmd.exe', ['/d', '/c', 'echo VARIN_CWD=%CD%'], mode);
+    assert.equal(/VARIN_CWD=([^\r\n]*)/.exec(cmd)?.[1]?.trim().toLowerCase(), cwd.toLowerCase());
+  }
+  const powershell = await run('native-powershell', 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "Write-Output ('VARIN_CWD=' + (Get-Location).Path)"]);
+  assert.equal(/VARIN_CWD=([^\r\n]*)/.exec(powershell)?.[1]?.trim().toLowerCase(), executionRoot.toLowerCase());
+  const bash = path.join(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe');
+  if (await fs.stat(bash).then(() => true, () => false)) {
+    const output = await run('native-bash', bash, ['--noprofile', '--norc', '-c', 'printf "VARIN_BASH=ok\\n"; test -f before.txt && printf isolated > bash.txt']);
+    assert.match(output, /VARIN_BASH=ok/);
+    assert.equal(await fs.readFile(path.join(child.path, 'bash.txt'), 'utf8'), 'isolated');
+  }
+  await assert.rejects(borrower.processSpawn({ ...f.spawn('native-escape', ''), rootId: child.rootId, cwd: '../' }), /path|root|parent/i);
+  await borrower.processSpawn({ ...f.spawn('native-live', 'setInterval(()=>{},1000)'), rootId: child.rootId, cwd: '' });
+  await assert.rejects(f.client.closeWorkspace({ branchId: child.branchId, generation: child.generation }), { code: 'workspace_in_use' });
+  await borrower.processKill({ workspaceId: 'ws', processId: 'native-live', force: true });
+  await drain(borrower, 'native-live');
+  await f.host.retireGrant('native-borrower');
+  const close = async (address: { branchId: string; generation: string }) => {
+    await expect.poll(async () => {
+      try { return (await f.client.closeWorkspace({ branchId: address.branchId, generation: address.generation })).closed; }
+      catch (error) {
+        if ((error as { code?: string }).code === 'workspace_native_handles_active') return false;
+        throw error;
+      }
+    }).toBe(true);
+  };
+  await close(child);
+  assert.equal(await fs.readFile(path.join(parent.path, 'before.txt'), 'utf8'), 'original source');
+  await close(parent);
+  await assert.rejects(fs.stat(executionRoot), { code: 'ENOENT' });
+}, 60_000);
+
 it("native process pipes preserve binary stdout/stderr, bounded cursors and the actual exit code", async () => {
   const f = await fixture();
   const params = f.spawn("binary", "process.stdout.write(Buffer.from([0,255,128,65,10]));process.stderr.write('error-stream');process.exitCode=7");

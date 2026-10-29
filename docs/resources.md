@@ -76,8 +76,11 @@ WinFsp 与 Linux/macOS FUSE 回调由默认 `workspace-mount` feature 编入；�
 macOS 默认运行时加载已安装的 libfuse3 session 接口，缺少组件不阻止应用启动；显式 SDK 构建仍保留 libfuse2/libfuse3 入口。真实挂载仍需平台验收。
 原生会话已通过 `workspace.*` 私有协议接入真实 Kernel 与 Host 客户端：项目 owner 持有文件系统，Run／Operation
 租约独立接纳和释放；挂载、区间版本持久化、卸载及进程／计算退出的等待都在 worker，原 Storage 继续服务回调。
-Windows 由 WinFsp 原子创建挂载点，保留系统卷登记以兼容标准文件路径 API；FUSE 则使用已存在的空目录。
-当前 Windows 挂载需要 Host 具有系统卷挂载权限（通常为管理员权限）；私有 junction 不能兼容标准 realpath，因此不作为替代路径。
+Windows 使用 WinFsp 本地 UNC 文件系统，普通用户即可挂载，标准 Windows、Rust 和 Node 路径解析保留同一来源身份。
+同一 Kernel 的工作区共享一个当前用户盘符，各 generation 路由到各自的原 Storage Session；不修改整机挂载开关，不为子任务分别占用盘符。
+来源登记、路径权限与租约使用规范 UNC 路径；进程启动 worker 核验盘符仍解析到原目录后，仅在私有启动配置中切换到该别名，供 cmd、PowerShell 与 MSYS/Bash 使用。
+盘符只在本地驱动中映射，没有 SMB 服务或网络传输。原 Session 的句柄与清理独立计数，关闭一个来源保留其他来源；最后一个来源退出后释放盘符与 dispatcher。FUSE 继续使用已存在的空目录。
+正常退休运行授权时，先核实该授权的文件操作、计算和进程已结束，再释放它自己的工作区执行租约；项目文件系统 owner 仍需先关闭原 Session。租约与授权退休不再互相等待，也不替其他运行释放来源。
 启动失败时标记原 Session 已断开，由来源 owner 关闭并释放，不留下仍等待挂载的来源。
 关闭先封闭新的原生 open/create，保留 dispatcher 直到实际文件／目录句柄关闭。原关闭回执等待真实释放，重试由关闭事件触发；清理回执之前到来的关闭事件也会保留，不会漏掉重试。
 `workspace.result.prepare` 固定同一数据和属性边界，交给原 WorkingResult 发布；父 head 后续写入继续保留。

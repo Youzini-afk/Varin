@@ -131,7 +131,7 @@ it("R0/R6 saturation retains a bounded native window through parallel uploads, c
   const controller = new AbortController();
   const object = uploaded[0]!;
   const long = f.actor.createBranch({ operationId: "cancel-large", branchId: "cancel-large", workspaceId: "ws", draftBasePaths: [], captureScopes: [],
-    entries: Array.from({ length: 20_000 }, (_, index) => ({ path: `wide/${index}.txt`, state: { kind: "regular-file" as const, objectHash: object.hash, byteLength: object.byteLength, mode: 0o644 } })),
+    entries: Array.from({ length: 20_000 }, (_, index) => ({ path: `wide/${index}.txt`, ownerId: object.ownerId, state: { kind: "regular-file" as const, objectHash: object.hash, byteLength: object.byteLength, mode: 0o644 } })),
   }, controller.signal);
   const rejected = expect(long).rejects.toThrow(/cancelled/i);
   await expect.poll(() => f.requests.some(request => request.method === "branch.create.append")).toBe(true);

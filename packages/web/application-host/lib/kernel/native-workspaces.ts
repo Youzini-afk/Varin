@@ -5,7 +5,7 @@ import type { KernelClient, KernelGrantHandle, KernelScopedClient } from './kern
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { KernelWorkspaceInspection, LaunchSource, ChildSourceProvenance, KernelBranchChange } from './protocol.generated.js';
 import { withAncestorDirectories } from '../harness/working-state/workspace-baseline.js';
-import { normalizePathIdentity } from '../workspace/path-safety.js';
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import { nativeGitRoots } from './native-git-roots.js';
 import { KernelClientError } from './kernel-error.js';
 export class WorkspaceBackendUnavailableError extends KernelClientError {
@@ -238,7 +238,12 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         return { workspaceId, originalPath: entry.originalPath, root: physical.path, hostId: physical.hostId, reference: { ...source } };
     };
     const resolvePath = async (value: string, containing = false): Promise<NativeDocumentWorkspace | undefined> => {
-        const selected = normalizePathIdentity(path.resolve(value)).replace(/\\/g, '/');
+        if (!opened.size) return undefined;
+        // A process can report the per-user drive while the source retains its
+        // canonical UNC identity. Resolve both through the actual filesystem.
+        const selected = normalizePathIdentity(process.platform === 'win32'
+            ? await canonicalizePathIdentity(path.resolve(value), { allowMissing: true })
+            : path.resolve(value)).replace(/\\/g, '/');
         for (const entry of opened.values()) {
             if (entry.epoch !== owners.kernel.handshake?.kernelEpoch || entry.view.mount?.state !== 'ready' || !entry.view.mount.path)
                 continue;

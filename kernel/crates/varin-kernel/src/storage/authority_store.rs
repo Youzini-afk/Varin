@@ -306,10 +306,16 @@ impl Storage {
         if grant.state == GrantState::Revoked {
             return Ok(());
         }
-        if self.workspace_holders.values().any(|(_, owner)| owner == id)
-            || self.workspace_sessions.values().filter_map(std::sync::Weak::upgrade)
+        if self.workspace_sessions.values().filter_map(std::sync::Weak::upgrade)
                 .any(|session| session.owned_by(id) && session.check_open().is_ok()) {
             return Err(KernelError::Operation("native workspace still retains this grant; drain its original filesystem or execution lease before retirement".into()));
+        }
+        if self.workspace_holders.values().any(|(_, owner)| owner == id) {
+            // Retiring this borrower is the end of its own execution lease.
+            // Requiring that lease to disappear first makes normal Run cleanup
+            // circular. The project filesystem still has a separate owner.
+            self.assert_workspace_grant_idle(id)?;
+            return Ok(());
         }
         let ids = {
             let mut q = self
@@ -362,6 +368,7 @@ impl Storage {
             return Err(error);
         }
         self.conn.execute_batch("COMMIT")?;
+        self.workspace_holders.retain(|_, (_, owner)| owner != id);
         self.computations.revoke(id);
         self.revoke_private_files(id);
         self.processes.revoke_subscriptions(id);

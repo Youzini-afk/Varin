@@ -340,7 +340,7 @@ impl Workspaces {
                         }
                     };
                     *locked(&entry.view)? = Some(
-                        json!({"mountId":id,"path":if worker.ready {Some(path)} else {None},"backend":worker.capabilities.get("backend").and_then(Value::as_str).unwrap_or(backend()),
+                        json!({"mountId":id,"path":if worker.ready {Some(worker.path.clone())} else {None},"backend":worker.capabilities.get("backend").and_then(Value::as_str).unwrap_or(backend()),
                             "capabilities":worker.capabilities,"state":if worker.ready {"ready"} else {"cleanup_pending"}}),
                     );
                     *mounted = Some(worker);
@@ -517,6 +517,7 @@ struct MountWorker {
     thread: Option<std::thread::JoinHandle<()>>,
     ready: bool,
     capabilities: Value,
+    path: PathBuf,
 }
 impl MountWorker {
     #[cfg(feature = "workspace-mount")]
@@ -530,8 +531,6 @@ impl MountWorker {
         let target = path.clone();
         let thread = std::thread::spawn(move || {
             let prepared = (|| {
-                #[cfg(windows)]
-                std::fs::create_dir_all(target.parent().ok_or_else(||error("workspace_mount_failed","Mount target has no parent directory"))?)?;
                 #[cfg(not(windows))]
                 std::fs::create_dir_all(&target)?;
                 crate::workspace_mount::Mount::start(session.clone(), &target)
@@ -550,7 +549,11 @@ impl MountWorker {
             let capabilities = mount.capabilities();
             #[cfg(windows)]
             let capabilities = json!({"backend":"winfsp","activeWritableMappingFork":false,"cacheFence":"closed_writers"});
-            if ready.send(Ok((startup_error,capabilities))).is_err() {
+            #[cfg(windows)]
+            let mounted_path = mount.path().to_path_buf();
+            #[cfg(not(windows))]
+            let mounted_path = target.clone();
+            if ready.send(Ok((startup_error,capabilities,mounted_path))).is_err() {
                 let _ = mount.stop();
                 return;
             }
@@ -566,6 +569,7 @@ impl MountWorker {
                         let stopped = result.is_ok();
                         let _ = reply.send(result);
                         if stopped {
+                            #[cfg(not(windows))]
                             let _ = std::fs::remove_dir(&target);
                             return;
                         }
@@ -580,12 +584,13 @@ impl MountWorker {
                 "Mount worker stopped before readiness",
             )
         })? {
-            Ok((startup_error,capabilities)) => Ok((
+            Ok((startup_error,capabilities,path)) => Ok((
                 Self {
                     sender,
                     thread: Some(thread),
                     ready: startup_error.is_none(),
                     capabilities,
+                    path,
                 },
                 startup_error,
             )),

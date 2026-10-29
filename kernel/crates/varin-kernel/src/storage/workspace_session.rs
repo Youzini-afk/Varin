@@ -2170,7 +2170,7 @@ impl Storage {
         }
         Ok(Some(prior["result"].clone()))
     }
-    fn assert_workspace_grant_idle(&mut self, grant: &str) -> Result<(), KernelError> {
+    pub(super) fn assert_workspace_grant_idle(&mut self, grant: &str) -> Result<(), KernelError> {
         if self
             .computations
             .jobs

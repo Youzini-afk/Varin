@@ -24,6 +24,8 @@ pub(crate) use fuse::Mount;
 pub(crate) use macos::Mount;
 #[cfg(windows)]
 pub(crate) use windows::Mount;
+#[cfg(windows)]
+pub(crate) use windows::execution_path;
 
 pub(crate) fn dependencies()->Result<(),KernelError>{
     #[cfg(windows)] {windows::initialize()?; windows::check_driver()}
@@ -73,32 +75,19 @@ fn component(value: &std::ffi::OsStr) -> Result<&str, KernelError> {
     Ok(value)
 }
 
-/// Check only the explicit target. FUSE mounts over an empty directory;
-/// WinFsp creates and owns a new junction. Neither may cover user files.
+/// FUSE mounts only over an existing empty directory, never over user files.
+#[cfg(not(windows))]
 fn admit_target(target: &Path) -> Result<(), KernelError> {
-    // WinFsp atomically creates and owns its delete-on-close junction. Creating
-    // and removing a placeholder first can leave Windows deletion pending.
-    #[cfg(windows)]
+    let metadata = std::fs::symlink_metadata(target)?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || std::fs::read_dir(target)?.next().is_some()
     {
-        return match std::fs::symlink_metadata(target) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.into()),
-            Ok(_) => Err(unsupported("WinFsp mount target must not already exist")),
-        };
+        return Err(unsupported(
+            "Workspace mount target must be an existing empty real directory",
+        ));
     }
-    #[cfg(not(windows))]
-    {
-        let metadata = std::fs::symlink_metadata(target)?;
-        if !metadata.is_dir()
-            || metadata.file_type().is_symlink()
-            || std::fs::read_dir(target)?.next().is_some()
-        {
-            return Err(unsupported(
-                "Workspace mount target must be an existing empty real directory",
-            ));
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
 fn kind_error(error: &KernelError) -> &str {

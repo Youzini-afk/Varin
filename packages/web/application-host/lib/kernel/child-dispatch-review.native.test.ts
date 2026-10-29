@@ -816,7 +816,12 @@ it.each(['quick','formal','isolated'] as const)('%s retrieval uses native search
     const child=(await h.runtime.children())[0]!;
     expect(child.selected_profile.work_mode).toBe(mode==='isolated'?'isolated_write':'shared');
     expect(child.code_result.kind).toBe('published');
-    await expect.poll(async()=>(await h.runtime.child(child.operation_id)).resources_released).toBe(true);
+    try {
+      await expect.poll(async()=>(await h.runtime.child(child.operation_id)).resources_released).toBe(true);
+    } catch (error) {
+      console.error('Completed retrieval cleanup failed', [...new Set(h.errors.map(String))]);
+      throw error;
+    }
   }
   expect(h.errors).toEqual([]);
 });

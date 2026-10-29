@@ -27,6 +27,17 @@ impl Launch {
         }
         let id = self.id.as_str();
         let config = self.config;
+        // Canonical UNC remains the admitted source and durable lease identity.
+        // Only execution uses the same volume's owned per-user DOS alias, so
+        // cmd.exe and MSYS do not silently replace an unsupported UNC cwd.
+        #[cfg(all(windows, feature = "workspace-mount"))]
+        let config = {
+            let mut config = config;
+            if let Some(cwd) = config["cwd"].as_str() {
+                config["cwd"] = json!(crate::workspace_mount::execution_path(Path::new(cwd))?);
+            }
+            config
+        };
         let executable = self.executable;
         let mut command = Command::new(executable);
         command
