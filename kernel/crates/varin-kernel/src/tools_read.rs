@@ -172,7 +172,7 @@ pub(super) fn schema() -> Value {
         "startLine":{"type":"integer","minimum":1,"description":"First line, 1-based. Use instead of offset/length."},
         "endLine":{"type":"integer","minimum":1,"description":"Last line, inclusive; requires startLine."},
         "unit":{"type":"object","additionalProperties":false,"anyOf":[{"required":["line"]},{"required":["symbol"]}],
-            "description":"Read an enclosing Tree-sitter code unit without starting a language server. Exact symbol names may return candidates; add line to disambiguate. offset/length page within the selected unit; continue with nextRead. Missing/incomplete structure returns plain source context with an explicit reason, never a claimed complete unit.",
+            "description":"Read a complete syntax unit, for example {path: 'file.ts', unit: {symbol: 'functionName'}} or unit: {line: 24}. symbol belongs inside unit and is an exact declaration name, not a filename. Multiple matches return candidates; add unit.line to disambiguate. offset/length page within the selected unit; continue with nextRead. Uncovered lines return source context and nearby units; incomplete/unavailable structure returns plain context with its reason.",
             "properties":{"line":{"type":"integer","minimum":1},"symbol":{"type":"string","minLength":1},"revision":{"type":"string","description":"Retain the returned revision when continuing a unit."}}}});
     let single = json!({"type":"object","additionalProperties":false,"properties":properties,"required":["path"]});
     let mut properties = properties;
@@ -274,8 +274,23 @@ impl KernelToolExecutor {
             }
         }
         if candidates.is_empty() {
+            let items = outline["items"].as_array().map(Vec::as_slice).unwrap_or_default();
+            // Nearest preceding/following units help recover an uncovered line
+            // without dumping the full file outline or guessing another symbol.
+            let nearby = if let Some(line) = unit.line {
+                let before = items.iter().filter(|item| item["range"]["endLine"].as_u64().is_some_and(|end| end < line))
+                    .max_by_key(|item| item["range"]["endLine"].as_u64());
+                let after = items.iter().filter(|item| item["range"]["startLine"].as_u64().is_some_and(|start| start > line))
+                    .min_by_key(|item| item["range"]["startLine"].as_u64());
+                before.into_iter().chain(after).map(|item| json!({"name":item["name"],"kind":item["kind"],
+                    "startLine":item["range"]["startLine"],"endLine":item["range"]["endLine"],
+                    "read":{"path":args.path,"unit":{"line":item["range"]["startLine"]}}})).collect::<Vec<_>>()
+            } else { Vec::new() };
             return self.unit_plain_read(context, call, args, contract, cancel,
-                json!({"status":"not_found","message":"No enclosing code unit matches this selection; showing source context","revision":outline["revision"]}));
+                json!({"status":"not_found","message":if unit.symbol.is_some() {
+                    "No declaration matches this exact unit.symbol and optional unit.line. Search for the declaration name, or choose a nearby unit. Showing plain source context."
+                } else { "This line is outside the extracted syntax units (for example, a blank line or standalone comment). Choose a nearby unit or read this source range directly. Showing plain source context." },
+                    "revision":outline["revision"],"nearbyUnits":nearby}));
         }
         if candidates.len() != 1 {
             return ToolCompletion::Result {

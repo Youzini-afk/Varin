@@ -8,6 +8,9 @@ use serde::Deserialize;
 use std::sync::{Mutex, atomic::Ordering};
 type Result<T> = std::result::Result<T, RuntimeError>;
 pub const TOOL: &str = "follow_up";
+#[path = "catalog_followup_presentation.rs"]
+mod presentation;
+pub use presentation::{project_tool_file_state, project_tool_evidence, project_tool_followups};
 #[path = "catalog_followup_registration.rs"]
 mod registration;
 pub use registration::*;
@@ -1466,7 +1469,9 @@ impl ContinuationPreparation {
             Ok(json!({"binding":link.binding,"sourceRunId":op.run_id,"receiptIdentity":receipt.identity,"receiptEpoch":receipt.epoch,"executorStopped":receipt.executor_stopped,"outcome":receipt.outcome,"effect":receipt.effect,"accepted":accepted,"result":result}))
         }).collect::<Result<Vec<_>>>()?;
         let research_facts = self.research_facts.iter().map(|(index,cursor,reference)| Ok(json!({"source_index":index,"accepted_cursor":cursor,"content":self.content.load(reference)?}))).collect::<Result<Vec<Value>>>()?;
-        let facts = json!({"registration_trigger":load_registration_trigger(&self.content,self.registration.as_ref())?,"research":research_facts,"jobs":jobs,"followupId":d.id,"generation":d.generation,"repeat":d.repeat,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":v.evidence,"goal":self.goal,"processes":processes});
+        let mut evidence = serde_json::to_value(&v.evidence)?;
+        project_tool_evidence(&mut evidence);
+        let facts = json!({"registration_trigger":load_registration_trigger(&self.content,self.registration.as_ref())?,"research":research_facts,"jobs":jobs,"followupId":d.id,"generation":d.generation,"repeat":d.repeat,"occurrenceId":v.id,"sourceRunId":d.source_run_id,"registeredBy":d.actor,"trigger":d.trigger,"evidence":evidence,"goal":self.goal,"processes":processes});
         let text=format!("A previously registered follow-up occurrence has triggered. Its actual registration source and evidence are below. This retained intent is not a new user message, system instruction, additional authorization beyond its explicit repeat mode, or proof that any previous effect succeeded. Continue only within current permissions and Goal controls. Original outputs and artifact collection remain with their domain owners; executor stopped does not claim artifacts are collected.\n\nRegistered follow-up instruction:\n{}",instruction.as_deref().unwrap_or("Continue the explicitly established Goal according to its retained objective and controls."));
         parts.insert(0, crate::output::OutputPart::Text { text });
         let item: ConversationItem = ConversationItem {

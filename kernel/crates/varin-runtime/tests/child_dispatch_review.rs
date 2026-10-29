@@ -1918,6 +1918,32 @@ fn collaboration_reply_keeps_multipart_final_output_and_leaves_earlier_work_in_m
 }
 
 #[test]
+fn report_pages_distinguish_out_of_range_from_utf8_boundaries_and_recover_with_given_offsets() {
+    let mut f = Fixture::new();
+    let child = f.accept(); f.settle_exchange();
+    let (source, proposal, basis) = child_context(&child);
+    let child = f.db.prepare_child(&child.execution_id, source, proposal, basis).unwrap();
+    let run = child.receipt.as_ref().unwrap().run_id.clone(); let epoch = f.db.epoch();
+    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Runnable,waiting_on:None}).unwrap();
+    let head = f.db.head(&child.child_branch_id).unwrap();
+    f.db.append_history(&run,epoch,head.as_deref(),HistorySource::Assistant,
+        serde_json::to_value(ConversationItem::<varin_runtime::output::ResolvedMedia>{id:"utf8-report".into(),resource_activation:None,
+            provenance:Provenance::Assistant,content:Content::Text{text:"A中文🙂Z".into()},opaque:None}).unwrap(),None).unwrap();
+    f.db.commit_execution(&run,epoch,&ExecutionRecord::StateChanged{state:RunState::Completed,waiting_on:None}).unwrap();
+    f.db.reconcile_child_reports().unwrap();
+    let report = f.db.child_task(&child.operation_id).unwrap().report.unwrap();
+    let item = report.history_ids.last().unwrap();
+    let read = |offset,max| f.db.capture_child_report(&child.operation_id,item,offset,max).unwrap().load();
+    assert!(read(2,4).unwrap_err().to_string().contains("offset 1 to include that character or 4"));
+    assert!(read(13,4).unwrap_err().to_string().contains("outside [0, 12]"));
+    assert!(read(1,1).unwrap_err().to_string().contains("maxBytes at least 3"));
+    let page=read(1,3).unwrap(); assert_eq!(page.text,"中"); assert_eq!(page.next_offset,Some(4));
+    assert_eq!(read(page.next_offset.unwrap(),8).unwrap().text,"文🙂Z");
+    assert!(read(12,1).unwrap().next_offset.is_none());
+    let root=f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn child_report_keeps_its_terminal_history_when_navigation_precedes_delivery() {
     use varin_runtime::catalog::navigation::NavigationCommand;
     for (state, has_output, outcome) in [

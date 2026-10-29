@@ -3,7 +3,7 @@ import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { AgentSettingsSnapshot } from '@varin/application-client';
 import type { OfficeCreateContent, OfficeEdit, OfficeReadRequest } from '@varin/protocol';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { compileToolJsonSchema, describeToolSchemaFailure } from '../models/schema.js';
 import type { DocumentReaderContext } from '../harness/document-reading.js';
 import type { OfficeReader } from '../office/reader.js';
 import { OfficePackage } from '../office/package.js';
@@ -47,7 +47,8 @@ export function createOfficeRuntime(options: {
   };
   const capability: HostCapabilityHandler = async (method, value, call) => {
     const selected = declarations.get(method);
-    if (!selected || !selected.validate(value)) throw new Error('Arguments do not match the selected Office operation; use its actual source, revision and object fields');
+    if (!selected) throw new Error('Unknown Office operation');
+    if (!selected.validate(value)) throw new Error(`Invalid Office arguments: ${describeToolSchemaFailure(selected.validate, value)}`);
     const input = parseVarinToolJson(value);
     return runToolDomainCall(call, { domain: OFFICE_CAPABILITY, toolName: selected.declaration.tool!.name,
       operation: selected.declaration.tool!.operation, arguments: input }, async invocation => {

@@ -142,6 +142,9 @@ impl ToolExecutor for Tools {
         _: &FrozenToolContext,
         _: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
+        if call.arguments["invalid"] == true {
+            return Err(ExecutionError::new("invalid_tool_arguments", "Choose a valid read range"));
+        }
         Ok(ToolContract {
             name: call.name.clone(),
             schema_version: call.schema_version.clone(),
@@ -209,6 +212,12 @@ impl ToolExecutor for Tools {
                     },
                 };
             }
+            let mut invalid = input("invalid-read", "read");
+            invalid.arguments = json!({"invalid":true});
+            let rejected = registry.invoke(&context.operation_id, &owner(), invalid.clone()).unwrap();
+            assert!(matches!(rejected.completion, ToolCompletion::NotDispatched { .. }));
+            assert_eq!(rejected.error.as_ref().unwrap().code, "invalid_tool_arguments");
+            assert_eq!(rejected, registry.invoke(&context.operation_id, &owner(), invalid).unwrap());
             let read = registry
                 .invoke(&context.operation_id, &owner(), input("read", "read"))
                 .unwrap();

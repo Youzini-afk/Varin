@@ -231,7 +231,8 @@ it('direct Bash and shellCommand use the same discovered executable and PATH for
       const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output');
       for (const style of ['direct', 'shell']) for (const mode of ['pipe', 'pty']) {
         expect(JSON.parse(responsesMetadataText(outputs.find(output => output.call_id === `${style}-${mode}`)?.output))).toMatchObject({
-          kind: 'job_accepted', content: { shell: { id: 'bash' }, exitCode: 0 },
+          kind: 'job_accepted', content: { shell: { id: 'bash' }, exitCode: 0, outputComplete: true,
+            observation: { outputComplete: true, outputState: { kind: 'complete' } } },
         });
       }
       done(response);

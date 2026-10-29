@@ -148,6 +148,16 @@ impl SyntaxRuntime {
             matches(query,root,bytes,&expired,|captures|{
                 if let Some((_,source))=captures.iter().find(|(name,_)|*name=="source"){
                     imports.push(json!({"source":unquote(node_text(*source,bytes)),"line":source.start_position().row+1}));
+                    // Import query captures point to the module string; expose the
+                    // complete enclosing statement as a readable unit as well.
+                    let mut unit = *source;
+                    while let Some(parent) = unit.parent() {
+                        unit = parent;
+                        if matches!(unit.kind(), "import_statement" | "import_declaration" | "import_from_statement" | "export_statement") {
+                            push_symbol(&mut symbols, &mut seen, unquote(node_text(*source,bytes)), "import", unit, None, bytes);
+                            break;
+                        }
+                    }
                 }Ok(())
             })?;
         }
@@ -364,6 +374,9 @@ mod tests {
             assert_eq!(result["symbols"][0]["name"], format!("fn_{index}"));
             assert_eq!(result["calls"][0]["literal"], format!("/api/{index}"));
             assert_eq!(result["imports"][0]["source"], "./x");
+            let import = result["symbols"].as_array().unwrap().iter().find(|s| s["kind"] == "import").unwrap();
+            assert_eq!(&text[import["range"]["startByte"].as_u64().unwrap() as usize..import["range"]["endByte"].as_u64().unwrap() as usize], "import x from './x';");
+            assert_eq!(import["syntaxComplete"], true);
             assert_eq!(result["contentHash"], hash);
             assert_eq!(syntax.compiled_query_count, 3);
         }

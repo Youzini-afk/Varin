@@ -28,7 +28,8 @@
     "test:dist": "node --experimental-repl-await --test test/worker.dist.test.mjs"
   },
   "dependencies": {
-    "@varin/protocol": "workspace:*"
+    "@varin/protocol": "workspace:*",
+    "acorn": "8.16.0"
   },
   "engines": {
     "node": ">=22.19.0"

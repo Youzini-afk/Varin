@@ -114,6 +114,7 @@ LiveRoot 的续读是多次真实观察；检查点文件发生变化时要求�
 
 可选 `unit: { line, symbol, revision }` 通过按需 Tree-sitter 选取代码单元。
 命中行优先最小包围单元，单独符号重名返回候选；返回名称、签名、精确字节/行范围和正文。
+`symbol` 位于 `unit` 内，按实际声明名匹配。支持完整 import 单元；空行或独立注释没有包围单元时，回退结果给出最近的前后单元与读取参数。
 大单元以 `offset` / `length` 与 `nextRead` 续读；版本变化要求重新选取。
 解析缺失、失败、没有包围单元或单元语法不完整时，保留原因并读取普通原文。
 按行选择的默认回退含前 20 行、后 60 行上下文，可用 `nextRead` 继续；显式原文读取仍可调整范围。
@@ -125,7 +126,7 @@ LiveRoot 的续读是多次真实观察；检查点文件发生变化时要求�
 
 `process_spawn` 以“程序 + 参数列表”或互斥的 `shellCommand` 执行；shell 由实际 Host 决定，
 直接参数不再拼接成 shell 字符串。返回原进程身份、实际 cwd、状态和可用首段输出。
-`waitMs` 是观察等待，默认 0；`maxOutputBytes` 是首段输出目标，不是杀进程期限。
+`waitMs` 是观察等待，覆盖进程退出和输出收尾，默认 0 立即返回；`maxOutputBytes` 是首段输出目标，不是杀进程期限。
 持续任务继续使用 `process_read`、输入、状态、`wait_process` 与停止工具。
 
 原 spool 保留通道、字节和精确 cursor；退出状态与输出是否读完分开表达。
@@ -190,6 +191,8 @@ submit、三种 enqueue 与 child continuation 冻结已授权 snapshot 的来�
 浏览器只传原始文件，既不提取正文，也不把任意 snapshot ID 变成访问授权。
 
 材料集合保存引用和显式跨任务 share grant，知道他人 material ID 不等于有权限。读取/模型选材重查原 grant；来源失败不变空文档。
+集合关键词搜索覆盖成员标题、可读快照标题、来源 URL／文件名、论文标识和正文，结果注明 `title`、`source` 或 `body`。
+只有正文命中才携带行号；没有正文的论文条目也可以按标题或 DOI 找到。集合范围与来源授权在检索前核验。
 artifact、collection、log follow-up 使用原发布事实和耐久 occurrence。
 
 实现位于 `harness/web-search.ts`、`web-fetch.ts`、`web-materials.ts`、`research-search.ts`、`document-reading.ts`、

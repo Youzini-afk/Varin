@@ -105,7 +105,7 @@ struct ProcessControl {
     input: Arc<Mutex<Option<SyncSender<Value>>>>,
     run_id: Option<String>,
     state: Mutex<ControlState>,
-    observers: Mutex<HashMap<String, SyncSender<()>>>,
+    shared: Arc<Shared>,
 }
 impl ProcessControl {
     fn apply(&self, state: &ControlState) -> Result<bool, KernelError> {
@@ -157,7 +157,7 @@ impl ProcessControl {
         if let Ok(mut state) = self.state.lock() {
             state.terminal = true;
         }
-        for sender in self.observers.lock().unwrap_or_else(|e|e.into_inner()).values() { let _ = sender.try_send(()); }
+        self.shared.notify();
     }
     fn stopped(&self) -> bool {
         self.state
@@ -183,22 +183,39 @@ struct Controls {
 pub(crate) struct ProcessControlRegistry(Arc<Mutex<Controls>>);
 pub(crate) struct ProcessObservationGuard { control: Arc<ProcessControl>, id: String }
 impl Drop for ProcessObservationGuard {
-    fn drop(&mut self) { self.control.observers.lock().unwrap_or_else(|e|e.into_inner()).remove(&self.id); }
+    fn drop(&mut self) { self.control.shared.interaction_wakes.lock().unwrap_or_else(|e|e.into_inner()).remove(&self.id); }
 }
 impl ProcessControlRegistry {
     fn stop_registered(&self,id:&str,force:bool)->Result<Option<Value>,KernelError>{
         let control=self.0.lock().map_err(|_|failure("process controls poisoned"))?.live.get(id).and_then(Weak::upgrade);
         control.map(|control|control.stop(force).map(|requested|json!({"requested":requested,"exited":control.stopped()}))).transpose()
     }
-    /// This is a wakeup for an already-authorized original process, not a resource grant.
-    pub(crate) fn observe_end(&self, id: &str, run: &str, sender: SyncSender<()>) -> Result<Option<ProcessObservationGuard>, KernelError> {
+    /// Wait outside Storage/manager locks for the original process AND its output.
+    /// The caller's existing observation budget includes both phases; no extra grace delay.
+    pub(crate) fn wait_for_completion(&self, id: &str, run: &str, budget: Duration,
+        cancel: &varin_runtime::execution::CancellationToken) -> Result<(), KernelError> {
+        if budget.is_zero() || cancel.is_cancelled() { return Ok(()); }
+        let started = Instant::now();
         let control = self.0.lock().map_err(|_|failure("process controls poisoned"))?.live.get(id).and_then(Weak::upgrade);
-        let Some(control) = control else { return Ok(None) };
+        let Some(control) = control else { return Ok(()) };
         if control.run_id.as_deref() != Some(run) { return Err(KernelError::Authorization("process observation Run changed".into())); }
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let _cancel = cancel.wake_on_cancel(sender.clone());
         let key = uuid::Uuid::new_v4().to_string();
-        control.observers.lock().unwrap_or_else(|e|e.into_inner()).insert(key.clone(),sender.clone());
-        if control.stopped() { let _ = sender.try_send(()); }
-        Ok(Some(ProcessObservationGuard {control,id:key}))
+        control.shared.interaction_wakes.lock().unwrap_or_else(|e|e.into_inner()).insert(key.clone(),sender);
+        let _observation = ProcessObservationGuard { control: control.clone(), id: key };
+        loop {
+            let (output_closed, broken, control_closed) = {
+                let buffer = control.shared.lock();
+                (buffer.output_closed, buffer.output_error.is_some() || buffer.control_error.is_some(), buffer.closed)
+            };
+            let stopped = control.stopped();
+            let finished = stopped && output_closed || broken || !stopped && control_closed;
+            if finished || cancel.is_cancelled() { break; }
+            let remaining = budget.saturating_sub(started.elapsed());
+            if remaining.is_zero() || receiver.recv_timeout(remaining).is_err() { break; }
+        }
+        Ok(())
     }
     pub(crate) fn cancel_known_process(&self, id: &str) -> Result<bool, KernelError> {
         let control = self

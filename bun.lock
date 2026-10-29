@@ -188,6 +188,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@varin/protocol": "workspace:*",
+        "acorn": "8.16.0",
       },
     },
     "packages/settings-store": {

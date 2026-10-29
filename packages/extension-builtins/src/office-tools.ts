@@ -63,8 +63,11 @@ export const OFFICE_TOOL_DECLARATIONS = [
   declaration('render', 'Render real Office pages through the Host’s available LibreOffice engine and return a PDF snapshot or actual page images. Reuse the returned PDF snapshotId with document_read for additional pages. Rendering availability is independent of structure reading and local edits; office_environment reports the installed engine.', {
     ...object({ ...source, page: { type: 'integer', minimum: 1 }, scale: positive }), ...exactlyOneSource,
   }),
-  declaration('export', 'Convert a source Office file using the actual LibreOffice engine and save the result to path. Exporting XLSX to XLSX also recalculates formulas. expectedRevision is required to replace an existing destination; omitting it creates a new file. The result identifies the engine and the committed file revision.', { ...object({
-    sourcePath: text, snapshotId: text, path: text, expectedRevision: text, format: { enum: ['pdf', 'docx', 'xlsx', 'pptx', 'csv'] },
+  declaration('export', 'Convert an input Office file (sourcePath or snapshotId, exactly one) using LibreOffice and save it to the separate output destination path. Exporting XLSX to XLSX also recalculates formulas. expectedRevision is required to replace an existing destination; omitting it creates a new file. The result identifies the engine and the committed file revision.', { ...object({
+    sourcePath: { ...text, description: 'Input source-relative file path; choose sourcePath or snapshotId.' },
+    snapshotId: { ...text, description: 'Input snapshot; choose snapshotId or sourcePath.' },
+    path: { ...text, description: 'Output destination file path, distinct from the input sourcePath or snapshotId.' },
+    expectedRevision: text, format: { enum: ['pdf', 'docx', 'xlsx', 'pptx', 'csv'] },
   }, ['path', 'format']), oneOf: [{ required: ['sourcePath'], not: { required: ['snapshotId'] } }, { required: ['snapshotId'], not: { required: ['sourcePath'] } }] } as JsonObject, 'effect', true),
   declaration('environment', 'Inspect the reusable Office environment: available format operations, bundled library module paths for JavaScript work, and the actual local LibreOffice renderer. Advanced application operations are available through computer_office on supported connected desktops; process and script tools remain usable for tasks beyond these format operations.', object({})),
 ] as const;

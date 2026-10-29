@@ -108,7 +108,7 @@ impl ToolKind {
                 "Inspect a retained process owned by the admitted execution environment."
             }
             Self::ProcessRead => {
-                "Read retained process output. Reading is non-destructive: any retained byte cursor can be revisited. Text pages align to complete characters; continue with nextCursor. Raw mode returns the exact requested bytes."
+                "Read retained process output. Reading is non-destructive: any retained byte cursor can be revisited. Text pages align to complete characters and omit terminal controls; byteLength and cursors still count original bytes, not visible characters. Continue with nextCursor. Raw mode returns exact bytes."
             }
             Self::ProcessSpawn => {
                 "Start a process in the admitted execution environment and return its durable operation handle."
@@ -475,7 +475,13 @@ impl ResourceOperation {
                 if batch.files.is_empty() { return Err(ExecutionError::new("invalid_tool_arguments","files must contain at least one read")); }
                 return Ok(Self::FileReadBatch(batch.files));
             }
-            ToolKind::FileRead => serde_json::from_value(args.clone()).map(Self::FileRead),
+            ToolKind::FileRead => {
+                if args.get("symbol").is_some() {
+                    return Err(ExecutionError::new("invalid_tool_arguments",
+                        "Place symbol inside unit: {path: \"file.ts\", unit: {symbol: \"functionName\"}}. Add unit.line to disambiguate; symbol is an exact declaration name, not a filename."));
+                }
+                serde_json::from_value(args.clone()).map(Self::FileRead)
+            },
             ToolKind::FileWrite => serde_json::from_value::<FileWriteArgs>(args.clone())
                 .map(|args| Self::FileMutation(TextMutation::Write(args))),
             ToolKind::FileEdit => serde_json::from_value::<FileEditArgs>(args.clone())
@@ -2495,11 +2501,9 @@ impl KernelToolExecutor {
             Ok(mut result) if spawn => {
                 if let Some(args) = &spawn_args {
                     if result["processId"].as_str() == Some(&context.operation_id) && !matches!(result["status"].as_str(),Some("unknown"|"failed")) {
-                        let (sender, receiver) = mpsc::sync_channel(1);
-                        let _cancel = cancel.wake_on_cancel(sender.clone());
-                        let observation = self.resources.controls.observe_end(&context.operation_id,&context.run_id,sender);
-                        if args.wait_ms > 0 && observation.as_ref().is_ok_and(Option::is_some) {
-                            let _ = receiver.recv_timeout(std::time::Duration::from_millis(args.wait_ms));
+                        if let Err(error) = self.resources.controls.wait_for_completion(&context.operation_id,
+                            &context.run_id, std::time::Duration::from_millis(args.wait_ms), cancel) {
+                            result["observationError"] = json!({"code":"process_wait_failed","message":error.to_string()});
                         }
                         match self.resources.observe_process(&self.binding,context,&context.operation_id,&context.run_id,None,
                             Some(crate::process::text::ReadPage {cursor:0,max_bytes:args.max_output_bytes,mode:crate::process::text::Mode::Text,encoding:args.output_encoding.clone()}),false,&CancellationToken::default()) {
@@ -2507,6 +2511,10 @@ impl KernelToolExecutor {
                                 crate::process::text::project(&mut output, &crate::process::text::Mode::Text, args.output_encoding.as_deref());
                                 if let Some(current) = output["process"].as_object() {
                                     result.as_object_mut().expect("process record").extend(current.clone());
+                                }
+                                // The page can observe EOF after the earlier process snapshot.
+                                for field in ["outputComplete", "outputError"] {
+                                    if let Some(value) = output.get(field) { result[field] = value.clone(); }
                                 }
                                 // Top-level status and this explanation come from the same observation.
                                 if let Some(state) = output.get("outputState") { result["outputState"] = state.clone(); }
@@ -2571,6 +2579,9 @@ impl KernelToolExecutor {
                 // Recovery provenance belongs to Storage's original journal, not
                 // the model-facing save status (normal writes are not reconciliations).
                 if let Some(fields)=result.as_object_mut() { fields.remove("reconciled"); }
+                if let Some(state) = result.get_mut("state") {
+                    varin_runtime::catalog::followups::project_tool_file_state(state);
+                }
                 ToolCompletion::Result {
                 outcome: if result["status"] == "applied" {
                     Outcome::Succeeded
@@ -2792,7 +2803,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             json!({"cwd":{"type":"string","default":"","description":"Directory relative to the selected source root. Empty string or . selects the root."},"command":{"type":"string","minLength":1},"args":{"type":"array","items":{"type":"string"}},
             "shellCommand":{"type":"string","minLength":1,"description":"Command text for the execution Host's published default Shell, or the selected shell. Mutually exclusive with command/args/windowsRawArguments. The body is passed unchanged."},
             "shell":{"type":"string","minLength":1,"description":"Shell ID from the execution Host's available shells (for example bash, pwsh, powershell, cmd). Omit or use auto for the published default. Only with shellCommand. Unavailable choices fail without replaying in another interpreter."},
-            "waitMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64,"default":0,"description":"Observe the original process until exit or this interval. Zero returns immediately. Never a kill timeout."},
+            "waitMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64,"default":0,"description":"Observe until the process exits and its output finishes, or this interval elapses. Zero returns immediately. Never a kill timeout."},
             "maxOutputBytes":{"type":"integer","minimum":1,"maximum":crate::process::CHUNK_BYTES,"description":"Initial output page. Continue with process_read at observation.nextCursor."},
             "outputEncoding":{"type":"string","description":"Encoding override for the initial text output, for example gbk or utf-16le; omitted uses automatic decoding."},
             "env":{"type":"array","description":"Complete process environment. Omit to inherit this execution environment; an empty array starts with no environment variables.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},

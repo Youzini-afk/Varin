@@ -323,7 +323,7 @@ impl ToolExecutor for FollowupTools {
                         .capture_tool_followups(c, call.clone(), schema())
                         .map_err(error)?;
                     let p = p.load().map_err(error)?;
-                    let value = match value {
+                    let mut value = match value {
                         FollowupToolInput::Jobs => {
                             let jobs = self
                                 .catalog
@@ -372,6 +372,7 @@ impl ToolExecutor for FollowupTools {
                         )
                         .map_err(error)?,
                     };
+                    followups::project_tool_followups(&mut value);
                     if cancel.is_cancelled() {
                         return Err(error("follow-up read cancelled"));
                     }

@@ -130,7 +130,8 @@ fn file_exists_enters_original_active_input_once_and_normalizes_only_source_path
                 &w,
                 FileState::Directory {
                     mode: Some(493),
-                    native: None,
+                    native: Some(FileMetadata { uid:0,gid:0,created:None,modified:FileTimestamp{seconds:1,nanos:0},backup:None,
+                        windows_attributes:0,bsd_flags:0,security:Some(vec![1,2,3]),reparse_data:None,xattrs:Default::default() }),
                 },
                 1,
                 false,
@@ -139,6 +140,13 @@ fn file_exists_enters_original_active_input_once_and_normalizes_only_source_path
         )
         .unwrap());
     let first = f.db.followup("file-exists").unwrap().occurrence.unwrap();
+    let original = serde_json::to_value(f.db.followup("file-exists").unwrap()).unwrap();
+    assert_eq!(original["sources"][1]["file"]["current"]["native"]["security"], json!([1,2,3]));
+    let mut projected = json!([original.clone()]);
+    project_tool_followups(&mut projected);
+    assert!(projected[0]["sources"][1]["file"]["current"].get("native").is_none());
+    assert!(projected[0]["occurrence"]["evidence"]["sources"][0]["evidence"]["state"].get("native").is_none());
+    assert_eq!(serde_json::to_value(f.db.followup("file-exists").unwrap()).unwrap(), original);
     assert!(
         matches!(&first.evidence,TriggerEvidence::Any{sources} if matches!(&sources[0].evidence,FollowupLeafEvidence::File{proof:FileProof::Exists,..}))
     );
@@ -161,6 +169,7 @@ fn file_exists_enters_original_active_input_once_and_normalizes_only_source_path
     let Content::Output { output } = &delivery.items[0].content else {
         panic!("original Environment input")
     };
+    assert!(!serde_json::to_string(&output.data).unwrap().contains("security"));
     assert!(serde_json::to_string(&output.data)
         .unwrap()
         .contains("out/nested/result.txt"));

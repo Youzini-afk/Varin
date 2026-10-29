@@ -74,6 +74,20 @@ test("contexts are isolated and syntax/runtime errors preserve subsequent usable
   assert.equal((await session.evaluate({ cellId: "after", script: "retained += 1" })).valueText, "13");
 });
 
+test("failed async cells explain reserved lexical names and their originating cell without losing state", async (t) => {
+  const session = createNodeReplSession({ environmentId: 'binding-review', output() {},
+    invoke: async () => { throw new Error('transport disconnected'); } });
+  t.after(() => session.closeAdmission());
+  await session.evaluate({ cellId: 'setup', script: 'var progress = 0;' });
+  const failed = await session.evaluate({ cellId: 'failed-cell', script:
+    'progress++; const reply = await tools.invoke({}); const { value: later } = { value: 7 };' });
+  assert.match(failed.error?.hint ?? '', /reply, later/);
+  const again = await session.evaluate({ cellId: 'retry', script: 'const later = 8;' });
+  assert.equal(again.error?.code, 'SCRIPT_BINDING_REDECLARED');
+  assert.match(again.error?.hint ?? '', /failed-cell, which failed/);
+  assert.equal((await session.evaluate({ cellId: 'recover', script: '{ const later = 8; progress += later; } progress' })).valueText, '9');
+});
+
 test("an old function uses its new caller's scope; detached continuations retain their closed scope", async (t) => {
   const gate = deferred<void>();
   const detachedDone = deferred<string>();

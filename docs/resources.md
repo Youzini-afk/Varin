@@ -196,6 +196,7 @@ guardian 是同一发行 executable 的另一模式，不另开数据库 writer�
 `process_read` 继续读取保留的输出。
 底层输出块保留精确的 `bytesBase64` 和字节游标，终端及 LSP/DAP 等协议消费者继续读原始字节。
 Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 控制序列；`mode: raw` 返回原始字节。
+字节数和游标始终计入原始控制序列；可见文字较少时不代表输出丢失，不能用显示字符数计算续读位置。
 输出读取不消费保留的历史；各读者可以独立续读或回读任意保留字节。帧位置索引只缓存磁盘偏移，不复制正文，输出释放时一并释放。
 文本页按完整字符对齐，`nextCursor` 仍是原输出的字节位置；从字符中间请求时，`actualCursor` 给出该字符起点，
 `requestedCursor` 保留原请求。`maxBytes` 是文本页目标，极小页面也会返回一个完整字符；原始模式严格保留请求的字节范围。
@@ -206,6 +207,8 @@ Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 
 返回原因、`rawAvailable` 与原位置的 `rawRead` 调用，不内联大段 base64；原进程保留精确字节，`mode: raw` 可读取。
 `outputSummary` 给出本页原始字节数、实际保留的起止游标及总字节数、页面之后的字节数和续读游标；越界错误也说明可读范围，运行中的末尾仍可能增长。
 `process_spawn` 顶层状态与其附带观察使用同一最新快照；`stdinMode` 如实区分 PTY，`input` 说明可写性、EOF 和行结束符。
+显式 `waitMs` 在同一等待预算内覆盖进程退出和输出收尾，通过原生通知唤醒并响应取消，不增加固定收尾延迟。
+等待预算耗尽时返回实际进展；默认 0 仍立即返回。最终页的完成标志同时用于顶层回执，避免较早进程快照覆盖新读到的 EOF。
 `process_write.text` 按 JSON 解码一次后原样写入；`submit:true` 在原输入确定时追加一次原进程的 `input.lineEnding`。
 空 text 可以只提交回车，实际追加字节进入原输入序列及幂等回执。`confirmedBytes` / `state:applied` 确认通道写入；
 应用的响应继续读原进程输出。退出与输出收尾分别观察：`outputComplete:false` 保留游标，输出错误显示原错误，

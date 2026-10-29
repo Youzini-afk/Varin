@@ -391,12 +391,27 @@ fn managed_unit_reads_compose_structure_and_bytes_at_the_coordinator() {
     let call=ToolCall{call_id:"unit".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.ts","unit":{"line":1}})};
     let origin=ToolOrigin::ModelStep{request_id:"unit-request".into()};let context=execution_context("run",&call,&origin);
     let request=FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,run_id:"run".into(),origin,tools:Arc::new(executor.schemas.clone()),tool_schema_generation:1,source:Some(selection),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
-    let cancel=CancellationToken::default();let bound=executor.bind_call(&call,&request,&cancel).unwrap();
+    let cancel=CancellationToken::default();let bound=executor.clone().bind_call(&call,&request,&cancel).unwrap();
     assert_eq!(bound.executor_owner(),varin_runtime::ExecutorOwner::Kernel);
     let plan=bound.prepare(&cancel).unwrap();bound.authorize(&context,&plan,&cancel).unwrap();
     let result=bound.execute(&context,&plan,&cancel);
     let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=result.completion else {panic!("unit read failed")};
     assert_eq!(content.data["unit"]["name"],"marker");assert_eq!(content.data["content"]["text"],body);
+    for (id, unit) in [("named", json!({"symbol":"marker"})), ("outside", json!({"line":2}))] {
+        let next=ToolCall{call_id:id.into(),arguments:json!({"path":"source.ts","unit":unit}),..call.clone()};
+        let context=execution_context("run",&next,&request.origin);
+        let bound=executor.clone().bind_call(&next,&request,&cancel).unwrap();
+        let plan=bound.prepare(&cancel).unwrap(); bound.authorize(&context,&plan,&cancel).unwrap();
+        let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=bound.execute(&context,&plan,&cancel).completion else {panic!("selection failed")};
+        if id=="named" { assert_eq!(content.data["unit"]["name"],"marker"); }
+        else {
+            assert_eq!(content.data["unitComplete"],false);
+            assert_eq!(content.data["structure"]["nearbyUnits"][0]["read"],json!({"path":"source.ts","unit":{"line":1}}));
+        }
+    }
+    let misplaced=ToolCall{arguments:json!({"path":"source.ts","symbol":"marker"}),..call.clone()};
+    let error=match executor.bind_call(&misplaced,&request,&cancel) { Ok(_)=>panic!("misplaced symbol accepted"),Err(e)=>e };
+    assert!(error.message.contains("inside unit"));
     source.close();language.close();responder.join().unwrap();
 }
 
@@ -491,8 +506,11 @@ fn search_scope_and_projections_keep_paths_matches_and_windows_distinct() {
 #[test]
 fn file_write_creates_without_a_read_and_keeps_existing_content_on_an_unversioned_retry() {
     let mut f=Fixture::new();
-    assert!(matches!(f.call("file_write",json!({"path":"new.txt","content":"中文🙂"})),
-        ToolCompletion::Result { outcome:Outcome::Succeeded,.. }));
+    let ToolCompletion::Result { outcome:Outcome::Succeeded, content,.. } =
+        f.call("file_write",json!({"path":"new.txt","content":"中文🙂"})) else { panic!("create failed") };
+    assert!(content.data["state"].get("native").is_none());
+    assert_eq!(content.data["state"]["byteLength"], "中文🙂".len());
+    assert!(content.data["readVersion"].is_string());
     assert!(matches!(f.call("file_write",json!({"path":"new.txt","content":"overwritten"})),ToolCompletion::NotDispatched {..}));
     assert_eq!(fs::read_to_string(f.root.join("work/new.txt")).unwrap(),"中文🙂");
     let ToolCompletion::NotDispatched { error:Some(error), .. } = f.call("file_write",json!({"path":"new.txt","content":"overwritten","mode":"create"})) else { panic!("create must reject an existing file") };

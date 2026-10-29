@@ -35,7 +35,7 @@ disable that contract. The package requires Node >=22.19.0.
 The `script_run` tool takes JavaScript in its `script` parameter. Within one environment, later cells
 reuse earlier bindings; repeated `let`/`const` declarations fail. Assign to an existing mutable binding,
 use a block for cell-local `const`, or use `var` for redeclarable temporary names. Redeclaration retains
-Node's error plus `SCRIPT_BINDING_REDECLARED` and a targeted hint. It does not reset state or replay
+Node's error plus `SCRIPT_BINDING_REDECLARED` and the originating cell when known. Failed cells immediately describe potentially retained top-level names, including declarations not reached before the failure. Acorn extracts names for diagnostics only; Node executes the original program. It does not reset state or replay
 the cell; output and effects already produced remain associated with the original invocation.
 
 The default context supplies `tools.invoke(input)`, `print(...values)`, `emitImage(image)`
@@ -128,7 +128,7 @@ meaning as a second authority. Host `rejected` frames are transport/call errors,
 not replacements for original completion facts.
 
 Failed nested receipts expose `receipt.error` with the shared code/message/details projection while
-retaining original completion, data and media. Rejected transport calls remain rejected Promises;
+retaining original completion, data and media. Known-tool argument/planning rejections return `not_dispatched` receipts so subsequent script work can continue. Check `completion.kind` before reading `outcome`: `job_accepted` has a phase and operation ID; process status and exit code are in `completion.content.data`. Rejected transport and invocation-identity calls remain rejected Promises;
 they do not manufacture a target-tool completion.
 
 Stdout is reserved for protocol frames. The provided `print` and `console` emit

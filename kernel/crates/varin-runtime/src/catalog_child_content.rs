@@ -432,8 +432,20 @@ impl ChildReportRead {
             }
         };
         let offset = self.offset;
-        if offset > text.len() || !text.is_char_boundary(offset) || self.max_bytes == 0 {
-            return Err(RuntimeError::Invalid("invalid report byte range".into()));
+        if offset > text.len() {
+            return Err(RuntimeError::Invalid(format!(
+                "Report offset {offset} is outside [0, {}] bytes. Continue with the previous page's next_offset, or use offset 0 to read again.", text.len())));
+        }
+        if !text.is_char_boundary(offset) {
+            let mut before = offset;
+            let mut after = offset;
+            while !text.is_char_boundary(before) { before -= 1; }
+            while !text.is_char_boundary(after) { after += 1; }
+            return Err(RuntimeError::Invalid(format!(
+                "Report offset {offset} splits a UTF-8 character in a {}-byte report. Use offset {before} to include that character or {after} to read after it; successive pages should use next_offset.", text.len())));
+        }
+        if self.max_bytes == 0 {
+            return Err(RuntimeError::Invalid("maxBytes must be positive; offset is a UTF-8 byte position and next_offset continues the report".into()));
         }
         // Existing response-page budget leaves JSON escaping headroom in the framed transport.
         let mut end = offset
@@ -443,9 +455,9 @@ impl ChildReportRead {
             end -= 1;
         }
         if end == offset && offset < text.len() {
-            return Err(RuntimeError::Invalid(
-                "maxBytes cannot hold the next UTF-8 character".into(),
-            ));
+            let needed = text[offset..].chars().next().expect("remaining text").len_utf8();
+            return Err(RuntimeError::Invalid(format!(
+                "maxBytes {} cannot hold the UTF-8 character at offset {offset}; use maxBytes at least {needed}", self.max_bytes)));
         }
         if cancelled() {
             return Err(RuntimeError::DispatchCancelled);

@@ -6,6 +6,7 @@ import { PassThrough, Writable } from "node:stream";
 import { formatWithOptions, inspect } from "node:util";
 import type { Context } from "node:vm";
 import type { NestedToolInput, NestedToolReceipt, IncomingMedia, OutputPart } from "@varin/protocol";
+import { lexicalBindings } from './bindings.js';
 
 export interface ScriptError {
   message: string;
@@ -75,7 +76,7 @@ export function scriptError(error: unknown): ScriptError {
         ...(details.details === undefined ? {} : { details: details.details }),
         ...(/^Identifier .+ has already been declared/.test(details.message) ? {
           code: typeof details.code === 'string' ? details.code : 'SCRIPT_BINDING_REDECLARED',
-          hint: "Bindings persist in this environmentId. Reuse the existing variable by assignment, use a block { const temporary = ...; } for local values, or var for redeclarable bindings. The environment and prior output are retained.",
+          hint: "Bindings persist in this environmentId, including names reserved by a failed cell. Assign only to initialized mutable bindings, use a block { const temporary = ...; } for local values, or choose a new name. The environment and prior output are retained.",
         } : {}) };
     }
   }
@@ -122,6 +123,7 @@ export function createNodeReplSession<Input = NestedToolInput, Receipt = NestedT
   options: NodeReplOptions<Input, Receipt, ErrorInfo>,
 ): NodeReplSession<ErrorInfo> {
   const scopes = new AsyncLocalStorage<CellScope>();
+  const bindings = new Map<string, { cellId: string; failed: boolean }>();
   const serializeError = (error: unknown): ErrorInfo => {
     try {
       return options.serializeError ? options.serializeError(error) : scriptError(error) as ErrorInfo;
@@ -206,6 +208,7 @@ export function createNodeReplSession<Input = NestedToolInput, Receipt = NestedT
       if (active) {
         return Promise.resolve({ error: serializeError(Object.assign(new Error("Script environment is already evaluating a cell"), { code: "SCRIPT_ENVIRONMENT_BUSY" })) });
       }
+      const declared = lexicalBindings(cell.script);
       return new Promise<CellResult<ErrorInfo>>((resolve) => {
         const scope: CellScope = {
           cellId: cell.cellId,
@@ -222,6 +225,20 @@ export function createNodeReplSession<Input = NestedToolInput, Receipt = NestedT
               result = !outcome.ok ? { error: serializeError(outcome.error) }
                 : outcome.value === undefined ? {}
                   : { valueText: typeof outcome.value === "string" ? outcome.value : inspect(outcome.value, inspectOptions) };
+              const name = !outcome.ok && outcome.error && typeof outcome.error === 'object'
+                ? (outcome.error as { name?: unknown }).name : undefined;
+              if (outcome.ok || name !== 'SyntaxError') {
+                for (const binding of declared) bindings.set(binding, { cellId: cell.cellId, failed: !outcome.ok });
+              }
+              // Custom adapters own their projection. Native script errors add
+              // only binding provenance, never source text or guessed rollback.
+              if (result.error && !options.serializeError) {
+                const match = /^Identifier ['"](.+)['"] has already been declared/.exec(result.error.message);
+                const previous = match ? bindings.get(match[1]!) : undefined;
+                if (previous) result.error.hint = `Binding ${match![1]} was declared in cell ${previous.cellId}${previous.failed ? ', which failed; even declarations after the failure may reserve names' : ''}. Use a local block { const temporary = ...; }, a new name, or assign only to an existing initialized mutable binding. Existing values and effects are retained.`;
+                else if (declared.length && name !== 'SyntaxError') result.error.hint =
+                  `Cell ${cell.cellId} failed. Its top-level bindings (${declared.join(', ')}) may remain, including declarations not reached before the error. Use a local block for retry temporaries; inspect existing state before continuing. Earlier effects are retained.`;
+              }
             } catch (failure) {
               result = { error: serializeError(failure) };
             }

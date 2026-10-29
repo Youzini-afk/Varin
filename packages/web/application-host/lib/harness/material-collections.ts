@@ -254,18 +254,41 @@ export const createMaterialCollections = (workingStates: WorkspaceWorkingStateRo
       const query = params.query?.trim();
       if (!query || params.limit !== undefined && (!Number.isSafeInteger(params.limit) || params.limit < 1)) throw new HarnessServiceError("invalid-params", "Search requires a query and, if supplied, a positive integer limit");
       const hits: MaterialCollectionSearchHit[] = [], unreadable: string[] = [];
+      const needle = query.toLowerCase();
+      const full = () => params.limit !== undefined && hits.length >= params.limit;
       for (const member of selected.payload.members) {
         ctx.signal?.throwIfAborted();
-        if (!member.snapshotId || !deps.materials) continue;
-        const found = await deps.materials.read(ctx.authority.owningWorkspaceId, member.snapshotId, ctx.authority, ctx.signal ? { signal: ctx.signal } : {});
-        if (!found) { unreadable.push(member.memberId); continue; }
+        const found = member.snapshotId && deps.materials
+          ? await deps.materials.read(ctx.authority.owningWorkspaceId, member.snapshotId, ctx.authority, ctx.signal ? { signal: ctx.signal } : {}) : null;
+        if (member.snapshotId && !found) unreadable.push(member.memberId);
+        // Member metadata belongs to the already-authorized collection. Snapshot
+        // metadata/body are used only after their independent read authorization.
+        const fields = [
+          ["title", member.title], ["title", member.paper?.title], ["title", found?.ref.title],
+          ["source", member.url], ["source", member.paper?.doi], ["source", member.paper?.id],
+          ["source", found?.ref.sourceUrl], ["source", found?.ref.finalUrl],
+        ] as const;
+        const seen = new Set<string>();
+        for (const [field, text] of fields) {
+          if (!text || !text.toLowerCase().includes(needle) || seen.has(text)) continue;
+          seen.add(text);
+          const start = Math.max(0, text.toLowerCase().indexOf(needle) - 80);
+          hits.push({ memberId: member.memberId, ...(found ? { snapshotId: found.ref.snapshotId } : {}),
+            field, excerpt: text.slice(start, start + Math.max(240, query.length)) });
+          if (full()) break;
+        }
+        if (full()) break;
+        if (!found) continue;
         const lines = found.body.toString("utf8").split(/\r?\n/);
         for (let index = 0; index < lines.length; index++) {
-          if (!lines[index]!.toLowerCase().includes(query.toLowerCase())) continue;
-          hits.push({ memberId: member.memberId, snapshotId: member.snapshotId, line: index + 1, excerpt: lines[index]!.slice(0, 240) });
-          if (params.limit !== undefined && hits.length >= params.limit) break;
+          const match = lines[index]!.toLowerCase().indexOf(needle);
+          if (match < 0) continue;
+          const start = Math.max(0, match - 80);
+          hits.push({ memberId: member.memberId, snapshotId: found.ref.snapshotId, field: "body", line: index + 1,
+            excerpt: lines[index]!.slice(start, start + Math.max(240, query.length)) });
+          if (full()) break;
         }
-        if (params.limit !== undefined && hits.length >= params.limit) break;
+        if (full()) break;
       }
       ctx.signal?.throwIfAborted();
       return result({ status: "ok", hits, ...(unreadable.length ? { unreadable } : {}) });

@@ -97,7 +97,7 @@ impl Launch {
         let containment = Arc::new(containment);
         let input = Arc::new(Mutex::new(Some(input)));
         let control = Arc::new(ProcessControl {
-            observers: Default::default(),
+            shared: shared.clone(),
             guardian: guardian.clone(),
             containment: containment.clone(),
             input: input.clone(),

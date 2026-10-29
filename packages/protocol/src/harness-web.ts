@@ -307,9 +307,10 @@ export interface MaterialCollectionSummary {
 
 export interface MaterialCollectionSearchHit {
   memberId: string;
-  snapshotId: string;
+  snapshotId?: string;
+  field: "title" | "source" | "body";
   /** One-based line in the fixed snapshot body. */
-  line: number;
+  line?: number;
   excerpt: string;
 }
 

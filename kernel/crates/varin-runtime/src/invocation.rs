@@ -220,8 +220,19 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
         scope.run_cancel.alias_child(&context.operation_id, &cancel);
         let mut frozen = scope.frozen.as_ref().clone();
         frozen.origin = context.origin.clone();
-        let bound = (scope.directory)(&call, &frozen, &cancel)?;
-        let preparation = bound.plan(&cancel)?;
+        // Binding and planning run before executor dispatch. Their rejection is a
+        // tool result, just as it is for a direct model call; it must not abort
+        // the surrounding script. Identity/transport/persistence failures below
+        // still propagate rather than inventing an execution receipt.
+        let rejected = |error| Ok(ToolExecutionReceipt {
+            completion: ToolCompletion::not_dispatched(error), executor_stopped: true,
+        });
+        let bound = match (scope.directory)(&call, &frozen, &cancel) {
+            Ok(bound) => bound, Err(error) => return rejected(error),
+        };
+        let preparation = match bound.plan(&cancel) {
+            Ok(plan) => plan, Err(error) => return rejected(error),
+        };
         let (intents, class) = match &preparation {
             ToolPreparation::Ready(contract) => (
                 contract
@@ -249,7 +260,9 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
         )?;
         let contract = match preparation {
             ToolPreparation::Ready(contract) => contract,
-            ToolPreparation::Resolve { .. } => bound.prepare(&cancel)?,
+            ToolPreparation::Resolve { .. } => match bound.prepare(&cancel) {
+                Ok(contract) => contract, Err(error) => return rejected(error),
+            },
         };
         if contract.name != call.name
             || contract.schema_version != call.schema_version

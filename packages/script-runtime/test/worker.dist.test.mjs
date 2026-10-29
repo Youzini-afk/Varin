@@ -74,7 +74,7 @@ test("compiled stdio worker preserves lexical cells, output and recovery", { tim
   const redeclared = (await runtime.next()).error;
   assert.match(redeclared.message, /already been declared/);
   assert.equal(redeclared.code, 'SCRIPT_BINDING_REDECLARED');
-  assert.match(redeclared.hint, /assignment/);
+  assert.match(redeclared.hint, /item.*cell one/);
   runtime.send({ type: "eval", cellId: "throw", script: "throw new Error('cell failed')" });
   assert.equal((await runtime.next()).error.message, "cell failed");
   runtime.send({ type: "eval", cellId: "two", script: "add() === item && item.total === 6" });

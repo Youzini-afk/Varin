@@ -86,7 +86,7 @@ describe("material collections", () => {
     const opened = openStore();
     const authority: ThreadMaterialAuthority = { kind: "thread", owningWorkspaceId: "ws", threadId: "t1" };
     const snapA = await opened.materials.put("ws", {
-      sourceUrl: "https://a.test/", finalUrl: "https://a.test/", representation: "raw-text",
+      sourceUrl: "https://a.test/probe.docx", finalUrl: "https://a.test/probe.docx", title: "Probe report", representation: "raw-text",
     }, Buffer.from("alpha body\ncontains retrieval keyword\nmore alpha"), authority);
     const snapB = await opened.materials.put("ws", {
       sourceUrl: "https://b.test/", finalUrl: "https://b.test/", representation: "raw-text",
@@ -102,7 +102,7 @@ describe("material collections", () => {
 
     await call(service, { action: "add", collectionId, member: { kind: "snapshot", snapshotId: snapA.snapshotId } }, "t1");
     await call(service, { action: "add", collectionId, member: { kind: "snapshot", snapshotId: snapB.snapshotId } }, "t1");
-    await call(service, { action: "add", collectionId, member: { kind: "paper", paper: { provider: "openalex", id: "W1", doi: "10.1/x" }, role: "main" } }, "t1");
+    await call(service, { action: "add", collectionId, member: { kind: "paper", paper: { provider: "openalex", id: "W1", doi: "10.1/x", title: "Probe findings" }, role: "main" } }, "t1");
 
     const listed = await call(service, { action: "list" }, "t1");
     expect(listed.collections).toEqual([
@@ -113,8 +113,19 @@ describe("material collections", () => {
     expect(searched.status).toBe("ok");
     // Scope applies before recall: only member bodies are scanned.
     expect(searched.hits).toEqual([
-      expect.objectContaining({ snapshotId: snapA.snapshotId, line: 2 }),
+      expect.objectContaining({ snapshotId: snapA.snapshotId, field: "body", line: 2 }),
     ]);
+    const titles = await call(service, { action: "search", collectionId, query: "PROBE" }, "t1");
+    expect(titles.hits).toEqual([
+      expect.objectContaining({ field: "title", excerpt: "Probe report", snapshotId: snapA.snapshotId }),
+      expect.objectContaining({ field: "source", excerpt: "https://a.test/probe.docx" }),
+      expect.objectContaining({ field: "title", excerpt: "Probe findings" }),
+    ]);
+    expect(titles.hits![2]).not.toHaveProperty('snapshotId');
+    expect(titles.hits!.every(hit => hit.line === undefined)).toBe(true);
+    const doi = await call(service, { action: "search", collectionId, query: "10.1/x" }, "t1");
+    expect(doi.hits).toEqual([expect.objectContaining({ field: "source", excerpt: "10.1/x" })]);
+    expect((await call(service, { action: "search", collectionId, query: "probe", limit: 1 }, "t1")).hits).toHaveLength(1);
   });
 
   it("denies foreign-authority writes and reports unreadable members", async () => {
@@ -205,7 +216,10 @@ describe("material collections", () => {
       kind: "thread", owningWorkspaceId: "ws", threadId: "native-reader",
     }))?.body.toString()).toBe("persisted body");
     const searched = await call(service, { action: "search", collectionId: created.collection!.collectionId, query: "persisted" }, "t2");
-    expect(searched.hits).toHaveLength(1);
+    expect(searched.hits).toEqual([
+      expect.objectContaining({ field: 'source', snapshotId: snap.snapshotId }),
+      expect.objectContaining({ field: 'body', snapshotId: snap.snapshotId, line: 1 }),
+    ]);
   });
 
   it("keeps member snapshot bodies alive through collection references", async () => {

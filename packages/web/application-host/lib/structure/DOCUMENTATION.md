@@ -26,10 +26,14 @@ persistent repository graph or rank evidence.
 
 The common `file_read` tool can select a unit by line or exact symbol name. Native symbols
 include name, kind, full byte/line span and signature text with its real line range.
+Import queries also expose the complete enclosing import/export statement as a readable unit.
 An enclosing-line request selects the smallest matching unit. Symbol ambiguity returns
 candidates. Body reads verify the same content hash and can continue by byte offset and
 revision. Unsupported/failed parsing, an uncovered line or an incomplete syntax
-node returns ordinary text and an explicit reason. The default line fallback
+node returns ordinary text and an explicit reason. An uncovered line also returns the nearest
+preceding/following unit with read arguments; the reader never silently substitutes a different selection.
+`symbol` is nested under `unit`, and a misplaced top-level symbol produces a corrective example.
+The default line fallback
 includes 20 preceding and 60 following lines; it is a reading window, not an
 input limit. `nextRead` continues the plain file. A unit-relative continuation
 never silently changes into a file-relative read. Ambiguous selections retain

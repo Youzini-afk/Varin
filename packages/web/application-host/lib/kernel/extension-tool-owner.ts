@@ -20,7 +20,7 @@ import {
   type PermissionPolicy,
   type WorkFocusId,
 } from '@varin/protocol';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { compileToolJsonSchema, describeToolSchemaFailure } from '../models/schema.js';
 import type { ThreadToolPreparation, AgentSettingsSnapshot } from '@varin/application-client';
 import type { KernelClient } from './kernel-client.js';
 import type {
@@ -222,12 +222,8 @@ export async function retainExtensionTool(
         throw new HostToolAdmissionError('extension_tool_input_schema_invalid', 'Tool arguments must be a valid JSON value.');
       }
       if (!validateInput(args)) {
-        const issue = validateInput.errors?.[0];
-        // AJV's structural diagnostic identifies the field/rule, never the supplied value.
-        const property = issue?.keyword === 'additionalProperties'
-          ? `: ${JSON.stringify(issue.params.additionalProperty)}` : '';
         throw new HostToolAdmissionError('extension_tool_input_schema_invalid',
-          `Invalid arguments for ${schema.name} at ${issue?.instancePath || '/'}: ${issue?.message ?? 'schema validation failed'}${property}.`);
+          `Invalid arguments for ${schema.name}: ${describeToolSchemaFailure(validateInput, args)}.`);
       }
       return args;
     };
