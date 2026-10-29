@@ -1,0 +1,166 @@
+{
+  "status": "portable source verification passed",
+  "sourceStatus": "candidate only; full runtime acceptance pending",
+  "independentCopy": true,
+  "generatedFoldersDeletedBeforeRebuild": true,
+  "noExternalArtInputs": true,
+  "frames": [
+    {
+      "frame": "frames/dispatch-a-gaze.png",
+      "sha256": "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb",
+      "rebuiltSHA256": "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/dispatch-a.png",
+      "sha256": "38ecf44c540b2f1b195e37649e1b8a5159152e72a528c9f2ac6a11d64f1d642b",
+      "rebuiltSHA256": "38ecf44c540b2f1b195e37649e1b8a5159152e72a528c9f2ac6a11d64f1d642b",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/dispatch-b-v2-gazeB.png",
+      "sha256": "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1",
+      "rebuiltSHA256": "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/dispatch-b-v2.png",
+      "sha256": "cf6fa19cd93aa28daa4681f79e69bd4b86e937f889cc06a04795d36e24ea6c34",
+      "rebuiltSHA256": "cf6fa19cd93aa28daa4681f79e69bd4b86e937f889cc06a04795d36e24ea6c34",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/dispatch-rise-gaze.png",
+      "sha256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+      "rebuiltSHA256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/dispatch-rise.png",
+      "sha256": "e21d295b3b080eb60d4c4074f6880bdb0ae8124d806b8873ea3b0933951b9ade",
+      "rebuiltSHA256": "e21d295b3b080eb60d4c4074f6880bdb0ae8124d806b8873ea3b0933951b9ade",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/dispatch-transit-gazeB.png",
+      "sha256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+      "rebuiltSHA256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/dispatch-transit.png",
+      "sha256": "11d4d3e685e1217237c6d8bb501500e287adce0c32a7f0b08389c351fd4e203d",
+      "rebuiltSHA256": "11d4d3e685e1217237c6d8bb501500e287adce0c32a7f0b08389c351fd4e203d",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/gaze-right.png",
+      "sha256": "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04",
+      "rebuiltSHA256": "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/neutral.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "rebuiltSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/review-rise.png",
+      "sha256": "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6",
+      "rebuiltSHA256": "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/review-v2.png",
+      "sha256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+      "rebuiltSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/review.png",
+      "sha256": "2ff88020f1da38714ac9484698cc921b3db0cd3d93dccf72833b0b052ba571f2",
+      "rebuiltSHA256": "2ff88020f1da38714ac9484698cc921b3db0cd3d93dccf72833b0b052ba571f2",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/screen-read.png",
+      "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "rebuiltSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/select.png",
+      "sha256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+      "rebuiltSHA256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/split-gaze.png",
+      "sha256": "6adbd265d91917ffedabfcc7fa1fdbe6400ec8aaeb6188903a64ee6f28149d25",
+      "rebuiltSHA256": "6adbd265d91917ffedabfcc7fa1fdbe6400ec8aaeb6188903a64ee6f28149d25",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/type-burst.png",
+      "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+      "rebuiltSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/type-forward-hands-b.png",
+      "sha256": "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d",
+      "rebuiltSHA256": "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/type-forward.png",
+      "sha256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+      "rebuiltSHA256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    },
+    {
+      "frame": "frames/type-prepare.png",
+      "sha256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+      "rebuiltSHA256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+      "pngBytesEqual": true,
+      "rgbaPixelsEqual": true
+    }
+  ],
+  "sequences": {
+    "editing": {
+      "exposures": 20,
+      "durationMs": 4670,
+      "exactFrameCueHoldSHAEqual": true
+    },
+    "collaboration": {
+      "exposures": 15,
+      "durationMs": 4630,
+      "exactFrameCueHoldSHAEqual": true
+    }
+  },
+  "allPNGBytesEqual": true,
+  "allRGBAPixelsEqual": true,
+  "allTimelinesEqual": true,
+  "originalLatestFramesExact": true,
+  "originalLatestTimedExposuresExact": true
+}

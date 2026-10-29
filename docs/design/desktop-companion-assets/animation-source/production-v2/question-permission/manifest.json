@@ -1,0 +1,245 @@
+{
+  "assets": {
+    "ask": {
+      "mask": "masks/ask.png",
+      "path": "poses/ask.png",
+      "prompt": "prompts/ask.txt",
+      "raw": "raw/ask.png",
+      "rawSHA256": "d75e2b313d88154f11346af32cd5c2934390ead51cf224e16791522b30d94e25",
+      "reference": "references/upright-open-neutral-v2.png",
+      "sha256": "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020"
+    },
+    "attend-corrected": {
+      "mask": "masks/attend-corrected.png",
+      "path": "poses/attend-corrected.png",
+      "prompt": "prompts/attend-corrected.txt",
+      "raw": "raw/attend-corrected.png",
+      "rawSHA256": "439da4dce0d79fc81a3caf981cb084966fc15efbb861ca8075d99855c81e671b",
+      "reference": "raw/ask.png",
+      "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+    },
+    "listen-rest": {
+      "mask": "masks/listen-rest.png",
+      "path": "poses/listen-rest.png",
+      "prompt": "prompts/listen-rest.txt",
+      "raw": "raw/listen-rest.png",
+      "rawSHA256": "2b0c665e5ec49dc79fe1289939c454c3ad31a17728801354508507122fc1990a",
+      "reference": "references/upright-open-neutral-v2.png",
+      "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+    },
+    "nod-soft": {
+      "mask": "masks/nod-soft.png",
+      "path": "poses/nod-soft.png",
+      "prompt": "prompts/nod-soft.txt",
+      "raw": "raw/nod-soft.png",
+      "rawSHA256": "f5a22095f15cfd2f0afb2f73704719bb20bcc053b6c96c03f1d229958d9a675e",
+      "reference": "raw/nod.png",
+      "sha256": "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482"
+    },
+    "offer": {
+      "mask": "masks/offer.png",
+      "path": "poses/offer.png",
+      "prompt": "prompts/offer.txt",
+      "raw": "raw/offer.png",
+      "rawSHA256": "776580747d4e45936d314c91ddd3a9cfdebdebb29f518c474430aadb9d92fe49",
+      "reference": "references/upright-open-neutral-v2.png",
+      "sha256": "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570"
+    },
+    "offer-mid": {
+      "mask": "masks/offer-mid.png",
+      "path": "poses/offer-mid.png",
+      "prompt": "prompts/offer-mid.txt",
+      "raw": "raw/offer-mid.png",
+      "rawSHA256": "798484e741f9ec2e1068ba158d4ecf2c1c5456efa182976fc159a4d4815e316a",
+      "reference": "raw/offer.png",
+      "sha256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a"
+    }
+  },
+  "canvas": [
+    512,
+    512
+  ],
+  "eventRules": [
+    "ATTEND and UNRESOLVED never nod or resume typing on a timer",
+    "ANSWER_RECEIVED only after actual answer event",
+    "ALLOW only after explicit allow event; deny/cancel no nod and neutral withdrawal",
+    "hold head upright; never perpetual tilted neck",
+    "no pretend approval; do not auto-exit unresolved wait"
+  ],
+  "externalCues": {
+    "permission": "independently rendered lock/action card/threshold; only true allow event crosses threshold",
+    "question": "independently rendered question/response whitespace; no baked text"
+  },
+  "generator": "built-in image_gen",
+  "normalization": "full generated square to 512, no bbox fitting or whole-character transform",
+  "processing": "process.py: authored regional masks preserve frozen base outside actual facial/arm redraw; nod uses genuinely redrawn head/neck. No synthetic in-between warp, no whole-person opacity crossfade.",
+  "referenceSHA256": {
+    "references/open-screen-read-v2.png": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+    "references/upright-open-neutral-v2.png": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+  },
+  "rejected": {
+    "poses/nod.png": "superseded cold expression; use nod-soft only",
+    "raw/attend.png": "wrong hand raised; replaced by attend-corrected"
+  },
+  "sequences": {
+    "permissionAllow": [
+      {
+        "durationMs": 140,
+        "phase": "ALLOW_EVENT",
+        "pose": "listen-rest"
+      },
+      {
+        "durationMs": 120,
+        "phase": "HANDS_RETURN",
+        "pose": "references/upright-open-neutral-v2.png"
+      },
+      {
+        "durationMs": 160,
+        "phase": "ALLOW_RECEIVED",
+        "pose": "nod-soft"
+      },
+      {
+        "durationMs": 120,
+        "phase": "RECOVER",
+        "pose": "references/upright-open-neutral-v2.png"
+      },
+      {
+        "durationMs": 160,
+        "phase": "RETURN",
+        "pose": "references/open-screen-read-v2.png"
+      }
+    ],
+    "permissionDenyOrCancel": [
+      {
+        "durationMs": 180,
+        "phase": "RETRACT_NEUTRAL",
+        "pose": "listen-rest"
+      },
+      {
+        "durationMs": 220,
+        "phase": "NEUTRAL",
+        "pose": "references/upright-open-neutral-v2.png"
+      },
+      {
+        "durationMs": 160,
+        "phase": "RETURN",
+        "pose": "references/open-screen-read-v2.png"
+      }
+    ],
+    "permissionEnter": [
+      {
+        "durationMs": 120,
+        "phase": "ACTIVE",
+        "pose": "references/open-screen-read-v2.png"
+      },
+      {
+        "durationMs": 240,
+        "phase": "STOP",
+        "pose": "attend-corrected"
+      },
+      {
+        "durationMs": 130,
+        "phase": "OFFER_START",
+        "pose": "offer-mid"
+      },
+      {
+        "durationMs": 650,
+        "phase": "OFFER",
+        "pose": "offer"
+      },
+      {
+        "durationMs": 180,
+        "phase": "LOWER_PALM",
+        "pose": "offer-mid"
+      },
+      {
+        "durationMs": 150,
+        "phase": "RETRACT",
+        "pose": "attend-corrected"
+      },
+      {
+        "durationMs": null,
+        "phase": "UNRESOLVED",
+        "pose": "listen-rest"
+      }
+    ],
+    "questionAnswered": [
+      {
+        "durationMs": 140,
+        "phase": "RECEIVED",
+        "pose": "listen-rest"
+      },
+      {
+        "durationMs": 120,
+        "phase": "LOWER",
+        "pose": "references/upright-open-neutral-v2.png"
+      },
+      {
+        "durationMs": 160,
+        "phase": "ANSWER_RECEIVED",
+        "pose": "nod-soft"
+      },
+      {
+        "durationMs": 120,
+        "phase": "RECOVER",
+        "pose": "references/upright-open-neutral-v2.png"
+      },
+      {
+        "durationMs": 180,
+        "phase": "RETURN",
+        "pose": "references/open-screen-read-v2.png"
+      }
+    ],
+    "questionCancel": [
+      {
+        "durationMs": 120,
+        "phase": "RETRACT",
+        "pose": "listen-rest"
+      },
+      {
+        "durationMs": 180,
+        "phase": "NEUTRAL",
+        "pose": "references/upright-open-neutral-v2.png"
+      },
+      {
+        "durationMs": 180,
+        "phase": "RETURN",
+        "pose": "references/open-screen-read-v2.png"
+      }
+    ],
+    "questionEnter": [
+      {
+        "durationMs": 160,
+        "phase": "READ",
+        "pose": "references/open-screen-read-v2.png"
+      },
+      {
+        "durationMs": 200,
+        "phase": "ADDRESS",
+        "pose": "references/upright-open-neutral-v2.png"
+      },
+      {
+        "durationMs": 120,
+        "phase": "LIFT",
+        "pose": "attend-corrected"
+      },
+      {
+        "durationMs": 520,
+        "phase": "ASK",
+        "pose": "ask"
+      },
+      {
+        "durationMs": 160,
+        "phase": "LOWER",
+        "pose": "attend-corrected"
+      },
+      {
+        "durationMs": null,
+        "phase": "ATTEND",
+        "pose": "listen-rest"
+      }
+    ]
+  },
+  "status": "internal artwork reviewed; runtime integration pending",
+  "version": 2
+}

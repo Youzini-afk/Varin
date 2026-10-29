@@ -1,0 +1,25 @@
+{
+  "status": "internal candidate; not runtime accepted",
+  "cue": "SELECT",
+  "source": "shared/open-screen-read-v2.png",
+  "sourceSha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+  "raw": "search-focus-v1-raw.png",
+  "rawSha256": "674cade959f2cf4f698c595978b64c7684725af1278b5609f6435ef60c26ced5",
+  "prompt": "search-focus-v1-exactprompt.txt",
+  "candidate": "search-focus-v1-candidate.png",
+  "candidateSha256": "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b",
+  "canvas": [
+    512,
+    512
+  ],
+  "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+  "mask": "search-focus-v1-edit-mask.png",
+  "outsideMaskExact": true,
+  "alphaCleanup": {
+    "islandPixels": 47,
+    "chromaEdgePixels": 115,
+    "whiteEdgePixels": 283,
+    "opaqueInteriorRGBUnchanged": true
+  },
+  "actualGestureSide": "image-left visible hand (character right); generated opposite prompt side; selected coherent authored gesture, other hand locked"
+}

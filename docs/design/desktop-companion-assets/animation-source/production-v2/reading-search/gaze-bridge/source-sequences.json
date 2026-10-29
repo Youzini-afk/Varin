@@ -1,0 +1,88 @@
+{
+  "status": "source-level gaze bridge visually reviewed; integration acceptance remains pending",
+  "geometryReference": "varin-upright-v2",
+  "canvas": [
+    512,
+    512
+  ],
+  "sourceRoot": "..",
+  "visualJudgment": "Actual images inspected together: head, neck, hair, torso, laptop, hands and seat have identical pixels. Only the two eye regions differ. User gaze is forward; screen gaze aims lower-left. Direct short eye refixation is appropriate; no invented intermediate, blink or whole-head transform is necessary. This bridge does not express a forward reading lean.",
+  "pixelEvidence": {
+    "changedPixels": 4376,
+    "changeBBox": [
+      200,
+      110,
+      318,
+      163
+    ],
+    "unchangedOutsideEyeBBox": true,
+    "alphaChangedPixels": 122,
+    "alphaNote": "122 changed alpha samples confined inside eye-region bbox, not character outline."
+  },
+  "sequences": [
+    {
+      "id": "upright-gaze-screen-to-user",
+      "kind": "bridge",
+      "entryPose": "upright-v2:open-screen",
+      "exitPose": "upright-v2:open-user",
+      "loop": null,
+      "frames": [
+        {
+          "source": "shared/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 50,
+          "phase": "enter",
+          "pose": "upright-v2:open-screen",
+          "cue": "GAZE_PREPARE",
+          "exitTo": [
+            "upright-v2:open-screen"
+          ]
+        },
+        {
+          "source": "shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 130,
+          "phase": "exit",
+          "pose": "upright-v2:open-user",
+          "cue": "GAZE_TO_USER",
+          "exitTo": [
+            "upright-v2:open-user"
+          ]
+        }
+      ],
+      "interruption": "Both exposure frames are exact shared canonical endpoints; route from the last actual shown pose, never from presumed elapsed time."
+    },
+    {
+      "id": "upright-gaze-user-to-screen",
+      "kind": "bridge",
+      "entryPose": "upright-v2:open-user",
+      "exitPose": "upright-v2:open-screen",
+      "loop": null,
+      "frames": [
+        {
+          "source": "shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 50,
+          "phase": "enter",
+          "pose": "upright-v2:open-user",
+          "cue": "GAZE_PREPARE",
+          "exitTo": [
+            "upright-v2:open-user"
+          ]
+        },
+        {
+          "source": "shared/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 130,
+          "phase": "exit",
+          "pose": "upright-v2:open-screen",
+          "cue": "GAZE_TO_SCREEN",
+          "exitTo": [
+            "upright-v2:open-screen"
+          ]
+        }
+      ],
+      "interruption": "Both exposure frames are exact shared canonical endpoints; route from the last actual shown pose, never from presumed elapsed time."
+    }
+  ]
+}

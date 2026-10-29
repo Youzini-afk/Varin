@@ -1,0 +1,62 @@
+{
+  "status": "QA exposure study, not final animation acceptance",
+  "frameInterpolation": "none; authored cels only",
+  "exitNote": "Reverse traversal uses actual matching authored poses, not synthesized deformation",
+  "frames": [
+    {
+      "source": "shared/upright-open-neutral-v2.png",
+      "durationMs": 550,
+      "cue": "prepare"
+    },
+    {
+      "source": "read-prepare-v2-candidate.png",
+      "durationMs": 100,
+      "cue": "PAGE_PRESENT"
+    },
+    {
+      "source": "read-middle-v1-candidate.png",
+      "durationMs": 110,
+      "cue": "READ_ENTER"
+    },
+    {
+      "source": "read-settle-v1-candidate.png",
+      "durationMs": 800,
+      "cue": "READ_SETTLE"
+    },
+    {
+      "source": "read-hand-prepare-v1-candidate.png",
+      "durationMs": 100,
+      "cue": "PAGE_TURN_PREPARE"
+    },
+    {
+      "source": "read-turn-v1-candidate.png",
+      "durationMs": 180,
+      "cue": "PAGE_TURN"
+    },
+    {
+      "source": "read-hand-prepare-v1-candidate.png",
+      "durationMs": 90,
+      "cue": "PAGE_TURN_RELEASE"
+    },
+    {
+      "source": "read-settle-v1-candidate.png",
+      "durationMs": 450,
+      "cue": "READ_SETTLE"
+    },
+    {
+      "source": "read-middle-v1-candidate.png",
+      "durationMs": 120,
+      "cue": "release"
+    },
+    {
+      "source": "read-prepare-v2-candidate.png",
+      "durationMs": 110,
+      "cue": "release"
+    },
+    {
+      "source": "shared/upright-open-neutral-v2.png",
+      "durationMs": 700,
+      "cue": "exit"
+    }
+  ]
+}

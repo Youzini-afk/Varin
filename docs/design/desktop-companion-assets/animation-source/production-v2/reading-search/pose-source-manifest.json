@@ -1,0 +1,624 @@
+{
+  "status": "10 authored candidate poses + shared anchors, pending parent sequence review",
+  "records": [
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "PAGE_PRESENT",
+      "source": "shared/upright-open-neutral-v2.png",
+      "sourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "raw": "read-prepare-v2-raw.png",
+      "rawSha256": "58efc18da1bf3638e15c921eb02ae6fa3bb96ed551c8536821447223e7275f7c",
+      "prompt": "read-prepare-v2-exactprompt.txt",
+      "candidate": "read-prepare-v2-candidate.png",
+      "candidateSha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "read-prepare-v2-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 171,
+        "chromaEdgePixels": 114,
+        "whiteEdgePixels": 381,
+        "opaqueInteriorRGBUnchanged": true
+      }
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "READ_ENTER",
+      "source": "shared/upright-open-neutral-v2.png",
+      "sourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "raw": "read-middle-v1-raw.png",
+      "rawSha256": "4f53222fcbe329c1cb9c0a0462b992eb1cf89e1016768846c236fb40b43bd587",
+      "prompt": "read-middle-v1-exactprompt.txt",
+      "candidate": "read-middle-v1-candidate.png",
+      "candidateSha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "read-middle-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 147,
+        "chromaEdgePixels": 187,
+        "whiteEdgePixels": 392,
+        "opaqueInteriorRGBUnchanged": true
+      }
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "READ_SETTLE",
+      "source": "shared/upright-open-neutral-v2.png",
+      "sourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "raw": "read-settle-v1-raw.png",
+      "rawSha256": "e6f0f87398dafaed562d635878362ae3fc4cc0f8e6bc9d792164cb4b91f6b33d",
+      "prompt": "read-settle-v1-exactprompt.txt",
+      "candidate": "read-settle-v1-candidate.png",
+      "candidateSha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "read-settle-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 213,
+        "chromaEdgePixels": 211,
+        "whiteEdgePixels": 555,
+        "opaqueInteriorRGBUnchanged": true
+      }
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "PAGE_TURN_PREPARE",
+      "source": "read-settle-v1-candidate.png",
+      "sourceSha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+      "raw": "read-hand-prepare-v1-raw.png",
+      "rawSha256": "011da17ad7e332138aa65da36e93081c6f395d592a428f55ce5577116abd3c65",
+      "prompt": "read-hand-prepare-v1-exactprompt.txt",
+      "candidate": "read-hand-prepare-v1-candidate.png",
+      "candidateSha256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "read-hand-prepare-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 45,
+        "chromaEdgePixels": 102,
+        "whiteEdgePixels": 2,
+        "opaqueInteriorRGBUnchanged": true
+      },
+      "actualGestureSide": "image-left visible hand (character right); generated opposite prompt side; selected coherent authored gesture, other hand locked"
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "PAGE_TURN",
+      "source": "read-settle-v1-candidate.png",
+      "sourceSha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+      "raw": "read-turn-v1-raw.png",
+      "rawSha256": "b36c9fd9748190f2c0e146f3e831aa46275491abb3c15fa59425027ffb6febd7",
+      "prompt": "read-turn-v1-exactprompt.txt",
+      "candidate": "read-turn-v1-candidate.png",
+      "candidateSha256": "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "read-turn-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 49,
+        "chromaEdgePixels": 118,
+        "whiteEdgePixels": 10,
+        "opaqueInteriorRGBUnchanged": true
+      },
+      "actualGestureSide": "image-left visible hand (character right); generated opposite prompt side; selected coherent authored gesture, other hand locked"
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "SCAN_SIDE_A_ENTER",
+      "source": "shared/upright-open-neutral-v2.png",
+      "sourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "raw": "search-left-middle-v1-raw.png",
+      "rawSha256": "72030e165e828c55d61c4455bfc0cd5a3848b88d44f3026330aabd82dc819f88",
+      "prompt": "search-left-middle-v1-exactprompt.txt",
+      "candidate": "search-left-middle-v1-candidate.png",
+      "candidateSha256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "search-left-middle-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 135,
+        "chromaEdgePixels": 90,
+        "whiteEdgePixels": 432,
+        "opaqueInteriorRGBUnchanged": true
+      }
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "SCAN_SIDE_A",
+      "source": "shared/upright-open-neutral-v2.png",
+      "sourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "raw": "search-left-v1-raw.png",
+      "rawSha256": "61c6a80c51fdce8bff1b2fdb6710bcea5fe6065b81629addb609a7df432413f3",
+      "prompt": "search-left-v1-exactprompt.txt",
+      "candidate": "search-left-v1-candidate.png",
+      "candidateSha256": "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "search-left-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 9,
+        "chromaEdgePixels": 129,
+        "whiteEdgePixels": 35,
+        "opaqueInteriorRGBUnchanged": true
+      }
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "SCAN_SIDE_B_ENTER",
+      "source": "shared/upright-open-neutral-v2.png",
+      "sourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "raw": "search-right-middle-v1-raw.png",
+      "rawSha256": "60299546304603c5d8adf96f43cffb460936d6c996b7a67109dfffb24062012e",
+      "prompt": "search-right-middle-v1-exactprompt.txt",
+      "candidate": "search-right-middle-v1-candidate.png",
+      "candidateSha256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "search-right-middle-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 173,
+        "chromaEdgePixels": 178,
+        "whiteEdgePixels": 332,
+        "opaqueInteriorRGBUnchanged": true
+      }
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "SCAN_SIDE_B",
+      "source": "shared/upright-open-neutral-v2.png",
+      "sourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "raw": "search-right-v1-raw.png",
+      "rawSha256": "2a8769aaef1371c8815a9d19303a758023022336ab0faada9edb33ca05581b61",
+      "prompt": "search-right-v1-exactprompt.txt",
+      "candidate": "search-right-v1-candidate.png",
+      "candidateSha256": "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "search-right-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 164,
+        "chromaEdgePixels": 177,
+        "whiteEdgePixels": 287,
+        "opaqueInteriorRGBUnchanged": true
+      }
+    },
+    {
+      "status": "internal candidate; not runtime accepted",
+      "cue": "SELECT",
+      "source": "shared/open-screen-read-v2.png",
+      "sourceSha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "raw": "search-focus-v1-raw.png",
+      "rawSha256": "674cade959f2cf4f698c595978b64c7684725af1278b5609f6435ef60c26ced5",
+      "prompt": "search-focus-v1-exactprompt.txt",
+      "candidate": "search-focus-v1-candidate.png",
+      "candidateSha256": "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b",
+      "canvas": [
+        512,
+        512
+      ],
+      "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+      "mask": "search-focus-v1-edit-mask.png",
+      "outsideMaskExact": true,
+      "alphaCleanup": {
+        "islandPixels": 47,
+        "chromaEdgePixels": 115,
+        "whiteEdgePixels": 283,
+        "opaqueInteriorRGBUnchanged": true
+      },
+      "actualGestureSide": "image-left visible hand (character right); generated opposite prompt side; selected coherent authored gesture, other hand locked"
+    }
+  ],
+  "knownLimitations": [
+    "Full-body static regions locked, but head volume/age still require playback review.",
+    "Hand preparation and tap remain sparse authored drawings; this is not final smooth runtime delivery.",
+    "Generated hand gestures use character-right/image-left hand, intentionally documented; no mirrored character.",
+    "READ_PREPARE_V1 rejected for excessive lean and excluded."
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "c4aed207b7119142a4cb320596d4a597df99313888bbce379d795a65309abe06"
+    },
+    {
+      "path": "gaze-bridge/gaze-endpoints-qa.jpg",
+      "sha256": "edf3b23475b5be7f848308a7ef17903345e733847eaa9cf32d09c4c71e4d6446"
+    },
+    {
+      "path": "gaze-bridge/gaze-endpoints-review.gif",
+      "sha256": "21203a37a9cd74a5a3742b37e528800b2777f4cdb1d9704663b899b1852e08a2"
+    },
+    {
+      "path": "gaze-bridge/source-sequences.json",
+      "sha256": "bc87986cb27e2ec9bbb965e07afc57d13ce78f0ad3106e738458dd0710674701"
+    },
+    {
+      "path": "hand-contact-qa-v2.jpg",
+      "sha256": "6be309f9fa22f54392cccb57ad367579a5109ff396261badfe91d45278ea0907"
+    },
+    {
+      "path": "original-candidate-checksums.json",
+      "sha256": "9b68beb1a086dc78a2c34f860d8327976d5eb620e25995a6d19528d571e9f55d"
+    },
+    {
+      "path": "portable-verification.json",
+      "sha256": "c57f8cafc54b02e8844cbfbbd0bb8391484e02a2c6c6aa283de34be44901b348"
+    },
+    {
+      "path": "pose-review.html",
+      "sha256": "14dccf561ce2c9780621235cabbe01cfa1d3bd76d9e93172b32273ccd3eb1f6a"
+    },
+    {
+      "path": "process_poses.py",
+      "sha256": "d5e7eba7d063ed827eec61c234193647ef59826127f771a3342c642f8271c942"
+    },
+    {
+      "path": "read-hand-prepare-v1-candidate.png",
+      "sha256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825"
+    },
+    {
+      "path": "read-hand-prepare-v1-clean-native.png",
+      "sha256": "ba0102c5975c0108d40165c1ac3cf2ba3a7236ace16382ba27103139a70892e4"
+    },
+    {
+      "path": "read-hand-prepare-v1-edit-mask.png",
+      "sha256": "7a6981f6bff223937b5606ebb3304546095241c2df2e2548917a89ebb462c17b"
+    },
+    {
+      "path": "read-hand-prepare-v1-exactprompt.txt",
+      "sha256": "0f9643f13f37a6317f7dc5e99235e6507030e57c189d0b3796dd08cc7169fb1e"
+    },
+    {
+      "path": "read-hand-prepare-v1-normalized.png",
+      "sha256": "1c18bf34d58fccbafccaf49b40aeb8b969478b94b63f4d2a90d6fd54d3314b58"
+    },
+    {
+      "path": "read-hand-prepare-v1-provenance.json",
+      "sha256": "81f465c81131d406c374eaaab5c4dc1d5b371c4f864f6e02317c8fc87f2627b2"
+    },
+    {
+      "path": "read-hand-prepare-v1-raw.png",
+      "sha256": "011da17ad7e332138aa65da36e93081c6f395d592a428f55ce5577116abd3c65"
+    },
+    {
+      "path": "read-middle-v1-candidate.png",
+      "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa"
+    },
+    {
+      "path": "read-middle-v1-clean-native.png",
+      "sha256": "660f3b8d340707cbd8c11259c9e58bca5c53f6c2df8c828418d652613f2dd37a"
+    },
+    {
+      "path": "read-middle-v1-edit-mask.png",
+      "sha256": "7583ede4ac8e4fff414afbdbeb4e3eb419d0853c9d8cf814d76a2b36cb37194a"
+    },
+    {
+      "path": "read-middle-v1-exactprompt.txt",
+      "sha256": "193ac643b1f46030575cbffc595b0f125690239676b5b3125fd43c7a51aefe68"
+    },
+    {
+      "path": "read-middle-v1-normalized.png",
+      "sha256": "02b235573a63d4862bb1ac9be29ac5bb26a696b09e4746430cdf221b1131fa33"
+    },
+    {
+      "path": "read-middle-v1-provenance.json",
+      "sha256": "64d599b79cf3fb6703a339e1e1b4cb1d743255afadcaff61bc47d2aec9d7ff15"
+    },
+    {
+      "path": "read-middle-v1-raw.png",
+      "sha256": "4f53222fcbe329c1cb9c0a0462b992eb1cf89e1016768846c236fb40b43bd587"
+    },
+    {
+      "path": "read-prepare-v1-exactprompt.txt",
+      "sha256": "6b838d3913d72d7ebff38d572afeaf2878b8eeb8502c8bfed767b96b31f34d56"
+    },
+    {
+      "path": "read-prepare-v1-raw.png",
+      "sha256": "098e683ad9e72151b1789becd864bf92415d4d430315aae4cae0b84501032f0a"
+    },
+    {
+      "path": "read-prepare-v1-rejection.json",
+      "sha256": "a77374bd7d62eab1e4dfddebc33b17f400a07019aecce80a0e1a047ee2053ae8"
+    },
+    {
+      "path": "read-prepare-v2-candidate.png",
+      "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482"
+    },
+    {
+      "path": "read-prepare-v2-clean-native.png",
+      "sha256": "9e06a9d1bfd8321299a6d4f3c0191583ea5e4c4d77d44843db425edf0a4700e5"
+    },
+    {
+      "path": "read-prepare-v2-edit-mask.png",
+      "sha256": "7583ede4ac8e4fff414afbdbeb4e3eb419d0853c9d8cf814d76a2b36cb37194a"
+    },
+    {
+      "path": "read-prepare-v2-exactprompt.txt",
+      "sha256": "381b7a90db01297e803992ef41d849985e5f2a51d83ae83bc72491ff33121079"
+    },
+    {
+      "path": "read-prepare-v2-normalized.png",
+      "sha256": "79c4c9e215081eef8185a68022ee1be172eed0c6fe8be24732f1c29447d711d2"
+    },
+    {
+      "path": "read-prepare-v2-provenance.json",
+      "sha256": "1b29c3f229a6dc369a917391855a9fca4af05b03bc018e22f552c69f2de5a08d"
+    },
+    {
+      "path": "read-prepare-v2-raw.png",
+      "sha256": "58efc18da1bf3638e15c921eb02ae6fa3bb96ed551c8536821447223e7275f7c"
+    },
+    {
+      "path": "read-settle-v1-candidate.png",
+      "sha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3"
+    },
+    {
+      "path": "read-settle-v1-clean-native.png",
+      "sha256": "b7b673f35b877b974be40384446f1daadef6b22f89cc25d30f16f8a4ae2e68e8"
+    },
+    {
+      "path": "read-settle-v1-edit-mask.png",
+      "sha256": "7583ede4ac8e4fff414afbdbeb4e3eb419d0853c9d8cf814d76a2b36cb37194a"
+    },
+    {
+      "path": "read-settle-v1-exactprompt.txt",
+      "sha256": "309f3432f6db6fbf77198a553178083f214d1806ec6afa024511be869771ac01"
+    },
+    {
+      "path": "read-settle-v1-normalized.png",
+      "sha256": "e59be283229cc9fb7af34bc08a431568b75c56f6fd1b5972455091ecf40aaca7"
+    },
+    {
+      "path": "read-settle-v1-provenance.json",
+      "sha256": "e7282f40f69bf763858c343fbd5e377396c6173e8cf76cc874ebad739caa72fc"
+    },
+    {
+      "path": "read-settle-v1-raw.png",
+      "sha256": "e6f0f87398dafaed562d635878362ae3fc4cc0f8e6bc9d792164cb4b91f6b33d"
+    },
+    {
+      "path": "read-turn-v1-candidate.png",
+      "sha256": "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742"
+    },
+    {
+      "path": "read-turn-v1-clean-native.png",
+      "sha256": "74372ddf743e0e5440709497817386350e7e49222f9e8aee9b779a7b2370b5e2"
+    },
+    {
+      "path": "read-turn-v1-edit-mask.png",
+      "sha256": "7a6981f6bff223937b5606ebb3304546095241c2df2e2548917a89ebb462c17b"
+    },
+    {
+      "path": "read-turn-v1-exactprompt.txt",
+      "sha256": "b0f61dc1f4ce4c84ad7ea1c1a7f1400c0c77cc0276288c0f1ff6d73ff74519d1"
+    },
+    {
+      "path": "read-turn-v1-normalized.png",
+      "sha256": "ef158d42dad9cb474e0f5fc5b08b97d48d78b21468f1816eddba9245ef4b6d95"
+    },
+    {
+      "path": "read-turn-v1-provenance.json",
+      "sha256": "7a19f54c6b585df5dc3d0b8b9fd706dc03cfd254520e3b2c90b921060191aade"
+    },
+    {
+      "path": "read-turn-v1-raw.png",
+      "sha256": "b36c9fd9748190f2c0e146f3e831aa46275491abb3c15fa59425027ffb6febd7"
+    },
+    {
+      "path": "reading-normal-timing-v2.gif",
+      "sha256": "dcaa14269b6c0e3dde132d1ec533dd3a6ab90e98c6c1a17f714412e06e6398d8"
+    },
+    {
+      "path": "reading-search-keypose-sequence-v2.jpg",
+      "sha256": "e1b906e8a71892f6af4760e95a0c8294262a625e1fe52e590890ed57543f4de9"
+    },
+    {
+      "path": "reading-timing-v2.json",
+      "sha256": "8145b0eb7f190a1f86b9e6c939f192f92163b68706e38a84e6aa2296c4637b88"
+    },
+    {
+      "path": "runtime-handoff.json",
+      "sha256": "70fd80adc41558a6dd0454e7b09ae48e38c231295db043efcdeb6c3e7c8ffbf4"
+    },
+    {
+      "path": "search-focus-v1-candidate.png",
+      "sha256": "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b"
+    },
+    {
+      "path": "search-focus-v1-clean-native.png",
+      "sha256": "53c4c8094e5dedd2685fe253b2fb921c903e7b23156c33064c6fb3f39e3d6438"
+    },
+    {
+      "path": "search-focus-v1-edit-mask.png",
+      "sha256": "7a6981f6bff223937b5606ebb3304546095241c2df2e2548917a89ebb462c17b"
+    },
+    {
+      "path": "search-focus-v1-exactprompt.txt",
+      "sha256": "fbf9777de56957884693852b6dfad3c937e250c3b83ae79ba8d802d4e367daff"
+    },
+    {
+      "path": "search-focus-v1-normalized.png",
+      "sha256": "7c029e1c80871b07b05820277b583a08c58535a10b8a5ec6376e4a8f1c9605e2"
+    },
+    {
+      "path": "search-focus-v1-provenance.json",
+      "sha256": "efb05d3f7cdf1a970e4842da9415714e4a8469c5fd176b6eaa57de9627757cea"
+    },
+    {
+      "path": "search-focus-v1-raw.png",
+      "sha256": "674cade959f2cf4f698c595978b64c7684725af1278b5609f6435ef60c26ced5"
+    },
+    {
+      "path": "search-left-middle-v1-candidate.png",
+      "sha256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce"
+    },
+    {
+      "path": "search-left-middle-v1-clean-native.png",
+      "sha256": "d23a18d8f9477106a6deb7ad2a16a24ce8679a2b3f7c234c61169bef90a317dd"
+    },
+    {
+      "path": "search-left-middle-v1-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a"
+    },
+    {
+      "path": "search-left-middle-v1-exactprompt.txt",
+      "sha256": "4f5c37b38259d1e53b4e26123e99c1935d63f2e44c9e938c3314dcfa2470a29b"
+    },
+    {
+      "path": "search-left-middle-v1-normalized.png",
+      "sha256": "7e13d4a99fa6f8e9341ca31dee7bc4091fc08f1342316116830aff2ec8e0b5a3"
+    },
+    {
+      "path": "search-left-middle-v1-provenance.json",
+      "sha256": "402776f194c27256928938a78ff5419d6d16b293b08b831cb2a7284a922c851e"
+    },
+    {
+      "path": "search-left-middle-v1-raw.png",
+      "sha256": "72030e165e828c55d61c4455bfc0cd5a3848b88d44f3026330aabd82dc819f88"
+    },
+    {
+      "path": "search-left-v1-candidate.png",
+      "sha256": "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263"
+    },
+    {
+      "path": "search-left-v1-clean-native.png",
+      "sha256": "db0a62ab7953c34bddeec0e845573512f0d54e4dd05daa79bd8174c04758c1fd"
+    },
+    {
+      "path": "search-left-v1-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a"
+    },
+    {
+      "path": "search-left-v1-exactprompt.txt",
+      "sha256": "59979e8a7d925e037a8b1ea28f095d22895ed7c17d1d8f37a79761c3c3e2d055"
+    },
+    {
+      "path": "search-left-v1-normalized.png",
+      "sha256": "b4b3d3922a94acc52f99079a90faca64d2f2b8897baa32c00a84afeaf0f57e94"
+    },
+    {
+      "path": "search-left-v1-provenance.json",
+      "sha256": "9bc4bd5f01012477bdcefa7508d7b12cc45414ba26c3ca8ea5d466bb907364db"
+    },
+    {
+      "path": "search-left-v1-raw.png",
+      "sha256": "61c6a80c51fdce8bff1b2fdb6710bcea5fe6065b81629addb609a7df432413f3"
+    },
+    {
+      "path": "search-normal-timing-v2.gif",
+      "sha256": "5333a8f85c10f952a3256fde1ac95a424ecb375faa2522ac518f9c441b65efed"
+    },
+    {
+      "path": "search-right-middle-v1-candidate.png",
+      "sha256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5"
+    },
+    {
+      "path": "search-right-middle-v1-clean-native.png",
+      "sha256": "d54ae5da04b75ab3fab4be211ca081e7fdeea86f8ddc4eb3b9f0e5dd7b900df7"
+    },
+    {
+      "path": "search-right-middle-v1-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a"
+    },
+    {
+      "path": "search-right-middle-v1-exactprompt.txt",
+      "sha256": "5c726afd4f638dc557708ad69768f2442b633cacbb8a14c4afed90af47abbb39"
+    },
+    {
+      "path": "search-right-middle-v1-normalized.png",
+      "sha256": "adb3f3c0d82f7c1cee57121fb3391a73e8f87d906c9c7faf35d690e554d81016"
+    },
+    {
+      "path": "search-right-middle-v1-provenance.json",
+      "sha256": "e7eab4aa64bb3ad1d1044a60714e6b5082494b5de2db3d42cc6f42600122f646"
+    },
+    {
+      "path": "search-right-middle-v1-raw.png",
+      "sha256": "60299546304603c5d8adf96f43cffb460936d6c996b7a67109dfffb24062012e"
+    },
+    {
+      "path": "search-right-v1-candidate.png",
+      "sha256": "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852"
+    },
+    {
+      "path": "search-right-v1-clean-native.png",
+      "sha256": "442faaa05db011234786cccfbce0cf23139cf50ee0ad33e133a57abe2706dec4"
+    },
+    {
+      "path": "search-right-v1-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a"
+    },
+    {
+      "path": "search-right-v1-exactprompt.txt",
+      "sha256": "50d1ea3b7ac09d38bcf181c2b8c6e74c6e46d32d2e79fe61403eb93b8b875fad"
+    },
+    {
+      "path": "search-right-v1-normalized.png",
+      "sha256": "b860b9272e635f7b6ee331827f4ade0937a7d7810eccee0f3c3cf1eb2da6155b"
+    },
+    {
+      "path": "search-right-v1-provenance.json",
+      "sha256": "bdf723fd2a562b742c127972c2628073245174ddd167fe1093b3c804c80cb567"
+    },
+    {
+      "path": "search-right-v1-raw.png",
+      "sha256": "2a8769aaef1371c8815a9d19303a758023022336ab0faada9edb33ca05581b61"
+    },
+    {
+      "path": "search-timing-v2.json",
+      "sha256": "739e659d159a9219e755960722d0b0da385f2a76d012144f3bf5b45b16ae0240"
+    },
+    {
+      "path": "shared/open-screen-read-v2.png",
+      "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+    },
+    {
+      "path": "shared/source-manifest.json",
+      "sha256": "6fe75efc61c7bde3ca0d63a5581db60d9cd72fd1cf754b3c280c4058992b4063"
+    },
+    {
+      "path": "shared/upright-open-neutral-v2.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+    },
+    {
+      "path": "verify_portable.py",
+      "sha256": "22c783b4fbe634ebefca65a38f96340158c8436b8bdf7d7aea633addfc795d06"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# Reading / search authored source closure
+
+Internal `varin-upright-v2` source candidates, integration review pending. These are not final runtime acceptance. This directory is self-contained: two frozen shared PNG copies, original imagegen raw/prompt pairs, edge cleanup and registered-region masks, 10 candidate drawings, timing/cue studies, provenance, and one rejected intermediate. The original workspace artifacts remain unchanged.
+
+Rebuild: `python process_poses.py` (Python + Pillow + NumPy + SciPy). The script uses only paths relative to its own directory. It resizes the complete raw viewport to 512, cleans only generated edge contamination, and preserves canonical pixels outside authored motion masks. It does not rotate heads, warp bodies, fit a bounding box, or synthesize motion inbetweens. `verify_portable.py` rebuilds a separate copy and checks candidate PNG bytes/RGBA pixels, masks and timing hashes.
+
+`runtime-handoff.json` records actual open-user/open-screen entry/exit, authored exposure cues, hold points and frame-index recovery paths. Runtime phase and scene cue are distinct. A recovery path begins with the current actual drawing; its final frame is a canonical endpoint. No route enters legacy tilted-head geometry. This source group does not consume any closed-lid endpoint.
+
+Known visual limits: head-volume/age and full playback still require integrated review; hand contacts are sparse authored cels, not final smooth motion. The generator used character-right/image-left for the hand gestures despite the prompt side, intentionally documented in provenance. Fingers point at the palmrest/keyboard region; the artwork does not establish a separately visible trackpad. The first attempted reading intermediate had excessive pitch and is explicitly rejected. Shared neutral blink cannot be pasted on leaned/yawed head geometry.
