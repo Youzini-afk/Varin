@@ -1,0 +1,223 @@
+{
+  "commonMask": "../references/canonical-stool-removal-mask-v5.png",
+  "donor": "../references/secure-no-stool-clean-donor-v1.png",
+  "pathBase": "manifest directory",
+  "records": {
+    "arrival-chest": {
+      "cleanPatch": "arrival-chest-clean-tail-patch.png",
+      "extraRemoval": "arrival-chest-extra-removal.png",
+      "finalPatchMask": "arrival-chest-patch-mask.png",
+      "foregroundExclusion": "arrival-chest-foreground-exclusion.png",
+      "localDonorOffset": [
+        5,
+        0
+      ],
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "source": "../poses/arrival-chest.png",
+      "sourceSHA256": "c473fb86d418aa2c285a353952f0eea37eaa6e9336ec9c3f3f4a87d32b17910b",
+      "tracedEdge": [
+        [
+          374,
+          332
+        ],
+        [
+          377,
+          337
+        ],
+        [
+          380,
+          343
+        ],
+        [
+          383,
+          349
+        ],
+        [
+          386,
+          355
+        ],
+        [
+          389,
+          361
+        ],
+        [
+          389,
+          365
+        ]
+      ]
+    },
+    "error-locate": {
+      "cleanPatch": "error-locate-clean-tail-patch.png",
+      "extraRemoval": "error-locate-extra-removal.png",
+      "finalPatchMask": "error-locate-patch-mask.png",
+      "foregroundExclusion": "error-locate-foreground-exclusion.png",
+      "localDonorOffset": [
+        5,
+        0
+      ],
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "source": "../poses/error-locate.png",
+      "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8",
+      "tracedEdge": [
+        [
+          374,
+          332
+        ],
+        [
+          377,
+          337
+        ],
+        [
+          380,
+          343
+        ],
+        [
+          383,
+          349
+        ],
+        [
+          386,
+          355
+        ],
+        [
+          389,
+          361
+        ],
+        [
+          389,
+          365
+        ]
+      ]
+    },
+    "error-observe": {
+      "cleanPatch": "error-observe-clean-tail-patch.png",
+      "extraRemoval": "error-observe-extra-removal.png",
+      "finalPatchMask": "error-observe-patch-mask.png",
+      "foregroundExclusion": "error-observe-foreground-exclusion.png",
+      "localDonorOffset": [
+        5,
+        0
+      ],
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "source": "../poses/error-observe.png",
+      "sourceSHA256": "786f8e34e679920179ee9099783ed098a9725d2ca43d1e4199147457ba4b15ab",
+      "tracedEdge": [
+        [
+          374,
+          332
+        ],
+        [
+          377,
+          337
+        ],
+        [
+          380,
+          343
+        ],
+        [
+          383,
+          349
+        ],
+        [
+          386,
+          355
+        ],
+        [
+          389,
+          361
+        ],
+        [
+          389,
+          365
+        ]
+      ]
+    },
+    "explain-content": {
+      "cleanPatch": "explain-content-clean-tail-patch.png",
+      "extraRemoval": "explain-content-extra-removal.png",
+      "finalPatchMask": "explain-content-patch-mask.png",
+      "foregroundExclusion": "explain-content-foreground-exclusion.png",
+      "localDonorOffset": [
+        5,
+        0
+      ],
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "source": "../poses/explain-content.png",
+      "sourceSHA256": "1a47069a7abb4aa5569ef8cea1221b6db223e0e3149b148f5821749d7fa897a7",
+      "tracedEdge": [
+        [
+          369,
+          332
+        ],
+        [
+          374,
+          338
+        ],
+        [
+          378,
+          344
+        ],
+        [
+          382,
+          350
+        ],
+        [
+          386,
+          356
+        ],
+        [
+          389,
+          362
+        ],
+        [
+          389,
+          365
+        ]
+      ]
+    },
+    "explain-rise": {
+      "cleanPatch": "explain-rise-clean-tail-patch.png",
+      "extraRemoval": "explain-rise-extra-removal.png",
+      "finalPatchMask": "explain-rise-patch-mask.png",
+      "foregroundExclusion": "explain-rise-foreground-exclusion.png",
+      "localDonorOffset": [
+        5,
+        0
+      ],
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "source": "../poses/explain-rise.png",
+      "sourceSHA256": "383a27e56d671bf7e965611dc310266c5ba64db0f3fd68628f7f34204d9235ef",
+      "tracedEdge": [
+        [
+          369,
+          332
+        ],
+        [
+          374,
+          338
+        ],
+        [
+          378,
+          344
+        ],
+        [
+          382,
+          350
+        ],
+        [
+          386,
+          356
+        ],
+        [
+          389,
+          362
+        ],
+        [
+          389,
+          365
+        ]
+      ]
+    }
+  },
+  "status": "author checked narrow new-source foreground and seat-wedge cleanup, no frozen source modification"
+}

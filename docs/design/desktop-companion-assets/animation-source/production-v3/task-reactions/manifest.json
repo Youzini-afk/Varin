@@ -1,0 +1,1537 @@
+{
+  "actions": {
+    "accept-closed": {
+      "endpoint": "upright-v2:closed-rest",
+      "facts": [
+        "C02 accepted while mechanically closed"
+      ],
+      "frames": [
+        {
+          "cue": "ADDRESS",
+          "durationMs": 100,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+        },
+        {
+          "cue": "RECEIVED",
+          "durationMs": 240,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/closed-smile.png",
+          "sourceSHA256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811"
+        },
+        {
+          "cue": "REST",
+          "durationMs": 150,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+        }
+      ],
+      "meaning": "honest reuse of existing small smile only; no new body action claimed, no forced opening",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "finiteEvent": true,
+        "shortEventWithdrawBySourceSHA": true
+      },
+      "publicAction": "accept",
+      "safeExposureIndexes": [
+        2
+      ],
+      "wholeSequenceLoop": false
+    },
+    "accept-open": {
+      "endpoint": "upright-v2:open-user",
+      "facts": [
+        "C02 accepted",
+        "C03 preparing attention only"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 100,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "ADDRESS",
+          "durationMs": 140,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        },
+        {
+          "cue": "LIFT",
+          "durationMs": 130,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "cue": "RECEIVED",
+          "durationMs": 420,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "poses/arrival-chest.png",
+          "sourceSHA256": "c473fb86d418aa2c285a353952f0eea37eaa6e9336ec9c3f3f4a87d32b17910b"
+        },
+        {
+          "cue": "LOWER",
+          "durationMs": 150,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "cue": "REST",
+          "durationMs": 140,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ],
+      "meaning": "received event/attention, not parsed or understood unless independently evidenced",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "finiteEvent": true,
+        "shortEventWithdrawBySourceSHA": true
+      },
+      "publicAction": "accept",
+      "safeExposureIndexes": [
+        5
+      ],
+      "wholeSequenceLoop": false
+    },
+    "cancel-settling": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "E02 cancellation requested, NOT executor-stopped"
+      ],
+      "frames": [
+        {
+          "cue": "CANCEL_REQUESTED",
+          "durationMs": 220,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "honest shared neutral observation body plus independent semantic cue; no fake nod",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [],
+        "exitByActualSourceRecovery": true,
+        "holdIndexes": [
+          0
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          0
+        ],
+        "repeatCueRequires": "real state update only"
+      },
+      "safeExposureIndexes": [
+        0
+      ],
+      "wholeSequenceLoop": false
+    },
+    "checking": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "T07 actual verify/check operation"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "VERIFY_SCAN",
+          "durationMs": 600,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/error-locate.png",
+          "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8"
+        },
+        {
+          "cue": "OBSERVE_REST",
+          "durationMs": 300,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "shared actual issue-location/observation body, distinct external cue; no fabricated new animation per label",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1
+        ],
+        "exitByActualSourceRecovery": true,
+        "holdBlink": {
+          "closed": "references/listen-rest-closed.png",
+          "exposureMs": [
+            45,
+            75,
+            45
+          ],
+          "half": "references/listen-rest-half.png",
+          "intervalMs": [
+            4500,
+            7000
+          ],
+          "open": "references/listen-rest.png"
+        },
+        "holdIndexes": [
+          2
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          2
+        ],
+        "repeatCueRequires": "new real scoped progress/stage event; no one-second re-point timer"
+      },
+      "safeExposureIndexes": [
+        2
+      ],
+      "wholeSequenceLoop": false
+    },
+    "completion": {
+      "endpoint": "upright-v2:open-user",
+      "facts": [
+        "actual successful completion receipt, deduplicate receipt ID"
+      ],
+      "frames": [
+        {
+          "cue": "ADDRESS",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        },
+        {
+          "cue": "LIFT",
+          "durationMs": 130,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-mid.png",
+          "sourceSHA256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2"
+        },
+        {
+          "cue": "COMPLETION_ACK",
+          "durationMs": 280,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-peak.png",
+          "sourceSHA256": "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15"
+        },
+        {
+          "cue": "LOWER",
+          "durationMs": 150,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/open-mid.png",
+          "sourceSHA256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2"
+        },
+        {
+          "cue": "SOFT_SMILE",
+          "durationMs": 220,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/open-smile.png",
+          "sourceSHA256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc"
+        },
+        {
+          "cue": "REST",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ],
+      "meaning": "bounded honest reuse of reviewed v2 wave; no new source claimed",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "finiteEvent": true,
+        "shortEventWithdrawBySourceSHA": true
+      },
+      "safeExposureIndexes": [
+        5
+      ],
+      "wholeSequenceLoop": false
+    },
+    "disconnected": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "E04 actual health unknown/disconnected"
+      ],
+      "frames": [
+        {
+          "cue": "CONNECTION_UNKNOWN",
+          "durationMs": 220,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "honest shared neutral observation body plus independent semantic cue; no fake nod",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [],
+        "exitByActualSourceRecovery": true,
+        "holdIndexes": [
+          0
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          0
+        ],
+        "repeatCueRequires": "real state update only"
+      },
+      "safeExposureIndexes": [
+        0
+      ],
+      "wholeSequenceLoop": false
+    },
+    "execution-observe": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "actual execution remains active"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "EXECUTION_OBSERVE",
+          "durationMs": 600,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/error-locate.png",
+          "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8"
+        },
+        {
+          "cue": "OBSERVE_REST",
+          "durationMs": 300,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "shared actual issue-location/observation body, distinct external cue; no fabricated new animation per label",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1
+        ],
+        "exitByActualSourceRecovery": true,
+        "holdBlink": {
+          "closed": "references/listen-rest-closed.png",
+          "exposureMs": [
+            45,
+            75,
+            45
+          ],
+          "half": "references/listen-rest-half.png",
+          "intervalMs": [
+            4500,
+            7000
+          ],
+          "open": "references/listen-rest.png"
+        },
+        "holdIndexes": [
+          2
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          2
+        ],
+        "repeatCueRequires": "new real scoped progress/stage event; no one-second re-point timer"
+      },
+      "safeExposureIndexes": [
+        2
+      ],
+      "wholeSequenceLoop": false
+    },
+    "external-wait": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "actual external dependency pending"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "EXTERNAL_WAIT",
+          "durationMs": 600,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/error-locate.png",
+          "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8"
+        },
+        {
+          "cue": "OBSERVE_REST",
+          "durationMs": 300,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "shared actual issue-location/observation body, distinct external cue; no fabricated new animation per label",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1
+        ],
+        "exitByActualSourceRecovery": true,
+        "holdBlink": {
+          "closed": "references/listen-rest-closed.png",
+          "exposureMs": [
+            45,
+            75,
+            45
+          ],
+          "half": "references/listen-rest-half.png",
+          "intervalMs": [
+            4500,
+            7000
+          ],
+          "open": "references/listen-rest.png"
+        },
+        "holdIndexes": [
+          2
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          2
+        ],
+        "repeatCueRequires": "new real scoped progress/stage event; no one-second re-point timer"
+      },
+      "safeExposureIndexes": [
+        2
+      ],
+      "wholeSequenceLoop": false
+    },
+    "failure": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "E01 actual failed receipt"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 100,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "NOTICE_ISSUE",
+          "durationMs": 440,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "poses/error-observe.png",
+          "sourceSHA256": "786f8e34e679920179ee9099783ed098a9725d2ca43d1e4199147457ba4b15ab"
+        },
+        {
+          "cue": "LOCATE",
+          "durationMs": 650,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "poses/error-locate.png",
+          "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8"
+        },
+        {
+          "cue": "NEUTRAL_REST",
+          "durationMs": 200,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "meaning": "mild concern then locating issue; not anger, blame, success or automatic retry",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1,
+          2
+        ],
+        "exitByActualSourceRecovery": true,
+        "holdIndexes": [
+          3
+        ],
+        "holdLoopWhileFact": false,
+        "pauseSafeHoldIndexes": [
+          3
+        ],
+        "repeatCueRequires": "new distinct failed receipt only"
+      },
+      "safeExposureIndexes": [
+        3
+      ],
+      "wholeSequenceLoop": false
+    },
+    "organizing": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "T06 actual organize operation"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "ORGANIZE_ALIGN",
+          "durationMs": 600,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/error-locate.png",
+          "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8"
+        },
+        {
+          "cue": "OBSERVE_REST",
+          "durationMs": 300,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "shared actual issue-location/observation body, distinct external cue; no fabricated new animation per label",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1
+        ],
+        "exitByActualSourceRecovery": true,
+        "holdBlink": {
+          "closed": "references/listen-rest-closed.png",
+          "exposureMs": [
+            45,
+            75,
+            45
+          ],
+          "half": "references/listen-rest-half.png",
+          "intervalMs": [
+            4500,
+            7000
+          ],
+          "open": "references/listen-rest.png"
+        },
+        "holdIndexes": [
+          2
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          2
+        ],
+        "repeatCueRequires": "new real scoped progress/stage event; no one-second re-point timer"
+      },
+      "safeExposureIndexes": [
+        2
+      ],
+      "wholeSequenceLoop": false
+    },
+    "output": {
+      "endpoint": "upright-v2:open-screen",
+      "facts": [
+        "C05 actual text_delta/output activity"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 100,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "LIFT",
+          "durationMs": 120,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "cue": "CONTENT_PREP",
+          "durationMs": 140,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "poses/explain-rise.png",
+          "sourceSHA256": "383a27e56d671bf7e965611dc310266c5ba64db0f3fd68628f7f34204d9235ef"
+        },
+        {
+          "cue": "EXPLAIN",
+          "durationMs": 430,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "poses/explain-content.png",
+          "sourceSHA256": "1a47069a7abb4aa5569ef8cea1221b6db223e0e3149b148f5821749d7fa897a7"
+        },
+        {
+          "cue": "CONTENT_SETTLE",
+          "durationMs": 180,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "poses/explain-rise.png",
+          "sourceSHA256": "383a27e56d671bf7e965611dc310266c5ba64db0f3fd68628f7f34204d9235ef"
+        },
+        {
+          "cue": "LOWER",
+          "durationMs": 120,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "cue": "SCREEN",
+          "durationMs": 180,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        }
+      ],
+      "meaning": "content-directed explanation; bounded gesture, mouth not held open indefinitely; debounce chunk stream",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1,
+          2
+        ],
+        "exitIndexes": [
+          5,
+          6
+        ],
+        "holdIndexes": [
+          4
+        ],
+        "holdMeaning": "closed-mouth content pointer between real output beats, never hold speaking mouth open",
+        "onRealProgressBeatIndexes": [
+          3,
+          4
+        ],
+        "pauseSafeHoldIndexes": [
+          4
+        ],
+        "repeatBeatRequires": "actual text_delta/output progress, debounce >=1200ms; no timed fake speech"
+      },
+      "safeExposureIndexes": [
+        6
+      ],
+      "wholeSequenceLoop": false
+    },
+    "prepare": {
+      "endpoint": "upright-v2:open-screen",
+      "facts": [
+        "C03 preparing"
+      ],
+      "frames": [
+        {
+          "cue": "ADDRESS",
+          "durationMs": 120,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        },
+        {
+          "cue": "READY",
+          "durationMs": 240,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/type-prepare.png",
+          "sourceSHA256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b"
+        },
+        {
+          "cue": "SCREEN",
+          "durationMs": 180,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        }
+      ],
+      "meaning": "existing true typing preparation reused, not new source",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "finiteEvent": true,
+        "shortEventWithdrawBySourceSHA": true
+      },
+      "safeExposureIndexes": [
+        2
+      ],
+      "wholeSequenceLoop": false
+    },
+    "queued": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "actual queued status"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "QUEUED",
+          "durationMs": 600,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/error-locate.png",
+          "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8"
+        },
+        {
+          "cue": "OBSERVE_REST",
+          "durationMs": 300,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "shared actual issue-location/observation body, distinct external cue; no fabricated new animation per label",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1
+        ],
+        "exitByActualSourceRecovery": true,
+        "holdBlink": {
+          "closed": "references/listen-rest-closed.png",
+          "exposureMs": [
+            45,
+            75,
+            45
+          ],
+          "half": "references/listen-rest-half.png",
+          "intervalMs": [
+            4500,
+            7000
+          ],
+          "open": "references/listen-rest.png"
+        },
+        "holdIndexes": [
+          2
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          2
+        ],
+        "repeatCueRequires": "new real scoped progress/stage event; no one-second re-point timer"
+      },
+      "safeExposureIndexes": [
+        2
+      ],
+      "wholeSequenceLoop": false
+    },
+    "reconnecting": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "E05 actual reconnect/sync pending, NOT completed"
+      ],
+      "frames": [
+        {
+          "cue": "SYNC_PENDING",
+          "durationMs": 220,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "honest shared neutral observation body plus independent semantic cue; no fake nod",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [],
+        "exitByActualSourceRecovery": true,
+        "holdIndexes": [
+          0
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          0
+        ],
+        "repeatCueRequires": "real state update only"
+      },
+      "safeExposureIndexes": [
+        0
+      ],
+      "wholeSequenceLoop": false
+    },
+    "retry-wait": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "W05 retry_scheduled; never guessed success"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "RETRY_BACKOFF",
+          "durationMs": 600,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/error-locate.png",
+          "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8"
+        },
+        {
+          "cue": "OBSERVE_REST",
+          "durationMs": 300,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "shared actual issue-location/observation body, distinct external cue; no fabricated new animation per label",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1
+        ],
+        "exitByActualSourceRecovery": true,
+        "holdBlink": {
+          "closed": "references/listen-rest-closed.png",
+          "exposureMs": [
+            45,
+            75,
+            45
+          ],
+          "half": "references/listen-rest-half.png",
+          "intervalMs": [
+            4500,
+            7000
+          ],
+          "open": "references/listen-rest.png"
+        },
+        "holdIndexes": [
+          2
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          2
+        ],
+        "repeatCueRequires": "new real scoped progress/stage event; no one-second re-point timer"
+      },
+      "safeExposureIndexes": [
+        2
+      ],
+      "wholeSequenceLoop": false
+    },
+    "think": {
+      "endpoint": "upright-v2:open-screen",
+      "facts": [
+        "C04 generating/thinking actual scoped contract"
+      ],
+      "frames": [
+        {
+          "cue": "READ",
+          "durationMs": 200,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "cue": "THINK_RISE",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "enter",
+          "source": "poses/thought-rise.png",
+          "sourceSHA256": "e3a0b1348a3994a9cff5e669f73757772ac3c6d74386ec74561d8c883f1f7d09"
+        },
+        {
+          "cue": "CONSIDER",
+          "durationMs": 4400,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/thought-chin.png",
+          "sourceSHA256": "7aa3b640cf56e6ed1312062d501dca6583dfaa2ed295c56ecf224827a2d64d6a"
+        },
+        {
+          "cue": "THOUGHT_BLINK",
+          "durationMs": 75,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/thought-blink.png",
+          "sourceSHA256": "7eceaf9172c0fb1780caff1654c20046bb49608c5e7ef1c5f7051a1df38258e6"
+        },
+        {
+          "cue": "CONSIDER",
+          "durationMs": 2300,
+          "pauseSafe": false,
+          "phase": "hold",
+          "source": "poses/thought-chin.png",
+          "sourceSHA256": "7aa3b640cf56e6ed1312062d501dca6583dfaa2ed295c56ecf224827a2d64d6a"
+        },
+        {
+          "cue": "LOWER",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "poses/thought-rise.png",
+          "sourceSHA256": "e3a0b1348a3994a9cff5e669f73757772ac3c6d74386ec74561d8c883f1f7d09"
+        },
+        {
+          "cue": "THINK_SCREEN",
+          "durationMs": 3600,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/open-screen-read-v2.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        }
+      ],
+      "loopWhileFactTrue": false,
+      "meaning": "short thoughtful excursion, never perpetual chin hold or side tilt",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [
+          0,
+          1
+        ],
+        "exitIndexes": [
+          5,
+          6
+        ],
+        "holdIndexes": [
+          2,
+          3,
+          4
+        ],
+        "holdLoopWhileFact": true,
+        "holdMeaning": "same upright thoughtful body with one sparse matching-head blink per 6775ms; never replay hand lift/lower loop",
+        "pauseSafeHoldIndexes": [
+          2,
+          4
+        ]
+      },
+      "safeExposureIndexes": [
+        6
+      ],
+      "wholeSequenceLoop": false
+    },
+    "unknown-effect-check": {
+      "endpoint": "upright-v2:listen",
+      "facts": [
+        "E06 operation effect unknown, NOT rollback/success"
+      ],
+      "frames": [
+        {
+          "cue": "EFFECT_UNKNOWN",
+          "durationMs": 220,
+          "pauseSafe": true,
+          "phase": "hold",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        }
+      ],
+      "holdRequiresFact": true,
+      "meaning": "honest shared neutral observation body plus independent semantic cue; no fake nod",
+      "ordinaryExit": "ordinaryRecoveryBySourceSHA for actual last rendered source, never receipt replay",
+      "phaseContract": {
+        "enterIndexes": [],
+        "exitByActualSourceRecovery": true,
+        "holdIndexes": [
+          0
+        ],
+        "holdLoopWhileFact": true,
+        "pauseSafeHoldIndexes": [
+          0
+        ],
+        "repeatCueRequires": "real state update only"
+      },
+      "safeExposureIndexes": [
+        0
+      ],
+      "wholeSequenceLoop": false
+    }
+  },
+  "assets": {
+    "arrival-chest": {
+      "editMask": "masks/arrival-chest.png",
+      "notForegroundMask": true,
+      "note": "new genuinely drawn arm/anatomy; fixed nonchanging regions restored from neutral; no puppet rotation",
+      "prompt": "prompts/arrival-chest.txt",
+      "raw": "raw/arrival-chest.png",
+      "rawSHA256": "2c05a38e67b8c7f5e892f48bad13bacb6c5c62094074f76cbe6908da129cafc8",
+      "reference": "references/upright-open-neutral-v2.png",
+      "referenceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "source": "poses/arrival-chest.png",
+      "sourceSHA256": "c473fb86d418aa2c285a353952f0eea37eaa6e9336ec9c3f3f4a87d32b17910b"
+    },
+    "error-locate": {
+      "calmFaceReuse": {
+        "mask": "masks/error-locate-calm-face.png",
+        "reason": "raw frown rejected; exact gentle read face reused honestly while new hand still locates issue",
+        "source": "references/open-screen-read-v2.png",
+        "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+      },
+      "editMask": "masks/error-locate.png",
+      "notForegroundMask": true,
+      "note": "new genuinely drawn arm/anatomy; fixed nonchanging regions restored from neutral; no puppet rotation",
+      "prompt": "prompts/error-locate.txt",
+      "raw": "raw/error-locate.png",
+      "rawSHA256": "53aa5698129b36a69fc34ef79b3ea73cd93573f0c29f0ef49d7ae7573cad109b",
+      "reference": "raw/error-observe.png",
+      "referenceSHA256": "68ff2f28771ea2819b9c894bb84b47021faa2ffef96fa8bb51c4142f141a83ac",
+      "source": "poses/error-locate.png",
+      "sourceSHA256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8"
+    },
+    "error-observe": {
+      "editMask": "masks/error-observe.png",
+      "notForegroundMask": true,
+      "note": "new genuinely drawn arm/anatomy; fixed nonchanging regions restored from neutral; no puppet rotation",
+      "prompt": "prompts/error-observe.txt",
+      "raw": "raw/error-observe.png",
+      "rawSHA256": "68ff2f28771ea2819b9c894bb84b47021faa2ffef96fa8bb51c4142f141a83ac",
+      "reference": "references/upright-open-neutral-v2.png",
+      "referenceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "source": "poses/error-observe.png",
+      "sourceSHA256": "786f8e34e679920179ee9099783ed098a9725d2ca43d1e4199147457ba4b15ab"
+    },
+    "explain-content": {
+      "editMask": "masks/explain-content.png",
+      "notForegroundMask": true,
+      "note": "new genuinely drawn arm/anatomy; fixed nonchanging regions restored from neutral; no puppet rotation",
+      "prompt": "prompts/explain-content.txt",
+      "raw": "raw/explain-content.png",
+      "rawSHA256": "00275966f4b9c598e6fc240dbb9a731f869d3d4b4a75057515a38517626d37e6",
+      "reference": "references/upright-open-neutral-v2.png",
+      "referenceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "source": "poses/explain-content.png",
+      "sourceSHA256": "1a47069a7abb4aa5569ef8cea1221b6db223e0e3149b148f5821749d7fa897a7"
+    },
+    "explain-rise": {
+      "editMask": "masks/explain-rise.png",
+      "notForegroundMask": true,
+      "note": "new genuinely drawn arm/anatomy; fixed nonchanging regions restored from neutral; no puppet rotation",
+      "prompt": "prompts/explain-rise.txt",
+      "raw": "raw/explain-rise.png",
+      "rawSHA256": "e5eb302f3e6ad31d853084a0b5eec1c0e8136d906fd4f72cdb65ea08af52b852",
+      "reference": "raw/explain-content.png",
+      "referenceSHA256": "00275966f4b9c598e6fc240dbb9a731f869d3d4b4a75057515a38517626d37e6",
+      "source": "poses/explain-rise.png",
+      "sourceSHA256": "383a27e56d671bf7e965611dc310266c5ba64db0f3fd68628f7f34204d9235ef"
+    },
+    "thought-blink": {
+      "editMask": "masks/thought-blink.png",
+      "notForegroundMask": true,
+      "note": "new genuinely drawn arm/anatomy; fixed nonchanging regions restored from neutral; no puppet rotation",
+      "prompt": "prompts/thought-blink.txt",
+      "raw": "raw/thought-blink.png",
+      "rawSHA256": "19144d5a5eabe0290c0630b8e1017fbbe1c984f73a887fff6ba95155c8a6d06b",
+      "reference": "raw/thought-chin.png",
+      "referenceSHA256": "356f3b7faf27e0e8f115427ce7ba85274f42455b778799cdd4d4b00eeae1a51c",
+      "source": "poses/thought-blink.png",
+      "sourceSHA256": "7eceaf9172c0fb1780caff1654c20046bb49608c5e7ef1c5f7051a1df38258e6"
+    },
+    "thought-chin": {
+      "editMask": "masks/thought-chin.png",
+      "notForegroundMask": true,
+      "note": "new genuinely drawn arm/anatomy; fixed nonchanging regions restored from neutral; no puppet rotation",
+      "prompt": "prompts/thought-chin.txt",
+      "raw": "raw/thought-chin.png",
+      "rawSHA256": "356f3b7faf27e0e8f115427ce7ba85274f42455b778799cdd4d4b00eeae1a51c",
+      "reference": "references/upright-open-neutral-v2.png",
+      "referenceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "source": "poses/thought-chin.png",
+      "sourceSHA256": "7aa3b640cf56e6ed1312062d501dca6583dfaa2ed295c56ecf224827a2d64d6a"
+    },
+    "thought-rise": {
+      "editMask": "masks/thought-rise.png",
+      "notForegroundMask": true,
+      "note": "new genuinely drawn arm/anatomy; fixed nonchanging regions restored from neutral; no puppet rotation",
+      "prompt": "prompts/thought-rise.txt",
+      "raw": "raw/thought-rise.png",
+      "rawSHA256": "79a3de8fc79f4c284f57770179da0b6139a0143ae49010c8f54101b4777bb26a",
+      "reference": "raw/thought-chin.png",
+      "referenceSHA256": "356f3b7faf27e0e8f115427ce7ba85274f42455b778799cdd4d4b00eeae1a51c",
+      "source": "poses/thought-rise.png",
+      "sourceSHA256": "e3a0b1348a3994a9cff5e669f73757772ac3c6d74386ec74561d8c883f1f7d09"
+    }
+  },
+  "authorizationBoundary": "no gesture authorizes tools, dismisses permission, or creates answer/completion receipt",
+  "canvas": [
+    512,
+    512
+  ],
+  "generator": "built-in image_gen",
+  "noStool": "new sourceSHA needs actual derivative registry; never map by semantic action name alone",
+  "ordinaryRecoveryBySourceSHA": {
+    "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/listen-rest.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "1a47069a7abb4aa5569ef8cea1221b6db223e0e3149b148f5821749d7fa897a7": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "poses/explain-content.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "poses/explain-rise.png",
+          "sourceSHA256": "383a27e56d671bf7e965611dc310266c5ba64db0f3fd68628f7f34204d9235ef"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/type-prepare.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "383a27e56d671bf7e965611dc310266c5ba64db0f3fd68628f7f34204d9235ef": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "poses/explain-rise.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/listen-rest-half.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 80,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/upright-open-neutral-v2.png",
+      "steps": []
+    },
+    "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811": {
+      "endpoint": "upright-v2:closed-rest",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/closed-smile.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+        }
+      ]
+    },
+    "786f8e34e679920179ee9099783ed098a9725d2ca43d1e4199147457ba4b15ab": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "poses/error-observe.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 180,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "7aa3b640cf56e6ed1312062d501dca6583dfaa2ed295c56ecf224827a2d64d6a": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "poses/thought-chin.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "poses/thought-rise.png",
+          "sourceSHA256": "e3a0b1348a3994a9cff5e669f73757772ac3c6d74386ec74561d8c883f1f7d09"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "7eceaf9172c0fb1780caff1654c20046bb49608c5e7ef1c5f7051a1df38258e6": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "poses/thought-blink.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 70,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "poses/thought-chin.png",
+          "sourceSHA256": "7aa3b640cf56e6ed1312062d501dca6583dfaa2ed295c56ecf224827a2d64d6a"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "poses/thought-rise.png",
+          "sourceSHA256": "e3a0b1348a3994a9cff5e669f73757772ac3c6d74386ec74561d8c883f1f7d09"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "poses/error-locate.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 180,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/open-mid.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/open-smile.png",
+          "sourceSHA256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb": {
+      "endpoint": "upright-v2:open-screen",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/open-screen-read-v2.png",
+      "steps": []
+    },
+    "c473fb86d418aa2c285a353952f0eea37eaa6e9336ec9c3f3f4a87d32b17910b": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "poses/arrival-chest.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 150,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb": {
+      "endpoint": "upright-v2:closed-rest",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/closed-rest-rigid-v2.png",
+      "steps": []
+    },
+    "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/listen-rest-closed.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 80,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/open-smile.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "e3a0b1348a3994a9cff5e669f73757772ac3c6d74386ec74561d8c883f1f7d09": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "poses/thought-rise.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/open-peak.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 120,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/open-mid.png",
+          "sourceSHA256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": false,
+          "phase": "exit",
+          "source": "references/open-smile.png",
+          "sourceSHA256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc"
+        },
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 140,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f": {
+      "endpoint": "upright-v2:open-user",
+      "never": "no receipt cue, nod or state transition from animation",
+      "source": "references/attend-corrected.png",
+      "steps": [
+        {
+          "cue": "NEUTRAL_RETURN",
+          "durationMs": 160,
+          "pauseSafe": true,
+          "phase": "exit",
+          "source": "references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    }
+  },
+  "pathBase": "manifest directory",
+  "references": {
+    "references/attend-corrected.png": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+    "references/canonical-stool-removal-mask-v5.png": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+    "references/closed-rest-rigid-v2.png": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+    "references/closed-smile.png": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811",
+    "references/listen-rest-closed.png": "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c",
+    "references/listen-rest-half.png": "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e",
+    "references/listen-rest.png": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+    "references/open-mid.png": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+    "references/open-peak.png": "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15",
+    "references/open-screen-read-v2.png": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+    "references/open-smile.png": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+    "references/secure-no-stool-clean-donor-v1.png": "8a79e84bf2266d7565079aaa1c957a2a160bdc33a4247d9b0976409d16a92db8",
+    "references/type-prepare.png": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+    "references/upright-open-neutral-v2.png": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+  },
+  "shortEventWithdrawal": "from actual last exposure use its sourceSHA recovery, never restart neutral or play completion tail; during source return keep clock monotonic",
+  "sourceFreeze": "v2 sources copied read-only into references; no v2 files modified",
+  "status": "parent direction approved; source/sequence integration pending; not runtime accepted",
+  "version": 3
+}

@@ -1,0 +1,76 @@
+{
+  "externalOriginsAreProvenanceOnly": "all rebuilds read bundled references, never external origin",
+  "pathBase": "module directory",
+  "references": {
+    "attend-corrected.png": {
+      "bundled": "references/attend-corrected.png",
+      "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+      "sourceOrigin": "../../production-v2/question-permission/poses/attend-corrected.png"
+    },
+    "canonical-stool-removal-mask-v5.png": {
+      "bundled": "references/canonical-stool-removal-mask-v5.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "sourceOrigin": "../../production-v2/relocation/frames/canonical-stool-removal-mask-v5.png"
+    },
+    "closed-rest-rigid-v2.png": {
+      "bundled": "references/closed-rest-rigid-v2.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "sourceOrigin": "../../production-v2/lid/frames/closed-rest-rigid-v2.png"
+    },
+    "closed-smile.png": {
+      "bundled": "references/closed-smile.png",
+      "sha256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811",
+      "sourceOrigin": "../../production-v2/question-permission/wave/closed-smile.png"
+    },
+    "listen-rest-closed.png": {
+      "bundled": "references/listen-rest-closed.png",
+      "sha256": "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c",
+      "sourceOrigin": "../../production-v2/question-permission/blink/listen-rest-closed.png"
+    },
+    "listen-rest-half.png": {
+      "bundled": "references/listen-rest-half.png",
+      "sha256": "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e",
+      "sourceOrigin": "../../production-v2/question-permission/blink/listen-rest-half.png"
+    },
+    "listen-rest.png": {
+      "bundled": "references/listen-rest.png",
+      "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+      "sourceOrigin": "../../production-v2/question-permission/poses/listen-rest.png"
+    },
+    "open-mid.png": {
+      "bundled": "references/open-mid.png",
+      "sha256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+      "sourceOrigin": "../../production-v2/question-permission/wave/open-mid.png"
+    },
+    "open-peak.png": {
+      "bundled": "references/open-peak.png",
+      "sha256": "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15",
+      "sourceOrigin": "../../production-v2/question-permission/wave/open-peak.png"
+    },
+    "open-screen-read-v2.png": {
+      "bundled": "references/open-screen-read-v2.png",
+      "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "sourceOrigin": "../../production-v2/shared/open-screen-read-v2.png"
+    },
+    "open-smile.png": {
+      "bundled": "references/open-smile.png",
+      "sha256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+      "sourceOrigin": "../../production-v2/question-permission/wave/open-smile.png"
+    },
+    "secure-no-stool-clean-donor-v1.png": {
+      "bundled": "references/secure-no-stool-clean-donor-v1.png",
+      "sha256": "8a79e84bf2266d7565079aaa1c957a2a160bdc33a4247d9b0976409d16a92db8",
+      "sourceOrigin": "../../production-v2/relocation/frames/secure-no-stool-clean-donor-v1.png"
+    },
+    "type-prepare.png": {
+      "bundled": "references/type-prepare.png",
+      "sha256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+      "sourceOrigin": "../../production-v2/editing-dispatch/frames/type-prepare.png"
+    },
+    "upright-open-neutral-v2.png": {
+      "bundled": "references/upright-open-neutral-v2.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "sourceOrigin": "../../production-v2/shared/upright-open-neutral-v2.png"
+    }
+  }
+}
