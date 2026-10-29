@@ -12,10 +12,10 @@ const PAGE_SIZE = 20; // Rendering budget, never a limit on tasks or requests.
 const buttonStyle: React.CSSProperties = { border: '1px solid #b9c8c6', borderRadius: 7, padding: '4px 7px', background: '#f2f5f4', color: '#253c3a', cursor: 'pointer' };
 
 /** This is an explicit interactive surface, never the click-through ornament window. */
-export function CompanionAttentionPanel({ attention, identity, focusTitle, onFocus, onOpenThread, onClose, onRefresh }: {
+export function CompanionAttentionPanel({ attention, identity, focusTitle, onFocus, onOpenThread, onClose, onRefresh, directorMode = false, onClearInspection }: {
   attention: CompanionAttentionView; identity: ThreadIdentity | null; focusTitle?: string;
   onFocus(identity: ThreadIdentity): void; onOpenThread(identity: ThreadIdentity): void;
-  onClose(): void; onRefresh(): void;
+  onClose(): void; onRefresh(): void; directorMode?: boolean; onClearInspection?(): void;
 }) {
   const { t } = useI18n();
   const close = useRef<HTMLButtonElement>(null);
@@ -45,7 +45,8 @@ export function CompanionAttentionPanel({ attention, identity, focusTitle, onFoc
   }} style={{ color: '#253c3a', background: '#fafcf9f5', border: '1px solid #b9c8c6', borderRadius: 12, padding: 12, fontSize: 12 }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{t('companion.attention.title')}</strong>
       <button ref={close} style={buttonStyle} onClick={onClose} aria-label={t('companion.attention.close')}>×</button></div>
-    <p>{identity ? t('companion.attention.focus', { title: focusTitle || t('companion.attention.untitled') }) : t('companion.attention.noFocus')}</p>
+    <p>{identity ? t(directorMode ? 'companion.director.inspection' : 'companion.attention.focus', { title: focusTitle || t('companion.attention.untitled') }) : t(directorMode ? 'companion.director.overview' : 'companion.attention.noFocus')}</p>
+    {directorMode && identity && onClearInspection && <button style={buttonStyle} onClick={onClearInspection}>{t('companion.director.clearInspection')}</button>}
     <p>{t('companion.attention.scope')}</p>
     {attention.health !== 'current' && <p role="status">{t(attention.health === 'unknown' ? 'companion.attention.stale' : 'companion.attention.sync')}</p>}
     <button style={buttonStyle} onClick={onRefresh} disabled={attention.refreshing}>{t('companion.attention.refresh')}</button>
@@ -65,19 +66,22 @@ export function CompanionAttentionPanel({ attention, identity, focusTitle, onFoc
             {(branch?.archived || branch?.deleted) && <small>{t('companion.attention.hidden')}</small>}
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               <button style={buttonStyle} onClick={() => open(item)}>{t('companion.attention.open')}</button>
-              <button style={buttonStyle} disabled={same(item, identity)} onClick={() => onFocus(identityOf(item))}>{t(same(item, identity) ? 'companion.attention.current' : 'companion.attention.follow')}</button>
+              <button style={buttonStyle} disabled={same(item, identity)} onClick={() => onFocus(identityOf(item))}>{t(directorMode ? same(item, identity) ? 'companion.director.current' : 'companion.director.inspect' : same(item, identity) ? 'companion.attention.current' : 'companion.attention.follow')}</button>
             </div>
             {ledger.current.isViewed(item.key) && <small>{t('companion.attention.viewed')}</small>}
           </li>;
         })}</ul>{pageControls(index, rows.length)}
       </section>)}
-      <details><summary>{t('companion.attention.overview')}</summary><ul style={{ listStyle: 'none', padding: 0 }}>
+      <details><summary>{t(directorMode ? 'companion.director.projects' : 'companion.attention.overview')}</summary><ul style={{ listStyle: 'none', padding: 0 }}>
         {pageRows(snapshot.branches, 2).map(branch => <li key={JSON.stringify([branch.threadId, branch.branchId])} style={{ padding: '7px 0', borderTop: '1px solid #dce5df' }}>
           <strong style={{ overflowWrap: 'anywhere' }}>{branch.title || t('companion.attention.untitled')}</strong><br/><small style={{ overflowWrap: 'anywhere' }}>{branch.branchId}</small>
           <p>{branch.hasUnsettledWork ? t('companion.attention.workContinues') : branch.latestRun?.state === 'completed' ? t('companion.attention.turnCompleted')
             : branch.currentRun ? t('companion.attention.running', { state: branch.currentRun.state }) : t('companion.attention.noActiveRun')}</p>
+          {directorMode && <p>{items.filter(item => same(item, branch)).length
+            ? [...new Set(items.filter(item => same(item, branch)).map(item => t(kindKey(item.kind))))].join(' · ')
+            : t('companion.director.noProjectNotices')}</p>}
           <button style={buttonStyle} onClick={() => onOpenThread(identityOf(branch))}>{t('companion.attention.open')}</button>{' '}
-          <button style={buttonStyle} disabled={same(branch, identity)} onClick={() => onFocus(identityOf(branch))}>{t(same(branch, identity) ? 'companion.attention.current' : 'companion.attention.follow')}</button>
+          <button style={buttonStyle} disabled={same(branch, identity)} onClick={() => onFocus(identityOf(branch))}>{t(directorMode ? same(branch, identity) ? 'companion.director.current' : 'companion.director.inspect' : same(branch, identity) ? 'companion.attention.current' : 'companion.attention.follow')}</button>
         </li>)}
       </ul>{pageControls(2, snapshot.branches.length)}</details>
     </>}
@@ -85,8 +89,8 @@ export function CompanionAttentionPanel({ attention, identity, focusTitle, onFoc
 }
 
 /** Small readable cue. No global idle/completion claim; no per-token live announcements. */
-export function CompanionAttentionSummary({ attention, focusTitle, focused, focusStatus, onInspect }: {
-  attention: CompanionAttentionView; focusTitle?: string; focused: boolean; focusStatus: string; onInspect(): void;
+export function CompanionAttentionSummary({ attention, focusTitle, focused, focusStatus, onInspect, directorMode = false, onClearInspection }: {
+  attention: CompanionAttentionView; focusTitle?: string; focused: boolean; focusStatus: string; onInspect(): void; directorMode?: boolean; onClearInspection?(): void;
 }) {
   const { t } = useI18n();
   const snapshot = attention.snapshot;
@@ -96,9 +100,10 @@ export function CompanionAttentionSummary({ attention, focusTitle, focused, focu
   const first = snapshot?.items.find(item => item.actionable) ?? snapshot?.items.find(item => item.kind === 'effect_unknown') ?? snapshot?.items[0];
   const branch = first && snapshot?.branches.find(row => same(row, first));
   return <div style={{ textAlign: 'center', maxWidth: '100%', fontSize: 12 }}>
-    <div title={focusTitle} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{focused ? t('companion.attention.focus', { title: focusTitle || t('companion.attention.untitled') }) : t('companion.attention.noFocus')}</div>
-    {focused && <div>{focusStatus}</div>}
+    <div title={focusTitle} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{focused ? t(directorMode ? 'companion.director.inspection' : 'companion.attention.focus', { title: focusTitle || t('companion.attention.untitled') }) : t(directorMode ? 'companion.director.overview' : 'companion.attention.noFocus')}</div>
+    {focused && <div>{directorMode ? t('companion.director.projectStatus', { status: focusStatus }) : focusStatus}</div>}
     <div role="status" aria-live="polite" aria-atomic="true">{attentionText}{first && attention.health === 'current' ? ` · ${branch?.title || t('companion.attention.untitled')}: ${t(kindKey(first.kind))}` : ''}</div>
     <button style={buttonStyle} onClick={onInspect}>{t('companion.attention.check')}</button>
+    {directorMode && focused && onClearInspection && <button style={buttonStyle} onClick={onClearInspection}>{t('companion.director.clearInspection')}</button>}
   </div>;
 }

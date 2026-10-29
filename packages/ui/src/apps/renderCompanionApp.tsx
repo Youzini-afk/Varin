@@ -1,3 +1,4 @@
+import { companionDirectorMode } from '@/components/companion/directorMode';
 import { createDirectorReviewFixtureSession, type DirectorReviewStep } from '@/components/companion/directorReviewFixtures';
 import { useCompanionDirector } from '@/components/companion/useCompanionDirector';
 import { useDirectorPortfolio } from '@/components/companion/useDirectorPortfolio';
@@ -68,6 +69,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [error, setError] = React.useState('');
   const [asset, setAsset] = React.useState<CompanionPackage>();
   const [assetList, setAssetList] = React.useState<CompanionPackage[]>([]);
+  const directorMode = companionDirectorMode(assetList, review, directorReview);
   const [imageLibrary, setImageLibrary] = React.useState<Record<string, ImageBitmap[]>>({});
   const imageCache = React.useRef<Record<string, ImageBitmap[]>>({});
   const atlasReader = React.useRef<((name: string) => Promise<ImageBitmap>) | null>(null);
@@ -158,10 +160,10 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (document.hidden) visibility();
     return () => document.removeEventListener('visibilitychange', visibility);
   }, [attention.refresh]);
-  const liveDirector = useCompanionDirector(directorReview && !fixtureActive ? attention : { ...attention, snapshot: null, health: 'unknown' }, selected?.generation === generation ? selected.identity : null, generation,
-    { visible: directorReview && !document.hidden, interacting: companionWindow.phase !== 'rest', cardCapacity: 3 });
+  const liveDirector = useCompanionDirector(directorMode && !fixtureActive ? attention : { ...attention, snapshot: null, health: 'unknown' }, selected?.generation === generation ? selected.identity : null, generation,
+    { visible: directorMode && !document.hidden, interacting: companionWindow.phase !== 'rest', cardCapacity: 3 });
   const directorDetail = directorToolDetail(snapshot, health);
-  const livePortfolio = useDirectorPortfolio(liveDirector, directorReview && !fixtureActive ? attention.snapshot : null, generation, directorReview && !fixtureActive && directorDetail ? [directorDetail] : [], { hideTaskNames });
+  const livePortfolio = useDirectorPortfolio(liveDirector, directorMode && !fixtureActive ? attention.snapshot : null, generation, directorMode && !fixtureActive && directorDetail ? [directorDetail] : [], { hideTaskNames });
   const fixtureView = fixtureActive ? fixtureSession.view({ visible: !document.hidden, interacting: companionWindow.phase !== 'rest', inspected: fixtureInspection, hideTaskNames }) : null;
   const director = fixtureView ? { ...fixtureView.presentation, consumeEdge: (key: string) => { fixtureSession.consumeEdge(key); refreshFixture(); }, discardTransient: () => { fixtureSession.discardTransient(); refreshFixture(); } } : liveDirector;
   discardDirectorTransient.current = director.discardTransient;
@@ -171,9 +173,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation)
     : stableIntent.state !== intent.state && rawScene.phase === 'active' ? { kind: null, phase: 'withdraw', outcome: null, count: null } as SceneFact : rawScene;
   const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
-  const directorLayout = useCompanionScene(canvas, sceneCurrent, directorReview ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
-    companionWindow.phase !== 'rest' || (!directorReview && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorReview || reviewRoute ? undefined : team, directorReview ? portfolioProjection.portfolio : undefined, directorReview ? directorContextKey : null);
-  const restDue = useCompanionLeisure((directorReview ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorReview || health === 'current' || health === 'unselected'), companionWindow.activityRevision);
+  const directorLayout = useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
+    companionWindow.phase !== 'rest' || (!directorMode && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorMode || reviewRoute ? undefined : team, directorMode ? portfolioProjection.portfolio : undefined, directorMode ? directorContextKey : null);
+  const restDue = useCompanionLeisure((directorMode ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorMode || health === 'current' || health === 'unselected'), companionWindow.activityRevision);
   const ordinaryDisplayAction = restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
   const seenHover = React.useRef(0);
   const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null);
@@ -181,14 +183,16 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const directorBaseAction = finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction;
   const directorLocalAction = directorLocal?.context === directorContextKey && director.health === 'current' && companionWindow.phase === 'rest' && !manualReview ? directorLocal.action : null;
   const usableAction = (action: string) => assetList.some(item => item.action === action && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate'));
-  const displayAction = directorReview ? directorLocalAction ?? (restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
+  const directorWelcome = directorMode && localAction === 'welcome' && director.health === 'current' && director.body.verb === 'available' && usableAction('welcome');
+  React.useEffect(() => { if (directorMode && director.health === 'current' && director.body.verb !== 'available') setLocalAction(null); }, [directorMode, director.health, director.body.verb]);
+  const displayAction = directorMode ? directorLocalAction ?? (directorWelcome ? 'welcome' : restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
   const localDirectorResponse = (event: 'tap' | 'hover') => {
     const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
     const decision = directorLocalResponse({ event, current: director.health === 'current', visible: !document.hidden,
       interacting: companionWindow.phase !== 'rest', blockedUI: controlsOpen || attentionOpen || manualReview,
       finiteHandover: ['director-intake', 'director-gather-present'].includes(directorBaseAction)
         || !!shown && ['director-intake', 'director-gather-present'].includes(shown.action ?? '') && (displayedDrawing.current?.exposure ?? 0) < shown.frames.length - 1,
-      closed: shown?.entryPose === 'upright-v2:closed' && shown.exitPose === 'upright-v2:closed' });
+      closed: !!shown && (shown.entryPose === 'upright-v2:closed' && shown.exitPose === 'upright-v2:closed' || ['rest-sleep', 'relax-idle'].includes(shown.action ?? '')) });
     if (!decision) return;
     // End this inspection sentence, not its project facts; do not replay LISTEN.
     if (usableAction(decision)) {
@@ -196,25 +200,25 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       setDirectorLocal({ action: decision, context: directorContextKey, event });
     }
   };
-  React.useEffect(() => { setDirectorLocal(null); }, [directorContextKey, directorReview, director.health, controlsOpen, attentionOpen, manualReview]);
+  React.useEffect(() => { setDirectorLocal(null); }, [directorContextKey, directorMode, director.health, controlsOpen, attentionOpen, manualReview]);
   React.useEffect(() => {
     if (!companionWindow.hoverRevision || seenHover.current === companionWindow.hoverRevision) return;
     seenHover.current = companionWindow.hoverRevision;
-    if (directorReview) { localDirectorResponse('hover'); return; }
+    if (directorMode) { localDirectorResponse('hover'); return; }
     const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
     // Closed-only attention must not close an open laptop merely to react to hover.
     if (localAllowed && !controlsOpen && shown && assetList.some(item => item.action === 'hover-response' && item.reviewStatus === 'accepted' && item.geometryReference === shown.geometryReference && item.entryPose === shown.entryPose && item.exitPose === shown.exitPose)) setLocalAction('hover-response');
-  }, [companionWindow.hoverRevision, localAllowed, controlsOpen, assetList, directorReview, localDirectorResponse]);
+  }, [companionWindow.hoverRevision, localAllowed, controlsOpen, assetList, directorMode, localDirectorResponse]);
   React.useEffect(() => { if (!companionWindow.hovered) { setLocalAction(current => current === 'hover-response' ? null : current); setDirectorLocal(current => current?.event === 'hover' ? null : current); } }, [companionWindow.hovered]);
   const displayedDrawing = React.useRef<{ packageId: string; exposure: number; context: string | null } | null>(null);
-  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current }, { allowCandidates: directorReview, presentationKey: directorReview ? directorContextKey : null });
+  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current }, { allowCandidates: directorReview, presentationKey: directorMode ? directorContextKey : null });
   React.useEffect(() => {
-    if (directorReview && automatic.context === directorContextKey && automatic.finished && directorRequestedAction !== 'director-supervise'
+    if (directorMode && automatic.context === directorContextKey && automatic.finished && directorRequestedAction !== 'director-supervise'
       && assetList.find(item => item.id === automatic.packageId)?.action === directorRequestedAction) {
       setFinishedDirectorSentence(directorSentenceKey);
       if (director.body.edge) director.consumeEdge(director.body.edge.key);
     }
-  }, [directorReview, automatic.finished, automatic.context, directorContextKey, automatic.packageId, directorRequestedAction, directorSentenceKey, assetList]);
+  }, [directorMode, automatic.finished, automatic.context, directorContextKey, automatic.packageId, directorRequestedAction, directorSentenceKey, assetList]);
   React.useEffect(() => {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'output-emphasis') setOutputBeat(false);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
@@ -231,13 +235,13 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   React.useEffect(() => {
     if (!companionWindow.tapRevision || seenTap.current === companionWindow.tapRevision) return;
     seenTap.current = companionWindow.tapRevision;
-    if (directorReview) { localDirectorResponse('tap'); return; }
+    if (directorMode) { localDirectorResponse('tap'); return; }
     if (!localAllowed) return;
     const current = assetList.find(item => item.id === automatic.packageId);
     // Identity-specific pose names are artwork contracts, not UI prefix conventions.
     // The existing player chooses the nearest authored tap variant and its safe bridge.
     if (current && assetList.some(item => item.action === 'tap-response' && item.reviewStatus === 'accepted' && item.geometryReference === current.geometryReference)) setLocalAction('tap-response');
-  }, [companionWindow.tapRevision, assetList, automatic.packageId, localAllowed, directorReview, localDirectorResponse]);
+  }, [companionWindow.tapRevision, assetList, automatic.packageId, localAllowed, directorMode, localDirectorResponse]);
   const pictures = asset ? imageLibrary[asset.id] ?? [] : [];
   const displayedExposure = !playing && !manualReview && automatic.packageId === asset?.id ? automatic.exposure : exposure;
   const loadGeneration = React.useRef(0);
@@ -298,6 +302,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     setPlaying(false); setError('');
     try {
       const data = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+      if (!allowCandidates && data.candidateOnly === true) throw new Error('Review-only artwork cannot be installed for normal playback');
       const nextPackages = Array.isArray(data.packages) ? data.packages.map(value => readCompanionPackage(value, allowCandidates)) : [readCompanionPackage(raw, allowCandidates)];
       if (!nextPackages.length || new Set(nextPackages.map(item => item.id)).size !== nextPackages.length) throw new Error('Empty bundle or duplicate sequence identity');
       for (const page of decodedPages.current.values()) page.image?.close();
@@ -523,9 +528,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       <div>{portfolioProjection.legend.map(item => <button key={item.key} onClick={() => { if (fixtureActive) { setFixtureInspection(item.identity); setFinishedDirectorSentence(null); refreshFixture(); } else setSelected({ generation, identity: item.identity }); }}>{item.label} · {item.title || 'Untitled task'}</button>)}</div>
       {!assetList.some(item => item.action === 'director-supervise') && <p>Load the explicit complete director candidate bundle to review management performances. No old tool-action fallback is used.</p>}
     </section>}
-    {!review && <section style={{ ...panel, position: 'fixed', bottom: 3, left: 5, right: 5, margin: 0, maxHeight: 104, overflow: 'auto', boxSizing: 'border-box' }}><CompanionAttentionSummary attention={attention} focusTitle={focusTitle} focused={!!identity} focusStatus={shortStatus} onInspect={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }} /></section>}
-    {attentionOpen && <div style={{ position: 'fixed', inset: '6px 4px', maxHeight: 'calc(100vh - 12px)', zIndex: 30, overflow: 'auto' }}><CompanionAttentionPanel attention={attention} identity={identity} focusTitle={focusTitle} onFocus={target => { setSelected({ generation, identity: target }); setAttentionOpen(false); }} onOpenThread={openThread} onClose={() => setAttentionOpen(false)} onRefresh={attention.refresh} /></div>}
-    {(review || controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
+    {!review && <section style={{ ...panel, position: 'fixed', bottom: 3, left: 5, right: 5, margin: 0, maxHeight: 104, overflow: 'auto', boxSizing: 'border-box' }}><CompanionAttentionSummary directorMode={directorMode} onClearInspection={() => setSelected(null)} attention={attention} focusTitle={focusTitle} focused={!!identity} focusStatus={shortStatus} onInspect={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }} /></section>}
+    {attentionOpen && <div style={{ position: 'fixed', inset: '6px 4px', maxHeight: 'calc(100vh - 12px)', zIndex: 30, overflow: 'auto' }}><CompanionAttentionPanel directorMode={directorMode} onClearInspection={() => { setSelected(null); setAttentionOpen(false); }} attention={attention} identity={identity} focusTitle={focusTitle} onFocus={target => { setSelected({ generation, identity: target }); setAttentionOpen(false); }} onOpenThread={openThread} onClose={() => setAttentionOpen(false)} onRefresh={attention.refresh} /></div>}
+    {(review || controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{directorMode && <><button onClick={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }}>{t('companion.director.projects')}</button><label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />{t('companion.director.hideTaskNames')}</label></>}{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
     {review && <section style={panel} aria-label="Development presentation review">
       <label>Preview presentation (not Host state) <select value={presentation} onChange={event => { setPresentation(event.target.value); setReviewRoute(true); setManualReview(false); setPlaying(false); }}>
         {catalog.states.map(state => <option key={state.id} value={state.id} disabled={state.id === 'L04' || state.id === 'L05'}>{state.id} {state.label}{state.id === 'L04' || state.id === 'L05' ? ' · drag/release the character' : ''}</option>)}
@@ -539,7 +544,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         <span> {displayedExposure + 1}/{asset.frames.length} exposures</span><button onClick={() => { setPlaying(false); setManualReview(false); setReviewRoute(false); }}>Follow actual Host presentation</button></>}
       {error && <p role="alert">{error}</p>}
     </section>}
-    {(review || controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: windowNotice ? 215 : 145, left: 4, right: 4, zIndex: 20, maxHeight: windowNotice ? 'calc(100vh - 230px)' : 'calc(100vh - 160px)', overflow: 'auto' } as React.CSSProperties : {}) }} aria-label="Actual Host facts">
+    {(review || controlsOpen && !directorMode) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: windowNotice ? 215 : 145, left: 4, right: 4, zIndex: 20, maxHeight: windowNotice ? 'calc(100vh - 230px)' : 'calc(100vh - 160px)', overflow: 'auto' } as React.CSSProperties : {}) }} aria-label="Actual Host facts">
       <strong>{review ? 'Actual Host facts — independent of review target' : t('companion.observe')}</strong>
       <select aria-label="Observe an existing thread branch" value={identity ? JSON.stringify(identity) : ''} onChange={event => {
         setSelected(event.target.value ? { generation, identity: JSON.parse(event.target.value) as ThreadIdentity } : null);

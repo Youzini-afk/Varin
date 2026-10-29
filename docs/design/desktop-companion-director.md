@@ -125,3 +125,17 @@ Varin 接收 A 的结果状态卡，轻指 A 的完成标记；B 主 agent 保�
 项目 notice 从同一 attention snapshot 的实际归属事项去重生成：可操作授权为 permission，问题或 elicitation 为 question，其余审阅与异常为 inspect，多类为 mixed；陈旧来源为 unknown，无事项时省略。卡片与 brief 使用真实类别，不从 needs-user 猜授权。requestCount 只统计真实待决，uncertainCount 独立；失败和结果未知不会变成可回答请求。B 授权与 C 问题并存分别显示锁与问号，B 单独解除不清除 C。
 
 浮层默认显示有界纯文本短标题，A/B/C 只辅助辨识；用户可隐藏任务名，完整标题和实际导航仍在交互面板。字符清理和转义不改变执行身份或权限。当前接线属于隔离 review 候选，公共角色资源尚未切换。
+
+### Normal-entry integration (2026-10-29)
+
+Management presentation is independent of the developer review switch. Normal playback enables it only after the installed bundle passes the existing accepted-art decoder and contains the complete upright management action capability (`director-supervise`, both LISTEN directions, GATHER, intake, local attention, and closed idle). A review-only bundle is rejected by the normal loader; this capability check does not promote any source. The legacy selected bundle remains on its previous path until the parent-controlled exact asset selection is installed.
+
+In management mode the real current-Host attention projection drives the portfolio. A chosen project is an inspection lens, not Varin becoming its tool executor. The existing accessible attention panel provides project inspection, exact per-project requests, opening the corresponding real task, and returning to the overview. The normal compact menu exposes “Projects and requests” and a decorative-title privacy switch. Offline fixture controls and permissive candidate decoding remain exclusively in the explicit development review entry.
+
+Local attention and global idle eligibility use this same management mode. A cold welcome is permitted only on the current, available portfolio; work supersedes rather than queues it. Hover/tap, hidden/drag cleanup, scope-bound recovery and the accepted source pickup graph retain the same single body controller. The decorative window remains inert and cannot approve or execute project work. This section records implementation, not an additional normal-entry native acceptance claim.
+
+## Selected normal-entry checkpoint (2026-10-29)
+
+The exact reviewed candidate `40c6f4f9f0c46c2b4c248fcf798fe3c726b77bb6dac7a59accbd485db2eeb4d2` was selected through the artifact-bound selector. The installed accepted bundle is `ed6830296471e492521e7f0b9adc026f057a0e744726faa86462c5cee90ad2aa`; the earlier `399bf` baseline remains preserved in source history and reconstruction inputs. Normal playback now enables the director capability from accepted assets, while candidate admission and offline examples remain development-review-only.
+
+See `desktop-companion-assets/director-performance/selection-review.json`, `native-squad-validation.json`, and `native-normal-validation.json` for separate art-selection, multi-project offline/native, and normal real-Host-empty smoke scopes. These records do not claim live paid concurrent runs, release performance, or every frame on every OS. The UI and Electron type checks, targeted projection/interaction/renderer/validator tests, full web/main builds, and native window cleanup were checked at this checkpoint.

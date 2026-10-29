@@ -47,3 +47,26 @@ it('bounds rendered requests with accessible paging instead of truncating the ta
  act(()=>[...requestGroup.querySelectorAll('button')].find(button=>button.textContent==='Next')!.click());
  expect(requestGroup.querySelectorAll('li')).toHaveLength(5);
 });
+
+it('director project list inspects exact owners and returns to portfolio without approving or opening a task', () => {
+ const root=environment(),inspect=vi.fn(),open=vi.fn(),clear=vi.fn();
+ act(()=>root.render(<CompanionAttentionPanel directorMode attention={{snapshot:facts,health:'current',refreshing:false,observationRevision:0}} identity={{runtime:'agent',threadId:'A',branchId:'branch-A'}} focusTitle="Task A" onFocus={inspect} onOpenThread={open} onClearInspection={clear} onClose={()=>{}} onRefresh={()=>{}}/>));
+ expect(document.body.textContent).toContain('Inspecting project: Task A');
+ expect(document.body.textContent).not.toContain('Follow this task');
+ const list=document.querySelector('details')!;
+ expect(list.querySelector('summary')?.textContent).toBe('Projects and requests');
+ const a=[...list.querySelectorAll('li')].find(row=>row.textContent?.includes('Task A'))!;
+ const b=[...list.querySelectorAll('li')].find(row=>row.textContent?.includes('Task B'))!;
+ expect(a.textContent).toContain('Answer required');expect(a.textContent).not.toContain('Permission required');
+ expect(b.textContent).toContain('Permission required');expect(b.textContent).not.toContain('Answer required');
+ act(()=>[...b.querySelectorAll('button')].find(button=>button.textContent==='Inspect project')!.click());
+ expect(inspect).toHaveBeenCalledWith({runtime:'agent',threadId:'B',branchId:'branch-B'});expect(open).not.toHaveBeenCalled();
+ act(()=>[...document.querySelectorAll('button')].find(button=>button.textContent==='Return to overview')!.click());expect(clear).toHaveBeenCalledOnce();
+});
+it('director summary is portfolio-aware without inspection and attributes tool status to the inspected project', () => {
+ const root=environment();const attention={snapshot:facts,health:'current' as const,refreshing:false,observationRevision:0};
+ act(()=>root.render(<CompanionAttentionSummary directorMode attention={attention} focused={false} focusStatus="Reading" onInspect={()=>{}}/>));
+ expect(document.body.textContent).toContain('Portfolio overview');expect(document.body.textContent).not.toContain('Reading');
+ act(()=>root.render(<CompanionAttentionSummary directorMode attention={attention} focused focusTitle="Task A" focusStatus="Reading" onInspect={()=>{}}/>));
+ expect(document.body.textContent).toContain('Project execution: Reading');expect(document.body.textContent).toContain('Inspecting project: Task A');
+});
