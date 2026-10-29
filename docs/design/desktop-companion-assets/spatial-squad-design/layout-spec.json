@@ -1,0 +1,197 @@
+{
+  "actor": {
+    "source": "/workspace/scratch/d33c4ad65693/varin-main-20261028/docs/design/desktop-companion-assets/animation-source/production-v2/shared/upright-open-neutral-v2.png",
+    "x": 120,
+    "y": 36,
+    "width": 360,
+    "height": 360
+  },
+  "variants": [
+    {
+      "id": "A",
+      "name": "开口议事圈",
+      "tag": "后侧两组 · 身前一组",
+      "note": "最均衡：Varin 像围坐中的主管，三队各有清楚的工作落点。",
+      "teams": [
+        {
+          "id": "A",
+          "x": 112,
+          "y": 238,
+          "size": 56,
+          "depth": "back",
+          "children": [
+            [
+              -35,
+              -18
+            ],
+            [
+              23,
+              34
+            ]
+          ],
+          "tool": "book"
+        },
+        {
+          "id": "B",
+          "x": 490,
+          "y": 246,
+          "size": 56,
+          "depth": "back",
+          "children": [
+            [
+              35,
+              -19
+            ],
+            [
+              35,
+              23
+            ]
+          ],
+          "tool": "lens"
+        },
+        {
+          "id": "C",
+          "x": 300,
+          "y": 402,
+          "size": 76,
+          "depth": "front",
+          "children": [
+            [
+              -61,
+              8
+            ],
+            [
+              61,
+              17
+            ]
+          ],
+          "tool": "pen"
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "错层拥簇",
+      "tag": "后方一组 · 前侧两组",
+      "note": "围绕感更强：前景团子更亲近，适合开阔桌面。",
+      "teams": [
+        {
+          "id": "A",
+          "x": 477,
+          "y": 190,
+          "size": 48,
+          "depth": "back",
+          "children": [
+            [
+              32,
+              -15
+            ],
+            [
+              20,
+              32
+            ]
+          ],
+          "tool": "book"
+        },
+        {
+          "id": "B",
+          "x": 172,
+          "y": 391,
+          "size": 70,
+          "depth": "front",
+          "children": [
+            [
+              -53,
+              -6
+            ],
+            [
+              28,
+              38
+            ]
+          ],
+          "tool": "lens"
+        },
+        {
+          "id": "C",
+          "x": 431,
+          "y": 397,
+          "size": 74,
+          "depth": "front",
+          "children": [
+            [
+              -30,
+              39
+            ],
+            [
+              56,
+              -4
+            ]
+          ],
+          "tool": "pen"
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "name": "贴身浅弧",
+      "tag": "低位收拢 · 保留前后",
+      "note": "窄桌边版本：不是竖排列表，也不把小队推到面部周围。",
+      "teams": [
+        {
+          "id": "A",
+          "x": 106,
+          "y": 291,
+          "size": 52,
+          "depth": "back",
+          "children": [
+            [
+              -30,
+              -18
+            ],
+            [
+              21,
+              29
+            ]
+          ],
+          "tool": "book"
+        },
+        {
+          "id": "B",
+          "x": 492,
+          "y": 299,
+          "size": 52,
+          "depth": "back",
+          "children": [
+            [
+              29,
+              -18
+            ],
+            [
+              24,
+              31
+            ]
+          ],
+          "tool": "lens"
+        },
+        {
+          "id": "C",
+          "x": 300,
+          "y": 404,
+          "size": 62,
+          "depth": "front",
+          "children": [
+            [
+              -43,
+              8
+            ],
+            [
+              43,
+              13
+            ]
+          ],
+          "tool": "pen"
+        }
+      ]
+    }
+  ]
+}

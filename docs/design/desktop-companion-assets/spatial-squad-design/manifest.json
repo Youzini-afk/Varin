@@ -1,0 +1,84 @@
+{
+  "status": "User selected B; frozen comparison archive, not runtime/native acceptance",
+  "generatedWith": "code-native SVG composition + existing identity/character resources; no imagegen",
+  "sources": [
+    {
+      "path": "packages/ui/src/components/companion/projectLeadArt.ts",
+      "sha256": "f07f8879eb8a93303be92ad2191e51051f7927f42b3b0654c9b39d51c6e918e4"
+    },
+    {
+      "path": "packages/ui/src/components/companion/projectLeadProfiles.json",
+      "sha256": "a528467372dba450aee2fe959f6043ce884595b50645573b944526c795a56d02"
+    },
+    {
+      "path": "packages/ui/src/components/ui/agent-avatar-art.ts",
+      "sha256": "4b206489693a6f0ad75b79c0eae58d4e850da3474151887b9381a3c8a265e542"
+    },
+    {
+      "path": "docs/design/desktop-companion-assets/animation-source/production-v2/shared/upright-open-neutral-v2.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+    }
+  ],
+  "files": [
+    {
+      "path": "DESIGN.md",
+      "bytes": 6338,
+      "sha256": "afb259ea6ba60f522dc654edb058e8eeeb0756d8136b7a673329517e692cce38"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1258,
+      "sha256": "9bffed6aecd80c9d1affc1ed792a02571799635ef421de09272c2d13700ca166"
+    },
+    {
+      "path": "layout-A.png",
+      "bytes": 224961,
+      "sha256": "9eb3c900acae25c7b1a099369286f8b4d0a66aadbcf0c4ce4ee16ad66e6ecec1"
+    },
+    {
+      "path": "layout-A.svg",
+      "bytes": 457595,
+      "sha256": "4bf396a4bd51153f2e49d239d1927c903ceea8f6089eb0443a34d9a9da21ec00"
+    },
+    {
+      "path": "layout-B.png",
+      "bytes": 227165,
+      "sha256": "a2bd934059b01a0c818ade3df7d5bbc197301f679fb34cf5c8ab4a456d470f49"
+    },
+    {
+      "path": "layout-B.svg",
+      "bytes": 457651,
+      "sha256": "55fabc199974877532b5edb24dee505abb361e7ad72e21ab97e033d79136e846"
+    },
+    {
+      "path": "layout-C.png",
+      "bytes": 223386,
+      "sha256": "ea6316f85e0e61ae964bbfd316c6488a2b231f97a06506cc41aa83c29dc8abe9"
+    },
+    {
+      "path": "layout-C.svg",
+      "bytes": 457790,
+      "sha256": "7927a85699297e6d9d809cd906c0a731b4508aa37cc13bd5bb9e78200c396315"
+    },
+    {
+      "path": "layout-spec.json",
+      "bytes": 3825,
+      "sha256": "393b45ce9c8066029a11038136ad4906c564d306819cfe77fe95570bd81de3a5"
+    },
+    {
+      "path": "provenance/original-render-comparison.ts",
+      "bytes": 6430,
+      "sha256": "fe832a63577344a90460a15b8906a538ecaf10ab23642e506295e402bdb0342c"
+    },
+    {
+      "path": "render-comparison.ts",
+      "bytes": 6422,
+      "sha256": "03795efd7e63be5d11b3e9b2ab1bc87cb11a021afe4db98d7f1724a2f0cda89b"
+    },
+    {
+      "path": "spatial-layout-comparison.png",
+      "bytes": 378397,
+      "sha256": "430f9dd27b0a39658c3eb327a0ce41fefbce4a8abc22b81322a74982ff1d011e"
+    }
+  ]
+}
