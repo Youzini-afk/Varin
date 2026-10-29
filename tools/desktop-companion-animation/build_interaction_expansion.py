@@ -305,7 +305,13 @@ if authoredPickup:
  newEntryIds={row['id'] for row in authoredPickup['nodes'] if row['gesture'].get('entrySourceSha256')}
  for p in packages+newPackages:
   g=p.get('gesture')
-  if g and g.get('entrySourceSha256') in replaceEntries and p['id'] not in newEntryIds:g.pop('entrySourceSha256')
+  if g and g.get('entrySourceSha256') in replaceEntries and p['id'] not in newEntryIds:
+   g.pop('entrySourceSha256')
+   # A changed accepted binding is new reviewed metadata, not an unchanged base
+   # package. The existing selector must include this ID in its exact review set.
+   if p.get('reviewStatus')=='accepted':
+    p['reviewStatus']='candidate'
+    p['warning']='Candidate source-entry rebinding; original drawing and internal ID retained; exact review required.'
 # Existing actions superseded by new authored performances cannot win shortest-path selection.
 replaced={p['action'] for p in newPackages if p.get('action')}
 packages=[p for p in packages if p.get('action') not in replaced or replacementActions is None and p.get('action')=='tap-response' and p['entryPose']!='upright-v2:closed']+newPackages
