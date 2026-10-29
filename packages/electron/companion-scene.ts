@@ -1,5 +1,5 @@
 import { isAgentAvatarId } from '@varin/protocol';
-import { COMPANION_TEAM_VISIBLE_LIMIT, type DesktopCompanionTeam } from '@varin/application-client/desktop';
+import { COMPANION_SPATIAL_B, resolveCompanionSpatialLayout, type CompanionSpatialLayout, COMPANION_TEAM_VISIBLE_LIMIT, type DesktopCompanionTeam } from '@varin/application-client/desktop';
 import { readCompanionPortfolio } from './companion-portfolio.js';
 import { companionWorldRect } from './companion-window.js';
 type Bounds = ReturnType<typeof companionWorldRect>;
@@ -8,7 +8,7 @@ import type { DesktopCompanionScene } from '@varin/application-client/desktop';
 
 export type CompanionSceneDescriptor = DesktopCompanionScene;
 export type CompanionSceneKind = Exclude<DesktopCompanionScene['kind'], null>;
-export interface CompanionSceneViewport { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number }
+export interface CompanionSceneViewport { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number; decorationBottom?: number }
 export interface CompanionSceneOwner {
   id: number; isDestroyed(): boolean; isVisible(): boolean; isMinimized(): boolean;
   isAlwaysOnTop(): boolean; getContentBounds(): Bounds;
@@ -20,7 +20,7 @@ export interface CompanionSceneWindow {
 }
 export interface CompanionScenePayload {
   descriptor: CompanionSceneDescriptor;
-  layout: { character: Bounds; visible: Bounds; inspectionSide: 'left' | 'right' };
+  layout: { character: Bounds; visible: Bounds; inspectionSide: 'left' | 'right' | null; spatial?: CompanionSpatialLayout };
 }
 export function readCompanionTeam(input: unknown): DesktopCompanionTeam {
     const value = input as Record<string, unknown>;
@@ -52,6 +52,16 @@ export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDesc
     || !['transition','engaged','present','read','page-turn','type','review','revise','scan-left','scan-right','select','split','dispatch-left','dispatch-right','watch','ask','offer','attend','acknowledge','organize-align','organize-select','verify-scan','verify-compare','listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate'].includes(String(d.cue))
     || !(d.cueInstance === undefined || Number.isSafeInteger(d.cueInstance) && (d.cueInstance as number) >= 0)
     || typeof d.suppressed !== 'boolean' || typeof d.reducedMotion !== 'boolean' || typeof d.menuOpen !== 'boolean') throw new Error('Invalid scene descriptor');
+  let drawing: DesktopCompanionScene['drawing'];
+  if (d.drawing !== undefined) {
+    const f = d.drawing as Record<string, unknown>;
+    if (!f || typeof f !== 'object' || Array.isArray(f) || !['selected','review'].includes(String(f.bundle))
+      || typeof f.epoch !== 'string' || !/^[a-f0-9]{64}$/.test(f.epoch)
+      || typeof f.packageId !== 'string' || !f.packageId || f.packageId.length > 200
+      || !Number.isSafeInteger(f.frameIndex) || (f.frameIndex as number) < 0 || (f.frameIndex as number) > 10000) throw new Error('Invalid companion drawing identity');
+    drawing = { bundle: f.bundle as 'selected' | 'review', epoch: f.epoch, packageId: f.packageId, frameIndex: f.frameIndex as number };
+  }
+  if (d.layout !== undefined && d.layout !== 'spatial-b-v1') throw new Error('Invalid companion scene layout');
   const team = d.team === undefined ? undefined : readCompanionTeam(d.team);
   if (d.kind === 'status' ? !['queued','external','retry','failure','cancelling','disconnected','synchronizing','uncertain'].includes(String(d.status)) : d.status !== undefined) throw new Error('Invalid scene status');
   const portfolio = d.kind === 'portfolio' ? readCompanionPortfolio(d.portfolio, readCompanionTeam) : undefined;
@@ -59,30 +69,44 @@ export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDesc
   if (portfolio && d.team !== undefined) throw new Error('Portfolio owns its scoped team');
   if (portfolio && !['transition','listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate'].includes(String(d.cue))) throw new Error('Portfolio body cue must describe a management gesture');
   if (d.outcome !== null && (d.phase !== 'resolve' || (d.outcome === 'answered' ? d.kind !== 'question' : d.kind !== 'permission'))) throw new Error('Scene outcome does not match its presentation');
-  return { revision: d.revision as number, scope: d.scope, kind: d.kind as CompanionSceneKind | null,
+  return { ...(drawing ? { drawing } : {}), ...(d.layout === 'spatial-b-v1' ? { layout: 'spatial-b-v1' as const } : {}), revision: d.revision as number, scope: d.scope, kind: d.kind as CompanionSceneKind | null,
     phase: d.phase as CompanionSceneDescriptor['phase'], outcome: d.outcome as CompanionSceneDescriptor['outcome'],
     ...(portfolio ? { portfolio } : {}), ...(team ? { team } : {}), ...(d.status === undefined ? {} : { status: d.status as NonNullable<CompanionSceneDescriptor['status']> }), count: d.count as number | null, ...(d.cueInstance === undefined ? {} : { cueInstance: d.cueInstance as number }), cue: d.cue as CompanionSceneDescriptor['cue'], suppressed: d.suppressed, reducedMotion: d.reducedMotion, menuOpen: d.menuOpen };
 }
 
-export function companionSceneLayout(content: Bounds, viewport: unknown, workArea: Bounds) {
+export function companionSceneLayout(content: Bounds, viewport: unknown, workArea: Bounds, spatial = false, preferredSide: 'left' | 'right' = 'right') {
   const character = companionWorldRect(content, viewport);
   // Preserve the character's native anchor. Additional space is decorative only;
   // the bottom ends at the character canvas, above the existing status caption.
-  const width = Math.round(character.width * 1.45), height = Math.round(character.height * 1.2);
-  const bounds = { x: character.x - Math.round((width-character.width)/2), y: character.y-(height-character.height), width, height };
+  const width = Math.round(character.width * 1.45), height = Math.round(character.height * (spatial ? 1.5 : 1.2));
+  const bounds = { x: character.x - Math.round((width-character.width)/2), y: character.y-Math.round(character.height*.2), width, height };
+  let floor = workArea.y + workArea.height;
+  const v = viewport as CompanionSceneViewport;
+  if (spatial && v.decorationBottom !== undefined) {
+    if (!Number.isFinite(v.decorationBottom) || v.decorationBottom < v.y || v.decorationBottom > v.viewportHeight) throw new Error('Invalid decoration floor');
+    floor = Math.min(floor, content.y + v.decorationBottom * content.height / v.viewportHeight);
+  }
   const left = Math.max(bounds.x,workArea.x), top = Math.max(bounds.y,workArea.y);
-  const right = Math.min(bounds.x+width,workArea.x+workArea.width), bottom = Math.min(bounds.y+height,workArea.y+workArea.height);
+  const right = Math.min(bounds.x+width,workArea.x+workArea.width), bottom = Math.min(bounds.y+height,floor);
   // Admit the whole decorative side lane, not merely the old 56px brief card.
   // Teams can occupy any point within this already allocated inert surface.
   const sideMargin = (width - character.width) / 2;
   const rightSpace = workArea.x + workArea.width - (character.x + character.width);
   const leftSpace = character.x - workArea.x;
   const rightFits = rightSpace >= sideMargin, leftFits = leftSpace >= sideMargin;
-  const inspectionSide: 'left' | 'right' = rightFits ? 'right' : leftFits ? 'left' : rightSpace >= leftSpace ? 'right' : 'left';
-  return { bounds, layout: { inspectionSide,
+  const inspectionSide: 'left' | 'right' | null = spatial && !(preferredSide === 'left' ? leftFits : rightFits) ? null : preferredSide === 'left' && leftFits ? 'left' : preferredSide === 'right' && rightFits ? 'right' : rightFits ? 'right' : leftFits ? 'left' : rightSpace >= leftSpace ? 'right' : 'left';
+  const scale = character.width / COMPANION_SPATIAL_B.character.width;
+  const space = spatial ? resolveCompanionSpatialLayout({ available: { left: (left-character.x)/scale+50, right: (right-character.x)/scale+50, top: (top-character.y)/scale+25, bottom: (bottom-character.y)/scale+25 } }) : undefined;
+  return { bounds, layout: { inspectionSide, ...(space ? { spatial: space } : {}),
     character: { x: (character.x-bounds.x)/width, y: (character.y-bounds.y)/height, width: character.width/width, height: character.height/height },
     visible: { x: (left-bounds.x)/width, y: (top-bounds.y)/height, width: Math.max(0,right-left)/width, height: Math.max(0,bottom-top)/height },
   } };
+}
+
+function preferredSceneSide(descriptor: CompanionSceneDescriptor): 'left' | 'right' {
+  const p = descriptor.portfolio;
+  const key = p?.mode === 'inspection' ? p.inspectedKey : p?.subjectKey;
+  return descriptor.layout === 'spatial-b-v1' && p?.projects.find(project => project.key === key)?.label === 'B' ? 'left' : 'right';
 }
 
 type SceneEntry = {
@@ -98,7 +122,7 @@ export class CompanionSceneWindows {
   update(owner: CompanionSceneOwner, raw: unknown, viewport: CompanionSceneViewport): void {
     const descriptor = readCompanionSceneDescriptor(raw);
     if (owner.isDestroyed()) { this.clear(owner.id); return; }
-    const geometry = companionSceneLayout(owner.getContentBounds(), viewport, this.workArea(owner.getContentBounds()));
+    const geometry = companionSceneLayout(owner.getContentBounds(), viewport, this.workArea(owner.getContentBounds()), descriptor.layout === 'spatial-b-v1', preferredSceneSide(descriptor));
     let entry = this.entries.get(owner.id);
     if (entry?.window.isDestroyed()) { this.clear(owner.id); entry = undefined; }
     if (entry && descriptor.revision <= entry.descriptor.revision) return;
@@ -133,7 +157,7 @@ export class CompanionSceneWindows {
     if (!entry || entry.descriptor.kind !== 'portfolio') return null;
     const { descriptor } = entry;
     const inspectionSide = entry.blocked || descriptor.suppressed || descriptor.menuOpen || !entry.owner.isVisible()
-      ? null : companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds())).layout.inspectionSide;
+      ? null : companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()), descriptor.layout === 'spatial-b-v1', preferredSceneSide(descriptor)).layout.inspectionSide;
     return { scope: descriptor.scope, revision: descriptor.revision, inspectionSide };
   }
 
@@ -156,7 +180,7 @@ export class CompanionSceneWindows {
       // Publish suppression even when native visibility events are throttled or disabled.
       // The decorative renderer must stop its own RAF, not rely on document.hidden.
       if (!this.visible(entry)) entry.window.hide();
-      const { bounds, layout } = companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()));
+      const { bounds, layout } = companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()), entry.descriptor.layout === 'spatial-b-v1', preferredSceneSide(entry.descriptor));
       entry.window.setBounds(bounds); entry.window.setAlwaysOnTop(entry.owner.isAlwaysOnTop());
       const descriptor = { ...entry.descriptor, suppressed: !this.visible(entry) };
       const payload = { descriptor, layout }, key = JSON.stringify(payload);

@@ -24,7 +24,7 @@ import {
 } from 'electron';
 import contextMenu from 'electron-context-menu';
 import { CompanionStoolWindows } from './companion-stool.js';
-import { CompanionSceneWindows, type CompanionSceneViewport } from './companion-scene.js';
+import { CompanionSceneWindows, readCompanionSceneDescriptor, type CompanionSceneViewport } from './companion-scene.js';
 import { CompanionWindowMovement, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect, captureCompanionPlacement, restoreCompanionPlacement } from './companion-window.js';
 import { createComputerFeedback } from './computer-feedback.js';
 import { createComputerControls } from './computer-controls.js';
@@ -4014,7 +4014,9 @@ const handleInvoke = async (
 
     case 'desktop_companion_scene': {
       const owner = requireCompanionWindow(browserWindow);
-      companionScenes.update(owner, args.descriptor, args.viewport as CompanionSceneViewport);
+      const descriptor = readCompanionSceneDescriptor(args.descriptor);
+      if (descriptor.drawing?.bundle === 'review' && new URL(owner.webContents.getURL()).searchParams.get('review') !== '1') throw new Error('Review drawing requires explicit developer review');
+      companionScenes.update(owner, descriptor, args.viewport as CompanionSceneViewport);
       companionScenes.block(owner.id, companionMovement.isDragging(owner.id));
       return companionScenes.inspectionReceipt(owner.id);
     }

@@ -1,20 +1,16 @@
 import type { DirectorPresentation } from './directorPresentation';
 
-/** Candidate management vocabulary. Project tool categories are intentionally
- * absent: they belong to the project/leader slot, not Varin's body controller. */
+/** Product mode alone is not authority to coordinate every project in the Host. */
 export function directorBodyAction(view: DirectorPresentation, side: 'left' | 'right' | null): string {
   if (view.health !== 'current') return 'director-supervise';
-  if (view.interactionRoute !== 'bot-coordinator' && view.interactionRoute !== 'coordination-review') {
-    if (view.body.verb === 'available') return 'idle-closed';
-    // A direct Agent conversation is not delegated through Varin. Inspection
-    // never produces a report/listen performance, and new runs do not hand off.
-    if (view.body.verb === 'notify-attention' || view.body.verb === 'notify-result') return 'director-open-attention';
-    return 'director-supervise';
-  }
-  if (view.body.verb === 'receive-work') return 'director-intake';
   if (view.body.verb === 'available') return 'idle-closed';
-  if (view.body.verb === 'receive-result' || view.body.verb === 'present-attention') return 'director-gather-present';
-  if (side && view.inspectedProjectKey !== null) return `director-listen-${side}`;
-  // Unknown/reflowing dock direction cannot borrow the opposite-side gaze.
+  const coordinates = (route: DirectorPresentation['interactionRoute']) => route === 'bot-coordinator' || route === 'coordination-review';
+  const productCoordinates = coordinates(view.interactionRoute);
+  const subjectCoordinates = productCoordinates && coordinates(view.body.subjectRoute);
+  if (view.body.verb === 'notify-attention' || view.body.verb === 'notify-result') return 'director-open-attention';
+  if (view.body.verb === 'receive-work') return subjectCoordinates ? 'director-intake' : 'director-supervise';
+  if (view.body.verb === 'receive-result' || view.body.verb === 'present-attention') return subjectCoordinates ? 'director-gather-present' : 'director-open-attention';
+  if (productCoordinates && coordinates(view.inspectionRoute) && side && view.inspectedProjectKey !== null) return `director-listen-${side}`;
+  // Unknown ownership/direction cannot borrow another project's authority/gaze.
   return 'director-supervise';
 }

@@ -38,13 +38,13 @@ export function portfolioCaption(s:string|undefined,budget=5):string {
  if(chars.reduce((n,c)=>n+width(c),0)<=budget)return chars.join('');
  let result='',used=0;for(const c of chars){if(used+width(c)>budget-1)break;result+=c;used+=width(c);}return result+'…';
 }
-const text=(x:number,y:number,s:string,size=8)=>`<text x="${x}" y="${y}" text-anchor="middle" fill="${ink}" stroke="#fffdf6" stroke-opacity=".96" stroke-width="1.8" stroke-linejoin="round" paint-order="stroke fill" font-family="Noto Sans CJK SC,system-ui" font-size="${size}">${escapePortfolioText(s)}</text>`;
+export const portfolioText=(x:number,y:number,s:string,size=8)=>`<text x="${x}" y="${y}" text-anchor="middle" fill="${ink}" stroke="#fffdf6" stroke-opacity=".96" stroke-width="1.8" stroke-linejoin="round" paint-order="stroke fill" font-family="Noto Sans CJK SC,system-ui" font-size="${size}">${escapePortfolioText(s)}</text>`;
 type Project=NonNullable<DesktopCompanionScene['portfolio']>['projects'][number];
 type ProjectNotice=NonNullable<Project['notice']>;
 const noticeOf=(project:Project)=>project.notice;
-function noticeGlyph(notice:ProjectNotice|undefined,x:number,y:number,size=1):string {
+export function noticeGlyph(notice:ProjectNotice|undefined,x:number,y:number,size=1):string {
  const lock=path('M-4 -1 v7 h8 v-7 Z',gold,'#fffaf0',1)+path('M-3 -1 v-3 a3 3 0 0 1 6 0 v3',ink,'none',1.3);
- const question=text(0,5,'?',13);
+ const question=portfolioText(0,5,'?',13);
  const lens='<circle cx="-1" cy="0" r="4" fill="none" stroke="'+blue+'" stroke-width="1.2"/>'+path('M2 3 l4 4',ink,'none',1.3);
  const disconnected=path('M-6 0 h4 M2 0 h4 M-1 -4 l-2 8',blue,'none',1.2);
  const body=notice==='permission'?lock:notice==='question'?question:notice==='mixed'?'<g transform="translate(-4 0) scale(.75)">'+lock+'</g><g transform="translate(5 0) scale(.75)">'+question+'</g>':notice==='inspect'?lens:notice==='unknown'?disconnected:path('M0 -4 l4 4 l-4 4 l-4 -4 Z',blue,'#fffaf0',1);
@@ -54,11 +54,11 @@ const count=(n:number|null)=>n!==null&&n>0?String(Math.min(999,n)):'';
 export interface PortfolioListen { key:string; started:number; phase:'approach'|'return' }
 export const squadHome=(label:string,side:'left'|'right')=>({x:label==='B'?(side==='right'?262:30):(side==='right'?250:42),y:({A:43,B:121,C:181} as Record<string,number>)[label]??121});
 const leadCache=new Map<string,string>(),childCache=new Map<string,string>();
-function leadArt(a:Project,x:number,y:number,size:number,tilt=0){
+export function leadArt(a:Project,x:number,y:number,size:number,tilt=0){
  let svg=leadCache.get(a.lead.avatar);if(!svg){svg=projectLeadSvg(a.lead.avatar,0,0,40);leadCache.set(a.lead.avatar,svg);}
  return `<g transform="rotate(${tilt} ${x} ${y}) translate(${x-size/2} ${y-size/2}) scale(${size/40})">${a.lead.role==='project-lead'?svg:agentAvatarSvg(a.lead.avatar).replace('<svg ','<svg width="40" height="40" ')}</g>`;
 }
-function childArt(avatar:Parameters<typeof agentAvatarSvg>[0],x:number,y:number,size=20){
+export function childArt(avatar:Parameters<typeof agentAvatarSvg>[0],x:number,y:number,size=20){
  let svg=childCache.get(avatar);if(!svg){svg=agentAvatarSvg(avatar).replace('<svg ','<svg width="20" height="20" ');childCache.set(avatar,svg);}
  return `<g transform="translate(${x-size/2} ${y-size/2}) scale(${size/20})">${svg}</g>`;
 }
@@ -70,12 +70,12 @@ export function squadWorkTiming(d:DesktopCompanionScene,now:number,epoch:number)
   if(age<640)animate=true;else wakeIn=Math.min(wakeIn??Infinity,5200-age);
  }return {animate,wakeIn};
 }
-function workAccent(a:Project,now:number,epoch:number,reduced:boolean){
+export function workAccent(a:Project,now:number,epoch:number,reduced:boolean){
  if(reduced||a.status!=='active'||a.detail==='waiting')return 0;
  const age=((now-epoch-['A','B','C'].indexOf(a.label)*1100)%5200+5200)%5200;
  return age<640?Math.sin(Math.PI*age/640):0;
 }
-function workProp(a:Project,x:number,y:number,b:number){
+export function workProp(a:Project,x:number,y:number,b:number){
  const paper=path(`M${x-12} ${y+12} q12 -4 24 0 l-2 9 q-10 -3 -22 0 Z`,blue,'url(#paper)',.7);
  if(a.status!=='active'&&a.status!=='settling')return '';
  if(a.detail==='reading')return paper+path(`M${x} ${y+10} v10 M${x-9} ${y+15} h6 M${x+3} ${y+15} h6`,blue,'none',.8)+path(`M${x+1} ${y+11} q${10-b*8} -${3+b*6} 10 0`,gold,'#fffaf0',.7);
@@ -99,24 +99,24 @@ export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|nul
   if(reporting&&travel>0)z+=path(`M${home.x} ${home.y+18} Q${home.x+sign*12} ${(home.y+cy)/2} ${cx} ${cy+17}`,'#b9c6d7','none',.6);
   let squadBadge='';
   if(team){const members=team.members.filter(m=>Object.hasOwn(AGENT_AVATAR_ART,m.avatar)).slice(0,3);
-   if(listening&&!reporting&&approach>0){const bx=tucked?cx+sign*7:Math.max(14,Math.min(287,home.x+sign*25)),by=tucked?cy+7:home.y+36;squadBadge=`<circle cx="${bx}" cy="${by}" r="${tucked?4:5.5}" fill="#fffdf6" stroke="#aab9c9" stroke-width=".6"/>`+text(bx,by+2,team.overflowCount===null?'·':String(members.length+team.overflowCount),tucked?5.5:6);}
+   if(listening&&!reporting&&approach>0){const bx=tucked?cx+sign*7:Math.max(14,Math.min(287,home.x+sign*25)),by=tucked?cy+7:home.y+36;squadBadge=`<circle cx="${bx}" cy="${by}" r="${tucked?4:5.5}" fill="#fffdf6" stroke="#aab9c9" stroke-width=".6"/>`+portfolioText(bx,by+2,team.overflowCount===null?'·':String(members.length+team.overflowCount),tucked?5.5:6);}
    else members.forEach((m,i)=>{const positions=[[Math.max(15,Math.min(280,home.x+sign*(side==='right'?30:26))),home.y-(project.label==='C'?7:22)],[Math.max(15,Math.min(project.label==='B'?284:280,home.x+sign*(side==='right'?30:26))),home.y+(project.label==='B'?13:23)],[home.x-sign*25,home.y+13]],pos=positions[i]!,mx=pos[0]!,my=pos[1]!;
     z+=`<g data-child-owner="${project.label}"><g opacity=".42">`+path(`M${mx} ${my} Q${(mx+home.x)/2} ${my+5} ${home.x} ${home.y+9}`,AGENT_AVATAR_ART[project.lead.avatar].color,'none',.7)+'</g>';
     if(accent>0&&project.status==='active'&&m.state==='running')z+=path(`M${mx} ${my} Q${(mx+home.x)/2} ${my-5*accent} ${home.x} ${home.y+7}`,'#a9bfd1','none',.6);
     z+=childArt(m.avatar,mx,my+(m.state==='running'?-accent*1.5:0));
-    if(m.state==='waiting')z+=path(`M${mx-2} ${my+11} v3 M${mx+2} ${my+11} v3`,gold,'none',1);else if(m.state==='failed')z+=text(mx,my+14,'!',7);else if(m.state==='settling'||m.state==='leaving')z+=path(`M${mx-3} ${my+12} h6`,blue,'none',.8);
+    if(m.state==='waiting')z+=path(`M${mx-2} ${my+11} v3 M${mx+2} ${my+11} v3`,gold,'none',1);else if(m.state==='failed')z+=portfolioText(mx,my+14,'!',7);else if(m.state==='settling'||m.state==='leaving')z+=path(`M${mx-3} ${my+12} h6`,blue,'none',.8);
     z+='</g>';
    });
-   if(count(team.overflowCount))z+=text(home.x+sign*27,home.y+37,'+'+count(team.overflowCount),6.5);
+   if(count(team.overflowCount))z+=portfolioText(home.x+sign*27,home.y+37,'+'+count(team.overflowCount),6.5);
   }
   z+=`<g data-lead-position="${project.label}" data-center="${cx},${cy}">`+leadArt(project,cx,cy,size,b*(project.detail==='reading'?-3:2))+'</g>';z+=squadBadge;if(!tucked&&(!reporting||travel<.2))z+=workProp(project,cx,cy,b);
-  if(reporting&&travel>0)z+=text(cx-sign*18,cy+18,project.label,7);
+  if(reporting&&travel>0)z+=portfolioText(cx-sign*18,cy+18,project.label,7);
   if(project.notice)z+=noticeGlyph(project.notice,cx+(tucked?sign*7:-sign*18),cy-12,tucked?.65:.85);
   const status=project.status==='active'?(project.detail==='waiting'?'等待':'推进'):({settling:'收尾',result:'本轮结果',available:'待命','needs-user':project.notice==='permission'?'待授权':project.notice==='question'?'待回答':project.notice==='mixed'?'多项待办':'待你决定',uncertain:'待核查',unknown:'未知'}[project.status]);
-  if(!tucked)z+=text(home.x,home.y+30,portfolioCaption(project.caption),7.5);
-  z+=text(tucked?cx-sign*2:home.x,tucked?cy+19:home.y+39,project.label+' · '+(tucked?(project.notice==='permission'?'授权':project.notice==='question'?'答复':status==='推进'?'推进':'待办'):reporting&&travel>0?'汇报':status),6.5)+'</g>';
+  if(!tucked)z+=portfolioText(home.x,home.y+30,portfolioCaption(project.caption),7.5);
+  z+=portfolioText(tucked?cx-sign*2:home.x,tucked?cy+19:home.y+39,project.label+' · '+(tucked?(project.notice==='permission'?'授权':project.notice==='question'?'答复':status==='推进'?'推进':'待办'):reporting&&travel>0?'汇报':status),6.5)+'</g>';
  }
  // Identified small summary; no large dossier remains to hide actual hands.
- if(a&&!['unknown','uncertain'].includes(a.status)&&(MANAGEMENT_CUES.has(d.cue)||(d.cue==='transition'&&heldTransfer))){const pose=managementPacketPose(heldTransfer?.cue??d.cue,heldTransfer?.age??cueAge,side,d.reducedMotion,squadHome(a.label,side));if(pose&&pose.opacity>0)z+=`<g data-summary-project="${a.label}" opacity="${pose.opacity}" transform="translate(${pose.x} ${pose.y})">`+path('M-13 -9 h26 v18 h-26 Z',blue,'url(#paper)',.9)+text(-7,-1,a.label,7)+path('M-1 -4 h10 M-1 0 h8 M-8 5 h17',blue,'none',.8)+'</g>';}
- if(count(p.overflowCards))z+=text(side==='right'?223:69,92,'+'+count(p.overflowCards),7);return z;
+ if(a&&!['unknown','uncertain'].includes(a.status)&&(MANAGEMENT_CUES.has(d.cue)||(d.cue==='transition'&&heldTransfer))){const pose=managementPacketPose(heldTransfer?.cue??d.cue,heldTransfer?.age??cueAge,side,d.reducedMotion,squadHome(a.label,side));if(pose&&pose.opacity>0)z+=`<g data-summary-project="${a.label}" opacity="${pose.opacity}" transform="translate(${pose.x} ${pose.y})">`+path('M-13 -9 h26 v18 h-26 Z',blue,'url(#paper)',.9)+portfolioText(-7,-1,a.label,7)+path('M-1 -4 h10 M-1 0 h8 M-8 5 h17',blue,'none',.8)+'</g>';}
+ if(count(p.overflowCards))z+=portfolioText(side==='right'?223:69,92,'+'+count(p.overflowCards),7);return z;
 }

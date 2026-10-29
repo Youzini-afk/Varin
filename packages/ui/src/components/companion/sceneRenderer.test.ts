@@ -154,3 +154,11 @@ describe('review-only director portfolio',()=>{
  });
 
 });
+
+// Rear exact-alpha clipping must be final: a parent drop shadow would leak back into Varin.
+it('B spatial layers do not receive a second parent shadow after alpha clipping',()=>{
+ const mounted=mountCompanionScene(root);
+ mounted.update(scene('portfolio',{layout:'spatial-b-v1'}));tick(600);
+ expect(root.innerHTML).not.toContain('clip-path="url(#outside-face)" filter="url(#paper-depth)"');
+ mounted.dispose();
+});

@@ -99,9 +99,47 @@ it('agent-companion notifies exact requests and exceptions; consuming a visual e
 it('preserves explicit Bot coordination while mode changes never replay past intake',()=>{
  const director=new CompanionDirector(),bot={visible:true,interacting:false,cardCapacity:3,interactionRoute:'bot-coordinator' as const};
  director.observe(facts([branch('A')]),'current',null,bot);
- const incoming=facts([branch('A'),branch('B','accepted')]);
+ const incoming=facts([branch('A'),{...branch('B','accepted'),botId:'bot-B'}]);
  expect(director.observe(incoming,'current',null,bot).body.verb).toBe('receive-work');
  const agent=director.observe(incoming,'current',id('B'),{...bot,interactionRoute:'agent-companion'});
  expect(agent.body.edge).toBeNull();expect(agent.body.verb).toBe('review-portfolio');
  expect(director.observe(incoming,'current',null,bot).body.edge).toBeNull();
+});
+
+it('Bot workspace never coordinates unrelated Agent background work but still coordinates actual Bot work',()=>{
+ const director=new CompanionDirector(),bot={...options,interactionRoute:'bot-coordinator' as const};
+ const a=branch('A'),b={...branch('B'),botId:'bot-B'};
+ director.observe(facts([a,b]),'current',id('A'),bot);
+ const started=director.observe(facts([{...branch('A','accepted','new-A'),botId:null},b]),'current',id('A'),bot);
+ expect(started.body.edge).toBeNull();expect(started.inspectionRoute).toBe('unknown');
+ const result=director.observe(facts([{...branch('A','completed','new-A'),botId:null},b]),'current',id('A'),bot);
+ expect(result.body.verb).toBe('notify-result');expect(result.body.subject).toEqual(id('A'));expect(result.body.subjectRoute).toBe('unknown');
+ const botStart=director.observe(facts([a,{...branch('B','accepted','new-B'),botId:'bot-B'}]),'current',id('B'),bot);
+ expect(botStart.body.verb).toBe('receive-work');expect(botStart.body.subjectRoute).toBe('bot-coordinator');expect(botStart.inspectionRoute).toBe('bot-coordinator');
+});
+it('mixed requests choose the exact subject route without losing other tasks or treating old Host metadata as ownership',()=>{
+ const director=new CompanionDirector(),bot={...options,interactionRoute:'bot-coordinator' as const};
+ const branches=[{...branch('A'),botId:null},{...branch('B'),botId:'bot-B'},branch('old-host')];
+ const data=facts(branches,[request('A'),request('B','question'),request('old-host')]);
+ const first=director.observe(data,'current',id('B'),bot);
+ expect(first.body.verb).toBe('notify-attention');expect(first.body.subject).toEqual(id('A'));expect(first.counts?.actionRequired).toBe(3);expect(first.cards).toHaveLength(3);
+ const second=director.observe(facts(branches,[request('B','question'),request('old-host')]),'current',id('A'),bot);
+ expect(second.body.verb).toBe('present-attention');expect(second.body.subjectRoute).toBe('bot-coordinator');expect(second.inspectionRoute).toBe('unknown');expect(second.counts?.actionRequired).toBe(2);
+ const agent=director.observe(data,'current',id('B'),{...bot,interactionRoute:'agent-companion'});
+ expect(agent.body.verb).toBe('notify-attention');expect(agent.inspectionRoute).toBe('agent-companion');
+ const old=director.observe(facts(branches,[request('old-host')]),'current',id('old-host'),bot);
+ expect(old.body.verb).toBe('notify-attention');expect(old.inspectionRoute).toBe('unknown');
+});
+
+it('does not borrow root Bot ownership for a mismatched nested request or retain a withdrawn intake',()=>{
+ const director=new CompanionDirector(),bot={...options,interactionRoute:'bot-coordinator' as const};
+ const root={...branch('A'),botId:'bot-A'},child={...branch('child'),parentThreadId:'A',botId:null};
+ const data=facts([root,child],[request('child')]);
+ data.teamExecutions=[{parentThreadId:'A',parentBranchId:'branch-A',parentRunId:'run-A',childOperationId:'op-child',executionId:'execution-child',childThreadId:'child',childBranchId:'branch-child',state:'ready',childRunId:'run-child',childRunState:'executing',activity:'running'}];
+ const mismatch=director.observe(data,'current',id('A'),bot);
+ expect(mismatch.body.subject).toEqual(id('A'));expect(mismatch.body.attentionOwner).toEqual(id('child'));expect(mismatch.body.subjectRoute).toBe('unknown');
+ const incoming=facts([{...branch('A','accepted','next-A'),botId:'bot-A'}]);
+ expect(director.observe(incoming,'current',null,bot).body.verb).toBe('receive-work');
+ const withdrawn={...incoming,branches:incoming.branches.map(row=>({...row,botId:null}))};
+ expect(director.observe(withdrawn,'current',null,bot).body.edge).toBeNull();
 });

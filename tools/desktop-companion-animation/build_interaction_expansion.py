@@ -9,6 +9,7 @@ parser.add_argument('--base-source',type=Path,required=True,help='reproducible p
 parser.add_argument('--base-bundle',type=Path,required=True,help='immutable selected v2 bundle.json; may be rebuilt from source')
 parser.add_argument('--output',type=Path,required=True)
 parser.add_argument('--director-manifest',type=Path,help='Optional explicit authored management sequences; review-only, not a production selection')
+parser.add_argument('--local-interaction-manifest',type=Path,action='append',help='Optional exact local hover/repeat source contract; candidate only')
 parser.add_argument('--detached-index',type=Path,required=True,help='explicit immutable new-source no-stool index')
 a=parser.parse_args();R=a.root.resolve();B=a.base_source.resolve();OUT=a.output.resolve();OUT.mkdir(parents=True,exist_ok=True)
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
@@ -59,6 +60,18 @@ if localManifest.exists():
   h=row['actualSourceSHA256']
   recovery[h]={'steps':[frame(localManifest.parent,f) for f in row['frames']]}
 
+# New local responses are opt-in, so the frozen prior candidate stays rebuildable.
+for localInput in a.local_interaction_manifest or []:
+ localPath=localInput.resolve();local=json.loads(localPath.read_text())
+ provenance.append({'source':str(localPath.relative_to(R)),'sha256':sha(localPath)})
+ def local_frame(f):return frame(localPath.parent,{**f,'sourceSHA256':f['actualSourceSHA']})
+ for name,action in local['actions'].items():
+  if action.get('wholeSequenceLoop') is not False:raise ValueError('Local response must be finite')
+  localPlans.append({'id':name,'kind':'action','action':action.get('publicAction',name),'loop':None,'frames':[local_frame(f) for f in action['frames']]})
+ for h,steps in local['ordinaryRecoveryByActualSHA'].items():
+  # Existing shared endpoints retain their already authored cross-family recovery.
+  if h not in recovery:recovery[h]={'steps':[local_frame(f) for f in steps]}
+
 # Management performances retain directional action identity. Project execution
 # detail is not their trigger and must never be inferred from these source cues.
 if a.director_manifest:
@@ -73,6 +86,16 @@ if a.director_manifest:
   # A group's own rest has no internal return; keep its existing cross-family
   # real hand recovery rather than erasing that route with an empty endpoint.
   if steps or h not in recovery:recovery[h]={'steps':steps}
+
+if a.local_interaction_manifest:
+ # The normal supervisor starts with a hand holding the laptop edge. Local
+ # attention reaches its open-user entrance through the real hand-return image,
+ # not the old two-exposure listening-to-neutral convenience return.
+ listen='0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a'
+ attendPath='question-permission/poses/attend-corrected.png'
+ attendHash='fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f'
+ provenance.append({'baseSource':attendPath,'sha256':attendHash})
+ recovery[listen]={'steps':[frame(B,{'source':attendPath,'sourceSHA256':attendHash,'durationMs':120,'cue':'RECOVERY_ONLY'}),frame(B,{'source':'shared/upright-open-neutral-v2.png','sourceSHA256':sha(B/'shared/upright-open-neutral-v2.png'),'durationMs':160,'cue':'REST','pauseSafe':True})]}
 
 # Add only source-exact new entries; the prior 55-entry graph remains untouched.
 rel=R/'relocation';indexPath=a.detached_index.resolve()

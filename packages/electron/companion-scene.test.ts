@@ -158,3 +158,27 @@ it('resolves a single native inspection side and clears its receipt while draggi
   f.manager.block(f.owner.id, true);
   expect(f.manager.inspectionReceipt(f.owner.id)?.inspectionSide).toBeNull();
 });
+
+it('admits only bounded drawing identities, not renderer URLs or crop data', () => {
+ const drawing={bundle:'selected' as const,epoch:'a'.repeat(64),packageId:'v3-director-supervise',frameIndex:0};
+ expect(readCompanionSceneDescriptor(descriptor(1,{drawing,layout:'spatial-b-v1'})).drawing).toEqual(drawing);
+ for(const change of [{bundle:'https://example.test'},{epoch:'old'},{frameIndex:-1},{packageId:''}]) expect(()=>readCompanionSceneDescriptor(descriptor(1,{drawing:{...drawing,...change} as typeof drawing}))).toThrow();
+ const clean=readCompanionSceneDescriptor({...descriptor(1,{drawing}),drawing:{...drawing,url:'https://example.test/p.png',rect:[0,0,1,1]}});
+ expect(clean.drawing).toEqual(drawing);
+});
+it('keeps B geometry in the same canvas basis and compresses before the real interactive footer', () => {
+ const owner={x:100,y:80,width:360,height:480};
+ const full=companionSceneLayout(owner,viewport,area,true), clipped=companionSceneLayout(owner,{...viewport,decorationBottom:360},area,true);
+ expect(full.bounds.height).toBe(540); expect(full.layout.spatial?.id).toBe('spatial-b-v1');
+ expect(full.layout.spatial?.bounds.bottom).toBeLessThanOrEqual(285);
+ expect(clipped.layout.spatial?.bounds.bottom).toBeLessThanOrEqual(225);
+ expect(clipped.layout.character.x).toBe(full.layout.character.x);
+ expect(clipped.layout.spatial?.seats.map(s=>s.label)).toEqual(['A','B','C']);
+ expect(()=>companionSceneLayout(owner,{...viewport,decorationBottom:481},area,true)).toThrow('floor');
+});
+it('honors the actual B report side, with neutral unavailable-side behavior rather than mirrored art', () => {
+ const owner={x:200,y:100,width:360,height:480};
+ expect(companionSceneLayout(owner,viewport,area,true,'left').layout.inspectionSide).toBe('left');
+ expect(companionSceneLayout({...owner,x:0},viewport,area,true,'left').layout.inspectionSide).toBeNull();
+ expect(companionSceneLayout({...owner,x:920},viewport,area,true,'right').layout.inspectionSide).toBeNull();
+});

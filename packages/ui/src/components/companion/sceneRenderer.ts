@@ -1,9 +1,12 @@
+import { spatialArtwork } from './spatialArtwork';
+import { SceneCharacterMaskCache, inverseCharacterMaskSvg, type SceneCharacterMask } from './sceneCharacterMask';
+import type { CompanionSpatialLayout } from '@varin/application-client/desktop';
 import { portfolioArtwork, squadWorkTiming, type PortfolioListen, type PortfolioBeat } from './portfolioArtwork';
 import type { DesktopCompanionScene } from '@varin/application-client';
 import { COMPANION_SCENE_GEOMETRY as geometry, COMPANION_TEAM_VISIBLE_LIMIT } from './sceneGeometry';
 import { AGENT_AVATAR_ART, agentAvatarSvg } from '../ui/agent-avatar-art';
 
-export interface SceneLayout { inspectionSide?: 'left' | 'right' | null; character: { x: number; y: number; width: number; height: number }; visible: { x: number; y: number; width: number; height: number } }
+export interface SceneLayout { spatial?: CompanionSpatialLayout; inspectionSide?: 'left' | 'right' | null; character: { x: number; y: number; width: number; height: number }; visible: { x: number; y: number; width: number; height: number } }
 export interface SceneUpdate { descriptor: DesktopCompanionScene; layout: SceneLayout }
 const blue = '#7895b5', ink = '#4c5268', cyan = '#8bbfc9', purple = '#aaa0ca', gold = '#c7a56c', peach = '#be8f9b';
 const path = (d: string, c = ink, fill = 'none', width = 1.4) => `<path d="${d}" stroke="${c}" fill="${fill}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -180,6 +183,8 @@ export function mountCompanionScene(root: HTMLElement) {
   root.style.cssText='position:fixed;inset:0;overflow:hidden;pointer-events:none;user-select:none';
   root.setAttribute('aria-hidden','true');
   let resetRoster=false;
+  let maskCache:SceneCharacterMaskCache|null=null, maskSelector:'selected'|'review'|null=null, characterMask:SceneCharacterMask|null=null;
+  const hideRear=()=>{root.querySelector?.('[data-spatial-behind]')?.setAttribute('visibility','hidden');};
   let portfolioBeats=new Map<string,PortfolioBeat>();
   let portfolioCueStarted=0;
   let portfolioListen:PortfolioListen|null=null,workEpoch=performance.now();
@@ -209,6 +214,13 @@ export function mountCompanionScene(root: HTMLElement) {
     const edge=leftCrop&&!rightCrop?'left':rightCrop&&!leftCrop?'right':null;
     const hasTeam=!!d.team?.members.length;
     let body=d.kind==='portfolio'?lane(portfolioArtwork(d,l.inspectionSide,now,now-portfolioCueStarted,portfolioBeats,portfolioPacketCue?{cue:portfolioPacketCue,age:now-portfolioPacketStarted}:undefined,portfolioListen,workEpoch)):d.kind==='dispatch'?'':lane(artwork({...d,team:undefined,count:d.team?null:d.count},elapsed,now-cueStarted,leftCrop&&!rightCrop,edge,teamBeats,now));
+    let maskDefs='';
+    if(d.kind==='portfolio'&&d.layout==='spatial-b-v1'&&l.spatial){
+      const spatial=spatialArtwork(d,l.spatial,l.inspectionSide,now,workEpoch,portfolioListen,portfolioPacketCue?{cue:portfolioPacketCue,age:now-portfolioPacketStarted}:undefined);
+      const bounds=l.spatial.available;
+      if(characterMask)maskDefs=inverseCharacterMaskSvg('drawn-character',characterMask,geometry.character,{x:bounds.left,y:bounds.top,width:bounds.right-bounds.left,height:bounds.bottom-bounds.top});
+      body=`<g data-spatial-behind="true" ${characterMask?'mask="url(#drawn-character)"':'visibility="hidden"'}>${spatial.behind}</g>${spatial.front}`;
+    }
     const teamLayer=hasTeam?lane(artwork({...d,phase:'active',outcome:null,count:null},elapsed,now-cueStarted,leftCrop&&!rightCrop,edge,teamBeats,now,true)):'';
     if(d.kind!=='portfolio'&&previous&&!d.reducedMotion&&now-previousAt<240&&previous.descriptor.scope===d.scope&&!terminal) body=`<g opacity="${1-(now-previousAt)/240}">${lane(previous.descriptor.kind==='dispatch'?'':artwork({...previous.descriptor,phase:'withdraw',team:undefined},previousElapsed))}</g>`+body;
     // At a display edge put one-sided scenes on the available side. Do not
@@ -217,7 +229,7 @@ export function mountCompanionScene(root: HTMLElement) {
     const withdraw = terminal && !d.reducedMotion ? ease(phaseAge/end) : 0;
     const layers = withdraw ? `<g transform="translate(${150*withdraw*.08} ${148*withdraw*.08}) scale(${1-withdraw*.08})">${body}</g>` : body;
     // All edge compositions are authored above; anchors never move with lanes.
-    root.innerHTML=`<svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="paper" x1="0" y1="0" x2=".1" y2="1"><stop stop-color="#fffdf5"/><stop offset=".44" stop-color="#fbfcff"/><stop offset="1" stop-color="#dce7f1"/></linearGradient><linearGradient id="spirit-glass" x2=".3" y2="1"><stop stop-color="#fffaf4" stop-opacity=".8"/><stop offset="1" stop-color="#c3cee9" stop-opacity=".45"/></linearGradient><linearGradient id="ribbon" x2=".3" y2="1"><stop stop-color="#e9e5f5"/><stop offset=".48" stop-color="#c7c6e0"/><stop offset="1" stop-color="#a1afcb"/></linearGradient><linearGradient id="metal" x2=".8" y2="1"><stop stop-color="#fff2ca"/><stop offset=".4" stop-color="#e6ce9d"/><stop offset="1" stop-color="#b59b74"/></linearGradient><filter id="paper-depth" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#273449" flood-opacity=".13"/></filter><clipPath id="outside-face"><path d="M-100 -100H400V350H-100Z M${face.x} ${face.y}V${face.y+face.height}H${face.x+face.width}V${face.y}Z" clip-rule="evenodd"/></clipPath></defs><g transform="translate(${tx} ${ty}) scale(${scale})" ><g clip-path="url(#outside-face)" filter="url(#paper-depth)"><g opacity="${opacity}">${layers}</g>${teamLayer}</g></g></svg>`;
+    root.innerHTML=`<svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg"><defs>${maskDefs}<linearGradient id="paper" x1="0" y1="0" x2=".1" y2="1"><stop stop-color="#fffdf5"/><stop offset=".44" stop-color="#fbfcff"/><stop offset="1" stop-color="#dce7f1"/></linearGradient><linearGradient id="spirit-glass" x2=".3" y2="1"><stop stop-color="#fffaf4" stop-opacity=".8"/><stop offset="1" stop-color="#c3cee9" stop-opacity=".45"/></linearGradient><linearGradient id="ribbon" x2=".3" y2="1"><stop stop-color="#e9e5f5"/><stop offset=".48" stop-color="#c7c6e0"/><stop offset="1" stop-color="#a1afcb"/></linearGradient><linearGradient id="metal" x2=".8" y2="1"><stop stop-color="#fff2ca"/><stop offset=".4" stop-color="#e6ce9d"/><stop offset="1" stop-color="#b59b74"/></linearGradient><filter id="paper-depth" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#273449" flood-opacity=".13"/></filter><clipPath id="outside-face"><path d="M-100 -100H400V350H-100Z M${face.x} ${face.y}V${face.y+face.height}H${face.x+face.width}V${face.y}Z" clip-rule="evenodd"/></clipPath></defs><g transform="translate(${tx} ${ty}) scale(${scale})" ><g clip-path="url(#outside-face)" ${d.layout==='spatial-b-v1'?'':'filter="url(#paper-depth)"'}><g opacity="${opacity}">${layers}</g>${teamLayer}</g></g></svg>`;
     if(terminal&&phaseAge>=end&&!hasTeam) { root.replaceChildren(); return; }
     const portfolioMoving=d.kind==='portfolio'&&[...portfolioBeats.values()].some(beat=>now-beat.at<480);
     const teamMoving=[...teamBeats.values()].some(beat=>((d.kind==='dispatch'&&beat.entering) || beat.state==='leaving') && now-beat.at<650);
@@ -304,15 +316,23 @@ export function mountCompanionScene(root: HTMLElement) {
       nextPortfolio.set(project.key,{detail:signature,at});
     }
     portfolioBeats=nextPortfolio;
-    if(current?.descriptor.scope!==value.descriptor.scope)workEpoch=performance.now();
+    if(current?.descriptor.scope!==value.descriptor.scope){workEpoch=performance.now();characterMask=null;hideRear();maskCache?.clear();}
     current=value;
+    const drawing=value.descriptor.drawing;
+    if(hidden||value.descriptor.layout!=='spatial-b-v1'||!drawing){characterMask=null;hideRear();maskCache?.clear();}
+    else {
+      if(maskSelector!==drawing.bundle){maskCache?.dispose();maskSelector=drawing.bundle;characterMask=null;
+        maskCache=new SceneCharacterMaskCache(drawing.bundle,ready=>{characterMask=ready;if(!ready)hideRear();if(!frame)frame=requestAnimationFrame(render);});
+      }
+      void maskCache?.setDrawing(drawing);
+    }
     if(frame)cancelAnimationFrame(frame);
     frame=requestAnimationFrame(render);
   };
   const event=(e:Event)=>update((e as CustomEvent<SceneUpdate>).detail);
-  const visibility=()=>{if(frame)cancelAnimationFrame(frame);if(workTimer!==undefined){clearTimeout(workTimer);workTimer=undefined;}if(document.hidden){resetRoster=true;departing.clear();teamBeats.clear();portfolioBeats.clear();portfolioPacketCue=null;portfolioListen=null;root.replaceChildren();}else {started=performance.now();frame=requestAnimationFrame(render);}};
+  const visibility=()=>{if(frame)cancelAnimationFrame(frame);if(workTimer!==undefined){clearTimeout(workTimer);workTimer=undefined;}if(document.hidden){characterMask=null;maskCache?.clear();resetRoster=true;departing.clear();teamBeats.clear();portfolioBeats.clear();portfolioPacketCue=null;portfolioListen=null;root.replaceChildren();}else {started=performance.now();frame=requestAnimationFrame(render);}};
   window.addEventListener('varin-companion-scene',event);document.addEventListener('visibilitychange',visibility);
   document.documentElement.dataset.varinCompanionSceneReady = 'true';
   window.dispatchEvent(new Event('varin-companion-scene-ready'));
-  return { update, dispose:()=>{delete document.documentElement.dataset.varinCompanionSceneReady;cancelAnimationFrame(frame);if(workTimer!==undefined)clearTimeout(workTimer);root.replaceChildren();window.removeEventListener('varin-companion-scene',event);document.removeEventListener('visibilitychange',visibility);} };
+  return { update, dispose:()=>{maskCache?.dispose();delete document.documentElement.dataset.varinCompanionSceneReady;cancelAnimationFrame(frame);if(workTimer!==undefined)clearTimeout(workTimer);root.replaceChildren();window.removeEventListener('varin-companion-scene',event);document.removeEventListener('visibilitychange',visibility);} };
 }

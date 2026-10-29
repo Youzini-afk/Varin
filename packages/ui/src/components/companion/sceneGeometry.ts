@@ -14,3 +14,7 @@ export const COMPANION_SCENE_GEOMETRY = {
 /** Three readable identity seats at the native 360px character size; further
  * confirmed scoped members are represented by the factual overflow count. */
 export { COMPANION_TEAM_VISIBLE_LIMIT } from '@varin/application-client/desktop';
+
+/** Review-only selected B spatial composition; shared with the native owner.
+ * Legacy geometry above remains the ordinary/public399 path. */
+export { COMPANION_SPATIAL_B, resolveCompanionSpatialLayout } from '@varin/application-client/desktop';

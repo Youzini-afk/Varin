@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { directorBodyAction } from './directorBody';
 import type { DirectorPresentation } from './directorPresentation';
-const view: DirectorPresentation = { interactionRoute:'bot-coordinator', health: 'current', source: null, body: { verb: 'review-portfolio', subject: null, attentionOwner: null, attentionMode: null, attentionItem: null, edge: null }, cards: [], overflowCards: 0, inspectedProjectKey: null, inspection: null, counts: null, coverage: null };
+const view: DirectorPresentation = { interactionRoute:'bot-coordinator', inspectionRoute:'bot-coordinator', health: 'current', source: null, body: { subjectRoute:'bot-coordinator', verb: 'review-portfolio', subject: null, attentionOwner: null, attentionMode: null, attentionItem: null, edge: null }, cards: [], overflowCards: 0, inspectedProjectKey: null, inspection: null, counts: null, coverage: null };
 it('uses direction only for actual managerial attention, not project tool changes', () => {
   expect(directorBodyAction(view, 'left')).toBe('director-supervise');
   const inspection = { ...view, inspectedProjectKey: 'project-1' };
@@ -26,4 +26,12 @@ it('keeps Agent inspection/new work separate from Bot coordination and faces the
  expect(directorBodyAction({...agent,body:{...agent.body,verb:'notify-attention'}},'right')).toBe('director-open-attention');
  expect(directorBodyAction({...agent,body:{...agent.body,verb:'notify-result'}},'left')).toBe('director-open-attention');
  expect(directorBodyAction({...agent,interactionRoute:'unknown'},'left')).toBe('director-supervise');
+});
+
+it('does not borrow the Bot workbench authority for an Agent project or a missing ownership field', () => {
+ const mixed={...view,inspectedProjectKey:'agent-A',inspectionRoute:'agent-companion' as const,body:{...view.body,subjectRoute:'unknown' as const}};
+ expect(directorBodyAction(mixed,'right')).toBe('director-supervise');
+ expect(directorBodyAction({...mixed,body:{...mixed.body,verb:'receive-work'}},'right')).toBe('director-supervise');
+ expect(directorBodyAction({...mixed,body:{...mixed.body,verb:'receive-result'}},'right')).toBe('director-open-attention');
+ expect(directorBodyAction({...mixed,body:{...mixed.body,verb:'present-attention'}},'left')).toBe('director-open-attention');
 });
