@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-29",
+  "scope": "Finite Linux native normal-entry smoke; no real tasks/Bots/model calls, source/Git/build/staging changes",
+  "selectedBundle": "1303a69840be467335a6400d9d8ebbd73d94b7a0fcd5cebebb22b44a9588bc18",
+  "observed": [
+    "Initial launcher execute bit missing; parent corrected u+x after failed/no-app attempt; retry succeeded. Actual stopped job observed before fg %1.",
+    "Normal entry automatically opens companion with character, menu, task overview; no developer header/checkbox/fixture selector and no dummy task leads.",
+    "Production menu opens; 项目与待办 opens 当前 Host · 原生任务；不含外部 Agent with 当前 Host 暂无需要你的请求.",
+    "Workspace companion shows 任务总览 and 任务提醒. Real topbar switches to Varin bot; empty Bot page and companion 主管总览 / 任务与待处理 observed. No Bot created.",
+    "Restored 工作台 through actual topbar; companion returned 任务总览.",
+    "关闭桌宠 removes companion/decorative windows; normal main close removes all Varin windows; terminal prompt returns and log confirms graceful shutdown.",
+    "Restored isolated settings byte-exact after exit."
+  ],
+  "notClaimed": [
+    "Full candidate QA repeated",
+    "Hair-touch/short hover peak",
+    "Real model execution/coordination",
+    "Release/fullCI/Windows/macOS certification"
+  ],
+  "blockers": [],
+  "log": "/workspace/shared/varin-native-validation/gui-companion-selected.log",
+  "logSha256": "93588f2d8918ed28e61c554a09239e36531eff2d91cc15794dd02da708cab4c9",
+  "settingsSha256": "87ee5fe4ec53a5fd4226d8ca790df57bd94e82c597dc8b72e94a6353a39bdcab"
+}
