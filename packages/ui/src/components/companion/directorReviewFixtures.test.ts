@@ -1,0 +1,61 @@
+import { expect, it } from 'vitest';
+import { createDirectorReviewFixtureSession } from './directorReviewFixtures';
+
+it('uses real projection contracts for three leads and keeps A children alive when B returns a result', () => {
+  const session = createDirectorReviewFixtureSession();
+  expect(session.view().projection.portfolio.projects).toHaveLength(3);
+  session.step('b-result');
+  const frame = session.view();
+  expect(frame.reviewOnly).toBe(true);
+  expect(frame.presentation.body.edge).toMatchObject({ kind: 'receive-result', runId: 'review-run-b', outcome: 'completed' });
+  expect(frame.projection.portfolio.team?.members).toHaveLength(1);
+  expect(frame.projection.portfolio.team?.members[0]?.state).toBe('running');
+  expect(frame.attention.teamExecutions[0]?.parentRunId).toBe(frame.attention.branches[0]?.currentRun?.id);
+  const edge = frame.presentation.body.edge!;
+  session.consumeEdge(edge.key);
+  expect(session.view().presentation.body.edge).toBeNull();
+  expect(session.view().presentation.body.verb).toBe('review-portfolio');
+});
+it('keeps independent permission/question ownership and resolves only B', () => {
+  const session = createDirectorReviewFixtureSession(); session.step('requests');
+  const before = session.view();
+  expect(before.projection.portfolio.projects.map(card => card.notice).filter(Boolean).sort()).toEqual(['permission', 'question']);
+  const question = before.attention.items.find(item => item.kind === 'question')!;
+  for (const item of before.attention.items) expect(before.attention.branches.find(branch => branch.branchId === item.branchId)?.currentRun?.id).toBe(item.runId);
+  session.step('b-resolved'); const after = session.view();
+  expect(after.attention.items).toEqual([question]);
+  expect(after.projection.portfolio.projects.map(card => card.notice).filter(Boolean)).toEqual(['question']);
+  expect(after.attention.counts.actionRequired).toBe(1);
+});
+it('unknown retains identities without stale team and reconnect never replays historical outcomes', () => {
+  const session = createDirectorReviewFixtureSession(); session.step('unknown');
+  const unknown = session.view();
+  expect(unknown.projection.portfolio.projects).toHaveLength(3);
+  expect(unknown.projection.portfolio.projects.every(card => card.status === 'unknown' && card.requestCount === null)).toBe(true);
+  expect(unknown.projection.portfolio.team).toBeUndefined();
+  session.step('reconnected'); const restored = session.view();
+  expect(restored.projection.sourceCurrent).toBe(true);
+  expect(restored.presentation.body.edge).toBeNull();
+  expect(restored.projection.portfolio.team?.members).toHaveLength(1);
+  session.step('b-result'); session.view({ visible: false });
+  expect(session.view({ visible: true }).presentation.body.edge).toBeNull();
+  expect(session.view({ hideTaskNames: true }).projection.portfolio.projects.every(card => card.caption === undefined)).toBe(true);
+});
+
+it('observes a genuinely new accepted B run before producing intake, independently of A inspection', () => {
+  const session = createDirectorReviewFixtureSession();
+  session.step('b-intake');
+  const frame = session.view();
+  expect(frame.presentation.body.verb).toBe('receive-work');
+  expect(frame.presentation.body.edge).toMatchObject({ kind: 'receive-work', runId: 'review-run-b', project: { threadId: 'review-thread-b', branchId: 'review-branch-b' }, outcome: null });
+  expect(frame.presentation.inspection?.identity.threadId).toBe('review-thread-a');
+  expect(frame.attention.branches.find(branch => branch.threadId === 'review-thread-b')?.currentRun?.state).toBe('accepted');
+  expect(frame.projection.portfolio.mode).toBe('intake');
+  const subject = frame.projection.portfolio.projects.find(card => card.key === frame.projection.portfolio.subjectKey);
+  expect(subject).toMatchObject({ caption: '页面方案', lead: { role: 'project-lead' } });
+  expect(frame.projection.portfolio.team?.members[0]?.state).toBe('running');
+  session.consumeEdge(frame.presentation.body.edge!.key);
+  expect(session.view().presentation.body.edge).toBeNull();
+  session.step('b-intake'); session.view({ interacting: true });
+  expect(session.view({ interacting: false }).presentation.body.edge).toBeNull();
+});

@@ -1,3 +1,4 @@
+import { createDirectorReviewFixtureSession, type DirectorReviewStep } from '@/components/companion/directorReviewFixtures';
 import { useCompanionDirector } from '@/components/companion/useCompanionDirector';
 import { useDirectorPortfolio } from '@/components/companion/useDirectorPortfolio';
 import { directorToolDetail } from '@/components/companion/directorPortfolio';
@@ -26,7 +27,15 @@ import catalog from '../../../../tools/desktop-companion-animation/coverage.json
 function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const { t } = useI18n();
   const review = new URLSearchParams(window.location.search).get('review') === '1';
-  const directorReview = review && new URLSearchParams(window.location.search).get('director') === '1';
+  const [directorEnabled, setDirectorEnabled] = React.useState(() => review && new URLSearchParams(window.location.search).get('director') === '1');
+  const directorReview = review && directorEnabled;
+  const [reviewBundleIdentity, setReviewBundleIdentity] = React.useState('');
+  const [fixtureMode, setFixtureMode] = React.useState(false);
+  const [fixtureStep, setFixtureStep] = React.useState<DirectorReviewStep>('portfolio');
+  const [fixtureInspection, setFixtureInspection] = React.useState<ThreadIdentity | null | undefined>();
+  const fixtureSession = React.useMemo(createDirectorReviewFixtureSession, []);
+  const [, refreshFixture] = React.useReducer((v: number) => v + 1, 0);
+  const fixtureActive = directorReview && fixtureMode;
   const [hideTaskNames, setHideTaskNames] = React.useState(false);
   const [finishedDirectorSentence, setFinishedDirectorSentence] = React.useState<string | null>(null);
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -145,15 +154,19 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (document.hidden) visibility();
     return () => document.removeEventListener('visibilitychange', visibility);
   }, [attention.refresh]);
-  const director = useCompanionDirector(directorReview ? attention : { ...attention, snapshot: null, health: 'unknown' }, selected?.generation === generation ? selected.identity : null, generation,
+  const liveDirector = useCompanionDirector(directorReview && !fixtureActive ? attention : { ...attention, snapshot: null, health: 'unknown' }, selected?.generation === generation ? selected.identity : null, generation,
     { visible: directorReview && !document.hidden, interacting: companionWindow.phase !== 'rest', cardCapacity: 3 });
   const directorDetail = directorToolDetail(snapshot, health);
-  const portfolioProjection = useDirectorPortfolio(director, directorReview ? attention.snapshot : null, generation, directorReview && directorDetail ? [directorDetail] : [], { hideTaskNames });
+  const livePortfolio = useDirectorPortfolio(liveDirector, directorReview && !fixtureActive ? attention.snapshot : null, generation, directorReview && !fixtureActive && directorDetail ? [directorDetail] : [], { hideTaskNames });
+  const fixtureView = fixtureActive ? fixtureSession.view({ visible: !document.hidden, interacting: companionWindow.phase !== 'rest', inspected: fixtureInspection, hideTaskNames }) : null;
+  const director = fixtureView ? { ...fixtureView.presentation, consumeEdge: (key: string) => { fixtureSession.consumeEdge(key); refreshFixture(); }, discardTransient: () => { fixtureSession.discardTransient(); refreshFixture(); } } : liveDirector;
+  const portfolioProjection = fixtureView?.projection ?? livePortfolio;
+  const selectFixture = (step: DirectorReviewStep) => { fixtureSession.step(step); setFixtureStep(step); setFinishedDirectorSentence(null); setManualReview(false); setPlaying(false); refreshFixture(); };
   const rawScene = sceneForIntent(sceneFact, intent.state);
   const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation)
     : stableIntent.state !== intent.state && rawScene.phase === 'active' ? { kind: null, phase: 'withdraw', outcome: null, count: null } as SceneFact : rawScene;
-  const directorContextKey = JSON.stringify([generation, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
-  const directorLayout = useCompanionScene(canvas, sceneCurrent, directorReview ? `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
+  const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
+  const directorLayout = useCompanionScene(canvas, sceneCurrent, directorReview ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
     companionWindow.phase !== 'rest' || (!directorReview && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorReview || reviewRoute ? undefined : team, directorReview ? portfolioProjection.portfolio : undefined, directorReview ? directorContextKey : null);
   const restDue = useCompanionLeisure(localAllowed && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (health === 'current' || health === 'unselected'), companionWindow.activityRevision);
   const ordinaryDisplayAction = restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
@@ -254,7 +267,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     for (const page of decodedPages.current.values()) page.image?.close();
     decodedPages.current.clear();
   }, []);
-  const installBundle = async (raw: unknown, readImage: (name: string) => Promise<ImageBitmap>, allowCandidates: boolean) => {
+  const installBundle = async (raw: unknown, readImage: (name: string) => Promise<ImageBitmap>, allowCandidates: boolean, manualSelection = false) => {
     ++loadGeneration.current;
     setPlaying(false); setError('');
     try {
@@ -265,7 +278,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       decodedPages.current.clear();
       imageCache.current = {}; loadingImages.current.clear(); atlasReader.current = readImage;
       setImageLibrary({}); setAssetList(nextPackages);
-      setAsset(allowCandidates ? nextPackages[0] : undefined); setExposure(0);
+      setAsset(manualSelection ? nextPackages[0] : undefined); setExposure(0);
     } catch (cause) { setError(String(cause)); }
   };
   // Decode only the displayed package and the controller's next bridge/target.
@@ -340,25 +353,35 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         const candidates = all.filter(file => file.name === name);
         if (candidates.length !== 1) throw new Error(`Missing or ambiguous atlas: ${name}`);
         return createImageBitmap(candidates[0]!);
-      }, true);
+      }, true, true);
     } catch (cause) { setError(String(cause)); }
   };
   React.useEffect(() => {
     const abort = new AbortController();
     const initialGeneration = loadGeneration.current;
-    const base = new URL('./companion-assets/', window.location.href);
+    const base = new URL(directorReview ? './companion-review-director/' : './companion-assets/', window.location.href);
+    setManualReview(false); setPlaying(false); setAsset(undefined); setAssetList([]); setFinishedDirectorSentence(null); setReviewBundleIdentity('');
     void fetch(new URL('bundle.json', base), { signal: abort.signal }).then(async response => {
       if (!response.ok) throw new Error('Bundled companion artwork is unavailable');
-      const raw: unknown = await response.json();
+      const text = await response.text();
+      const raw: unknown = JSON.parse(text);
+      if (directorReview) {
+        const completion = await fetch(new URL('review-assets.json', base), { signal: abort.signal });
+        if (!completion.ok) throw new Error('Director review generation is not completely staged');
+        const marker = await completion.json() as { reviewOnly?: boolean; candidateBundleSHA256?: string };
+        const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        if (!raw || typeof raw !== 'object' || !('candidateOnly' in raw) || raw.candidateOnly !== true || marker.reviewOnly !== true || marker.candidateBundleSHA256 !== digest) throw new Error('Director review generation identity mismatch');
+        if (!abort.signal.aborted && loadGeneration.current === initialGeneration) setReviewBundleIdentity(digest);
+      }
       if (!abort.signal.aborted && loadGeneration.current === initialGeneration) await installBundle(raw, async name => {
         // Decoder has already restricted each page to a basename; no arbitrary URLs/paths.
         const image = await fetch(new URL(encodeURIComponent(name), base), { signal: abort.signal });
         if (!image.ok) throw new Error(`Bundled atlas unavailable: ${name}`);
         return createImageBitmap(await image.blob());
-      }, false);
+      }, directorReview);
     }).catch(cause => { if (!abort.signal.aborted && loadGeneration.current === initialGeneration) setError(String(cause)); });
     return () => { abort.abort(); loadGeneration.current++; };
-  }, []);
+  }, [directorReview]);
   React.useEffect(() => {
     if (!playing && !manualReview && automatic.packageId) {
       const current = assetList.find(item => item.id === automatic.packageId);
@@ -386,6 +409,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   // rather than letting an embedded stool travel for a React/animation frame.
   beforeNativeLift.current = () => {
     canAnimateEdges.current = false;
+    // A real native grab takes over from manual exposure review; its necessary
+    // pickup/landing timeline must not remain paused by the inspection controls.
+    setManualReview(false); setPlaying(false);
     const next = automatic.beginGrab(displayedDrawing.current);
     const sequence = next && assetList.find(item => item.id === next.packageId);
     const images = next && imageCache.current[next.packageId];
@@ -453,14 +479,22 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       <button style={{ float: 'right', WebkitAppRegion: 'no-drag' } as React.CSSProperties} disabled={!isElectronShell()}
         onClick={() => void invokeDesktop('desktop_close_current_window')}>Close</button>
     </header> : <button aria-label={t('companion.controls')} aria-expanded={controlsOpen} onClick={() => setControlsOpen(value => !value)} style={{ position: 'absolute', right: 6, top: 6, zIndex: 20, borderRadius: 20, background: '#20242bca', color: 'white', border: 0, padding: '6px 10px' }}>⋯</button>}
-    <canvas ref={canvas} {...companionWindow.handlers} style={{ width: 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
+    {review && <section style={{ ...panel, margin: 0, padding: '4px 8px' }} aria-label="Director review entry">
+      <label><input type="checkbox" checked={directorReview} onChange={event => setDirectorEnabled(event.target.checked)} />主管候选（独立资源，仅开发审阅）</label>
+      {directorReview && <>
+        <label style={{ display: 'block' }}>数据 <select aria-label="Director review data source" value={fixtureMode ? 'fixture' : 'host'} onChange={event => { setFixtureMode(event.target.value === 'fixture'); setFinishedDirectorSentence(null); fixtureSession.discardTransient(); refreshFixture(); }}><option value="host">实际 Host · 只读</option><option value="fixture">离线演示 fixture · 非真实任务</option></select></label>
+        {fixtureActive && <label>演示 <select aria-label="Offline director scenario" value={fixtureStep} onChange={event => selectFixture(event.target.value as DirectorReviewStep)}><option value="portfolio">三项目总览</option><option value="team-active">A负责人和子队</option><option value="b-intake">B新项目接收→交负责人</option><option value="b-result">B结果 · A仍执行</option><option value="requests">B授权 · C问题</option><option value="b-resolved">B解除 · C仍待答</option><option value="unknown">观察未知</option><option value="reconnected">恢复观察不重播</option></select></label>}
+        <small style={{ display: 'block', color: fixtureActive ? '#ffd393' : undefined }}>{fixtureActive ? '离线示例：不写Host，不执行/打开任何示例任务' : '真实Host空列表将保持为空；不生成示例任务'} · 未选择正式人物包</small>
+      </>}
+    </section>}
+    <canvas ref={canvas} {...companionWindow.handlers} style={{ width: directorReview ? 'min(100%,320px)' : 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
     {error && !review && <p role="alert" style={panel}>{error}</p>}
     {!asset && <p style={panel}>{assetList.length ? t('companion.loading') : t('companion.missing')}</p>}
     {directorReview && <section style={panel} aria-label="Director candidate portfolio">
       <strong>Director candidate — read-only project inspection, not final artwork selection</strong>
-      <p>Management: {director.body.verb}. Project execution detail does not select Varin's body.</p>
+      <p>候选 {reviewBundleIdentity.slice(0, 12) || "尚未加载"} · Management: {director.body.verb}. Project execution detail does not select Varin's body.</p>
       <label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />Hide decorative task names</label>
-      <div>{portfolioProjection.legend.map(item => <button key={item.key} onClick={() => setSelected({ generation, identity: item.identity })}>{item.label} · {item.title || 'Untitled task'}</button>)}</div>
+      <div>{portfolioProjection.legend.map(item => <button key={item.key} onClick={() => { if (fixtureActive) { setFixtureInspection(item.identity); setFinishedDirectorSentence(null); refreshFixture(); } else setSelected({ generation, identity: item.identity }); }}>{item.label} · {item.title || 'Untitled task'}</button>)}</div>
       {!assetList.some(item => item.action === 'director-supervise') && <p>Load the explicit complete director candidate bundle to review management performances. No old tool-action fallback is used.</p>}
     </section>}
     {!review && <section style={{ ...panel, position: 'fixed', bottom: 3, left: 5, right: 5, margin: 0, maxHeight: 104, overflow: 'auto', boxSizing: 'border-box' }}><CompanionAttentionSummary attention={attention} focusTitle={focusTitle} focused={!!identity} focusStatus={shortStatus} onInspect={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }} /></section>}
