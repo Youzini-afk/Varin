@@ -29,6 +29,8 @@ pub struct AttentionBranch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     pub parent_thread_id: Option<String>,
+    /// Exact Catalog ownership, including existing child ancestry; null is unbound.
+    pub bot_id: Option<String>,
     pub archived: bool,
     pub deleted: bool,
     pub active_run_id: Option<String>,
@@ -233,6 +235,7 @@ impl AttentionRead {
             branches.insert(
                 branch_id.clone(),
                 AttentionBranch {
+                    bot_id: bot::thread_bot(&db, &thread_id)?,
                     thread_id,
                     branch_id,
                     title,

@@ -1,3 +1,5 @@
+#[path = "fixtures/child_dispatch.rs"]
+mod child_dispatch;
 #[path = "fixtures/input_admission.rs"]
 mod input_admission;
 use input_admission::InputAdmission;
@@ -45,7 +47,18 @@ fn submit(db: &mut Catalog, thread: &str, branch: &str) -> Receipt {
 fn attention_is_one_snapshot_and_owner_replacement_is_not_empty_success() {
     let root = Fixture::new();
     let mut db = Catalog::open(&root.0).unwrap();
-    submit(&mut db, "first", "first-branch");
+    let first = submit(&mut db, "first", "first-branch");
+    for bot in ["original-bot", "concurrent-bot"] {
+        db.publish_bot_gate(varin_runtime::catalog::bot::BotGate {
+            bot_id: bot.into(),
+            profile_revision: 1,
+            activity_operation_id: None,
+            permitted: true,
+        }).unwrap();
+    }
+    db.create_bot_thread("bot-thread", "bot-branch", "original-bot")
+        .unwrap();
+    db.fork_branch("bot-branch", "bot-fork", None).unwrap();
     let read = db.capture_attention_read();
     let before = db.event_cursor().unwrap();
     let calls = std::cell::Cell::new(0);
@@ -57,23 +70,50 @@ fn attention_is_one_snapshot_and_owner_replacement_is_not_empty_success() {
             if n == 1 {
                 writer
                     .borrow_mut()
-                    .create_thread("concurrent", "concurrent-branch")
+                    .create_bot_thread("concurrent", "concurrent-branch", "concurrent-bot")
                     .unwrap();
             }
             false
         })
         .unwrap();
     assert_eq!(snapshot.event_cursor, before);
-    assert_eq!(snapshot.branches.len(), 1);
+    assert_eq!(snapshot.branches.len(), 3);
     assert_eq!(snapshot.counts.action_required, 0);
+    let direct = snapshot
+        .branches
+        .iter()
+        .find(|b| b.thread_id == "first")
+        .unwrap();
+    assert_eq!(direct.bot_id, None);
+    assert_eq!(direct.current_run.as_ref().unwrap().id, first.run_id);
+    for branch in snapshot
+        .branches
+        .iter()
+        .filter(|b| b.thread_id == "bot-thread")
+    {
+        assert_eq!(branch.bot_id.as_deref(), Some("original-bot"));
+        assert_eq!(branch.parent_thread_id, None);
+    }
+    let wire = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(wire["branches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["threadId"] == "first")
+        .unwrap().get("botId"), Some(&Value::Null));
+    assert!(!wire.to_string().contains("private body"));
     drop(writer);
+    let next = db.capture_attention_read().load(&|| false).unwrap();
+    assert_eq!(next.branches.len(), 4);
+    assert!(next.event_cursor > before);
     assert_eq!(
-        db.capture_attention_read()
-            .load(&|| false)
+        next.branches
+            .iter()
+            .find(|b| b.thread_id == "concurrent")
             .unwrap()
-            .branches
-            .len(),
-        2
+            .bot_id
+            .as_deref(),
+        Some("concurrent-bot")
     );
     let old = db.capture_attention_read();
     drop(db);
@@ -228,4 +268,21 @@ fn attention_preparation_failure_is_waiting_and_multiple_branches_keep_identity(
     assert!(!serde_json::to_string(&snapshot)
         .unwrap()
         .contains("private diagnostic"));
+}
+
+#[test]
+fn attention_uses_original_bot_ancestry_without_rewriting_child_identity() {
+    let mut f = child_dispatch::Fixture::new_in_bot("owning-bot");
+    let child = f.accept();
+    let snapshot = f.db.capture_attention_read().load(&|| false).unwrap();
+    let branch = snapshot
+        .branches
+        .iter()
+        .find(|b| b.thread_id == child.child_thread_id)
+        .unwrap();
+    assert_eq!(branch.bot_id.as_deref(), Some("owning-bot"));
+    assert_eq!(branch.branch_id, child.child_branch_id);
+    assert_eq!(branch.parent_thread_id.as_deref(), Some("thread:parent"));
+    let wire = serde_json::to_string(&snapshot).unwrap();
+    assert!(!wire.contains("credential-ref"));
 }

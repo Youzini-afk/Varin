@@ -23,6 +23,8 @@ export interface ThreadAttentionRun {
 export interface ThreadAttentionBranch {
   threadId: string; branchId: string; title: string; avatar?: string;
   parentThreadId: string | null; archived: boolean; deleted: boolean;
+  /** Catalog ownership (including child ancestry). Null is unbound; absent on older Hosts is unknown. */
+  botId?: string | null;
   activeRunId: string | null; currentRun: ThreadAttentionRun | null; latestRun: ThreadAttentionRun | null;
   hasUnsettledWork: boolean;
 }

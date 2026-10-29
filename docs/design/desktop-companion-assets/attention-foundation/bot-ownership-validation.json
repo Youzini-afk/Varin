@@ -1,0 +1,23 @@
+{
+  "purpose": "Authoritative per-project Bot ownership for mixed Bot/Agent companion presentation",
+  "atUTC": "2026-10-29T16:17:00Z",
+  "field": "ThreadAttentionBranch.botId?: string | null",
+  "semantics": "Same Catalog read transaction, existing thread_bot ancestry resolution; null unbound, absent older Host unknown",
+  "tests": {
+    "focusedAttentionPassed": 6,
+    "applicationClientTypeCheck": "passed",
+    "protocol71GeneratorCheck": "passed"
+  },
+  "qaKernelSHA256": "a75c1dacd462df0f4047fdb1a8574fdec9aaf0784959834faa1917678bda14c1",
+  "qaKernelProfile": "Development native-QA opt0; not release performance",
+  "qaKernelBuildExit": 0,
+  "notClaimed": [
+    "Complete test suite or CI",
+    "Mixed-mode native GUI verification at this metadata checkpoint"
+  ],
+  "files": {
+    "kernel/crates/varin-runtime/src/catalog_attention.rs": "e62a0b78e8e8ae32693ddcf0594dfc564bfa2cb465ea49f04a8a2a0ceced93b8",
+    "kernel/crates/varin-runtime/tests/attention_review.rs": "d83144cfc45257da461bc428d2953163bae8bd2a39d5baad201c95cb9f260005",
+    "packages/application-client/src/threads.ts": "b84961df4086b004dba8bd600cbeee9a963a9a4a94233d1cbaa09c58076d3400"
+  }
+}
