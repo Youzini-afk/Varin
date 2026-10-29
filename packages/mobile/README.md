@@ -85,6 +85,9 @@ before uploading the complete artifact or attaching assets to an existing draft 
 - `Varin-<version>-android.apk` (one APK containing the supported Android architectures);
 - `Varin-<version>-android.apk.sha256`.
 
+With `publish_release=true`, verified assets are attached to the draft. Also set `publish_draft=true`
+to publish it automatically after the complete desktop/Android asset set has uploaded successfully.
+
 `versionName` follows the root product version and the release tag must match it. Official Android
 `versionCode` uses this workflow's increasing `github.run_number`; retrying a run preserves its code.
 Continue using the same workflow counter and signing key so users can install future updates.

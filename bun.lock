@@ -45,7 +45,7 @@
     },
     "packages/electron": {
       "name": "@varin/electron",
-      "version": "0.9.33",
+      "version": "0.9.34",
       "dependencies": {
         "@varin/application-client": "workspace:*",
         "@varin/protocol": "workspace:*",
@@ -197,7 +197,7 @@
     },
     "packages/ui": {
       "name": "@varin/ui",
-      "version": "0.9.33",
+      "version": "0.9.34",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.1",
         "@base-ui/react": "^1.9.0",
@@ -300,7 +300,7 @@
     },
     "packages/web": {
       "name": "@varin/web",
-      "version": "0.9.33",
+      "version": "0.9.34",
       "bin": {
         "varin": "./bin/cli.js",
       },

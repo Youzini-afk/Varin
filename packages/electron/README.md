@@ -337,11 +337,14 @@ When these variables are absent, the build falls back to an unsigned NSIS instal
 ### Smoke builds
 
 Run the `Windows Desktop Build` workflow on demand for a focused Windows x64, ARM64, or dual-architecture
-build. For a release, run `Desktop Release Build` against an existing version tag. By default it builds and
+build. For a release, run `Release Build` against an existing version tag. By default it builds and
 smokes Windows x64/ARM64, Linux x64/ARM64, and macOS Apple Silicon on matching native GitHub runners,
 assembles the architecture-specific updater channels, and can upload only the verified assets to an
-existing draft GitHub Release. The slow macOS Intel target is a manual opt-in on that workflow, so routine
-releases do not wait for the Intel runner. Publishing the draft remains a separate deliberate action.
+existing draft GitHub Release. Android's signed APK and checksum are built alongside desktop targets
+and required by final assembly; see [mobile signing](../mobile/README.md#android-release).
+The slow macOS Intel target is a manual opt-in on that workflow, so routine releases do not wait for
+the Intel runner. `publish_release` uploads assets to the draft; additionally setting `publish_draft`
+publishes it after the complete verified asset set has uploaded. Both options default to false.
 
 All platforms share one startup smoke: launch the unpacked packaged application with clean temporary
 data configured to use the local Host, wait for its main workspace and renderer readiness, then check

@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_draft:
+        description: Publish the draft after verified assets are uploaded (requires publish_release)
+        required: true
+        default: false
+        type: boolean
       include_macos_intel:
         description: Also package the slow macOS Intel target (manual opt-in)
         required: true
@@ -26,6 +31,12 @@ jobs:
     name: Verify release source quality
     runs-on: ubuntu-latest
     steps:
+      - name: Validate publication options
+        if: inputs.publish_draft && !inputs.publish_release
+        run: |
+          echo 'Publishing the draft requires publish_release=true.' >&2
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_ref }}
@@ -542,6 +553,13 @@ jobs:
           set -euo pipefail
           test "$(gh release view '${{ inputs.release_ref }}' --json isDraft --jq '.isDraft')" = true
           gh release upload '${{ inputs.release_ref }}' release-assets/* --clobber
-        
+
+      - name: Publish completed GitHub Release
+        if: inputs.publish_release && inputs.publish_draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release edit '${{ inputs.release_ref }}' --draft=false --latest
+
     permissions:
       contents: write
