@@ -1,0 +1,18 @@
+{
+  "durationSeconds": 108.185,
+  "width": 1280,
+  "height": 720,
+  "bundleSha256": "642ad2926270d1ee7e614d12f82943656a39b0e89fa2ec570b8328175aeaa613",
+  "repoCommit": "db598369",
+  "render": "variable frame rate, source exposure durations, no interpolation",
+  "files": {
+    "varin-animation-showcase.mp4": {
+      "bytes": 1577925,
+      "sha256": "e1a7922c4a2a5180cc0b8195c235176589ac278d30694bb7cfcfe7ffeb6eff7e"
+    },
+    "varin-animation-overview.jpg": {
+      "bytes": 303983,
+      "sha256": "bb82080e9d65294ef7ada4fb500a5f5c6e78a3728d6b8f483856f2c78703e5f5"
+    }
+  }
+}
