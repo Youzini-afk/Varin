@@ -171,6 +171,8 @@ describe('Thread source resource admission', () => {
       '.varin/resources/skills/review/SKILL.md': skill('review', 'ORIGINAL'), '.varin/resources/skills/review/reference.txt': 'ORIGINAL SUPPORT', 'ignored/unrelated.txt': 'EXCLUDED' });
     const prepared = await f.prepare();
     expect(prepared.provenance.resources?.coverage).toMatchObject({ kind: 'selected', subtrees: ['.varin/resources/skills', '.varin/resources/skills/review'] });
+    expect(prepared.provenance.resources?.coverage).toMatchObject({ paths: expect.arrayContaining(['']) });
+    expect(prepared.provenance.resources?.coverage).not.toMatchObject({ subtrees: expect.arrayContaining(['']) });
     expect(f.branches.get('source')!.states['ignored/unrelated.txt']).toBeUndefined();
     expect(f.scans.flat()).not.toContain('.');
     await f.write('workspace/.varin/resources/skills/review/SKILL.md', skill('review', 'LATER'));

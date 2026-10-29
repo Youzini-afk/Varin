@@ -90,9 +90,15 @@ async function fixture() {
     async fileRootRegister() { return { rootId: "source-root" }; },
     async fileScan(_input: unknown, signal?: AbortSignal) { scanCalls++; await beforeScan(signal); signal?.throwIfAborted(); return { paths: ["input.txt"], fingerprint: "input-tree" }; },
     async fileCaptureBatch(input: { paths: string[]; store: boolean }, signal?: AbortSignal) {
-      captureCalls++; await beforeCapture(signal); return { entries: input.paths.map((relative) => ({ path: relative,
-        stateJson: JSON.stringify({ kind: "regular-file", objectHash: "sha256-input", byteLength: 15, mode: 420 }),
-        ...(input.store ? { ownerId: "fixture-owner" } : {}) })) };
+      captureCalls++; await beforeCapture(signal);
+      return { entries: await Promise.all(input.paths.map(async relative => {
+        const bytes = await fs.readFile(path.join(root, relative));
+        const objectHash = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+        if (input.store) blobs.set(objectHash, bytes);
+        return { path: relative,
+          stateJson: JSON.stringify({ kind: "regular-file", objectHash, byteLength: bytes.length, mode: 420 }),
+          ...(input.store ? { ownerId: "fixture-owner" } : {}) };
+      })) };
     },
     async createBranch(input: { branchId: string; operationId: string; entries: Array<{ path: string }> }, signal?: AbortSignal) {
       const result = { branchId: input.branchId, root: "sha256-frozen", created: true };
@@ -557,7 +563,8 @@ it('installed ordinary research tools hand original model and policy invocations
   } as unknown as import('../kernel/agent-runtime-client.js').AgentRuntimeClient;
   let research=createResearchRuntime({kernel,runtime,experiments,sources:f.sources,resources:f.resources,onError:error=>f.errors.push(error)});
   cleanup.push(()=>research.dispose());
-  research.start();
+  // Start observer recovery after the controlled lost acceptance reply, so
+  // reconciliation cannot consume that fault before the original invocation.
   const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../../..');
   const installed=path.join(f.root,'installed');await fs.mkdir(installed);
   const example=path.join(repo,'examples/extensions/research-tools');
@@ -594,6 +601,8 @@ it('installed ordinary research tools hand original model and policy invocations
     const subject=saved.link!.binding.subject;assert.equal(subject.kind,'workspace');if(subject.kind!=='workspace')throw new Error('original research workspace subject required');
     const domain=await experiments.nativeReceipt('ws',subject.subjectId);assert.ok(domain);assert.deepEqual(domain.owner.actor,{kind:'tool',origin,callId:activeCall.callId,toolName:activeCall.name,schemaVersion:activeCall.schemaVersion});assert.deepEqual(domain.accepted,saved.accepted);
   }
+  assert.equal(loseBindAck,false);
+  research.start();
   const before=f.counters().spawnCalls;await research.reconcile();assert.equal(bound,2);assert.equal(f.counters().resolveCalls,0,'native source never consults cwd/Pi root fallback');
   await vi.waitFor(()=>assert.equal(f.counters().spawnCalls,2,JSON.stringify({errors:f.errors.map(e=>e.message),events:f.events})),{timeout:4000,interval:10});assert.ok(before<=2);
   // Detach both observers while the domain backend still runs. The next real service

@@ -231,7 +231,9 @@ export async function captureStableSourceBaseline(
       ...(input.captureIdentity ? { captureIdentity: input.captureIdentity } : {}), ...(input.drafts ? { drafts: input.drafts } : {}),
       omittedDraftPaths: input.content.mode === 'saved-files' ? draftPaths(dirty) : [], captureScopes: scopes,
       ...(resources ? { resources: { ...resources.resources, coverage: captured.consistency === 'stable-capture' ? { kind: 'complete' as const }
-        : { kind: 'selected' as const, paths: [...new Set([...Object.keys(effective.effectiveState), ...resources.observedPaths])].sort(),
+        // Storage records root metadata as '.', while resource paths use ''.
+        // This is exact root coverage, not permission to read every descendant.
+        : { kind: 'selected' as const, paths: [...new Set([...Object.keys(effective.effectiveState), ...resources.observedPaths].map(file => file === '.' ? '' : file))].sort(),
           subtrees: [...new Set([...scopes, ...resources.captureScopes])].filter(file => file === '.' || effective.effectiveState[file]?.kind === 'directory').map(file => file === '.' ? '' : file).sort() } } } : {}) };
     input.onPhase?.('publish');
     const branch = await store.createBranch(input.workspaceId, input.branchId, effective.effectiveState, captured.baseRef,
