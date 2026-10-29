@@ -1,0 +1,408 @@
+{
+  "status": "parent-approved art direction; source candidates frozen for integration review",
+  "geometryReference": "varin-upright-v2",
+  "runtimeSources": [
+    {
+      "source": "frames/yawn-hand-release-v1.png",
+      "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+      "pose": "upright-v2:companionship:yawn-hand-release-v1"
+    },
+    {
+      "source": "frames/yawn-lift-v1.png",
+      "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+      "pose": "upright-v2:companionship:yawn-lift-v1"
+    },
+    {
+      "source": "frames/yawn-near-v1.png",
+      "sha256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302",
+      "pose": "upright-v2:companionship:yawn-near-v1"
+    },
+    {
+      "source": "frames/yawn-cover-v1.png",
+      "sha256": "94c077061ec9a08dd08252ca349ea6e4b6f0c774a633c045117a853dd68ab565",
+      "pose": "upright-v2:companionship:yawn-cover-v1"
+    },
+    {
+      "source": "frames/rest-middle-v1.png",
+      "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+      "pose": "upright-v2:companionship:rest-middle-v1"
+    },
+    {
+      "source": "frames/rest-settled-v2.png",
+      "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+      "pose": "upright-v2:companionship:rest-settled-v2"
+    },
+    {
+      "source": "frames/drowsy-middle-v1.png",
+      "sha256": "377327a3bd8115ab3d47f520003fc8905fa44b6af1dc0135067b4645871236b0",
+      "pose": "upright-v2:companionship:drowsy-middle-v1"
+    },
+    {
+      "source": "frames/doze-v1.png",
+      "sha256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260",
+      "pose": "upright-v2:companionship:doze-v1"
+    },
+    {
+      "source": "frames/wake-middle-v1.png",
+      "sha256": "1e8a746bbc1a96bc509d730bc9630f867bb6ebeae961c869a1dc2855e305979c",
+      "pose": "upright-v2:companionship:wake-middle-v1"
+    },
+    {
+      "source": "frames/wake-alert-v1.png",
+      "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+      "pose": "upright-v2:companionship:wake-alert-v1"
+    },
+    {
+      "source": "frames/hover-middle-v1.png",
+      "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+      "pose": "upright-v2:companionship:hover-middle-v1"
+    },
+    {
+      "source": "frames/hover-attend-v1.png",
+      "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+      "pose": "upright-v2:companionship:hover-attend-v1"
+    },
+    {
+      "source": "frames/tap-response-v1.png",
+      "sha256": "9764d64c77d61326c5519ebe3cd2671e53d0f731e4bee86c4785f8154866b148",
+      "pose": "upright-v2:companionship:tap-response-v1"
+    }
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "783f5d07c332135277df1d70fa0f5531e6f819a319b3ebb5b8a511819052a14b"
+    },
+    {
+      "path": "build_handoff.py",
+      "sha256": "67df6f879cb800b4e65a6f339e4e2e5943cd8f974f4dc5f348ad2d8ca4224182"
+    },
+    {
+      "path": "frames/doze-v1-provenance.json",
+      "sha256": "5eb1dc9770142298cfacab936610bf81d479ab99f36c9314439282fe29d4ecef"
+    },
+    {
+      "path": "frames/doze-v1.png",
+      "sha256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260"
+    },
+    {
+      "path": "frames/drowsy-middle-v1-provenance.json",
+      "sha256": "c3f41fc3666d9eff46aba527dbf0fba262e02af78101a8f9135aa78714bd59c4"
+    },
+    {
+      "path": "frames/drowsy-middle-v1.png",
+      "sha256": "377327a3bd8115ab3d47f520003fc8905fa44b6af1dc0135067b4645871236b0"
+    },
+    {
+      "path": "frames/hover-attend-v1-provenance.json",
+      "sha256": "d6f4a2a31777602c5f73374137515c41b505cdbd75037d75d8924fc2df862fff"
+    },
+    {
+      "path": "frames/hover-attend-v1.png",
+      "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30"
+    },
+    {
+      "path": "frames/hover-middle-v1-provenance.json",
+      "sha256": "13b791eb8e68b1912626910000857fb0c6a28f4196da4129152f53eb38723092"
+    },
+    {
+      "path": "frames/hover-middle-v1.png",
+      "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f"
+    },
+    {
+      "path": "frames/rest-middle-v1-provenance.json",
+      "sha256": "66cef0d5ee4ea400181214c4e6e01276401432cf8c9eb3407b3af18b0dfd4047"
+    },
+    {
+      "path": "frames/rest-middle-v1.png",
+      "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8"
+    },
+    {
+      "path": "frames/rest-settled-v2-provenance.json",
+      "sha256": "17d9dd2cb8860c50f408c06f66699dec5c244a94586c6ddefc094606ca2779c7"
+    },
+    {
+      "path": "frames/rest-settled-v2.png",
+      "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6"
+    },
+    {
+      "path": "frames/tap-response-v1-provenance.json",
+      "sha256": "e9e8110d7d0a159a876007364d9576ef729626f4ede593109cb454b452b2558a"
+    },
+    {
+      "path": "frames/tap-response-v1.png",
+      "sha256": "9764d64c77d61326c5519ebe3cd2671e53d0f731e4bee86c4785f8154866b148"
+    },
+    {
+      "path": "frames/wake-alert-v1-provenance.json",
+      "sha256": "801c3f56e4f2a4372df83ca1c47b099b2ba9978bef64c2189502699976fdeb8a"
+    },
+    {
+      "path": "frames/wake-alert-v1.png",
+      "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2"
+    },
+    {
+      "path": "frames/wake-middle-v1-provenance.json",
+      "sha256": "540e7a4c2cfa5a0bb9c00ceaa47948326d79905fe0db76b23dde1f57105619f2"
+    },
+    {
+      "path": "frames/wake-middle-v1.png",
+      "sha256": "1e8a746bbc1a96bc509d730bc9630f867bb6ebeae961c869a1dc2855e305979c"
+    },
+    {
+      "path": "frames/yawn-cover-v1-provenance.json",
+      "sha256": "c7bd2b7c1e398c744b6b8708c6f8fb67221a0c0f44c196aa511a7a612a90e5de"
+    },
+    {
+      "path": "frames/yawn-cover-v1.png",
+      "sha256": "94c077061ec9a08dd08252ca349ea6e4b6f0c774a633c045117a853dd68ab565"
+    },
+    {
+      "path": "frames/yawn-hand-release-v1-provenance.json",
+      "sha256": "dbe9964f1a3215f36314d5a1773f9f0cbb957df2a46a1a53cf61a50424796e57"
+    },
+    {
+      "path": "frames/yawn-hand-release-v1.png",
+      "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69"
+    },
+    {
+      "path": "frames/yawn-lift-v1-provenance.json",
+      "sha256": "efd42e8e2539c7cc3b3f78eee3abd1e7778d8f3fde76ba1b14204888f30fc9aa"
+    },
+    {
+      "path": "frames/yawn-lift-v1.png",
+      "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d"
+    },
+    {
+      "path": "frames/yawn-near-v1-provenance.json",
+      "sha256": "d15c861a9beb77fd18365e63e0def50503dc99b4be43bde73ae081e76fd9ff36"
+    },
+    {
+      "path": "frames/yawn-near-v1.png",
+      "sha256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302"
+    },
+    {
+      "path": "manifest.json",
+      "sha256": "0ee2dcf62c1e8e04d00d18d0893e7fc5bd909f4e85120e68644ed91cbda9f729"
+    },
+    {
+      "path": "masks/doze-v1.png",
+      "sha256": "02af253514039c2476724d2c500cd16a76ef41d090817bec40c3ed90a9385ac4"
+    },
+    {
+      "path": "masks/drowsy-middle-v1.png",
+      "sha256": "02af253514039c2476724d2c500cd16a76ef41d090817bec40c3ed90a9385ac4"
+    },
+    {
+      "path": "masks/hover-attend-v1.png",
+      "sha256": "ac231bffba29425e4206237414961ab48c50277c817d92eee783e35830a1cedf"
+    },
+    {
+      "path": "masks/hover-middle-v1.png",
+      "sha256": "ac231bffba29425e4206237414961ab48c50277c817d92eee783e35830a1cedf"
+    },
+    {
+      "path": "masks/rest-middle-v1.png",
+      "sha256": "1444a35e1e8fe41b01d01986e024cf3a911c247b9d6692818481da8001958e3f"
+    },
+    {
+      "path": "masks/rest-settled-v2.png",
+      "sha256": "1444a35e1e8fe41b01d01986e024cf3a911c247b9d6692818481da8001958e3f"
+    },
+    {
+      "path": "masks/tap-response-v1.png",
+      "sha256": "212cd037b11cdcf94b3ed4332049d232d2267f67c216bb4a559c27fb704bf412"
+    },
+    {
+      "path": "masks/wake-alert-v1.png",
+      "sha256": "ac231bffba29425e4206237414961ab48c50277c817d92eee783e35830a1cedf"
+    },
+    {
+      "path": "masks/wake-middle-v1.png",
+      "sha256": "02af253514039c2476724d2c500cd16a76ef41d090817bec40c3ed90a9385ac4"
+    },
+    {
+      "path": "masks/yawn-cover-v1.png",
+      "sha256": "6f51dd5ae5def1bfeaecddaba40bdc3edb60003da951771b0350d43fb7216d87"
+    },
+    {
+      "path": "masks/yawn-hand-release-v1.png",
+      "sha256": "0f1a802da9b2a82382edf7649945c13eaeae3c3f6c61b02cfb86c2b9484fc84a"
+    },
+    {
+      "path": "masks/yawn-lift-v1.png",
+      "sha256": "6f51dd5ae5def1bfeaecddaba40bdc3edb60003da951771b0350d43fb7216d87"
+    },
+    {
+      "path": "masks/yawn-near-v1.png",
+      "sha256": "6f51dd5ae5def1bfeaecddaba40bdc3edb60003da951771b0350d43fb7216d87"
+    },
+    {
+      "path": "portable-verification.json",
+      "sha256": "e5879c47188ae3966b2ad6972a0da18180b5a4de403016ead89c02b4b4910460"
+    },
+    {
+      "path": "prompts/doze-v1.txt",
+      "sha256": "8317edbf9b536f33365562cdb2cf0a268ad35b4295628186ed5bace260843c4a"
+    },
+    {
+      "path": "prompts/drowsy-middle-v1.txt",
+      "sha256": "b897f8f824c929c591a4c9080c5dcfeac87623fc85e0a85552b3525431eacaf4"
+    },
+    {
+      "path": "prompts/hover-attend-v1.txt",
+      "sha256": "c562de0b48965f5109d5cb10853fdea4e47daab1af7e8c032e86532a230d843f"
+    },
+    {
+      "path": "prompts/hover-middle-v1.txt",
+      "sha256": "6b20a26faa1530e1999978b0947ee8c7455147fa48189fa8b6a605b669f3660d"
+    },
+    {
+      "path": "prompts/rest-middle-v1.txt",
+      "sha256": "b229ae503aa1cc4369507e587add0d55c6eeed476429234679ffc8050f76207d"
+    },
+    {
+      "path": "prompts/rest-settled-v1.txt",
+      "sha256": "df2a8c1d41631cc7eea35ae605da40572e2f7d25400fdd65b938ddee762d8eb2"
+    },
+    {
+      "path": "prompts/rest-settled-v2.txt",
+      "sha256": "554952e62dee043d7ef923ac9f7e33351e0cf126b74362fd75f93094699b2704"
+    },
+    {
+      "path": "prompts/tap-response-v1.txt",
+      "sha256": "cc2b26c6c04bc3bb20ab47bbf2db73269a340f5c672f518f854b1f6863ca2b8a"
+    },
+    {
+      "path": "prompts/wake-alert-v1.txt",
+      "sha256": "5ab9b12853c33f5cdf147bfd490eb1dba1d3d6c67797ee004e510239e81814d7"
+    },
+    {
+      "path": "prompts/wake-middle-v1.txt",
+      "sha256": "cc968ce78c32e8edad600455ce2ac96d4ab78241dab87691ff7e45f384473f77"
+    },
+    {
+      "path": "prompts/yawn-cover-v1.txt",
+      "sha256": "1f3cf92b388fd8feed382109f01bdd3699167dc918e1b95959deaf653363751e"
+    },
+    {
+      "path": "prompts/yawn-hand-release-v1.txt",
+      "sha256": "0ce318d4283fe21acb34b855dbe4d4b6c35ecbfeee9a67706733317276a7f4e3"
+    },
+    {
+      "path": "prompts/yawn-lift-v1.txt",
+      "sha256": "4092666508f24d984ec8717d5872f60ed522eccbf245c47c3ce425176d40e40c"
+    },
+    {
+      "path": "prompts/yawn-near-v1.txt",
+      "sha256": "a922c3d481f24dcd50b09cf20700b23283cd52fb744fa66ee44f0d22a538a0e0"
+    },
+    {
+      "path": "qa/all-poses-v1.jpg",
+      "sha256": "03ce5c2b06f8686e23d3cc848952fb36df276e4bcf0a6c0b51d90239d05e2831"
+    },
+    {
+      "path": "raw/doze-v1.png",
+      "sha256": "8789240df4bc5476f50391cc05a53cc3ebdeae31245dd6655e7159d6d41cfc59"
+    },
+    {
+      "path": "raw/drowsy-middle-v1.png",
+      "sha256": "654cf9037d3d6ae3114ddab7736e5a83c13b22e9d8b82705942e10cb1f385c02"
+    },
+    {
+      "path": "raw/hover-attend-v1.png",
+      "sha256": "fb2e76bc122c249df41619adaa25e402586ebe2cf033696b35dabb4186ef79f1"
+    },
+    {
+      "path": "raw/hover-middle-v1.png",
+      "sha256": "cd2461e2daef3095364f0ae6daa5fe18d718d46712b781389bbe55c9b606ce3e"
+    },
+    {
+      "path": "raw/rest-middle-v1.png",
+      "sha256": "150e84a210615afe449d7c7ef0396f8aad7290e925fc47e4b0274d7a19626b9d"
+    },
+    {
+      "path": "raw/rest-settled-v1.png",
+      "sha256": "7abea03514bce22aec3d8ec4fc187e1727402058b55a6e33e20a5985314f135d"
+    },
+    {
+      "path": "raw/rest-settled-v2.png",
+      "sha256": "5b8891a223e0b917887ffa8c0d7b47ecfc8643224a6d6f41554c881d6888a831"
+    },
+    {
+      "path": "raw/tap-response-v1.png",
+      "sha256": "d24999b2742fe16f4472072a7b47a12cea3bfc8f4d1b604fca7e424889fc241a"
+    },
+    {
+      "path": "raw/wake-alert-v1.png",
+      "sha256": "bf1a0337fd2135fa90b2a8d3dca32c5d91a2820e060e39d309fe95d712916587"
+    },
+    {
+      "path": "raw/wake-middle-v1.png",
+      "sha256": "9d1718e25550df73d82acc86f9d67317ce2e185a2373d48f2c73ff7395544075"
+    },
+    {
+      "path": "raw/yawn-cover-v1.png",
+      "sha256": "5f612f6cc6caae04c203114f0ad20682e5f1856386798ddfbdbaa89c69c1d11b"
+    },
+    {
+      "path": "raw/yawn-hand-release-v1.png",
+      "sha256": "4360c04e00e297950c998d116bc04e865bad73fa854bbab9661f1e01e579ff68"
+    },
+    {
+      "path": "raw/yawn-lift-v1.png",
+      "sha256": "db9f38f1759fb0f94b6070aec1ab6886a3dffb0629d38f38ea7412b0fb52db4f"
+    },
+    {
+      "path": "raw/yawn-near-v1.png",
+      "sha256": "17cfac0415c4604777caefbe32b35c97b64dfb2b09f9271b59a5a3512b4e227a"
+    },
+    {
+      "path": "references/closed-rest-rigid-v2.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+    },
+    {
+      "path": "references/open-screen.png",
+      "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+    },
+    {
+      "path": "references/open-user.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+    },
+    {
+      "path": "register_pose.py",
+      "sha256": "34b3b2f58b6867a0a6a9386bfe3ddd89543d364df070b841861220b0557ccaed"
+    },
+    {
+      "path": "rejected-source.json",
+      "sha256": "0e0d6a83f70b9045789f49c8abdea70643c6cec9f786cbf0efada3e4aba2e475"
+    },
+    {
+      "path": "verify_portable.py",
+      "sha256": "ae0881fa21f2a742c5624ed78667e43cd62019de4f4069ac3c9cba650e8b8f4b"
+    }
+  ],
+  "archiveExclusions": [
+    "frames/doze-v1-normalized-reference.png",
+    "frames/drowsy-middle-v1-normalized-reference.png",
+    "frames/hover-attend-v1-normalized-reference.png",
+    "frames/hover-middle-v1-normalized-reference.png",
+    "frames/rest-middle-v1-normalized-reference.png",
+    "frames/rest-settled-v2-normalized-reference.png",
+    "frames/tap-response-v1-normalized-reference.png",
+    "frames/wake-alert-v1-normalized-reference.png",
+    "frames/wake-middle-v1-normalized-reference.png",
+    "frames/yawn-cover-v1-normalized-reference.png",
+    "frames/yawn-hand-release-v1-normalized-reference.png",
+    "frames/yawn-lift-v1-normalized-reference.png",
+    "frames/yawn-near-v1-normalized-reference.png",
+    "qa/first-rest-chain.jpg",
+    "qa/hover-normal-timing.gif",
+    "qa/hover-preview-timing.json",
+    "qa/rest-full-normal-timing.gif",
+    "qa/rest-full-preview-timing.json",
+    "qa/review.html",
+    "qa/tap-normal-timing.gif",
+    "qa/tap-preview-timing.json"
+  ]
+}

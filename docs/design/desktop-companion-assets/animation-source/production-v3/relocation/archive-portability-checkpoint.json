@@ -1,19 +1,10 @@
 {
   "selectedFilesCopiedAndHashVerified": 50,
-  "sourceDependenciesMissing": [
-    "companionship/frames/wake-middle-v1.png",
-    "companionship/frames/drowsy-middle-v1.png",
-    "companionship/frames/rest-settled-v2.png",
-    "companionship/frames/yawn-hand-release-v1.png",
-    "companionship/frames/wake-alert-v1.png",
-    "companionship/frames/hover-attend-v1.png",
-    "companionship/frames/rest-middle-v1.png",
-    "companionship/frames/yawn-lift-v1.png",
-    "companionship/frames/yawn-cover-v1.png",
-    "companionship/frames/hover-middle-v1.png",
-    "companionship/frames/tap-response-v1.png",
-    "companionship/frames/doze-v1.png",
-    "companionship/frames/yawn-near-v1.png"
-  ],
-  "status": "checkpoint source copied; full archive rebuild pending companionship author archive"
+  "sourceDependenciesMissing": [],
+  "finalDerivedPNGRebuildHashMatchCount": 21,
+  "finalDerivedPNGCount": 21,
+  "status": "complete: repository-local production-v2 anchor/mask and production-v3 authors/raw-support rebuild every derived PNG with exact recorded SHA256",
+  "donorResolution": "Frozen v2 donor was not in old archive selection. Use byte-identical preserved task-reactions/references/secure-no-stool-clean-donor-v1.png; no external workspace dependency.",
+  "command": "python docs/design/desktop-companion-assets/animation-source/production-v3/relocation/rebuild.py",
+  "notClaimed": "runtime/native aesthetic acceptance"
 }

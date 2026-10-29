@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "frames/rest-settled-v2.png",
+  "sourceSHA256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+  "raw": "raw/drowsy-middle-v1.png",
+  "rawSHA256": "654cf9037d3d6ae3114ddab7736e5a83c13b22e9d8b82705942e10cb1f385c02",
+  "prompt": "prompts/drowsy-middle-v1.txt",
+  "output": "frames/drowsy-middle-v1.png",
+  "sha256": "377327a3bd8115ab3d47f520003fc8905fa44b6af1dc0135067b4645871236b0",
+  "mask": "masks/drowsy-middle-v1.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

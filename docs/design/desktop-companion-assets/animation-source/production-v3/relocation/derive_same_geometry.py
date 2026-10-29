@@ -18,7 +18,7 @@ dif=np.any(np.array(im)!=np.array(ref),axis=2)&(m>0)
 review=Image.new('RGB',(1024,512),'#263846');b=Image.new('RGBA',im.size,'#263846');b.alpha_composite(im);review.paste(b.convert('RGB'),(0,0));mark=b.copy();pixels=np.array(mark);pixels[dif]=[255,75,140,255];review.paste(Image.fromarray(pixels).convert('RGB'),(512,0));review.save(outdir/f'{sha[:16]}-overlap.jpg',quality=95)
 if dif.any() and not (a.protect or a.review_overlap):raise SystemExit(f'{dif.sum()} overlap pixels require actual visual review/author mask; no detached image made')
 if a.protect:m=np.minimum(m,255-np.array(Image.open(root/a.protect).convert('L')))
-mask=Image.fromarray(m);donor=Image.open(v2/'relocation/frames/secure-no-stool-clean-donor-v1.png').convert('RGBA');out=Image.composite(donor,im,mask)
+mask=Image.fromarray(m);donor=Image.open(root/'task-reactions/references/secure-no-stool-clean-donor-v1.png').convert('RGBA');out=Image.composite(donor,im,mask)
 path=outdir/f'{sha[:16]}.png';out.save(path);maskpath=outdir/f'{sha[:16]}-mask.png';mask.save(maskpath)
 assert np.array_equal(np.array(out)[m==0],np.array(im)[m==0])
 record={'source':str(src.relative_to(root)),'sourceSHA256':sha,'detachedSource':str(path.relative_to(root)),'detachedSHA256':hashlib.sha256(path.read_bytes()).hexdigest(),'mask':str(maskpath.relative_to(root)),'outsideMaskPixelExact':True,'overlapPixels':int(dif.sum()),'authorProtect':a.protect,'embeddedStool':False,'stage':'candidate; geometry/contact/light-dark visual review required; no runtime acceptance'}

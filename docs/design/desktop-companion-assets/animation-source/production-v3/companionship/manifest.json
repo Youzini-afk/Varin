@@ -1,0 +1,1553 @@
+{
+  "status": "authored candidates; first rest direction approved; full sequence and runtime review pending",
+  "geometryReference": "varin-upright-v2",
+  "canvas": [
+    512,
+    512
+  ],
+  "runtimeSourceNames": [
+    "yawn-hand-release-v1",
+    "yawn-lift-v1",
+    "yawn-near-v1",
+    "yawn-cover-v1",
+    "rest-middle-v1",
+    "rest-settled-v2",
+    "drowsy-middle-v1",
+    "doze-v1",
+    "wake-middle-v1",
+    "wake-alert-v1",
+    "hover-middle-v1",
+    "hover-attend-v1",
+    "tap-response-v1"
+  ],
+  "newUniqueSourceCount": 13,
+  "sourceRoot": ".",
+  "sequences": [
+    {
+      "id": "companionship-rest-enter",
+      "action": "rest-sleep",
+      "kind": "bridge",
+      "geometryReference": "varin-upright-v2",
+      "canvas": [
+        512,
+        512
+      ],
+      "entryPose": "upright-v2:closed",
+      "exitPose": "upright-v2:companionship:doze-v1",
+      "loop": null,
+      "frames": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "pose": "upright-v2:closed",
+          "phase": "enter",
+          "cue": "REST_NOTICE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        },
+        {
+          "source": "frames/yawn-hand-release-v1.png",
+          "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+          "durationMs": 80,
+          "pose": "upright-v2:companionship:yawn-hand-release-v1",
+          "phase": "enter",
+          "cue": "YAWN_RELEASE_CONTACT",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-lift-v1.png",
+          "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:yawn-lift-v1",
+          "phase": "act",
+          "cue": "YAWN_RAISE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-near-v1.png",
+          "sha256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302",
+          "durationMs": 90,
+          "pose": "upright-v2:companionship:yawn-near-v1",
+          "phase": "act",
+          "cue": "YAWN_NEAR",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-cover-v1.png",
+          "sha256": "94c077061ec9a08dd08252ca349ea6e4b6f0c774a633c045117a853dd68ab565",
+          "durationMs": 620,
+          "pose": "upright-v2:companionship:yawn-cover-v1",
+          "phase": "act",
+          "cue": "YAWN_COVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-near-v1.png",
+          "sha256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:yawn-near-v1",
+          "phase": "exit",
+          "cue": "YAWN_LOWER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-lift-v1.png",
+          "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+          "durationMs": 110,
+          "pose": "upright-v2:companionship:yawn-lift-v1",
+          "phase": "exit",
+          "cue": "YAWN_LOWER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-hand-release-v1.png",
+          "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:yawn-hand-release-v1",
+          "phase": "exit",
+          "cue": "YAWN_CONTACT_RETURN",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 280,
+          "pose": "upright-v2:closed",
+          "phase": "hold",
+          "cue": "SUPPORTED_REST",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        },
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 140,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "enter",
+          "cue": "REST_HAND_RELEASE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/rest-settled-v2.png",
+          "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+          "durationMs": 900,
+          "pose": "upright-v2:companionship:rest-settled-v2",
+          "phase": "hold",
+          "cue": "REST_SETTLED",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:rest-settled-v2"
+          ]
+        },
+        {
+          "source": "frames/drowsy-middle-v1.png",
+          "sha256": "377327a3bd8115ab3d47f520003fc8905fa44b6af1dc0135067b4645871236b0",
+          "durationMs": 450,
+          "pose": "upright-v2:companionship:drowsy-middle-v1",
+          "phase": "enter",
+          "cue": "DROWSY",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/doze-v1.png",
+          "sha256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260",
+          "durationMs": 240,
+          "pose": "upright-v2:companionship:doze-v1",
+          "phase": "hold",
+          "cue": "DOZE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:doze-v1"
+          ]
+        }
+      ],
+      "publicAction": "rest-sleep"
+    },
+    {
+      "id": "companionship-doze-hold",
+      "action": "rest-sleep",
+      "kind": "action",
+      "geometryReference": "varin-upright-v2",
+      "canvas": [
+        512,
+        512
+      ],
+      "entryPose": "upright-v2:companionship:doze-v1",
+      "exitPose": "upright-v2:companionship:doze-v1",
+      "loop": [
+        0,
+        1
+      ],
+      "frames": [
+        {
+          "source": "frames/doze-v1.png",
+          "sha256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260",
+          "durationMs": 1000,
+          "pose": "upright-v2:companionship:doze-v1",
+          "phase": "hold",
+          "cue": "DOZE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:doze-v1"
+          ]
+        }
+      ],
+      "publicAction": "rest-sleep"
+    },
+    {
+      "id": "companionship-wake-exit",
+      "action": "rest-sleep",
+      "kind": "bridge",
+      "geometryReference": "varin-upright-v2",
+      "canvas": [
+        512,
+        512
+      ],
+      "entryPose": "upright-v2:companionship:doze-v1",
+      "exitPose": "upright-v2:closed",
+      "loop": null,
+      "frames": [
+        {
+          "source": "frames/doze-v1.png",
+          "sha256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260",
+          "durationMs": 40,
+          "pose": "upright-v2:companionship:doze-v1",
+          "phase": "enter",
+          "cue": "WAKE_NOTICE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:doze-v1"
+          ]
+        },
+        {
+          "source": "frames/wake-middle-v1.png",
+          "sha256": "1e8a746bbc1a96bc509d730bc9630f867bb6ebeae961c869a1dc2855e305979c",
+          "durationMs": 130,
+          "pose": "upright-v2:companionship:wake-middle-v1",
+          "phase": "enter",
+          "cue": "WAKE_REFOCUS",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/wake-alert-v1.png",
+          "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+          "durationMs": 240,
+          "pose": "upright-v2:companionship:wake-alert-v1",
+          "phase": "act",
+          "cue": "WAKE_ALERT",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/rest-settled-v2.png",
+          "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+          "durationMs": 110,
+          "pose": "upright-v2:companionship:rest-settled-v2",
+          "phase": "exit",
+          "cue": "WAKE_SETTLE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:rest-settled-v2"
+          ]
+        },
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 120,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "exit",
+          "cue": "HAND_RETURN",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 100,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "CLOSED_READY",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "publicAction": "rest-sleep"
+    },
+    {
+      "id": "companionship-hover-response",
+      "action": "hover-response",
+      "kind": "action",
+      "geometryReference": "varin-upright-v2",
+      "canvas": [
+        512,
+        512
+      ],
+      "entryPose": "upright-v2:closed",
+      "exitPose": "upright-v2:closed",
+      "loop": null,
+      "frames": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 40,
+          "pose": "upright-v2:closed",
+          "phase": "enter",
+          "cue": "HOVER_NOTICE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        },
+        {
+          "source": "frames/hover-middle-v1.png",
+          "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:hover-middle-v1",
+          "phase": "enter",
+          "cue": "ATTEND_ENTER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/hover-attend-v1.png",
+          "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+          "durationMs": 650,
+          "pose": "upright-v2:companionship:hover-attend-v1",
+          "phase": "hold",
+          "cue": "LOCAL_ATTEND",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:hover-attend-v1"
+          ]
+        },
+        {
+          "source": "frames/hover-middle-v1.png",
+          "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+          "durationMs": 110,
+          "pose": "upright-v2:companionship:hover-middle-v1",
+          "phase": "exit",
+          "cue": "ATTEND_RELEASE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 100,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "CLOSED_READY",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "publicAction": "hover-response"
+    },
+    {
+      "id": "companionship-closed-tap",
+      "action": "tap-response",
+      "kind": "action",
+      "geometryReference": "varin-upright-v2",
+      "canvas": [
+        512,
+        512
+      ],
+      "entryPose": "upright-v2:closed",
+      "exitPose": "upright-v2:closed",
+      "loop": null,
+      "frames": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 40,
+          "pose": "upright-v2:closed",
+          "phase": "enter",
+          "cue": "TAP_NOTICE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        },
+        {
+          "source": "frames/hover-middle-v1.png",
+          "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+          "durationMs": 90,
+          "pose": "upright-v2:companionship:hover-middle-v1",
+          "phase": "enter",
+          "cue": "ATTEND_ENTER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/hover-attend-v1.png",
+          "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+          "durationMs": 90,
+          "pose": "upright-v2:companionship:hover-attend-v1",
+          "phase": "act",
+          "cue": "LOCAL_ATTEND",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:hover-attend-v1"
+          ]
+        },
+        {
+          "source": "frames/tap-response-v1.png",
+          "sha256": "9764d64c77d61326c5519ebe3cd2671e53d0f731e4bee86c4785f8154866b148",
+          "durationMs": 210,
+          "pose": "upright-v2:companionship:tap-response-v1",
+          "phase": "act",
+          "cue": "LOCAL_TAP_SMILE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/hover-attend-v1.png",
+          "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+          "durationMs": 90,
+          "pose": "upright-v2:companionship:hover-attend-v1",
+          "phase": "exit",
+          "cue": "TAP_RELEASE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:hover-attend-v1"
+          ]
+        },
+        {
+          "source": "frames/hover-middle-v1.png",
+          "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:hover-middle-v1",
+          "phase": "exit",
+          "cue": "ATTEND_RELEASE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 100,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "CLOSED_READY",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "publicAction": "tap-response"
+    },
+    {
+      "id": "companionship-hover-to-tap",
+      "action": "tap-response",
+      "kind": "bridge",
+      "geometryReference": "varin-upright-v2",
+      "canvas": [
+        512,
+        512
+      ],
+      "entryPose": "upright-v2:companionship:hover-attend-v1",
+      "exitPose": "upright-v2:closed",
+      "loop": null,
+      "frames": [
+        {
+          "source": "frames/hover-attend-v1.png",
+          "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+          "durationMs": 30,
+          "pose": "upright-v2:companionship:hover-attend-v1",
+          "phase": "enter",
+          "cue": "TAP_NOTICE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:hover-attend-v1"
+          ]
+        },
+        {
+          "source": "frames/tap-response-v1.png",
+          "sha256": "9764d64c77d61326c5519ebe3cd2671e53d0f731e4bee86c4785f8154866b148",
+          "durationMs": 210,
+          "pose": "upright-v2:companionship:tap-response-v1",
+          "phase": "act",
+          "cue": "LOCAL_TAP_SMILE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/hover-attend-v1.png",
+          "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+          "durationMs": 90,
+          "pose": "upright-v2:companionship:hover-attend-v1",
+          "phase": "exit",
+          "cue": "TAP_RELEASE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:hover-attend-v1"
+          ]
+        },
+        {
+          "source": "frames/hover-middle-v1.png",
+          "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:hover-middle-v1",
+          "phase": "exit",
+          "cue": "ATTEND_RELEASE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 100,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "CLOSED_READY",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "publicAction": "tap-response"
+    },
+    {
+      "id": "companionship-relax-idle-once",
+      "action": "relax-idle",
+      "kind": "action",
+      "geometryReference": "varin-upright-v2",
+      "canvas": [
+        512,
+        512
+      ],
+      "entryPose": "upright-v2:closed",
+      "exitPose": "upright-v2:closed",
+      "loop": null,
+      "frames": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "pose": "upright-v2:closed",
+          "phase": "enter",
+          "cue": "REST_NOTICE",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        },
+        {
+          "source": "frames/yawn-hand-release-v1.png",
+          "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+          "durationMs": 80,
+          "pose": "upright-v2:companionship:yawn-hand-release-v1",
+          "phase": "enter",
+          "cue": "YAWN_RELEASE_CONTACT",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-lift-v1.png",
+          "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:yawn-lift-v1",
+          "phase": "act",
+          "cue": "YAWN_RAISE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-near-v1.png",
+          "sha256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302",
+          "durationMs": 90,
+          "pose": "upright-v2:companionship:yawn-near-v1",
+          "phase": "act",
+          "cue": "YAWN_NEAR",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-cover-v1.png",
+          "sha256": "94c077061ec9a08dd08252ca349ea6e4b6f0c774a633c045117a853dd68ab565",
+          "durationMs": 620,
+          "pose": "upright-v2:companionship:yawn-cover-v1",
+          "phase": "act",
+          "cue": "YAWN_COVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-near-v1.png",
+          "sha256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:yawn-near-v1",
+          "phase": "exit",
+          "cue": "YAWN_LOWER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-lift-v1.png",
+          "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+          "durationMs": 110,
+          "pose": "upright-v2:companionship:yawn-lift-v1",
+          "phase": "exit",
+          "cue": "YAWN_LOWER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-hand-release-v1.png",
+          "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+          "durationMs": 100,
+          "pose": "upright-v2:companionship:yawn-hand-release-v1",
+          "phase": "exit",
+          "cue": "YAWN_CONTACT_RETURN",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 280,
+          "pose": "upright-v2:closed",
+          "phase": "hold",
+          "cue": "SUPPORTED_REST",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        },
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 140,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "enter",
+          "cue": "REST_HAND_RELEASE",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/rest-settled-v2.png",
+          "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+          "durationMs": 900,
+          "pose": "upright-v2:companionship:rest-settled-v2",
+          "phase": "hold",
+          "cue": "REST_SETTLED",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:rest-settled-v2"
+          ]
+        },
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 120,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "exit",
+          "cue": "HAND_RETURN",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 100,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "CLOSED_READY",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "publicAction": "relax-idle"
+    }
+  ],
+  "safeRecoveryByActualSource": [
+    {
+      "actualSourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "actualPose": "upright-v2:closed",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 0,
+      "frames": [],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+      "actualPose": "upright-v2:companionship:yawn-hand-release-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+      "actualPose": "upright-v2:companionship:yawn-lift-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "frames/yawn-hand-release-v1.png",
+          "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:yawn-hand-release-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302",
+      "actualPose": "upright-v2:companionship:yawn-near-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "frames/yawn-lift-v1.png",
+          "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:yawn-lift-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-hand-release-v1.png",
+          "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:yawn-hand-release-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "94c077061ec9a08dd08252ca349ea6e4b6f0c774a633c045117a853dd68ab565",
+      "actualPose": "upright-v2:companionship:yawn-cover-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "frames/yawn-near-v1.png",
+          "sha256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:yawn-near-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-lift-v1.png",
+          "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:yawn-lift-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/yawn-hand-release-v1.png",
+          "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:yawn-hand-release-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+      "actualPose": "upright-v2:companionship:rest-middle-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+      "actualPose": "upright-v2:companionship:rest-settled-v2",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 0,
+      "frames": [
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "377327a3bd8115ab3d47f520003fc8905fa44b6af1dc0135067b4645871236b0",
+      "actualPose": "upright-v2:companionship:drowsy-middle-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "frames/wake-middle-v1.png",
+          "sha256": "1e8a746bbc1a96bc509d730bc9630f867bb6ebeae961c869a1dc2855e305979c",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:wake-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/wake-alert-v1.png",
+          "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:wake-alert-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/rest-settled-v2.png",
+          "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-settled-v2",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:rest-settled-v2"
+          ]
+        },
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260",
+      "actualPose": "upright-v2:companionship:doze-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 0,
+      "frames": [
+        {
+          "source": "frames/wake-middle-v1.png",
+          "sha256": "1e8a746bbc1a96bc509d730bc9630f867bb6ebeae961c869a1dc2855e305979c",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:wake-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/wake-alert-v1.png",
+          "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:wake-alert-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/rest-settled-v2.png",
+          "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-settled-v2",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:rest-settled-v2"
+          ]
+        },
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "1e8a746bbc1a96bc509d730bc9630f867bb6ebeae961c869a1dc2855e305979c",
+      "actualPose": "upright-v2:companionship:wake-middle-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "frames/wake-alert-v1.png",
+          "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:wake-alert-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "frames/rest-settled-v2.png",
+          "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-settled-v2",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:rest-settled-v2"
+          ]
+        },
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+      "actualPose": "upright-v2:companionship:wake-alert-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "frames/rest-settled-v2.png",
+          "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-settled-v2",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:rest-settled-v2"
+          ]
+        },
+        {
+          "source": "frames/rest-middle-v1.png",
+          "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:rest-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+      "actualPose": "upright-v2:companionship:hover-middle-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+      "actualPose": "upright-v2:companionship:hover-attend-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 0,
+      "frames": [
+        {
+          "source": "frames/hover-middle-v1.png",
+          "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:hover-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    },
+    {
+      "actualSourceSHA256": "9764d64c77d61326c5519ebe3cd2671e53d0f731e4bee86c4785f8154866b148",
+      "actualPose": "upright-v2:companionship:tap-response-v1",
+      "targetPose": "upright-v2:closed",
+      "currentExposureMaximumRemainingMs": 40,
+      "frames": [
+        {
+          "source": "frames/hover-attend-v1.png",
+          "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:hover-attend-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:companionship:hover-attend-v1"
+          ]
+        },
+        {
+          "source": "frames/hover-middle-v1.png",
+          "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+          "durationMs": 85,
+          "pose": "upright-v2:companionship:hover-middle-v1",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": false,
+          "exitTo": []
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 60,
+          "pose": "upright-v2:closed",
+          "phase": "exit",
+          "cue": "SAFE_RECOVER",
+          "pauseSafe": true,
+          "exitTo": [
+            "upright-v2:closed"
+          ]
+        }
+      ],
+      "factRule": "Update latest intent/Host UI immediately; this drawing-only recovery never delays pointer-root translation or implies approval/completion."
+    }
+  ],
+  "sourceRecords": [
+    {
+      "status": "candidate",
+      "source": "references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "raw": "raw/yawn-hand-release-v1.png",
+      "rawSHA256": "4360c04e00e297950c998d116bc04e865bad73fa854bbab9661f1e01e579ff68",
+      "prompt": "prompts/yawn-hand-release-v1.txt",
+      "output": "frames/yawn-hand-release-v1.png",
+      "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+      "mask": "masks/yawn-hand-release-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:yawn-hand-release-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "enter",
+        "exit"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "raw": "raw/yawn-lift-v1.png",
+      "rawSHA256": "db9f38f1759fb0f94b6070aec1ab6886a3dffb0629d38f38ea7412b0fb52db4f",
+      "prompt": "prompts/yawn-lift-v1.txt",
+      "output": "frames/yawn-lift-v1.png",
+      "sha256": "8d9924a358fa5e8738d11b365bc371503a7915fb2dd54f9f35585fa4e9ed905d",
+      "mask": "masks/yawn-lift-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:yawn-lift-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "act",
+        "exit"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "raw": "raw/yawn-near-v1.png",
+      "rawSHA256": "17cfac0415c4604777caefbe32b35c97b64dfb2b09f9271b59a5a3512b4e227a",
+      "prompt": "prompts/yawn-near-v1.txt",
+      "output": "frames/yawn-near-v1.png",
+      "sha256": "d51434124d2240755e41658e9466f90aa1aec2f260d48b281faf0ec04725b302",
+      "mask": "masks/yawn-near-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:yawn-near-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "act",
+        "exit"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "raw": "raw/yawn-cover-v1.png",
+      "rawSHA256": "5f612f6cc6caae04c203114f0ad20682e5f1856386798ddfbdbaa89c69c1d11b",
+      "prompt": "prompts/yawn-cover-v1.txt",
+      "output": "frames/yawn-cover-v1.png",
+      "sha256": "94c077061ec9a08dd08252ca349ea6e4b6f0c774a633c045117a853dd68ab565",
+      "mask": "masks/yawn-cover-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:yawn-cover-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "act"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "raw": "raw/rest-middle-v1.png",
+      "rawSHA256": "150e84a210615afe449d7c7ef0396f8aad7290e925fc47e4b0274d7a19626b9d",
+      "prompt": "prompts/rest-middle-v1.txt",
+      "output": "frames/rest-middle-v1.png",
+      "sha256": "79f07e91bc13c678d0eff142778ab70f69b7f6831858c5c90c86e4fbdb33acb8",
+      "mask": "masks/rest-middle-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:rest-middle-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "enter",
+        "exit"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "raw": "raw/rest-settled-v2.png",
+      "rawSHA256": "5b8891a223e0b917887ffa8c0d7b47ecfc8643224a6d6f41554c881d6888a831",
+      "prompt": "prompts/rest-settled-v2.txt",
+      "output": "frames/rest-settled-v2.png",
+      "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+      "mask": "masks/rest-settled-v2.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:rest-settled-v2",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "exit",
+        "hold"
+      ],
+      "pauseSafe": true
+    },
+    {
+      "status": "candidate",
+      "source": "frames/rest-settled-v2.png",
+      "sourceSHA256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+      "raw": "raw/drowsy-middle-v1.png",
+      "rawSHA256": "654cf9037d3d6ae3114ddab7736e5a83c13b22e9d8b82705942e10cb1f385c02",
+      "prompt": "prompts/drowsy-middle-v1.txt",
+      "output": "frames/drowsy-middle-v1.png",
+      "sha256": "377327a3bd8115ab3d47f520003fc8905fa44b6af1dc0135067b4645871236b0",
+      "mask": "masks/drowsy-middle-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:drowsy-middle-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "enter"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "frames/rest-settled-v2.png",
+      "sourceSHA256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+      "raw": "raw/doze-v1.png",
+      "rawSHA256": "8789240df4bc5476f50391cc05a53cc3ebdeae31245dd6655e7159d6d41cfc59",
+      "prompt": "prompts/doze-v1.txt",
+      "output": "frames/doze-v1.png",
+      "sha256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260",
+      "mask": "masks/doze-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:doze-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "enter",
+        "hold"
+      ],
+      "pauseSafe": true
+    },
+    {
+      "status": "candidate",
+      "source": "frames/rest-settled-v2.png",
+      "sourceSHA256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+      "raw": "raw/wake-middle-v1.png",
+      "rawSHA256": "9d1718e25550df73d82acc86f9d67317ce2e185a2373d48f2c73ff7395544075",
+      "prompt": "prompts/wake-middle-v1.txt",
+      "output": "frames/wake-middle-v1.png",
+      "sha256": "1e8a746bbc1a96bc509d730bc9630f867bb6ebeae961c869a1dc2855e305979c",
+      "mask": "masks/wake-middle-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:wake-middle-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "enter"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "frames/rest-settled-v2.png",
+      "sourceSHA256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+      "raw": "raw/wake-alert-v1.png",
+      "rawSHA256": "bf1a0337fd2135fa90b2a8d3dca32c5d91a2820e060e39d309fe95d712916587",
+      "prompt": "prompts/wake-alert-v1.txt",
+      "output": "frames/wake-alert-v1.png",
+      "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+      "mask": "masks/wake-alert-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:wake-alert-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "act"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "raw": "raw/hover-middle-v1.png",
+      "rawSHA256": "cd2461e2daef3095364f0ae6daa5fe18d718d46712b781389bbe55c9b606ce3e",
+      "prompt": "prompts/hover-middle-v1.txt",
+      "output": "frames/hover-middle-v1.png",
+      "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+      "mask": "masks/hover-middle-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:hover-middle-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "enter",
+        "exit"
+      ],
+      "pauseSafe": false
+    },
+    {
+      "status": "candidate",
+      "source": "references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "raw": "raw/hover-attend-v1.png",
+      "rawSHA256": "fb2e76bc122c249df41619adaa25e402586ebe2cf033696b35dabb4186ef79f1",
+      "prompt": "prompts/hover-attend-v1.txt",
+      "output": "frames/hover-attend-v1.png",
+      "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+      "mask": "masks/hover-attend-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:hover-attend-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "act",
+        "enter",
+        "exit",
+        "hold"
+      ],
+      "pauseSafe": true
+    },
+    {
+      "status": "candidate",
+      "source": "frames/hover-attend-v1.png",
+      "sourceSHA256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+      "raw": "raw/tap-response-v1.png",
+      "rawSHA256": "d24999b2742fe16f4472072a7b47a12cea3bfc8f4d1b604fca7e424889fc241a",
+      "prompt": "prompts/tap-response-v1.txt",
+      "output": "frames/tap-response-v1.png",
+      "sha256": "9764d64c77d61326c5519ebe3cd2671e53d0f731e4bee86c4785f8154866b148",
+      "mask": "masks/tap-response-v1.png",
+      "canvas": [
+        512,
+        512
+      ],
+      "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+      "outsideMaskExact": true,
+      "pose": "upright-v2:companionship:tap-response-v1",
+      "embeddedStool": true,
+      "phaseRoles": [
+        "act"
+      ],
+      "pauseSafe": false
+    }
+  ],
+  "localEligibility": {
+    "rest-sleep": "only continuous clear inactive >=~5min, no active work, pending ask/permission, unknown connection, menu/drag; visible only; hidden resets, never catch-up play",
+    "wake": "fresh local input/new task/error/permission/unknown excludes rest immediately; use actual drawing recovery; never changes OS sleep or Host status",
+    "hover-response": "actual character alpha-hitmask residency ~700ms; 10s cooldown; leave recovers; transparent padding/global cursor ignored; closed endpoint only",
+    "tap-response": "actual local tap only, no double-click semantics, no task approval or completion; no forced computer close; existing v2 open tap remains in use",
+    "yawn": "once in rest entry, not a repeating hold action",
+    "reducedMotion": "suppress optional rest/hover recurrence; keep canonical closed and necessary current-pose return",
+    "wakeReset": "Any fresh input, tap, hover attention wake or new task clears continuous-idle eligibility; runtime must not return to sleep on the next frame."
+  },
+  "acceptedSourceBoundary": "No v2 source overwritten. Normalized-reference PNGs are processing references and never runtime sources.",
+  "anatomicalNote": "Yawn uses character RIGHT/image-LEFT hand. Image-right hand remains on closed laptop. After yawn returns, image-right hand can rest on own skirt; not stool.",
+  "ordinaryActionGroups": {
+    "rest-sleep": {
+      "enter": "companionship-rest-enter",
+      "hold": "companionship-doze-hold",
+      "exit": "companionship-wake-exit"
+    },
+    "hover-response": {
+      "oneShot": "companionship-hover-response"
+    },
+    "tap-response": {
+      "closed": "companionship-closed-tap",
+      "fromHover": "companionship-hover-to-tap",
+      "open": "reuse existing v2 open tap, no v3 substitution"
+    },
+    "relax-idle": {
+      "oneShot": "companionship-relax-idle-once",
+      "condition": "clear inactive only, low-frequency local rest; never a repeated yawn loop"
+    },
+    "idle-closed": {
+      "implementation": "keep selected v2 closed-idle unchanged; do not replace ordinary quiet with sleep"
+    }
+  }
+}

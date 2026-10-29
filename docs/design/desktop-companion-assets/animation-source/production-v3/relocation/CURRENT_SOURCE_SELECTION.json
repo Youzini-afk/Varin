@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "relocation/README.md",
-      "sha256": "9e236ffeacec4184bbedc07854ff347eca2c3b2d211427b5f84176e5f9f90525",
-      "bytes": 1901
+      "sha256": "717a82e31f455afc2326e2197855aa45a38780f76fd9c753c6f9d78345b266c9",
+      "bytes": 1951
     },
     {
       "path": "relocation/current-source-detached-index-v3.json",
@@ -13,8 +13,8 @@
     },
     {
       "path": "relocation/derive_same_geometry.py",
-      "sha256": "6f5f6aba79220ee46ba43186108e9b1064136db06ecc9ef867e1eeafe8329bfa",
-      "bytes": 2902
+      "sha256": "0e937472cf88f2bd9d8f35bb6fab7b5625dac05e834cde9588db80e8a5b57dac",
+      "bytes": 2912
     },
     {
       "path": "relocation/derive_task_foreground.py",
@@ -252,7 +252,7 @@
       "bytes": 144537
     }
   ],
-  "totalBytes": 8388804,
-  "requiredExternal": "exact art source paths in index; task-reactions/integration-support manifest dependency closure; production-v2 shared/upright-open-neutral-v2.png, relocation/frames/secure-no-stool-clean-donor-v1.png and canonical-stool-removal-mask-v5.png",
+  "totalBytes": 8388864,
+  "requiredExternal": "exact art source paths in index; task-reactions/integration-support and references dependency closure (contains exact no-stool donor); production-v2 shared/upright-open-neutral-v2.png and relocation/frames/canonical-stool-removal-mask-v5.png",
   "verification": "21/21 source and rebuilt derived PNG SHA exact; source matte outside-mask pixel exact"
 }
