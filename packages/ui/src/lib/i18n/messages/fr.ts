@@ -2515,6 +2515,7 @@ export const dict = {
   'chat.compaction.failed': 'Échec de la compression du contexte',
   'chat.compaction.thinking': 'Réflexion',
   'chat.scrollToBottom.aria': 'Faire défiler vers le bas',
+  'chat.scrollToBottom.newReply': 'Nouvelle réponse',
   'chat.promptNavigator.aria': 'Messages de la conversation',
   'chat.promptNavigator.turn': 'Tour {number}',
   'chat.computerActivity.open': 'Ouvrir le bureau pour {app}',

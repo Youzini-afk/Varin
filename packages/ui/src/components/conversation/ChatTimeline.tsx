@@ -50,6 +50,10 @@ import type { ThreadHistoryRun } from '@varin/application-client';
 import { toast } from '@/components/ui';
 import { currentMotionLevel, prefersReducedMotion, useMotionLevel } from '@/hooks/usePrefersReducedMotion';
 import { SpringDriver, omegaSpring, tokenSpring } from '@/lib/motion/spring';
+import { installScrollMotion, isViewportScrolling, ownsScrollTarget, SCROLL_INTENT, SCROLL_PAINT, SCROLL_SETTLED, stopViewportScroll, type ScrollIntent } from '@/lib/motion/scroll';
+import { requestAfterFrame, type FrameHandle } from '@/lib/motion/frame';
+import { ScrollTravel } from '@/lib/motion/scrollTravel';
+import { ChatReadingAnchor } from './chatReadingAnchor';
 import { springTransition, transitionFor, TWEENS } from '@/lib/motion/tokens';
 import { useWorkbenchMatchRenderers } from '@/lib/extensions/workbench-registry';
 import type { ChatSessionEntry } from './types';
@@ -59,7 +63,7 @@ import { ConversationPreviewContext } from './ConversationContext';
 const FOLLOW_SPRING = omegaSpring(14);
 /** Anchoring a sent turn and returning to the latest cross the timeline. */
 const TRAVEL_SPRING = tokenSpring('travel');
-/** "Back to latest" skips a long history and travels only the last stretch. */
+/** Beyond this reading distance, navigate with a viewport departure/arrival. */
 const RETURN_TRAVEL_VIEWPORTS = 1.25;
 /** Distance from the end at which a return hands the spring to following. */
 const RETURN_HANDOVER_PX = 48;
@@ -92,35 +96,6 @@ const timelineScroller = (list: LegendListRef | null): HTMLElement | null => {
 
 const maxScrollTop = (node: HTMLElement): number => Math.max(0, node.scrollHeight - node.clientHeight);
 
-const isInteractiveKeyTarget = (target: EventTarget | null): boolean => (
-  target instanceof HTMLElement
-  && target.closest('input, textarea, select, button, a, [contenteditable="true"]') !== null
-);
-
-// Tool previews own their bounded scroll area (including overscroll containment).
-// Reading one must not cancel the outer conversation's automatic following.
-const isToolPreviewScrollTarget = (target: EventTarget | null): boolean => {
-  if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return false;
-  const viewport = target.closest<HTMLElement>('[data-conversation-tool-scroll]');
-  return Boolean(viewport && viewport.scrollHeight > viewport.clientHeight);
-};
-
-const CHAT_TIMELINE_SCROLL_KEYS = new Set([
-  'ArrowDown',
-  'ArrowUp',
-  'End',
-  'Home',
-  'PageDown',
-  'PageUp',
-  ' ',
-]);
-
-const chatTimelineKeyIntent = (key: string, shiftKey: boolean): ChatTimelineScrollIntent => (
-  key === 'ArrowUp' || key === 'PageUp' || key === 'Home' || (key === ' ' && shiftKey)
-    ? 'away-from-end'
-    : 'toward-end'
-);
-
 export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const { t } = useI18n();
   const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
@@ -133,6 +108,12 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const isMobile = useUIStore((state) => state.isMobile);
   const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
+  const [scrollViewport, setScrollViewport] = React.useState<HTMLElement | null>(null);
+  const readingAnchor = React.useRef<ChatReadingAnchor | null>(null);
+  const readingCorrection = React.useRef<FrameHandle | null>(null);
+  const returnTravel = React.useRef<ScrollTravel | null>(null);
+  const manualIntent = React.useRef({ direction: 0, height: 0, viewport: 0 });
+  const pinnedDisclosure = React.useRef(false);
   const scrollbarDraggingRef = React.useRef(false);
   const surfaceRef = React.useRef<HTMLDivElement>(null);
   const turnNavigatorRef = React.useRef<ChatTurnNavigatorHandle>(null);
@@ -236,7 +217,6 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const scrollSample = React.useRef({ top: 0, time: 0, upward: 0 });
   const prefetchFrame = React.useRef<number | null>(null);
   const [viewportHeight, setViewportHeight] = React.useState(0);
-  const touchYRef = React.useRef<number | null>(null);
   const manualOwnershipClaimedRef = React.useRef(false);
   const navigationRequestRef = React.useRef<symbol | null>(null);
   const navigationAbort = React.useRef<AbortController | undefined>(undefined);
@@ -244,6 +224,19 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     manualOwnershipClaimedRef.current = false;
   }
   const motionLevel = useMotionLevel();
+  const replyStamp = React.useMemo(() => {
+    const live = props.liveAssistant;
+    if (live?.content.some(part => part.type === 'text' && part.text.trim())) return `${live.id}:${live.content.reduce((length, part) => length + (part.type === 'text' ? part.text.length : 0), 0)}`;
+    for (let index = props.entries.length - 1; index >= 0; index--) {
+      const entry = props.entries[index];
+      if (entry?.type === 'message' && entry.message.role === 'assistant'
+        && entry.message.content.some(part => part.type === 'text' && part.text.trim())) return entry.id;
+    }
+    return '';
+  }, [props.liveAssistant, props.entries]);
+  const seenReply = React.useRef(timelineView.viewport?.replyStamp ?? replyStamp);
+  if (timelineView.scrollMode !== 'free-scrolling') seenReply.current = replyStamp;
+  const returnLabel = t(seenReply.current !== replyStamp && replyStamp ? 'chat.scrollToBottom.newReply' : 'chat.scrollToBottom.aria');
   const scrollSpringRef = React.useRef<SpringDriver | null>(null);
   const scrollMotionRef = React.useRef<TimelineScrollMotion | null>(null);
   // Last value the spring wrote. A different scrollTop on the next frame means
@@ -281,7 +274,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     // reservation under a sent turn, a growing end) can arrive a frame later.
     const next = Math.min(maxScrollTop(node), Math.max(0, spring.value));
     node.scrollTop = next;
-    scrollWriteRef.current = next;
+    scrollWriteRef.current = node.scrollTop;
+    node.dispatchEvent(new Event(SCROLL_PAINT));
     // A growing end never lets a return come to rest. Once it reaches the live
     // edge, following takes over the same spring, velocity and all.
     if (motion.kind === 'return' && spring.target - next <= RETURN_HANDOVER_PX) {
@@ -295,6 +289,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const startScrollMotion = React.useCallback((motion: TimelineScrollMotion, target: number) => {
     const node = timelineScroller(listRef.current);
     if (!node) return;
+    stopViewportScroll(node);
     const spring = scrollSpringRef.current ??= new SpringDriver({
       spring: FOLLOW_SPRING,
       restDelta: 0.5,
@@ -335,10 +330,24 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (!Number.isFinite(position) || !Number.isFinite(state.scroll)) return;
     viewportRef.current = {
       itemId: item.id,
-      mode: modeRef.current === 'following-end' ? 'following-end' : 'free-scrolling',
+      mode: modeRef.current === 'free-scrolling' ? 'free-scrolling' : 'following-end',
       offset: position - state.scroll,
+      replyStamp: seenReply.current,
     };
   }, []);
+
+  const stabilizeReading = React.useCallback(() => {
+    if (readingCorrection.current) return;
+    readingCorrection.current = requestAfterFrame(() => {
+      readingCorrection.current = null;
+      const node = timelineScroller(listRef.current);
+      if (modeRef.current !== 'free-scrolling' || navigationRequestRef.current || returnTravel.current?.active
+        || scrollMotionRef.current || scrollbarDraggingRef.current || isViewportScrolling(node)) return;
+      readingAnchor.current?.restore();
+      node?.dispatchEvent(new Event(SCROLL_PAINT));
+      captureViewport();
+    });
+  }, [captureViewport]);
 
   const updateNavigationPosition = React.useCallback(() => {
     const block = blocksRef.current?.items[firstVisibleIndexRef.current];
@@ -368,6 +377,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (followEndFrameRef.current !== null) cancelAnimationFrame(followEndFrameRef.current);
     if (prefetchFrame.current !== null) cancelAnimationFrame(prefetchFrame.current);
     haltScrollMotion();
+    returnTravel.current?.stop();
+    readingCorrection.current?.cancel();
     navigationRequestRef.current = null; navigationAbort.current?.abort();
     captureViewport();
     if (observedLeafIdRef.current !== undefined) {
@@ -387,7 +398,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
    */
   const followContentEnd = React.useCallback((instant = false) => {
     const list = listRef.current;
-    if (!list) return;
+    if (!list || isViewportScrolling(timelineScroller(list))) return;
     const state = list.getState();
     const offset = getChatTimelineFollowOffset(
       state.contentLength,
@@ -530,6 +541,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
 
   const takeManualOwnership = React.useCallback(() => {
     haltScrollMotion();
+    returnTravel.current?.stop();
     navigationAbort.current?.abort(); navigationRequestRef.current = null;
     const current = useTimelineViewStore.getState().views[props.sessionId];
     if (
@@ -682,13 +694,16 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (atEndRef.current && props.leafId !== undefined) {
       observedLeafIdRef.current = props.leafId;
     }
-    if (atEndRef.current && !navigationRequestRef.current && !scrollbarDraggingRef.current) {
+    const deliberateDown = manualIntent.current.direction > 0 && contentOffset.y > sample.top
+      && manualIntent.current.height === contentSize.height && manualIntent.current.viewport === layoutMeasurement.height;
+    if (atEndRef.current && deliberateDown && !navigationRequestRef.current && !scrollbarDraggingRef.current) {
       const current = useTimelineViewStore.getState().views[props.sessionId];
       if (current?.scrollMode === 'free-scrolling' && current.pendingReturnToken === undefined) {
         const token = requestTimelineReturn(props.sessionId);
         if (token > 0) completeTimelineReturn(props.sessionId, token);
       }
     }
+    if (modeRef.current === 'free-scrolling' && !readingCorrection.current && !pinnedDisclosure.current && !returnTravel.current?.active) readingAnchor.current?.capture();
     scheduleViewportCapture();
     scheduleHistoryPrefetch();
   }, [completeTimelineReturn, endSpaceHeight, props.leafId, props.sessionId, requestTimelineReturn, scheduleViewportCapture, scheduleHistoryPrefetch]);
@@ -700,6 +715,9 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     const list = listRef.current;
     const node = timelineScroller(list);
     haltScrollMotion();
+    returnTravel.current?.stop();
+    stopViewportScroll(node);
+    readingAnchor.current?.clear();
     if (!list || !node || currentMotionLevel() !== 'full') {
       void Promise.resolve(scrollToContentEnd(false))
         .then(() => completeTimelineReturn(props.sessionId, token));
@@ -707,7 +725,16 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     }
     const target = Math.min(maxScrollTop(node), returnTarget());
     const lead = list.getState().scrollLength * RETURN_TRAVEL_VIEWPORTS;
-    if (target - node.scrollTop > lead) node.scrollTop = target - lead;
+    if (target - node.scrollTop > lead && typeof node.animate === 'function') {
+      const travel = returnTravel.current ??= new ScrollTravel(node);
+      travel.start(() => {
+        if (!isScrollMotionCurrent(props.sessionId, { kind: 'return', token })) return;
+        const destination = Math.min(maxScrollTop(node), returnTarget());
+        node.scrollTop = Math.max(0, destination - Math.min(80, list.getState().scrollLength * 0.1));
+        startScrollMotion({ kind: 'return', token }, destination);
+      });
+      return;
+    }
     // Travels, then hands over to following when it settles (or chases the
     // end while rows on the way are measured).
     startScrollMotion({ kind: 'return', token }, target);
@@ -827,11 +854,86 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (!shouldReleaseChatTimelineFollow(modeRef.current, atEndRef.current, intent)) return;
     takeManualOwnership();
   }, [takeManualOwnership]);
+  React.useLayoutEffect(() => {
+    if (!scrollViewport) return;
+    const node = scrollViewport;
+    const uninstall = installScrollMotion(node);
+    readingAnchor.current = new ChatReadingAnchor(node);
+    if (modeRef.current === 'free-scrolling') readingAnchor.current.capture();
+    returnTravel.current = new ScrollTravel(node);
+    const manual = (event: Event) => {
+      if (event.target !== node) return;
+      const intent = (event as CustomEvent<ScrollIntent>).detail;
+      manualIntent.current = { direction: intent.direction, height: node.scrollHeight, viewport: node.clientHeight };
+      returnTravel.current?.stop();
+      haltScrollMotion();
+      if (intent.input === 'pointer') { takeManualOwnership(); return; }
+      pinnedDisclosure.current = false;
+      readingAnchor.current?.capture();
+      releaseAutomationForIntent(intent.direction < 0 ? 'away-from-end' : 'toward-end');
+    };
+    const settled = () => {
+      if (manualIntent.current.direction > 0 && isChatTimelineAtEnd(node.scrollHeight, node.scrollTop, node.clientHeight, endSpaceHeight())) {
+        const token = requestTimelineReturn(props.sessionId);
+        if (token > 0) completeTimelineReturn(props.sessionId, token);
+      }
+      if (modeRef.current === 'following-end') scheduleFollowEnd();
+      else if (!pinnedDisclosure.current) readingAnchor.current?.capture();
+    };
+    const pointer = (event: PointerEvent) => {
+      if (event.button !== 0 || !ownsScrollTarget(node, event.target)) return;
+      const disclosure = event.target instanceof Element ? event.target.closest('button[aria-expanded], summary') : null;
+      pinnedDisclosure.current = !!disclosure;
+      if (disclosure) readingAnchor.current?.pin(disclosure);
+      else readingAnchor.current?.capture();
+    };
+    const disclosureClick = (event: MouseEvent) => {
+      if (!ownsScrollTarget(node, event.target)) return;
+      const disclosure = event.target instanceof Element ? event.target.closest('button[aria-expanded], summary') : null;
+      if (!disclosure) return;
+      takeManualOwnership();
+      manualIntent.current.direction = 0;
+      pinnedDisclosure.current = true;
+      readingAnchor.current?.pin(disclosure);
+    };
+    const selection = () => {
+      const selected = node.ownerDocument.getSelection?.();
+      if (selected && !selected.isCollapsed && selected.anchorNode && node.contains(selected.anchorNode)) {
+        manualIntent.current.direction = 0;
+        stopViewportScroll(node); takeManualOwnership();
+      }
+    };
+    const scrollEnd = () => { manualIntent.current.direction = 0; };
+    node.addEventListener(SCROLL_INTENT, manual);
+    node.addEventListener(SCROLL_SETTLED, settled);
+    node.addEventListener('pointerdown', pointer);
+    node.addEventListener('click', disclosureClick);
+    node.addEventListener('scrollend', scrollEnd);
+    node.ownerDocument.addEventListener('selectionchange', selection);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(stabilizeReading);
+    observer?.observe(node);
+    node.addEventListener('load', stabilizeReading, true);
+    return () => {
+      uninstall(); observer?.disconnect();
+      node.removeEventListener(SCROLL_INTENT, manual); node.removeEventListener(SCROLL_SETTLED, settled);
+      node.removeEventListener('pointerdown', pointer); node.removeEventListener('scrollend', scrollEnd);
+      node.removeEventListener('click', disclosureClick);
+      node.removeEventListener('load', stabilizeReading, true);
+      node.ownerDocument.removeEventListener('selectionchange', selection);
+      returnTravel.current?.stop(); readingAnchor.current = null;
+    };
+  }, [scrollViewport, props.sessionId, takeManualOwnership, releaseAutomationForIntent, haltScrollMotion, endSpaceHeight, stabilizeReading, scheduleFollowEnd, requestTimelineReturn, completeTimelineReturn]);
   React.useEffect(() => {
     const surface = surfaceRef.current;
     const receive = (event: Event) => {
       const intent = (event as CustomEvent).detail;
-      if (intent === 'away-from-end' || intent === 'toward-end') releaseAutomationForIntent(intent);
+      if (intent === 'away-from-end' || intent === 'toward-end') {
+        const node = timelineScroller(listRef.current);
+        manualIntent.current = { direction: intent === 'toward-end' ? 1 : -1, height: node?.scrollHeight ?? 0, viewport: node?.clientHeight ?? 0 };
+        pinnedDisclosure.current = false;
+        returnTravel.current?.stop();
+        releaseAutomationForIntent(intent);
+      }
       else if (intent && typeof intent.dragging === 'boolean') {
         scrollbarDraggingRef.current = intent.dragging;
         if (intent.dragging) takeManualOwnership();
@@ -850,6 +952,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
 
   const selectRun = React.useCallback(async (target: ThreadHistoryRun) => {
     takeManualOwnership();
+    stopViewportScroll(timelineScroller(listRef.current));
+    readingAnchor.current?.clear();
     const request = Symbol(); navigationRequestRef.current = request;
     const controller = new AbortController(); navigationAbort.current = controller;
     if (!listRef.current) return;
@@ -902,6 +1006,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
             && block.entry.message.content.some(part => part.type === 'toolCall' && part.id === toolCallId)));
         if (index < 0) throw new Error(t('chat.context.sourceUnavailable'));
         takeManualOwnership();
+        stopViewportScroll(timelineScroller(listRef.current));
+        readingAnchor.current?.clear();
         const list = listRef.current;
         const generation = generationRef.current;
         await list?.scrollToIndex({ index, viewPosition: 0, animated: false });
@@ -977,49 +1083,27 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
           captureViewport();
         }}
         onItemSizeChanged={({ itemKey }) => {
+          stabilizeReading();
           // The reply is rendered as rows after the anchored turn, so any row
           // growing can carry the turn past the comfortable line.
           if (modeRef.current === 'anchoring-new-turn' || itemKey === timelineView.newTurn?.turnId) correctAnchoredTurn();
           if (modeRef.current === 'following-end' || (scrollMotionRef.current && scrollMotionRef.current.kind !== 'follow')) scheduleFollowEnd();
         }}
-        onLayout={() => { scheduleFollowEnd(); scheduleHistoryPrefetch(); }}
+        onLayout={() => { stabilizeReading(); scheduleFollowEnd(); scheduleHistoryPrefetch(); }}
         onMetricsChange={() => {
           const height = listRef.current?.getState().scrollLength;
           if (height) setViewportHeight(previous => previous === height ? previous : height);
-          scheduleFollowEnd(); scheduleHistoryPrefetch();
-        }}
-        onKeyDownCapture={(event) => {
-          if (isToolPreviewScrollTarget(event.target)) return;
-          if (CHAT_TIMELINE_SCROLL_KEYS.has(event.key) && !isInteractiveKeyTarget(event.target)) {
-            releaseAutomationForIntent(chatTimelineKeyIntent(event.key, event.shiftKey));
-          }
+          stabilizeReading(); scheduleFollowEnd(); scheduleHistoryPrefetch();
         }}
         onLoad={() => {
           listLoadedRef.current = true;
+          setScrollViewport(timelineScroller(listRef.current));
           onScrollContainerChange?.(listRef.current?.getScrollableNode() ?? null);
           applyEntryIntent();
           updateNavigationPosition();
           scheduleHistoryPrefetch();
         }}
         onScroll={handleScroll}
-        onTouchMoveCapture={(event) => {
-          if (isToolPreviewScrollTarget(event.target)) return;
-          const y = event.touches[0]?.clientY ?? null;
-          const previous = touchYRef.current;
-          touchYRef.current = y;
-          if (y !== null && previous !== null && Math.abs(y - previous) > 0.5) {
-            releaseAutomationForIntent(y > previous ? 'away-from-end' : 'toward-end');
-          }
-        }}
-        onTouchStartCapture={(event) => {
-          touchYRef.current = event.touches[0]?.clientY ?? null;
-        }}
-        onWheelCapture={(event) => {
-          if (isToolPreviewScrollTarget(event.target)) return;
-          if (!event.ctrlKey && event.deltaY !== 0) {
-            releaseAutomationForIntent(event.deltaY < 0 ? 'away-from-end' : 'toward-end');
-          }
-        }}
         recycleItems={false}
         renderItem={renderItem}
         // Patched LegendList (bun-patches): a collapsing row's smaller size applies in the same frame,
@@ -1036,15 +1120,15 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
             data-conversation-return-latest="true"
             onClick={handleReturnToLatest}
             className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/70 bg-background/95 px-3 py-1.5 typography-meta text-foreground shadow-lg backdrop-blur hover:bg-interactive-hover"
-            aria-label={t('chat.scrollToBottom.aria')}
-            title={t('chat.scrollToBottom.aria')}
+            aria-label={returnLabel}
+            title={returnLabel}
             initial={{ opacity: 0, y: 8, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1, transition: transitionFor(motionLevel, RETURN_PILL_ENTER) }}
             exit={{ opacity: 0, y: 4, scale: 0.98, transition: transitionFor(motionLevel, TWEENS.exit) }}
             whileTap={{ scale: 0.97 }}
           >
             <Icon name="arrow-down" className="size-3.5" />
-            {t('chat.scrollToBottom.aria')}
+            {returnLabel}
           </motion.button>
         ) : null}
       </AnimatePresence>

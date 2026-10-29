@@ -75,6 +75,7 @@ beforeEach(() => {
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window);
   vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element);
+  vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   frames = new Map(); nextFrame = 0; time = 0;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; });
@@ -90,18 +91,18 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it('mounts a revisited conversation at its saved reading target instead of first showing the end', async () => {
+it.each([false, true])('mounts a revisited conversation at its saved reading target, including background work=%s', async working => {
   const identity = { runtime: 'agent' as const, threadId: 'reading-fixture', branchId: 'main' };
   const key = threadComposerKey(threadHostKey(), identity);
   useTimelineViewStore.setState({ views: { [key]: { ...DEFAULT_CHAT_TIMELINE_VIEW,
-    observedLeafId: 'latest', scrollMode: 'free-scrolling',
+    observedLeafId: working ? 'old-head' : 'latest', scrollMode: 'free-scrolling',
     viewport: { itemId: 'turn:earlier', mode: 'free-scrolling', offset: -24 } } } });
   const history: ThreadHistoryItem[] = ['earlier', 'latest'].map((id, index) => ({
     id, parent: index ? 'earlier' : null, thread_id: identity.threadId, run_id: id,
     source: 'user', provider: null, content: { text: id },
   }));
   await act(async () => root.render(<ConversationTimeline api={{} as ThreadsAPI} identity={identity}
-    history={history} historyReady progress={[]} working={false} cwd="/workspace" onQuote={() => {}} />));
+    history={history} historyReady progress={[]} working={working} cwd="/workspace" onQuote={() => {}} />));
   expect(viewport.initial).toEqual([{ index: 0, viewOffset: -24, viewPosition: 0 }]);
   expect(viewport.writes).toEqual([]);
   expect(useTimelineViewStore.getState().views[key]?.scrollMode).toBe('free-scrolling');
@@ -156,4 +157,53 @@ it('retains manually revealed end space when following resumes after entry', asy
   frame();
   expect(viewport.top).toBe(1400);
   expect(viewport.writes).toEqual([]);
+});
+
+it('does not resume following when layout changes put a reader at the end', async () => {
+  await showEnd(); frame();
+  act(() => useTimelineViewStore.getState().cancelTimelineAutomation('end-fixture'));
+  act(() => viewport.props!.onScroll?.({ nativeEvent: {
+    contentOffset: { x: 0, y: 1196 }, contentSize: { width: 700, height: 2000 }, layoutMeasurement: { width: 700, height: 600 },
+  } } as never));
+  expect(useTimelineViewStore.getState().views['end-fixture']?.scrollMode).toBe('free-scrolling');
+});
+
+it('keeps manual wheel motion continuous across streaming updates and resumes after a deliberate return', async () => {
+  const live = assistant('answer', [{ type: 'text', text: 'First words' }], {}, true);
+  await showEnd(live); frame();
+  const node = mount.querySelector('[tabindex]') ?? mount.firstElementChild!.querySelector('div')!;
+  const wheel = (deltaY: number) => act(() => {
+    const event = new window.Event('wheel', { bubbles: true, cancelable: true });
+    Object.assign(event, { deltaY, deltaX: 0, deltaMode: 1 }); node.dispatchEvent(event);
+  });
+  wheel(-5); frame(); frame();
+  const before = viewport.top;
+  await act(async () => root.render(<ChatTimeline sessionId="end-fixture" cwd="/workspace" entries={[]} leafId="head" toolExecutions={{}}
+    liveAssistant={{ ...live, content: [{ type: 'text', text: 'A new reply is arriving' }] }} />));
+  frame();
+  expect(viewport.top).toBeLessThan(before);
+  expect(mount.textContent).toContain('chat.scrollToBottom.newReply');
+  wheel(40);
+  for (let i = 0; i < 45; i++) frame();
+  expect(useTimelineViewStore.getState().views['end-fixture']?.scrollMode).toBe('following-end');
+});
+
+it('cancels a long return before relocation when the reader takes over', async () => {
+  viewport.content = 20_000;
+  await showEnd(); frame();
+  act(() => useTimelineViewStore.getState().cancelTimelineAutomation('end-fixture'));
+  viewport.top = 300;
+  const node = mount.firstElementChild!.querySelector('div')! as HTMLElement;
+  let finish!: () => void;
+  node.animate = vi.fn(() => ({ finished: new Promise<void>(resolve => { finish = resolve; }), cancel: vi.fn() } as unknown as Animation));
+  act(() => mount.querySelector<HTMLElement>('[data-conversation-return-latest]')!.click());
+  expect(node.animate).toHaveBeenCalledTimes(1);
+  expect(viewport.top).toBe(300);
+  act(() => {
+    const event = new window.Event('wheel', { bubbles: true });
+    Object.assign(event, { deltaY: -4, deltaX: 0, deltaMode: 0 }); node.dispatchEvent(event);
+  });
+  await act(async () => finish()); frame(); frame();
+  expect(viewport.top).toBe(300);
+  expect(useTimelineViewStore.getState().views['end-fixture']?.scrollMode).toBe('free-scrolling');
 });

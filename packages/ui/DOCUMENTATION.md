@@ -87,6 +87,9 @@ right edge of the complete conversation layout, outside the full/compact work ov
 idle and remains visible during hover, focus or dragging. Pointer/keyboard scrolling releases the
 timeline's follow spring through its existing scroll-intent event; changing conversation/history cuts
 rebinds the viewport without letting a departing scene clear the new binding.
+Only user input reveals the chat rail; background streaming updates its geometry without extending
+the visibility timer. Thumb geometry is written directly before paint, including during spring steps,
+and its hit area remains 14px wide while the visible line expands from 4px to 6px on interaction.
 
 Conversation entry prepares its saved viewport before mounting the virtual list. The initial
 last-row target excludes the footer's breathing space, and the timeline takes over exact placement
@@ -143,13 +146,28 @@ Both sidebars contribute to one canvas width lock. The content lays out at its d
 the frames keep giving way continuously, and completing one side does not release the other side's
 lock. The panel's proportional width consumes the sidebar's destination width during this motion.
 
-The conversation timeline has one scroll spring, owned by one motion at a time:
+The conversation timeline's automatic scroll spring is owned by one motion at a time:
 
 - Following the end uses a critically damped spring (ω = 14). Its target only grows, so a long reply glides instead of stepping once per measurement. While it catches up, the timeline still counts as at the end.
 - A sent turn travels to the top with `travel`. Once its reply passes the comfortable line, the view hands over to following on the same spring.
-- 「滚动到底部」 skips a long history and travels the last 1.25 viewports. Near the live edge it hands over to following, velocity and all.
+- 「滚动到底部」 travels continuously over a short distance. Beyond 1.25 viewports, the chat viewport leaves upward, is placed at the destination while transparent, and arrives from below. This interruptible WAAPI transition does not clone messages/iframes or capture the whole app. Near the live edge the scroll spring hands over to following, velocity and all.
 - Wheel, touch and key intent stop the spring at once. A motion whose owner went stale (mode, generation or return token) stops on its next frame.
 - Entering a Thread, a resized viewport, and `reduced` or `off` place the end directly.
+
+`lib/motion/scroll.ts` owns manual motion for the timeline, shared `ScrollableOverlay` reading panes,
+settings and work overview. Explicit line/page wheel events and identifiable Chromium mouse detents
+use a short critically damped spring; successive detents retain velocity, reversal discards the old
+remainder. Continuous/ambiguous pixel gestures, touch scrolling and editor/terminal inputs stay native.
+Page keys retain two reading lines of overlap. Dragging the thumb owns position directly and cancels
+pending motion. The timeline suspends automatic movement while manual motion owns its viewport.
+
+Manual direction and actual viewport geometry distinguish returning to the live edge from a layout
+change that happens to put the reader there. Selecting text or opening a disclosure releases following.
+`ChatReadingAnchor` keeps a visible text Range (or disclosure trigger) at its screen offset through
+intra-row changes and reflow, complementing LegendList's existing prepend/row-size compensation.
+Conversation re-entry restores a saved reading position even if its Run continued in the background;
+the return pill indicates a new textual reply without counting streamed chunks. Native follow-ups,
+execution and history loading remain with their original owners.
 
 Literal hex and CSS functional colors in Markdown prose/inline code receive small color swatches after
 the value. The DOM decorator preserves source text, skips code blocks, links and math, and paints empty

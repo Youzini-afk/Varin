@@ -7,6 +7,7 @@ export interface ChatTimelineViewportAnchor {
   itemId: string;
   mode: Exclude<ChatTimelineScrollMode, 'anchoring-new-turn'>;
   offset: number;
+  replyStamp?: string;
 }
 
 export type ChatTimelineEntryTarget =
@@ -61,11 +62,7 @@ export const prepareChatTimelineEntry = (
   },
 ): ChatTimelineViewState => {
   const view = current ?? DEFAULT_CHAT_TIMELINE_VIEW;
-  const restore = (options.preserveReading || !options.working
-    && !options.hasAttention
-    && !options.hasLiveOverlay
-    && view.observedLeafId !== undefined
-    && view.observedLeafId === options.leafId)
+  const restore = (options.preserveReading || view.observedLeafId !== undefined)
     && view.viewport?.mode === 'free-scrolling';
   const generation = view.generation + 1;
   const next: ChatTimelineViewState = {

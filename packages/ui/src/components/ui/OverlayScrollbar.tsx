@@ -1,5 +1,6 @@
 import React from "react";
 import { cn } from "@/lib/utils";
+import { announceScrollIntent, moveViewport, ownsScrollTarget, SCROLL_INTENT, SCROLL_PAINT, scrollKeyOffset, stopViewportScroll, viewportScrollTarget } from '@/lib/motion/scroll';
 import {
   calculateOverlayThumbMetrics,
   EMPTY_OVERLAY_THUMB,
@@ -23,7 +24,6 @@ type OverlayScrollbarProps = {
   onDragChange?(dragging: boolean): void;
 };
 
-const USER_SCROLL_INTENT_WINDOW_MS = 1000;
 const METRIC_EPSILON = 0.5;
 
 const isSameThumbMetrics = (a: OverlayThumbMetrics, b: OverlayThumbMetrics): boolean => {
@@ -47,16 +47,18 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   onDragChange,
 }) => {
   const [visible, setVisible] = React.useState(false);
-  const [vertical, setVertical] = React.useState<OverlayThumbMetrics>({ length: 0, offset: 0 });
-  const [horizontal, setHorizontal] = React.useState<OverlayThumbMetrics>({ length: 0, offset: 0 });
-  const [scrollPercent, setScrollPercent] = React.useState(0);
+  const vertical = React.useRef<OverlayThumbMetrics>({ length: 0, offset: 0 });
+  const horizontal = React.useRef<OverlayThumbMetrics>({ length: 0, offset: 0 });
+  const verticalNode = React.useRef<HTMLDivElement>(null);
+  const horizontalNode = React.useRef<HTMLDivElement>(null);
+  const railNode = React.useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = React.useState({ vertical: false, horizontal: false });
+  const overflowRef = React.useRef(overflow);
   const hideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const frameRef = React.useRef<number | null>(null);
   const metricsFrameRef = React.useRef<number | null>(null);
   const isDraggingRef = React.useRef(false);
   const isHoveringRef = React.useRef(false);
   const isFocusedRef = React.useRef(false);
-  const lastUserIntentAtRef = React.useRef(0);
   const dragStartRef = React.useRef<{
     pointerX: number;
     pointerY: number;
@@ -84,8 +86,12 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       minThumbSize,
       trackInset,
     });
-    setVertical((prev) => (isSameThumbMetrics(prev, nextVertical) ? prev : nextVertical));
-    if (interactiveTrack) setScrollPercent(Math.round(Math.max(0, Math.min(1, scrollTop / Math.max(scrollHeight - clientHeight, 1))) * 100));
+    if (!isSameThumbMetrics(vertical.current, nextVertical)) vertical.current = nextVertical;
+    if (verticalNode.current) {
+      verticalNode.current.style.height = `${vertical.current.length}px`;
+      verticalNode.current.style.transform = `translateY(${vertical.current.offset}px)`;
+    }
+    if (interactiveTrack) railNode.current?.setAttribute('aria-valuenow', String(Math.round(Math.max(0, Math.min(1, scrollTop / Math.max(scrollHeight - clientHeight, 1))) * 100)));
 
     let nextHorizontal: OverlayThumbMetrics = EMPTY_OVERLAY_THUMB;
     if (!disableHorizontal && scrollWidth > clientWidth) {
@@ -98,7 +104,15 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
         trackInset,
       });
     }
-    setHorizontal((prev) => (isSameThumbMetrics(prev, nextHorizontal) ? prev : nextHorizontal));
+    if (!isSameThumbMetrics(horizontal.current, nextHorizontal)) horizontal.current = nextHorizontal;
+    if (horizontalNode.current) {
+      horizontalNode.current.style.width = `${horizontal.current.length}px`;
+      horizontalNode.current.style.transform = `translateX(${horizontal.current.offset}px)`;
+    }
+    if (overflowRef.current.vertical !== (nextVertical.length > 0) || overflowRef.current.horizontal !== (nextHorizontal.length > 0)) {
+      overflowRef.current = { vertical: nextVertical.length > 0, horizontal: nextHorizontal.length > 0 };
+      setOverflow(overflowRef.current);
+    }
   }, [containerRef, disableHorizontal, interactiveTrack, minThumbSize, trackRef]);
 
   const scheduleMetricsUpdate = React.useCallback(() => {
@@ -147,28 +161,17 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   }, [hideDelayMs]);
 
   const markUserIntent = React.useCallback(() => {
-    lastUserIntentAtRef.current = Date.now();
-  }, []);
+    if (!suppressVisibility) { setVisible(true); scheduleHide(); }
+  }, [scheduleHide, suppressVisibility]);
 
   const handleScroll = React.useCallback(() => {
-    if (frameRef.current !== null) return;
-    frameRef.current = requestAnimationFrame(() => {
-      frameRef.current = null;
-      updateMetrics();
-      if (suppressVisibility && !isDraggingRef.current) {
-        setVisible(false);
-        return;
-      }
-      if (userIntentOnly && !isDraggingRef.current) {
-        const hasRecentUserIntent = Date.now() - lastUserIntentAtRef.current <= USER_SCROLL_INTENT_WINDOW_MS;
-        if (!hasRecentUserIntent) {
-          setVisible(false);
-          return;
-        }
-      }
-      setVisible(true);
-      scheduleHide();
-    });
+    // A scroll event runs before paint; the thumb must not trail the text by a frame.
+    updateMetrics();
+    if (suppressVisibility && !isDraggingRef.current) { setVisible(false); return; }
+    // User input owns visibility in reading panes; streamed output only moves the thumb.
+    if (userIntentOnly) return;
+    setVisible(true);
+    scheduleHide();
   }, [scheduleHide, suppressVisibility, updateMetrics, userIntentOnly]);
 
   React.useEffect(() => {
@@ -179,6 +182,8 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     setVisible(false);
 
     const onScroll = () => handleScroll();
+    const onUserInput = (event: Event) => { if (ownsScrollTarget(container, event.target)) markUserIntent(); };
+    const onIntent = (event: Event) => { if (event.target === container) markUserIntent(); };
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         event.key === 'ArrowUp'
@@ -189,15 +194,17 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
         || event.key === 'End'
         || event.key === ' '
       ) {
-        markUserIntent();
+        onUserInput(event);
       }
     };
 
     container.addEventListener("scroll", onScroll, { passive: true });
+    container.addEventListener(SCROLL_PAINT, updateMetrics);
+    container.addEventListener(SCROLL_INTENT, onIntent);
     if (userIntentOnly) {
-      container.addEventListener("wheel", markUserIntent, { passive: true });
-      container.addEventListener("touchstart", markUserIntent, { passive: true });
-      container.addEventListener("touchmove", markUserIntent, { passive: true });
+      container.addEventListener("wheel", onUserInput, { passive: true });
+      container.addEventListener("touchstart", onUserInput, { passive: true });
+      container.addEventListener("touchmove", onUserInput, { passive: true });
       container.addEventListener("keydown", onKeyDown);
     }
 
@@ -230,12 +237,14 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
 
     return () => {
       container.removeEventListener("scroll", onScroll);
+      container.removeEventListener(SCROLL_PAINT, updateMetrics);
+      container.removeEventListener(SCROLL_INTENT, onIntent);
       container.removeEventListener("input", onInput, true);
       container.removeEventListener("load", onLoad, true);
       if (userIntentOnly) {
-        container.removeEventListener("wheel", markUserIntent);
-        container.removeEventListener("touchstart", markUserIntent);
-        container.removeEventListener("touchmove", markUserIntent);
+        container.removeEventListener("wheel", onUserInput);
+        container.removeEventListener("touchstart", onUserInput);
+        container.removeEventListener("touchmove", onUserInput);
         container.removeEventListener("keydown", onKeyDown);
       }
       resizeObserver?.disconnect();
@@ -243,9 +252,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       mutationObserver?.disconnect();
       observedElementsRef.current.clear();
       if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (metricsFrameRef.current) cancelAnimationFrame(metricsFrameRef.current);
-      frameRef.current = null;
       metricsFrameRef.current = null;
       if (isDraggingRef.current) onDragChange?.(false);
       isDraggingRef.current = false;
@@ -273,7 +280,9 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     if (!container || event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
+    stopViewportScroll(container);
     onScrollIntent?.();
+    announceScrollIntent(container, { input: 'scrollbar', direction: 0 });
 
     isDraggingRef.current = true;
     onDragChange?.(true);
@@ -297,22 +306,25 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
 
     const axis = dragAxisRef.current;
     if (axis === "vertical") {
-      const { pointerY, scrollTop } = dragStartRef.current;
+      const { pointerY } = dragStartRef.current;
       const delta = event.clientY - pointerY;
       const trackLength = Math.max((trackRef?.current?.clientHeight ?? container.clientHeight) - 16, 0);
-      const thumbTravel = Math.max(trackLength - vertical.length, 1);
+      const thumbTravel = Math.max(trackLength - vertical.current.length, 1);
       const maxScroll = Math.max(container.scrollHeight - container.clientHeight, 1);
       const scrollDelta = (delta / thumbTravel) * maxScroll;
-      container.scrollTop = scrollTop + scrollDelta;
+      container.scrollTop += scrollDelta;
+      dragStartRef.current.pointerY = event.clientY;
     } else if (axis === "horizontal") {
-      const { pointerX, scrollLeft } = dragStartRef.current;
+      const { pointerX } = dragStartRef.current;
       const delta = event.clientX - pointerX;
       const trackLength = Math.max((trackRef?.current?.clientWidth ?? container.clientWidth) - 16, 0);
-      const thumbTravel = Math.max(trackLength - horizontal.length, 1);
+      const thumbTravel = Math.max(trackLength - horizontal.current.length, 1);
       const maxScroll = Math.max(container.scrollWidth - container.clientWidth, 1);
       const scrollDelta = (delta / thumbTravel) * maxScroll;
-      container.scrollLeft = scrollLeft + scrollDelta;
+      container.scrollLeft += scrollDelta;
+      dragStartRef.current.pointerX = event.clientX;
     }
+    updateMetrics();
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -340,28 +352,30 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     scheduleHide();
   }, [scheduleHide]);
 
-  const showVertical = vertical.length > 0;
-  const showHorizontal = horizontal.length > 0;
+  const showVertical = overflow.vertical;
+  const showHorizontal = overflow.horizontal;
   if (!showVertical && !showHorizontal) return null;
 
   const trackInset = 8;
   const verticalThumb = <div
+    ref={verticalNode}
     className="overlay-scrollbar__thumb overlay-scrollbar__thumb--vertical"
     data-overlay-scrollbar-thumb="vertical"
-    style={{ height: `${vertical.length}px`, top: trackInset, transform: `translateY(${vertical.offset}px)`, right: trackInset / 2 }}
+    style={{ height: `${vertical.current.length}px`, top: trackInset, transform: `translateY(${vertical.current.offset}px)` }}
     onPointerDown={event => handlePointerDown(event, 'vertical')}
     onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}
     onLostPointerCapture={handlePointerUp}
     onMouseEnter={interactiveTrack ? undefined : handleThumbMouseEnter}
     onMouseLeave={interactiveTrack ? undefined : handleThumbMouseLeave}
   />;
-  const moveTo = (offset: number) => {
+  const moveTo = (offset: number, animated = false) => {
     const container = containerRef.current;
     if (!container) return;
     onScrollIntent?.();
+    announceScrollIntent(container, { input: 'scrollbar', direction: offset < container.scrollTop ? -1 : 1 });
     markUserIntent();
     setVisible(true);
-    container.scrollTop = Math.max(0, Math.min(container.scrollHeight - container.clientHeight, offset));
+    moveViewport(container, offset, animated);
     scheduleMetricsUpdate();
     scheduleHide();
   };
@@ -373,9 +387,9 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       style={{ opacity: visible ? 1 : 0 }}
     >
       {showVertical && (interactiveTrack ? <div
-        className="overlay-scrollbar__track--vertical" role="scrollbar" tabIndex={0}
+        ref={railNode} className="overlay-scrollbar__track--vertical" role="scrollbar" tabIndex={0}
         aria-label={ariaLabel} aria-controls={ariaControls} aria-orientation="vertical"
-        aria-valuemin={0} aria-valuemax={100} aria-valuenow={scrollPercent}
+        aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, (containerRef.current?.scrollTop ?? 0) / Math.max((containerRef.current?.scrollHeight ?? 0) - (containerRef.current?.clientHeight ?? 0), 1)) * 100)}
         onMouseEnter={handleThumbMouseEnter} onMouseLeave={handleThumbMouseLeave}
         onFocus={() => { isFocusedRef.current = true; setVisible(true); if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current); }}
         onBlur={() => { isFocusedRef.current = false; scheduleHide(); }}
@@ -385,32 +399,25 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
           const container = containerRef.current;
           if (!container) return;
           const track = event.currentTarget.getBoundingClientRect();
-          const travel = Math.max(track.height - trackInset * 2 - vertical.length, 1);
-          moveTo((event.clientY - track.top - trackInset - vertical.length / 2) / travel * Math.max(container.scrollHeight - container.clientHeight, 0));
+          const travel = Math.max(track.height - trackInset * 2 - vertical.current.length, 1);
+          moveTo((event.clientY - track.top - trackInset - vertical.current.length / 2) / travel * Math.max(container.scrollHeight - container.clientHeight, 0));
         }}
         onKeyDown={event => {
           const container = containerRef.current;
           if (!container) return;
-          let next: number;
-          switch (event.key) {
-            case 'ArrowUp': next = container.scrollTop - 40; break;
-            case 'ArrowDown': next = container.scrollTop + 40; break;
-            case 'PageUp': next = container.scrollTop - container.clientHeight; break;
-            case 'PageDown': next = container.scrollTop + container.clientHeight; break;
-            case 'Home': next = 0; break;
-            case 'End': next = container.scrollHeight; break;
-            default: return;
-          }
-          event.preventDefault(); event.stopPropagation(); moveTo(next);
+          const next = scrollKeyOffset(container, event.key, event.shiftKey, viewportScrollTarget(container));
+          if (next === undefined) return;
+          event.preventDefault(); event.stopPropagation(); moveTo(next, true);
         }}
       >{verticalThumb}</div> : verticalThumb)}
       {showHorizontal && (
         <div
+          ref={horizontalNode}
           className="overlay-scrollbar__thumb overlay-scrollbar__thumb--horizontal"
           data-overlay-scrollbar-thumb="horizontal"
           style={{
-            width: `${horizontal.length}px`,
-            left: `${trackInset + horizontal.offset}px`,
+            width: `${horizontal.current.length}px`,
+            left: `${trackInset}px`, transform: `translateX(${horizontal.current.offset}px)`,
             bottom: `${trackInset / 2}px`,
           }}
           onPointerDown={(e) => handlePointerDown(e, "horizontal")}

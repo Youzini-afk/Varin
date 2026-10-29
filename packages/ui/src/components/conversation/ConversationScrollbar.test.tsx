@@ -18,6 +18,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window);
+  vi.stubGlobal('Element', window.Element); vi.stubGlobal('Event', window.Event);
   vi.stubGlobal('CustomEvent', window.CustomEvent); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   frames = new Map(); frameId = 0;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++frameId, callback); return frameId; });
@@ -36,13 +37,16 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-it('reveals on scrolling and edge hover, then fades after inactivity', () => {
+it('reveals for manual scrolling and edge hover, while streamed output does not keep it awake', () => {
   const overlay = mount.querySelector<HTMLElement>('.conversation-scrollbar')!;
   const rail = mount.querySelector<HTMLElement>('[role="scrollbar"]')!;
   expect(overlay.style.opacity).toBe('0');
   viewport.scrollTop = 400; fire(viewport, 'scroll'); flush();
+  expect(overlay.style.opacity).toBe('0');
+  fire(viewport, 'wheel', { deltaY: 50 }); fire(viewport, 'scroll');
   expect(overlay.style.opacity).toBe('1');
-  tick(1000); expect(overlay.style.opacity).toBe('0');
+  tick(900); viewport.scrollTop = 600; fire(viewport, 'scroll');
+  tick(100); expect(overlay.style.opacity).toBe('0');
   fire(rail, 'mouseover'); tick(2000); expect(overlay.style.opacity).toBe('1');
   fire(rail, 'mouseout', { relatedTarget: document.body }); tick(1000);
   expect(overlay.style.opacity).toBe('0');

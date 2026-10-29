@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { cn } from '@/lib/utils';
 import { useWorkOverviewMotion } from './workOverviewMotion';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 export type OverviewPeekSection = 'questions' | 'review' | 'plan' | 'outputs' | 'threads' | 'sources' | 'memory' | 'computer' | 'context' | 'goals' | 'followups' | 'recovery' | 'research' | 'operations';
 export interface OverviewPeekRow {
@@ -25,7 +26,7 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
   const { t } = useI18n();
   const id = React.useId();
   const root = React.useRef<HTMLElement>(null);
-  const detailViewport = React.useRef<HTMLDivElement>(null);
+  const detailViewport = React.useRef<HTMLElement>(null);
   React.useLayoutEffect(() => {
     if (detailViewport.current) detailViewport.current.scrollTop = 0;
   }, [detailTitle]);
@@ -65,13 +66,13 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
     <div className="workbench-overview-clip">
     <section id={id} aria-label={t('harness.overview.peek')} data-harness-overview-peek="true" hidden={!compactOpen} inert={!compactOpen} aria-hidden={!compactOpen} className="workbench-overview-peek workbench-overview-surface flex min-h-0 flex-col">
       <header className="flex h-11 shrink-0 items-center gap-1 px-3"><span className="min-w-0 flex-1 truncate typography-ui-label font-medium">{t('harness.overview.title')}</span><button type="button" onClick={close} className={iconButton} aria-label={t('dialog.common.actions.close')}><Icon name="close" className="size-4" /></button></header>
-      <div className="thread-work-overview min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 pb-3">
+      <ScrollableOverlay preventOverscroll disableHorizontal userIntentOnly className="thread-work-overview min-h-0 min-w-0 px-3 pb-3">
         {status}
         {compactContent ?? rows.map(row => <button key={row.id} type="button" onClick={() => openFull(row.section)} className="mt-3 flex w-full items-start gap-2 rounded-md py-1.5 text-left hover:bg-interactive-hover">
           <Icon name={row.icon} className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 typography-meta"><span className="flex justify-between gap-2"><span>{row.label}</span><span className="text-muted-foreground">{row.value}</span></span>{row.description && <span className="mt-1 block truncate typography-micro text-muted-foreground">{row.description}</span>}</span>
         </button>)}
         {!status && !rows.length && !compactContent && <p className="typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>}
-      </div>
+      </ScrollableOverlay>
       <div className="flex shrink-0 items-center border-t border-border/50 px-3 py-2"><button type="button" onClick={() => openFull()} className="flex flex-1 items-center gap-2 rounded-md p-1 typography-meta hover:bg-interactive-hover">{t('harness.overview.details')}<Icon name="arrow-right-s" className="ml-auto size-3.5" /></button></div>
     </section>
     <section aria-label={t('harness.overview.title')} hidden={view !== 'full'} inert={view !== 'full'} aria-hidden={view !== 'full'} data-harness-overview-panel="true" className="workbench-overview-full workbench-overview-surface flex min-h-0 flex-col">
@@ -86,7 +87,7 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
         <button type="button" className={iconButton} onClick={() => changeView(() => onCompactChange(true))} aria-label={t('harness.overview.peek')}><Icon name="arrow-down-s" className="size-4" /></button>
         <button type="button" className={iconButton} onClick={close} aria-label={t('harness.overview.collapse')}><Icon name="close" className="size-4" /></button>
       </header>
-      <div ref={detailViewport} className="thread-work-overview min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 pb-3">{children}</div>
+      <ScrollableOverlay ref={detailViewport} preventOverscroll disableHorizontal userIntentOnly className="thread-work-overview min-h-0 min-w-0 px-3 pb-3">{children}</ScrollableOverlay>
     </section>
     </div>
     </div>

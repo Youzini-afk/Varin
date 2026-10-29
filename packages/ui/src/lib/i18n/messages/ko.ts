@@ -2691,6 +2691,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': '맨 아래로 스크롤',
+  'chat.scrollToBottom.newReply': '새 답변',
   'chat.promptNavigator.aria': '대화 메시지 탐색',
   'chat.promptNavigator.turn': '{number}번째 턴',
   'chat.computerActivity.open': '{app} 데스크톱 열기',

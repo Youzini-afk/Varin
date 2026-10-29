@@ -22,7 +22,7 @@ export function ConversationScrollbar({ viewport, trackRef }: {
   const changeDrag = React.useCallback((dragging: boolean) => {
     viewport.dispatchEvent(new CustomEvent(CHAT_TIMELINE_SCROLL_INTENT_EVENT, { bubbles: true, detail: { dragging } }));
   }, [viewport]);
-  return <OverlayScrollbar containerRef={containerRef} trackRef={trackRef} disableHorizontal
+  return <OverlayScrollbar containerRef={containerRef} trackRef={trackRef} disableHorizontal userIntentOnly
     interactiveTrack ariaLabel={t('chat.scrollbar.aria')} ariaControls={viewport.id || id}
     onScrollIntent={takeScrollOwnership} onDragChange={changeDrag} className="conversation-scrollbar" />;
 }

@@ -2806,6 +2806,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sectionSkills": "Скіли",
   "chat.draftStarters.remove": "Прибрати",
   "chat.scrollToBottom.aria": "Прокрутити вниз",
+  "chat.scrollToBottom.newReply": "Нова відповідь",
   'chat.promptNavigator.aria': 'Навігація повідомленнями розмови',
   'chat.promptNavigator.turn': 'Хід {number}',
   'chat.computerActivity.open': 'Відкрити робочий стіл для {app}',

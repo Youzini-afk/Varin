@@ -58,6 +58,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
     <SettingsFooterContext.Provider value={footerTarget}>
     <div className={cn('flex h-full min-h-0 flex-col', outerClassName)}>
     <ScrollableOverlay
+      preventOverscroll userIntentOnly
       outerClassName="flex-1 min-h-0"
       className="w-full @container"
     >

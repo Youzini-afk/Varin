@@ -2,6 +2,7 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import { OverlayScrollbar } from "./OverlayScrollbar";
 import { ScrollShadow } from "./ScrollShadow";
+import { useScrollMotion } from '@/hooks/useScrollMotion';
 
 type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   minThumbSize?: number;
@@ -19,6 +20,7 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   /** Suppress the top fade (e.g. when sticky headers sit at the top edge). */
   hideTopScrollShadow?: boolean;
   userIntentOnly?: boolean;
+  smoothWheel?: boolean;
   /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
 };
@@ -41,9 +43,11 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     scrollShadowSize,
     hideTopScrollShadow = false,
     userIntentOnly = false,
+    smoothWheel = true,
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
+    useScrollMotion(containerRef, smoothWheel && Component !== 'textarea' && Component !== 'input');
 
     React.useImperativeHandle(ref, () => containerRef.current as HTMLElement, []);
 

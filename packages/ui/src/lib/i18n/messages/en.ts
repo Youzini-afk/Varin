@@ -3066,6 +3066,7 @@ export const dict = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': 'Scroll to bottom',
+  'chat.scrollToBottom.newReply': 'New reply',
   'chat.scrollbar.aria': 'Conversation scroll position',
   'chat.history.unavailable': 'Earlier messages could not be read.',
   'chat.history.retry': 'Retry',

@@ -3016,6 +3016,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': '捲動到底部',
+  'chat.scrollToBottom.newReply': '新回覆',
   'chat.scrollbar.aria': '聊天捲動位置',
   'chat.promptNavigator.aria': '對話訊息導覽',
   'chat.promptNavigator.turn': '第 {number} 輪',

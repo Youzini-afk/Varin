@@ -2828,6 +2828,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sectionSkills": "Skills",
   "chat.draftStarters.remove": "Remove",
   "chat.scrollToBottom.aria": "Ir ao final",
+  "chat.scrollToBottom.newReply": "Nova resposta",
   'chat.promptNavigator.aria': 'Mensagens da conversa',
   'chat.promptNavigator.turn': 'Rodada {number}',
   'chat.computerActivity.open': 'Abrir a área de trabalho de {app}',

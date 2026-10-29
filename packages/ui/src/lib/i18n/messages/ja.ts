@@ -2619,6 +2619,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'スキル',
   'chat.draftStarters.remove': '削除',
   'chat.scrollToBottom.aria': '一番下にスクロール',
+  'chat.scrollToBottom.newReply': '新しい返信',
   'chat.promptNavigator.aria': '会話メッセージのナビゲーション',
   'chat.promptNavigator.turn': '第 {number} ターン',
   'chat.computerActivity.open': '{app} のデスクトップを開く',

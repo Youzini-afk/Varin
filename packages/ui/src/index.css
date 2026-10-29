@@ -684,7 +684,7 @@ html:not(.dark) .chat-scroll {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
+  transition: opacity 200ms var(--motion-ease-out);
   /* Above sticky zone headers (z-20) — the thumb must never dive under
      a stuck sidebar header while scrolling. */
   z-index: 30;
@@ -700,12 +700,11 @@ html:not(.dark) .chat-scroll {
 .overlay-scrollbar__thumb {
   pointer-events: auto;
   position: absolute;
-  width: 6px;
+  width: 4px;
   background: var(--varin-scrollbar-thumb);
   border-radius: 9999px;
   opacity: 0.8;
-  transition: background-color var(--motion-dur-fade) var(--motion-ease-out), opacity var(--motion-dur-fade) var(--motion-ease-out);
-  will-change: transform, height;
+  transition: background-color var(--motion-dur-fade) var(--motion-ease-out), opacity var(--motion-dur-fade) var(--motion-ease-out), width 140ms var(--motion-ease-out);
   touch-action: none;
   user-select: none;
 }
@@ -719,13 +718,19 @@ html:not(.dark) .chat-scroll {
   touch-action: none;
 }
 .overlay-scrollbar__track--vertical:focus-visible { outline: none; }
-.overlay-scrollbar__track--vertical:focus-visible .overlay-scrollbar__thumb { background: var(--primary-base); opacity: 1; }
 
 .overlay-scrollbar__thumb:hover,
 .overlay-scrollbar__thumb:active {
   background: var(--varin-scrollbar-thumb-hover);
   opacity: 1;
 }
+
+.overlay-scrollbar__track--vertical:hover .overlay-scrollbar__thumb::after,
+.overlay-scrollbar__track--vertical:focus-within .overlay-scrollbar__thumb::after,
+.overlay-scrollbar__thumb--vertical:hover::after,
+.overlay-scrollbar__thumb--vertical:active::after { width: 6px; background: var(--varin-scrollbar-thumb-hover); }
+.overlay-scrollbar__thumb--vertical:active::after { background: var(--primary-base); }
+.overlay-scrollbar__track--vertical:focus-visible .overlay-scrollbar__thumb::after { background: var(--primary-base); opacity: 1; }
 
 .overlay-scrollbar__thumb--horizontal {
   height: 6px;
@@ -734,7 +739,18 @@ html:not(.dark) .chat-scroll {
 
 .overlay-scrollbar__thumb--vertical {
   margin: 0;
+  right: 0;
+  width: 14px;
+  background: transparent;
 }
+.overlay-scrollbar__thumb--vertical:hover, .overlay-scrollbar__thumb--vertical:active { background: transparent; }
+.overlay-scrollbar__thumb--vertical::after {
+  content: ''; position: absolute; inset-block: 0; right: 4px; width: 4px;
+  background: var(--varin-scrollbar-thumb); border-radius: inherit;
+  transition: width 140ms var(--motion-ease-out), background-color var(--motion-dur-fade) var(--motion-ease-out);
+}
+
+[data-conversation-tool-scroll] { overscroll-behavior-y: contain; }
 
 /* Pierre diff viewer styling */
 .pierre-diff-wrapper {
