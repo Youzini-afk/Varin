@@ -1,0 +1,582 @@
+{
+  "version": 1,
+  "id": "continuous.browsing-v1",
+  "family": "SEATED_WORK",
+  "stage": "motion-candidate",
+  "warning": "Continuous authored performance from reviewed drawings. Nonessential recurrence stops under reduced motion; actual Host changes and pointer movement take priority. Timing visual follow-up recorded separately.",
+  "reviewStatus": "accepted",
+  "kind": "action",
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "action": "browsing",
+  "canvas": [
+    512,
+    512
+  ],
+  "durationMs": 12560,
+  "loop": [
+    0,
+    18
+  ],
+  "uniqueImages": 5,
+  "entryPose": "seated-open-screen-keyboard",
+  "exitPose": "seated-open-screen-keyboard",
+  "pages": [
+    {
+      "file": "atlas-000.png"
+    }
+  ],
+  "frames": [
+    {
+      "source": "frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 0,
+      "durationMs": 250,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-002.png",
+      "sha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343",
+      "startMs": 250,
+      "durationMs": 150,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "reach-palmrest",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-003.png",
+      "sha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c",
+      "startMs": 400,
+      "durationMs": 200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "two-finger-contact",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-004.png",
+      "sha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316",
+      "startMs": 600,
+      "durationMs": 160,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "scroll",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-005.png",
+      "sha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef",
+      "startMs": 760,
+      "durationMs": 160,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "release",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 920,
+      "durationMs": 3100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 4020,
+      "durationMs": 250,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-002.png",
+      "sha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343",
+      "startMs": 4270,
+      "durationMs": 150,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "reach-palmrest",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-003.png",
+      "sha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c",
+      "startMs": 4420,
+      "durationMs": 200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "two-finger-contact",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-004.png",
+      "sha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316",
+      "startMs": 4620,
+      "durationMs": 160,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "scroll",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-005.png",
+      "sha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef",
+      "startMs": 4780,
+      "durationMs": 160,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "release",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 4940,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 7140,
+      "durationMs": 250,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-002.png",
+      "sha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343",
+      "startMs": 7390,
+      "durationMs": 150,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "reach-palmrest",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-003.png",
+      "sha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c",
+      "startMs": 7540,
+      "durationMs": 200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "two-finger-contact",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-004.png",
+      "sha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316",
+      "startMs": 7740,
+      "durationMs": 160,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "scroll",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-005.png",
+      "sha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef",
+      "startMs": 7900,
+      "durationMs": 160,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "scroll",
+      "pose": "release",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 8060,
+      "durationMs": 4500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    }
+  ]
+}

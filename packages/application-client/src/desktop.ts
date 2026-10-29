@@ -368,7 +368,7 @@ export interface VarinDesktopCommandMap {
   desktop_get_companion: { args: void; result: { enabled: boolean; visible: boolean } };
   desktop_set_companion: { args: { enabled: boolean }; result: { enabled: boolean; visible: boolean } };
   desktop_companion_stool: { args: { phase: 'clear' } | { phase: 'lift' | 'landing'; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number } }; result: null };
-  desktop_companion_drag: { args: { phase: 'start' | 'move' | 'end' }; result: null };
+  desktop_companion_drag: { args: { phase: 'start'; anchor: { x: number; y: number } } | { phase: 'move' | 'end' }; result: null };
   desktop_companion_passthrough: { args: { enabled: boolean }; result: { supported: boolean; enabled: boolean } };
   desktop_set_window_title: { args: { title: string }; result: null };
   desktop_set_window_theme: { args: { themeMode?: string; themeVariant?: string }; result: null };

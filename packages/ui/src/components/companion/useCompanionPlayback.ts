@@ -46,8 +46,11 @@ export function useCompanionPlayback(packages: CompanionPackage[], requestedActi
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const draw = (now: number) => {
       if (controller.loading && ready.current.has(controller.loading)) { controller.advance(); previous = undefined; }
+      // Reduced motion suppresses repeated performance at the authored loop's
+      // next explicitly safe drawing, not necessary state changes or pointer release/landing.
+      const reducedHold = reduced.matches && controller.canPauseRepeatedMotion();
       // Hidden time is not animation time: return to the displayed contact pose.
-      if (paused || document.hidden || reduced.matches) previous = undefined;
+      if (paused || document.hidden || reducedHold) previous = undefined;
       else { if (previous !== undefined) controller.tick(now - previous); previous = now; }
       const current = controller.current;
       const exposure = current ? current.frames.indexOf(frameAt(current, controller.timeMs)!) : 0;

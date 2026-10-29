@@ -12,6 +12,7 @@ export class CompanionPlayback {
   gesture: { released: boolean } | null; worldEvent: { phase: 'lift' | 'landing' | 'clear'; revision: number; packageId: string | null } | null; grab(displayed?: { packageId: string; exposure: number }): boolean; release(displayed?: { packageId: string; exposure: number }): void;
   canDisplay: (id: string) => boolean; loading: string | null; advance(): boolean | undefined; path: string[]; blocker: string | null; hold: boolean;
   request(id: string, options?: { urgent?: boolean }): RouteResult;
+  canPauseRepeatedMotion(): boolean;
   tick(elapsedMs: number): void;
 }
 export { CompanionPlayback as ReviewPlayback };

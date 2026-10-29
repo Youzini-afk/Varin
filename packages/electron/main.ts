@@ -24,7 +24,7 @@ import {
 } from 'electron';
 import contextMenu from 'electron-context-menu';
 import { CompanionStoolWindows } from './companion-stool.js';
-import { CompanionWindowMovement, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect } from './companion-window.js';
+import { CompanionWindowMovement, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect, captureCompanionPlacement, restoreCompanionPlacement } from './companion-window.js';
 import { createComputerFeedback } from './computer-feedback.js';
 import { createComputerControls } from './computer-controls.js';
 import { ElectronBrowserOwner } from './browser-owner.js';
@@ -486,6 +486,9 @@ const shutdownBackgroundServices = async ({ allowDuringUpdate = false }: { allow
       if (!allowDuringUpdate && state.installingUpdate) {
         return;
       }
+      const companion = BrowserWindow.getAllWindows().find((window: BrowserWindow) => !window.isDestroyed() && window.__varinLabel === 'companion');
+      if (companion) await persistCompanionPlacement(companion);
+      await companionPlacementWrite;
       await killSidecar();
       if (state.notificationListener) {
         state.notificationListener.stop();
@@ -1197,7 +1200,9 @@ const resolveLocalWorkspaceHome = (): string => {
   return configuredRoot ? path.resolve(configuredRoot) : (os.homedir() || '');
 };
 
-const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
+// bootstrap.mjs always runs dist-bundle/main.mjs; staged development assets
+// live beside dist-bundle in the package, while installed assets use Electron's root.
+const resourceRoot = () => app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..', 'resources');
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
 const shouldUsePackagedUi = () => {
   if (process.env.VARIN_ELECTRON_LOAD_SERVER_UI === '1') return false;
@@ -2342,9 +2347,7 @@ const readThemeSource = () => {
 const getWindowIconPath = () => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
   const iconFileName = process.platform === 'linux' ? 'icon.png' : 'icon.ico';
-  const iconPath = isDev
-    ? path.join(__dirname, 'resources', 'icons', iconFileName)
-    : path.join(process.resourcesPath, 'icons', iconFileName);
+  const iconPath = path.join(resourceRoot(), 'icons', iconFileName);
   return fs.existsSync(iconPath) ? iconPath : undefined;
 };
 
@@ -2503,6 +2506,7 @@ const createBrowserWindow = ({
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('close', (event) => {
+    if (browserWindow.__varinLabel === 'companion') void persistCompanionPlacement(browserWindow);
     if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
       debounceWindowStatePersist(browserWindow, true);
       event.preventDefault();
@@ -2778,6 +2782,30 @@ const buildMiniChatUrl = ({ mode, threadId = '', branchId = '', directory = '', 
 };
 
 
+let companionPlacementWrite: Promise<unknown> = Promise.resolve();
+let companionPlacementMemory: unknown;
+const persistCompanionPlacement = (window: BrowserWindow): Promise<unknown> => {
+  if (window.isDestroyed() || window.__varinLabel !== 'companion') return companionPlacementWrite;
+  const bounds = window.getBounds();
+  const placement = captureCompanionPlacement(bounds, screen.getDisplayMatching(bounds));
+  companionPlacementMemory = placement;
+  companionPlacementWrite = mutateSettingsRoot(root => { root.desktopCompanionPlacement = placement; })
+    .catch(error => log.warn('[companion] could not save placement', error));
+  return companionPlacementWrite;
+};
+const recoverCompanionPlacement = () => {
+  const window = BrowserWindow.getAllWindows().find((item: BrowserWindow) => !item.isDestroyed() && item.__varinLabel === 'companion');
+  if (!window) return;
+  const current = window.getBounds();
+  const saved = companionPlacementMemory ?? readSettingsRoot().desktopCompanionPlacement
+    ?? captureCompanionPlacement(current, screen.getDisplayMatching(current));
+  const bounds = restoreCompanionPlacement(saved, current, screen.getAllDisplays(), screen.getPrimaryDisplay().id);
+  if (!bounds) return;
+  companionMovement.forget(window.id); companionStools.clear(window.id); companionDragOrigins.delete(window.id);
+  window.setPosition(bounds.x, bounds.y);
+  void persistCompanionPlacement(window);
+};
+
 const openCompanionWindow = (review = false): BrowserWindow => {
   const existing = BrowserWindow.getAllWindows().find((window: BrowserWindow) => !window.isDestroyed() && window.__varinLabel === 'companion');
   if (existing) { existing.showInactive(); return existing; }
@@ -2785,7 +2813,9 @@ const openCompanionWindow = (review = false): BrowserWindow => {
   if (!base) throw new Error('Local companion UI is not available');
   const url = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
   if (review) url.searchParams.set('review', '1');
-  return createBrowserWindow({ label: 'companion', presentation: 'companion', url: url.toString(), runtimeConfig: getWindowRuntimeConfig(state.mainWindow) });
+  const placement = restoreCompanionPlacement(companionPlacementMemory ?? readSettingsRoot().desktopCompanionPlacement,
+    { width: 360, height: 480 }, screen.getAllDisplays(), screen.getPrimaryDisplay().id);
+  return createBrowserWindow({ label: 'companion', presentation: 'companion', ...(placement ? { fixedBounds: placement } : {}), url: url.toString(), runtimeConfig: getWindowRuntimeConfig(state.mainWindow) });
 };
 const companionStools = new CompanionStoolWindows((bounds, phase, owner) => {
   const base = shouldUsePackagedUi() ? buildPackagedUiUrl('/companion.html') : state.localOrigin || state.sidecarUrl;
@@ -3917,9 +3947,12 @@ const handleInvoke = async (
       if (command === 'desktop_companion_drag') {
         // Electron supplies both cursor and window bounds in native DIP space.
         // Never assume browser CSS screen coordinates equal physical pixels.
-        if (args.phase === 'start') companionDragOrigins.set(companionOwner.id, companionOwner.getContentBounds());
+        const origin = args.phase === 'start' ? companionOwner.getContentBounds() : null;
         const point = args.phase === 'end' ? null : screen.getCursorScreenPoint();
-        companionMovement.drag(companionOwner, { phase: args.phase, screenX: point?.x, screenY: point?.y });
+        const wasDragging = companionMovement.isDragging(companionOwner.id);
+        companionMovement.drag(companionOwner, { phase: args.phase, anchor: args.anchor, screenX: point?.x, screenY: point?.y });
+        if (args.phase === 'end' && wasDragging) await persistCompanionPlacement(companionOwner);
+        if (origin) companionDragOrigins.set(companionOwner.id, origin);
         return null;
       }
       return applyCompanionPassthrough(companionOwner, args.enabled, process.platform, companionMovement.isDragging(companionOwner.id));
@@ -5464,6 +5497,9 @@ app.whenReady().then(async () => {
     loginItemSettings,
   });
   nativeTheme.themeSource = readThemeSource();
+  screen.on('display-added', recoverCompanionPlacement);
+  screen.on('display-removed', recoverCompanionPlacement);
+  screen.on('display-metrics-changed', recoverCompanionPlacement);
   registerPackagedUiProtocol();
   setupAutoUpdater();
 

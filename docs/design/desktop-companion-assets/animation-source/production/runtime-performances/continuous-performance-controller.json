@@ -1,0 +1,26 @@
+{
+  "checks": 343,
+  "failures": 0,
+  "maxExitIncludingActualBridgesMs": 5786,
+  "cycles": [
+    {
+      "id": "continuous.editing-v1",
+      "durationMs": 9870,
+      "exposures": 18,
+      "sourceDrawings": 5
+    },
+    {
+      "id": "continuous.browsing-v1",
+      "durationMs": 12560,
+      "exposures": 18,
+      "sourceDrawings": 5
+    },
+    {
+      "id": "continuous.idle-closed-v1",
+      "durationMs": 160440,
+      "exposures": 134,
+      "sourceDrawings": 14
+    }
+  ],
+  "scope": "Shared production controller with actual accepted drawings. Two cycles plus every exposure newer intent/drag early-release. Normal-speed composite review pending."
+}

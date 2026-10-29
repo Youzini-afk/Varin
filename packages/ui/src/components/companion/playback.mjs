@@ -95,10 +95,17 @@ export class CompanionPlayback {
     this.emitWorld('landing');
     const restoreSource = this.current.gesture?.restoreSourceSha256;
     if (restoreSource) {
-      const candidates = [this.gesture.previous, ...this.assets.filter(asset => !asset.gesture && usable(asset))];
+      const previous = this.gesture.previous;
+      const alreadySameDrawing = frameAt(previous, this.gesture.previousTime)?.sha256 === restoreSource;
+      const candidates = [previous, ...this.assets.filter(asset => !asset.gesture && usable(asset))];
       const target = candidates.find(asset => asset.frames.some(frame => frame.sha256 === restoreSource));
-      const frame = target?.frames.find(item => item.sha256 === restoreSource);
-      if (target && frame) { this.gesture.previous = target; this.gesture.previousTime = frame.startMs; }
+      const matches = target?.frames.filter(item => item.sha256 === restoreSource) ?? [];
+      // Canonical pixels can occur at both ends of a one-shot. Preserve the exact
+      // grabbed exposure, or prefer a subsequent matching exposure, never its first
+      // occurrence merely because a hash search found it first.
+      const frame = target === previous ? matches.find(item => item.startMs >= this.gesture.previousTime) ?? matches.at(-1) : matches.at(-1);
+      if (alreadySameDrawing) { /* Keep the grabbed authored position. */ }
+      else if (target && frame) { this.gesture.previous = target; this.gesture.previousTime = frame.startMs; }
       else {
         const seated = this.assets.find(asset => usable(asset) && asset.gesture?.embeddedStool && asset.frames.some(item => item.sha256 === restoreSource));
         if (seated) this.gesture.restoreNext = [seated.id, ...seated.gesture.releaseNext];
@@ -141,6 +148,12 @@ export class CompanionPlayback {
       else break; // Actual authored airborne hold; never manufacture a new pose.
     }
     if (!this.gesture && remaining > 0) this.tick(remaining);
+  }
+  canPauseRepeatedMotion() {
+    const first = this.current?.loop && this.current.frames[this.current.loop[0]];
+    const frame = this.current && frameAt(this.current, this.timeMs);
+    return !!(first && frame && !this.gesture && !this.pending && !this.path.length && !this.loading
+      && this.timeMs >= first.startMs && frame.pose && frame.exitTo?.includes(frame.pose));
   }
   target() { return this.assets.find(a => a.id === this.pending); }
   /** Only explicitly authored safe drawings may exit before a clip's end. */

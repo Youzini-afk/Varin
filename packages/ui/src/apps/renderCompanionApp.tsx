@@ -52,7 +52,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     || (snapshot?.operations.some(operation => operation.phase !== 'terminal') ?? false)
     || Object.values(snapshot?.childActivity ?? {}).some(child => child.state !== 'preparation_failed')
     || (reviewRoute && /^(C0[2345]|T|W)/.test(presentation));
-  const preferredAction = visualIntent.state === 'E05' ? 'disconnected' : visualIntent.state === 'T03' && requestedAction !== 'understood' ? 'execution-observe' : requestedAction;
+  const localReviewAction: Record<string, string> = { L01: 'welcome', L02: 'idle-closed', L06: 'stretch', L07: 'idle-closed', E03: 'idle-closed' };
+  const preferredAction = reviewRoute && localReviewAction[presentation] ? localReviewAction[presentation]!
+    : visualIntent.state === 'E05' ? 'disconnected' : visualIntent.state === 'T03' && requestedAction !== 'understood' ? 'execution-observe' : requestedAction;
   const visualAction = preferredAction && assetList.some(item => item.action === preferredAction && item.reviewStatus === 'accepted' && item.stage === 'motion-candidate' && item.geometryReference && item.entryPose && item.exitPose) ? preferredAction
     : hasActiveWork && !visualIntent.state?.startsWith('E') ? 'external-wait' : preferredAction;
   const localAllowed = !reviewRoute && !manualReview && !['W02','W03','E01','E02','E04','E05','E06'].includes(intent.state ?? '');
@@ -68,14 +70,18 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === localAction) setLocalAction(null);
   }, [automatic.finished, automatic.packageId, assetList, localAction]);
 
+  // A local greeting/tap is not a queued application event. Higher-priority facts
+  // discard it instead of replaying it after a permission or interruption clears.
+  React.useEffect(() => { if (!localAllowed) setLocalAction(null); }, [localAllowed]);
   const seenTap = React.useRef(0);
   React.useEffect(() => {
     if (!companionWindow.tapRevision || seenTap.current === companionWindow.tapRevision) return;
     seenTap.current = companionWindow.tapRevision;
+    if (!localAllowed) return;
     const current = assetList.find(item => item.id === automatic.packageId);
     const posture = current?.exitPose?.startsWith('seated-open-') ? 'seated-open-' : current?.exitPose?.startsWith('seated-closed-') ? 'seated-closed-' : null;
     if (posture && assetList.some(item => item.action === 'tap-response' && item.reviewStatus === 'accepted' && item.entryPose?.startsWith(posture))) setLocalAction('tap-response');
-  }, [companionWindow.tapRevision, assetList, automatic.packageId]);
+  }, [companionWindow.tapRevision, assetList, automatic.packageId, localAllowed]);
   const pictures = asset ? imageLibrary[asset.id] ?? [] : [];
   const displayedExposure = !playing && !manualReview && automatic.packageId === asset?.id ? automatic.exposure : exposure;
   const loadGeneration = React.useRef(0);
@@ -292,7 +298,18 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const statusKeys: Record<string, I18nKey> = { C01: 'companion.idle', C06: 'companion.completed', W02: 'companion.permission', W03: 'companion.question', E01: 'companion.failed', E02: 'companion.cancelling', E04: 'companion.unknown', E05: 'companion.sync', E06: 'companion.uncertain' };
   const shortStatus = health === 'unselected' ? t('companion.quiet') : t(statusKeys[intent.state ?? ''] ?? (run?.state === 'cancelled' ? 'companion.cancelled' : intent.state?.startsWith('W') ? 'companion.waiting' : 'companion.working'));
   const panel: React.CSSProperties = { background: '#20242bed', color: '#edf0f6', borderRadius: 10, padding: 10, font: '12px system-ui', margin: 5 };
+  const windowNotice = companionWindow.notice === 'passthrough-unsupported' ? t('companion.passthroughUnsupported') : companionWindow.notice;
   return <main style={{ width: '100%', position: 'relative', background: 'transparent', font: '12px system-ui' }}>
+    <style>{`
+      .companion-controls button,.companion-controls select{font:inherit;color:inherit;background:#303844;border:1px solid #74839a66;border-radius:8px;padding:6px 10px;min-height:30px;max-width:100%;box-sizing:border-box}
+      .companion-controls button{cursor:pointer;margin:3px 6px 3px 0}
+      .companion-controls button:hover:not(:disabled){background:#414e61;border-color:#a9c3ec}
+      .companion-controls button:disabled{opacity:.45;cursor:default}
+      .companion-controls button:focus-visible,.companion-controls select:focus-visible,.companion-controls input:focus-visible{outline:2px solid #a9c3ec;outline-offset:2px}
+      .companion-controls label{display:inline-flex;align-items:center;gap:6px;margin:4px 0}
+      .companion-controls input[type=checkbox]{accent-color:#a9c3ec}
+      .companion-controls select{display:block;width:100%;margin-top:7px}
+    `}</style>
     {review ? <header style={{ ...panel, WebkitAppRegion: 'drag' } as React.CSSProperties}>
       <strong>{review ? 'Varin companion · development review' : 'Varin'}</strong>
       <button style={{ float: 'right', WebkitAppRegion: 'no-drag' } as React.CSSProperties} disabled={!isElectronShell()}
@@ -302,11 +319,12 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     {error && !review && <p role="alert" style={panel}>{error}</p>}
     {!asset && <p style={panel}>{assetList.length ? t('companion.loading') : t('companion.missing')}</p>}
     {!review && <p role="status" style={{ ...panel, textAlign: 'center', margin: '0 auto', width: 'fit-content', maxWidth: '90%' }}>{shortStatus}</p>}
-    {(review || controlsOpen) && <section style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 90, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{companionWindow.notice && <p>{companionWindow.notice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
+    {(review || controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
     {review && <section style={panel} aria-label="Development presentation review">
       <label>Preview presentation (not Host state) <select value={presentation} onChange={event => { setPresentation(event.target.value); setReviewRoute(true); setManualReview(false); setPlaying(false); }}>
-        {catalog.states.map(state => <option key={state.id} value={state.id}>{state.id} {state.label}</option>)}
+        {catalog.states.map(state => <option key={state.id} value={state.id} disabled={state.id === 'L04' || state.id === 'L05'}>{state.id} {state.label}{state.id === 'L04' || state.id === 'L05' ? ' · drag/release the character' : ''}</option>)}
       </select></label>
+      <small>L04/L05 use actual pointer pickup/release, not a synthetic Host state. E03 previews a neutral recovery pose only; it does not confirm executor stoppage.</small>
       <input type="file" multiple accept=".json,.png" aria-label="Select bundle or sequence JSON and PNG atlases" onChange={event => void loadFiles(event.target.files)} />
       {assetList.length > 1 && <select aria-label="Review an actual package in the bundle" value={asset?.id ?? ''} onChange={event => { setManualReview(true); setPlaying(false); setExposure(0); setAsset(assetList.find(item => item.id === event.target.value)); }}>{asset?.gesture && <option value={asset.id}>Pointer movement · internal drawing</option>}{assetList.filter(item => !item.gesture).map(item => <option key={item.id} value={item.id}>{item.id}</option>)}</select>}
       {asset && <><p>{asset.id} · {asset.stage ?? 'unstated stage'} · {asset.warning}</p>
@@ -315,7 +333,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         <span> {displayedExposure + 1}/{asset.frames.length} exposures</span><button onClick={() => { setPlaying(false); setManualReview(false); setReviewRoute(false); }}>Follow actual Host presentation</button></>}
       {error && <p role="alert">{error}</p>}
     </section>}
-    {(review || controlsOpen) && <section style={{ ...panel, ...(!review ? { position: 'absolute', top: 145, left: 4, right: 4, zIndex: 20, maxHeight: 'calc(100vh - 160px)', overflow: 'auto' } as React.CSSProperties : {}) }} aria-label="Actual Host facts">
+    {(review || controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: windowNotice ? 215 : 145, left: 4, right: 4, zIndex: 20, maxHeight: windowNotice ? 'calc(100vh - 230px)' : 'calc(100vh - 160px)', overflow: 'auto' } as React.CSSProperties : {}) }} aria-label="Actual Host facts">
       <strong>{review ? 'Actual Host facts — independent of review target' : t('companion.observe')}</strong>
       <select aria-label="Observe an existing thread branch" value={identity ? JSON.stringify(identity) : ''} onChange={event => {
         setSelected(event.target.value ? { generation, identity: JSON.parse(event.target.value) as ThreadIdentity } : null);

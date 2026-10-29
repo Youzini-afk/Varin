@@ -1,0 +1,14 @@
+[
+  {
+    "action": "editing",
+    "package": "accepted-runtime/v3/continuous-editing-v1/sequence.json"
+  },
+  {
+    "action": "browsing",
+    "package": "accepted-runtime/v3/continuous-browsing-v1/sequence.json"
+  },
+  {
+    "action": "idle-closed",
+    "package": "accepted-runtime/v3/continuous-idle-closed-v1/sequence.json"
+  }
+]

@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "id": "rest.closed-eye-rub-v1-boundary-v1",
+  "family": "REST",
+  "stage": "motion-candidate",
+  "warning": "Accepted only for the reviewed bounded performance; real application intent controls holds and exits.",
+  "reviewStatus": "accepted",
+  "kind": "action",
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "action": "eye-rub",
+  "canvas": [
+    512,
+    512
+  ],
+  "durationMs": 3780,
+  "loop": null,
+  "uniqueImages": 5,
+  "entryPose": "seated-closed-neutral-rest",
+  "exitPose": "seated-closed-neutral-rest",
+  "pages": [
+    {
+      "file": "atlas-000.png",
+      "size": [
+        1816,
+        998
+      ]
+    }
+  ],
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 0,
+      "durationMs": 1000,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "startMs": 1000,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-001.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "startMs": 1090,
+      "durationMs": 95,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-002.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "startMs": 1185,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-003.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "sha256": "ebe9c0ce1fc1ef0fb2527229155c211c248c061e52ef21c17dec26e8eb7fccce",
+      "startMs": 1275,
+      "durationMs": 420,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-004.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "startMs": 1695,
+      "durationMs": 85,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-003.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "startMs": 1780,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-002.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "startMs": 1880,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-001.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 1980,
+      "durationMs": 1800,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    }
+  ]
+}

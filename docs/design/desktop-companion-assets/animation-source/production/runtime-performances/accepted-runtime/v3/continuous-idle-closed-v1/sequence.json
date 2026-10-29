@@ -1,0 +1,2930 @@
+{
+  "version": 1,
+  "id": "continuous.idle-closed-v1",
+  "family": "REST",
+  "stage": "motion-candidate",
+  "warning": "Continuous authored performance from reviewed drawings. Nonessential recurrence stops under reduced motion; actual Host changes and pointer movement take priority. Timing visual follow-up recorded separately.",
+  "reviewStatus": "accepted",
+  "kind": "action",
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "action": "idle-closed",
+  "canvas": [
+    512,
+    512
+  ],
+  "durationMs": 160440,
+  "loop": [
+    0,
+    134
+  ],
+  "uniqueImages": 5,
+  "entryPose": "seated-closed-neutral-rest",
+  "exitPose": "seated-closed-neutral-rest",
+  "pages": [
+    {
+      "file": "atlas-000.png"
+    },
+    {
+      "file": "atlas-001.png"
+    },
+    {
+      "file": "atlas-002.png"
+    }
+  ],
+  "frames": [
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 0,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 2200,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 2245,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 2335,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 2395,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 3895,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 4075,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 7275,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 7465,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 11665,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 13865,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 13910,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 14000,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 14060,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 15560,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 15740,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 18940,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 19130,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 23330,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 25530,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 25575,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 25665,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 25725,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 27225,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 27405,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 30605,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 30795,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 34995,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 37195,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 37240,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 37330,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 37390,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 38890,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 39070,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 42270,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 42460,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 46660,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 48860,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 48905,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 48995,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 49055,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 50555,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 50735,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 53935,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 54125,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 58325,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 60525,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 60570,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 60660,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 60720,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 62220,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 62400,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 65600,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 65790,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 69990,
+      "durationMs": 1000,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 1,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "startMs": 70990,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-001.png",
+      "exitTo": [],
+      "page": 1,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "startMs": 71080,
+      "durationMs": 95,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-002.png",
+      "exitTo": [],
+      "page": 1,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "startMs": 71175,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-003.png",
+      "exitTo": [],
+      "page": 1,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "sha256": "ebe9c0ce1fc1ef0fb2527229155c211c248c061e52ef21c17dec26e8eb7fccce",
+      "startMs": 71265,
+      "durationMs": 420,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-004.png",
+      "exitTo": [],
+      "page": 1,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "startMs": 71685,
+      "durationMs": 85,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-003.png",
+      "exitTo": [],
+      "page": 1,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "startMs": 71770,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-002.png",
+      "exitTo": [],
+      "page": 1,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "startMs": 71870,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-eye-rub-v1-boundary-v1-drawing-pose-001.png",
+      "exitTo": [],
+      "page": 1,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 71970,
+      "durationMs": 7800,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 1,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 79770,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 81970,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 82015,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 82105,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 82165,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 83665,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 83845,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 87045,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 87235,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 91435,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 93635,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 93680,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 93770,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 93830,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 95330,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 95510,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 98710,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 98900,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 103100,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 105300,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 105345,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 105435,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 105495,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 106995,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 107175,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 110375,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 110565,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 114765,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 116965,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 117010,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 117100,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 117160,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 118660,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 118840,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 122040,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 122230,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 126430,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 128630,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 128675,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 128765,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 128825,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 130325,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 130505,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 133705,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 133895,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 138095,
+      "durationMs": 2200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 140295,
+      "durationMs": 45,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "startMs": 140340,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-closed.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "startMs": 140430,
+      "durationMs": 60,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-half.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 140490,
+      "durationMs": 1500,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 141990,
+      "durationMs": 180,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "startMs": 142170,
+      "durationMs": 3200,
+      "offset": [
+        45,
+        6
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-settle.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        504,
+        450,
+        497
+      ]
+    },
+    {
+      "source": "between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "startMs": 145370,
+      "durationMs": 190,
+      "offset": [
+        45,
+        5
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.quiet-settle-v1-boundary-v1-drawing-between.png",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        498
+      ]
+    },
+    {
+      "source": "neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 145560,
+      "durationMs": 4200,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 149760,
+      "durationMs": 900,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 2,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "startMs": 150660,
+      "durationMs": 80,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-001.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "startMs": 150740,
+      "durationMs": 80,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-002.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "startMs": 150820,
+      "durationMs": 70,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-003.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "sha256": "3e8510d61b4fba530ba26c0d1a248a394dd18ecf8bc542ed2ad311f3f97acefa",
+      "startMs": 150890,
+      "durationMs": 80,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-004.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-005.png",
+      "sha256": "83cf11a74ce177e7d10326aa2c4ab9be5c05dc6ab863a9b64f8fcb0e31fde8e7",
+      "startMs": 150970,
+      "durationMs": 80,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-005.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        456,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-006.png",
+      "sha256": "7d9897deb4e13e0a15002b281e6f64a2ff255abeb7398fd010f09448b57ccacd",
+      "startMs": 151050,
+      "durationMs": 85,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-006.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        910,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-007.png",
+      "sha256": "511cb52602068b691562161a69cf80af2c82141a781c727ba86c9315cdaaef90",
+      "startMs": 151135,
+      "durationMs": 130,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-007.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        1364,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-008.png",
+      "sha256": "a178622139811eeb1a4f1c17c78430028c5026cf55351e11b216fec0f3e755e8",
+      "startMs": 151265,
+      "durationMs": 220,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "performance",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-008.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        2,
+        1000,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-007.png",
+      "sha256": "511cb52602068b691562161a69cf80af2c82141a781c727ba86c9315cdaaef90",
+      "startMs": 151485,
+      "durationMs": 600,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-007.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        1364,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-006.png",
+      "sha256": "7d9897deb4e13e0a15002b281e6f64a2ff255abeb7398fd010f09448b57ccacd",
+      "startMs": 152085,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-006.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        910,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-005.png",
+      "sha256": "83cf11a74ce177e7d10326aa2c4ab9be5c05dc6ab863a9b64f8fcb0e31fde8e7",
+      "startMs": 152185,
+      "durationMs": 95,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-005.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        456,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "sha256": "3e8510d61b4fba530ba26c0d1a248a394dd18ecf8bc542ed2ad311f3f97acefa",
+      "startMs": 152280,
+      "durationMs": 85,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-004.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "startMs": 152365,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-003.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "startMs": 152465,
+      "durationMs": 90,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-002.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "startMs": 152555,
+      "durationMs": 85,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "return",
+      "pose": "rest.closed-stretch-v1-boundary-v1-drawing-pose-001.png",
+      "exitTo": [],
+      "page": 2,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "startMs": 152640,
+      "durationMs": 7800,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {},
+      "phase": "stable",
+      "pose": "seated-closed-neutral-rest",
+      "exitTo": [
+        "seated-closed-neutral-rest"
+      ],
+      "page": 2,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    }
+  ]
+}

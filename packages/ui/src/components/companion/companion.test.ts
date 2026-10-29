@@ -50,9 +50,10 @@ it('holds an authored wait until intent changes, plays its exit and bridge, and 
   const player = new CompanionPlayback([waiting, bridge, work]);
   player.request('wait'); player.tick(950); expect(player.timeMs).toBe(150);
   const route = player.request('work'); expect(route.clips).toEqual(['bridge','work']);
+  expect(player.canPauseRepeatedMotion()).toBe(false); // Changed facts release the quiet hold.
   player.tick(150); expect(player.current?.id).toBe('bridge');
   expect(route.clips).toEqual(['bridge','work']);
-  player.tick(300); expect(player.current?.id).toBe('work');
+  player.tick(300); expect(player.current?.id).toBe('work'); expect(player.canPauseRepeatedMotion()).toBe(false); // Finite actions, including welcome, must finish.
   player.request('missing'); const held = player.timeMs; player.tick(900);
   expect(player.timeMs).toBe(held); expect(player.blocker).toBeTruthy();
 });
@@ -79,7 +80,9 @@ it('finishes the current gesture to an authored safe drawing and carries elapsed
   bridge.frames[0] = { ...bridge.frames[0]!, pose: 'contact', exitTo: ['contact'] };
   const work = asset('work','keyboard','keyboard');
   const player = new CompanionPlayback([wait, bridge, work]);
-  player.request('wait'); player.tick(120); player.request('work', { urgent: true });
+  const quiet = new CompanionPlayback([wait, bridge, work]);quiet.request('wait');quiet.tick(220);
+  expect(quiet.canPauseRepeatedMotion()).toBe(true);quiet.request('work');expect(quiet.canPauseRepeatedMotion()).toBe(false);
+  player.request('wait'); player.tick(120);expect(player.canPauseRepeatedMotion()).toBe(false); player.request('work', { urgent: true });
   expect(player.current?.id).toBe('wait'); // No teleport while the hand is moving.
   player.tick(130);
   expect(player.current?.id).toBe('release'); expect(player.timeMs).toBe(50);
@@ -103,7 +106,7 @@ it('uses the actually displayed pickup frame, keeps latest intent, and restores 
   const land = {...asset('land','land'),gesture:{grabNext:['carry'],releaseNext:[],embeddedStool:true,settled:true,restoreOnRelease:false}};
   const p = new CompanionPlayback([seated,entry,carry,land,work]);p.request('seated');
   expect(p.grab({packageId:'seated',exposure:0})).toBe(true); expect(p.current?.id).toBe('detached');
-  p.release({packageId:'detached',exposure:0});p.tick(100);expect(p.current?.id).toBe('seated');expect(p.gesture).toBeNull();
+  p.release({packageId:'detached',exposure:0});expect(p.canPauseRepeatedMotion()).toBe(false);p.tick(100);expect(p.current?.id).toBe('seated');expect(p.gesture).toBeNull();
   p.grab({packageId:'seated',exposure:0});p.tick(100);expect(p.current?.id).toBe('carry');
   p.request('work');expect(p.current?.id).toBe('carry'); // Host presentation never steals the drag canvas.
   p.release({packageId:'carry',exposure:0});p.release();p.tick(200);expect(p.current?.id).toBe('work');expect(p.gesture).toBeNull();

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "completion-once-v1",
+    "grabbedExposure": 10,
+    "minimumRestoredMs": 1045,
+    "actualMs": 1048.02,
+    "noReplay": true
+  },
+  {
+    "id": "user.welcome-closed-v2",
+    "grabbedExposure": 9,
+    "minimumRestoredMs": 1200,
+    "actualMs": 1203.02,
+    "noReplay": true
+  }
+]

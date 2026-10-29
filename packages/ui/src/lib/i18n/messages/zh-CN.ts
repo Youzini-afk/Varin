@@ -18,6 +18,7 @@ export const dict: Record<I18nKey, string> = {
   "companion.pin": "置顶",
   "companion.unpin": "取消置顶",
   "companion.passthrough": "透明区域鼠标穿透",
+  "companion.passthroughUnsupported": "当前平台暂不支持鼠标穿透，仍可正常与桌宠交互。",
   "companion.close": "关闭桌宠",
   "companion.observe": "联动会话",
   "companion.noThread": "尚未选择会话",

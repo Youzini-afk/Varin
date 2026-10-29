@@ -18,6 +18,7 @@ export const dict = {
   "companion.pin": "Keep on top",
   "companion.unpin": "Unpin",
   "companion.passthrough": "Transparent pointer pass-through",
+  "companion.passthroughUnsupported": "Pointer pass-through is unavailable on this platform. You can still interact with the companion.",
   "companion.close": "Close companion",
   "companion.observe": "Observe a conversation",
   "companion.noThread": "No conversation selected",

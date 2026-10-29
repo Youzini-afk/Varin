@@ -30,7 +30,7 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
     alpha.current = node && context ? { width: node.width, height: node.height, pixels: context.getImageData(0,0,node.width,node.height).data } : null;
     reevaluatePointer.current();
   }, [canvas]);
-  const pointer = React.useRef<{ id: number; x: number; y: number; moving: boolean } | null>(null);
+  const pointer = React.useRef<{ id: number; x: number; y: number; anchor: { x: number; y: number }; moving: boolean } | null>(null);
   const hit = React.useCallback((x: number, y: number) => {
     const node = canvas.current;
     if (!node) return false;
@@ -42,22 +42,27 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
     return (mask.pixels[(py*mask.width+px)*4+3] ?? 0) > 16;
   }, [canvas]);
   const send = React.useCallback((phase: 'start' | 'move' | 'end') => {
-    if (isElectronShell()) void invokeDesktop('desktop_companion_drag', { phase }).catch(error => setNotice(String(error)));
+    if (!isElectronShell()) return;
+    const anchor = pointer.current?.anchor;
+    if (phase === 'start' && !anchor) return;
+    const args = phase === 'start' ? { phase, anchor: anchor! } : { phase };
+    void invokeDesktop('desktop_companion_drag', args).catch(error => setNotice(String(error)));
   }, []);
-  const end = React.useCallback(() => {
+  const end = React.useCallback((completedClick = false) => {
     const current = pointer.current;
     pointer.current = null;
     send('end'); resetPassthrough();
     if (!current) return;
     if (canvas.current?.hasPointerCapture(current.id)) canvas.current.releasePointerCapture(current.id);
     setPhase(current.moving ? 'landing' : 'rest');
-    if (!current.moving) setTapRevision(value => value + 1);
+    if (!current.moving && completedClick) setTapRevision(value => value + 1);
   }, [canvas, send, resetPassthrough]);
   React.useEffect(() => {
-    window.addEventListener('blur', end);
+    const cancel = () => end();
+    window.addEventListener('blur', cancel);
     const hidden = () => { if (document.hidden) end(); };
     document.addEventListener('visibilitychange', hidden);
-    return () => { window.removeEventListener('blur', end); document.removeEventListener('visibilitychange', hidden); end(); worldStool('clear'); };
+    return () => { window.removeEventListener('blur', cancel); document.removeEventListener('visibilitychange', hidden); end(); worldStool('clear'); };
   }, [end, worldStool]);
   React.useEffect(() => {
     if (!passthrough || !isElectronShell()) return;
@@ -72,7 +77,7 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
       ignored.current = ignore;
       // Serialize changes so a late true cannot override cleanup's final false.
       passthroughQueue.current = passthroughQueue.current.catch(() => {}).then(() => invokeDesktop('desktop_companion_passthrough', { enabled: ignore })).then(result => {
-        if (active && !result?.supported) { setNotice('Transparent pointer forwarding is unavailable on this platform; window remains interactive.'); setPassthrough(false); }
+        if (active && !result?.supported) { setNotice('passthrough-unsupported'); setPassthrough(false); }
       }).catch(error => { if (active) { setNotice(String(error)); setPassthrough(false); } });
     };
     reevaluatePointer.current = reconcile;
@@ -86,17 +91,17 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
     handlers: {
       onPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
         if ((!isElectronShell() && !reviewPointer) || event.button !== 0 || !hit(event.clientX, event.clientY)) return;
-        event.preventDefault(); resetPassthrough(); pointer.current = { id: event.pointerId, x: event.screenX, y: event.screenY, moving: false };
+        event.preventDefault(); resetPassthrough(); pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY, anchor: { x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight }, moving: false };
         event.currentTarget.setPointerCapture(event.pointerId);
       },
       onPointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
         const current = pointer.current;
         if (!current || current.id !== event.pointerId) return;
-        if (!current.moving && Math.hypot(event.screenX-current.x,event.screenY-current.y) < 3) return;
+        if (!current.moving && Math.hypot(event.clientX-current.x,event.clientY-current.y) < 3) return;
         if (!current.moving) { current.moving = true; beforeNativeLift?.(); send('start'); setPhase('lifting'); }
         send('move');
       },
-      onPointerUp: end, onPointerCancel: end, onLostPointerCapture: end,
+      onPointerUp: () => end(true), onPointerCancel: () => end(), onLostPointerCapture: () => end(),
     },
   };
 }

@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, test } from 'vitest';
-import { DEFAULT_LOCALE } from './runtime';
-import { resetI18nDictionaryCacheForTests, useI18nStore } from './store';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { DEFAULT_LOCALE, LOCALE_STORAGE_KEY } from './runtime';
+import { initializeLocale, resetI18nDictionaryCacheForTests, useI18nStore } from './store';
 
 const defaultDictionary = useI18nStore.getState().dictionary;
 
@@ -30,6 +30,39 @@ describe('i18n store', () => {
       await loaded;
       expect(useI18nStore.getState().loadingLocale).toBeNull();
     } finally {
+      resetStore();
+    }
+  });
+
+  test('initializes from saved language and follows another window without polling', async () => {
+    const values = new Map([[LOCALE_STORAGE_KEY, JSON.stringify({ locale: 'zh-CN' })]]);
+    const target = Object.assign(new EventTarget(), {
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+    vi.stubGlobal('window', target);
+    const notify = (key: string) => target.dispatchEvent(Object.assign(new Event('storage'), { key }));
+    try {
+      initializeLocale();
+      initializeLocale();
+      await vi.waitFor(() => expect(useI18nStore.getState().loadingLocale).toBeNull());
+      expect(useI18nStore.getState().locale).toBe('zh-CN');
+      expect(useI18nStore.getState().dictionary['companion.passthroughUnsupported'])
+        .not.toBe(defaultDictionary['companion.passthroughUnsupported']);
+
+      values.set(LOCALE_STORAGE_KEY, JSON.stringify({ locale: 'en' }));
+      notify('unrelated-setting');
+      expect(useI18nStore.getState().locale).toBe('zh-CN');
+      notify(LOCALE_STORAGE_KEY);
+      expect(useI18nStore.getState().locale).toBe('en');
+      expect(useI18nStore.getState().dictionary).toBe(defaultDictionary);
+      values.set(LOCALE_STORAGE_KEY, 'invalid');
+      notify(LOCALE_STORAGE_KEY);
+      expect(useI18nStore.getState().locale).toBe('en');
+    } finally {
+      vi.unstubAllGlobals();
       resetStore();
     }
   });

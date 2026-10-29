@@ -1,0 +1,185 @@
+{
+  "scope": "Current package plus its exact pickup entrances and first two recovery nodes; no whole-library eager decode",
+  "ordinary": [
+    {
+      "id": "continuous.editing-v1",
+      "decodedMiB": 14.69,
+      "pages": 10
+    },
+    {
+      "id": "continuous.browsing-v1",
+      "decodedMiB": 14.69,
+      "pages": 10
+    },
+    {
+      "id": "observe.gaze-to-screen-v1-pose-v1",
+      "decodedMiB": 12.1,
+      "pages": 11
+    },
+    {
+      "id": "observe.gaze-to-user-v1-pose-v1",
+      "decodedMiB": 12.1,
+      "pages": 11
+    },
+    {
+      "id": "observe.wait-enter-v1-boundary-v1",
+      "decodedMiB": 18.15,
+      "pages": 14
+    },
+    {
+      "id": "observe.wait-hold-v1-boundary-v1",
+      "decodedMiB": 19.91,
+      "pages": 16
+    },
+    {
+      "id": "observe.wait-exit-v1-boundary-v1",
+      "decodedMiB": 18.15,
+      "pages": 14
+    },
+    {
+      "id": "continuous.idle-closed-v1",
+      "decodedMiB": 49.31,
+      "pages": 32
+    },
+    {
+      "id": "rest.closed-eye-rub-v1-boundary-v1",
+      "decodedMiB": 16.42,
+      "pages": 12
+    },
+    {
+      "id": "rest.closed-stretch-v1-boundary-v1",
+      "decodedMiB": 26.79,
+      "pages": 20
+    },
+    {
+      "id": "seated-work.opening-hybrid-v2",
+      "decodedMiB": 72.59,
+      "pages": 47
+    },
+    {
+      "id": "seated-work.closing-hybrid-v2",
+      "decodedMiB": 72.59,
+      "pages": 47
+    },
+    {
+      "id": "permission-ask-enter-v1",
+      "decodedMiB": 23.33,
+      "pages": 16
+    },
+    {
+      "id": "permission-palm-release-v1",
+      "decodedMiB": 10.37,
+      "pages": 9
+    },
+    {
+      "id": "question-ask-enter-v1",
+      "decodedMiB": 14.69,
+      "pages": 10
+    },
+    {
+      "id": "question-chin-release-v1",
+      "decodedMiB": 13.83,
+      "pages": 9
+    },
+    {
+      "id": "permission-unresolved-hold-v1",
+      "decodedMiB": 21.59,
+      "pages": 18
+    },
+    {
+      "id": "question-unanswered-hold-v1",
+      "decodedMiB": 27.64,
+      "pages": 21
+    },
+    {
+      "id": "relaxed-to-neutral-v1",
+      "decodedMiB": 13.83,
+      "pages": 13
+    },
+    {
+      "id": "relaxed-settled-to-neutral-v1",
+      "decodedMiB": 19.87,
+      "pages": 16
+    },
+    {
+      "id": "answer-understood-v1",
+      "decodedMiB": 6.92,
+      "pages": 6
+    },
+    {
+      "id": "completion-once-v1",
+      "decodedMiB": 23.4,
+      "pages": 20
+    },
+    {
+      "id": "observe.cancel-entry-boundary-v1",
+      "decodedMiB": 9.51,
+      "pages": 9
+    },
+    {
+      "id": "observe.cancel-hold-boundary-v1",
+      "decodedMiB": 8.64,
+      "pages": 8
+    },
+    {
+      "id": "observe.failure-entry-boundary-v1",
+      "decodedMiB": 12.1,
+      "pages": 11
+    },
+    {
+      "id": "observe.unknown-entry-boundary-v1",
+      "decodedMiB": 12.1,
+      "pages": 11
+    },
+    {
+      "id": "observe.unknown-hold-boundary-v1",
+      "decodedMiB": 8.64,
+      "pages": 8
+    },
+    {
+      "id": "observe.sync-attention-boundary-v1",
+      "decodedMiB": 17.28,
+      "pages": 13
+    },
+    {
+      "id": "observe.uncertain-check-boundary-v1",
+      "decodedMiB": 23.33,
+      "pages": 20
+    },
+    {
+      "id": "observe.uncertain-release-boundary-v1",
+      "decodedMiB": 23.33,
+      "pages": 20
+    },
+    {
+      "id": "observe.neutral-recovery-boundary-v1",
+      "decodedMiB": 19.01,
+      "pages": 15
+    },
+    {
+      "id": "observe.raised-focus-to-unknown-boundary-v1",
+      "decodedMiB": 11.23,
+      "pages": 10
+    },
+    {
+      "id": "user.welcome-closed-v2",
+      "decodedMiB": 19.91,
+      "pages": 16
+    },
+    {
+      "id": "user.click-closed-v5",
+      "decodedMiB": 18.23,
+      "pages": 14
+    },
+    {
+      "id": "user.tap-open-v1",
+      "decodedMiB": 19.91,
+      "pages": 16
+    }
+  ],
+  "max": {
+    "id": "seated-work.opening-hybrid-v2",
+    "decodedMiB": 72.59,
+    "pages": 47
+  }
+}
