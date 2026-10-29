@@ -303,7 +303,9 @@ fn defaults(id: Uuid, state: &PathState, time: Timestamp) -> Attributes {
         modified: time,
         changed: time,
         backup: None,
-        windows_attributes: if state.is_directory() { 0x10 } else { 0x20 },
+        // ARCHIVE is a Windows creation attribute. Unix files do not expose
+        // that bit, including files created through FUSE/FSKit callbacks.
+        windows_attributes: if state.is_directory() { 0x10 } else if cfg!(windows) { 0x20 } else { 0 },
         bsd_flags: 0,
         security: None,
         reparse_data: None,

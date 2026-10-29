@@ -403,13 +403,13 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
         .status()
         .unwrap();
     assert!(result.success());
-    #[cfg(windows)]
     {
         let node = parent.lookup("written.txt").unwrap();
-        let metadata = node.attributes().unwrap().file_metadata().unwrap();
+        let attributes = node.attributes().unwrap();
+        let metadata = attributes.file_metadata().unwrap();
         let exported = directory.join("exported.txt");
         std::fs::write(&exported, b"written in ordinary process").unwrap();
-        crate::native_metadata::apply(&exported, Some(0o644), &metadata).unwrap();
+        crate::native_metadata::apply(&exported, Some(attributes.mode), &metadata).unwrap();
         assert_eq!(crate::native_metadata::observe(&exported).unwrap().attributes.file_metadata().unwrap(), metadata);
         parent.forget_cached(&node).unwrap();
     }

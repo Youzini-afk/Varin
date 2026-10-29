@@ -7,6 +7,27 @@ struct Fixture {
     directory: PathBuf,
 }
 
+#[cfg(unix)]
+#[test]
+fn new_workspace_file_metadata_roundtrips_to_ordinary_host_files() {
+    let f = Fixture::new();
+    let bytes = b"exported workspace result";
+    let file = f.directory.join("exported.txt");
+    fs::write(&file, bytes).unwrap();
+    let state = PathState::RegularFile {
+        object_hash: format!("sha256-{}", hex::encode(Sha256::digest(bytes))),
+        byte_length: bytes.len() as u64,
+        mode: 0o640,
+    };
+    let metadata = Storage::new_workspace_metadata(&state).attributes.file_metadata().unwrap();
+    crate::native_metadata::apply(&file, Some(0o640), &metadata).unwrap();
+    let observed = crate::native_metadata::observe(&file).unwrap();
+    assert_eq!(observed.attributes.file_metadata().unwrap(), metadata);
+    assert_eq!(observed.attributes.mode, 0o640);
+    assert_eq!(fs::read(&file).unwrap(), bytes);
+    f.close();
+}
+
 #[test]
 fn partial_file_fork_keeps_only_changed_ranges_and_survives_reopen_and_collection() {
     use super::workspace_session::{Command, Session, StoragePort};
