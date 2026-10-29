@@ -8,6 +8,7 @@ const repairs = [
   ['braces@3.0.3', 'GHSA-vfj7-8cjw-p6xm'],
   ['http-cache-semantics@4.2.0', 'GHSA-ch52-4w7c-c8xp'],
   ['sprintf-js@1.1.3', 'GHSA-hp3w-g68c-fv3c'],
+  ['deepmerge@4.3.1', 'GHSA-gcqx-w48m-w2h4'],
 ];
 for (const [dependency] of repairs) {
   if (manifest.patchedDependencies?.[dependency] !== `bun-patches/${dependency}.patch`) {

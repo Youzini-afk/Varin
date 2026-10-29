@@ -7,10 +7,22 @@ Dependency reports, consumer checks, and lockfile updates.
 ## Dependency update review
 
 [`scripts/audit-dependencies.mjs`](../../scripts/audit-dependencies.mjs) owns the current advisory exceptions and their behavior checks. The dependency audit prefers published fixes. The remaining pinned local repairs for `braces`,
-`http-cache-semantics`, and `sprintf-js` must pass behavior checks through their actual installed
+`http-cache-semantics`, `sprintf-js`, and `deepmerge` must pass behavior checks through their actual installed
 consumers before their version-based advisories are excluded. `sprintf-js` has no published fixed
 version; its patch keeps numeric precision within the ECMAScript-supported range while preserving
 normal formatting. Every other advisory still fails the audit.
+
+`ip-address` is pinned to the published 10.7.5 repair for IPv6 link-local/NAT64 classification,
+cross-family subnet comparisons, and unbounded parse/zone diagnostics. Checks resolve it through the
+installed Claude SDK → MCP → Express rate-limit consumer, including ordinary IPv6 rate-limit keys.
+
+`deepmerge` 4.3.1 has no published fix for [GHSA-gcqx-w48m-w2h4](https://github.com/advisories/GHSA-gcqx-w48m-w2h4).
+Its pinned source/CJS/UMD patch creates own data properties instead of invoking inherited setters in
+both merge and target-copy paths. This keeps merged objects' prototypes intact without dropping data
+keys; existing array, symbol and custom merge behavior is retained. The PWA build's actual Rollup
+consumer and the distributed UMD entry must pass the poisoning and ordinary-merge regressions before
+the version-based advisory is excluded. Replace this patch and its exception when a fixed upstream
+release is adopted; production dependencies keep the same IP repair in the cloud runtime lock.
 
 Zod is pinned to the published 4.6.7 fix for bounded-collection validation. MCP and the other
 consumers already support Zod 4; published Bash language server 5.8.1 still depends on Zod 3.

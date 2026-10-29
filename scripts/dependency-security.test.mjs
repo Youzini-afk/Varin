@@ -22,6 +22,12 @@ const bash = createRequire(builtins.resolve('bash-language-server/package.json')
 const bashConfig = bash('./out/config.js');
 const { ShellCheckResultSchema } = bash('./out/shellcheck/types.js');
 const mcp = createRequire(web.resolve('@modelcontextprotocol/client'));
+const claude = createRequire(web.resolve('@anthropic-ai/claude-agent-sdk/core'));
+const legacyMcp = createRequire(claude.resolve('@modelcontextprotocol/sdk/package.json'));
+const rateLimit = createRequire(legacyMcp.resolve('express-rate-limit'));
+const pwa = createRequire(web.resolve('vite-plugin-pwa'));
+const workbox = createRequire(pwa.resolve('workbox-build'));
+const nodeResolve = createRequire(workbox.resolve('@rollup/plugin-node-resolve'));
 
 // GHSA-27r3-jxmh-p828: send the trailing bytes only after the compressed frame
 // has parsed. Isolate the old uncaught decoder error, with no listener or large body.
@@ -101,6 +107,54 @@ test('security exceptions apply only to the pinned, behavior-verified dependency
   assert.equal(micromatch('braces/package.json').version, '3.0.3');
   assert.equal(cache('http-cache-semantics/package.json').version, '4.2.0');
   assert.equal(logging('sprintf-js/package.json').version, '1.1.3');
+  assert.equal(nodeResolve('deepmerge/package.json').version, '4.3.1');
+});
+
+test('installed PWA merge consumers preserve plain prototypes and normal merge options', () => {
+  const mergeEntries = [nodeResolve.resolve('deepmerge'), nodeResolve.resolve('deepmerge/dist/umd.js')];
+  for (const entry of mergeEntries) {
+    const merge = nodeResolve(entry);
+    const payload = JSON.parse('{"session":{"__proto__":{"admin":true}}}');
+    for (const target of [{ session: null }, { session: undefined }, { session: false }, { session: Object.create(null) }, JSON.parse('{"session":{"__proto__":null}}')]) {
+      const value = merge(target, payload);
+      assert.equal(Object.getPrototypeOf(value.session), Object.prototype);
+      assert.equal(value.session.admin, undefined);
+      assert.equal(Object.prototype.admin, undefined);
+    }
+    const target = JSON.parse('{"__proto__":{"admin":true},"normal":1}');
+    const copied = merge(target, { other: 2 });
+    assert.equal(Object.getPrototypeOf(copied), Object.prototype);
+    assert.equal(copied.admin, undefined);
+    assert.equal(copied.normal, 1);
+    const symbol = Symbol('merge-data');
+    const ordinary = merge({ settings: { a: 1 }, files: ['a'], [symbol]: { a: true } }, { settings: { b: 2 }, files: ['b'], [symbol]: { b: true } });
+    assert.deepEqual(ordinary.settings, { a: 1, b: 2 });
+    assert.deepEqual(ordinary.files, ['a', 'b']);
+    assert.deepEqual(ordinary[symbol], { a: true, b: true });
+    assert.deepEqual(merge({ files: ['a'] }, { files: ['b'] }, { arrayMerge: (_, source) => source }), { files: ['b'] });
+    assert.deepEqual(merge({ settings: { a: 1 } }, { settings: { b: 2 } }, { customMerge: key => key === 'settings' ? (a, b) => ({ total: a.a + b.b }) : undefined }), { settings: { total: 3 } });
+  }
+});
+
+test('installed MCP rate-limit IP parsing keeps IPv6 classification and family boundaries accurate', () => {
+  const { Address4, Address6 } = rateLimit('ip-address');
+  for (const address of ['fe80::1', 'fe81::1', 'fe8f::1', 'febf::1']) assert.equal(new Address6(address).isLinkLocal(), true, address);
+  assert.equal(new Address6('2001:4860:4860::8888').isLinkLocal(), false);
+  const v4 = new Address4('10.0.0.1');
+  const v6 = new Address6('a00::1');
+  assert.equal(v6.isInSubnet(new Address4('10.0.0.0/8')), false);
+  assert.equal(v4.isHostInSubnet(new Address6('::/0')), false);
+  assert.equal(v4.isInSubnet(new Address4('10.0.0.0/8')), true);
+  assert.equal(new Address6('64:ff9b:1::a00:1').isGlobal(), false);
+  assert.equal(rateLimit('express-rate-limit').ipKeyGenerator('2001:db8::1'), '2001:db8::/56');
+  const result = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { Address6 } = require(process.argv[1]);
+    assert.equal(Address6.isValid('x'.repeat(100000)), false);
+    assert.equal(Address6.isValid('::1' + '%'.repeat(100000) + '\\n'), false);
+    assert.equal(new Address6('fe80::1%eth0').zone, '%eth0');
+  `, rateLimit.resolve('ip-address')], { encoding: 'utf8', windowsHide: true, timeout: 3000 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
 });
 
 test('MCP and Bash consumers reject oversized bounded Zod collections before walking elements', () => {
