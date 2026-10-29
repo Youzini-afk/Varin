@@ -239,3 +239,19 @@ it('persists profile changes before applying native personalization and exposes 
   await service.update(bot.id, { instructions: null, model: null });
   expect(applyProfile).toHaveBeenLastCalledWith(expect.objectContaining({ instructions: null, model: null, entry: bot.entry }));
 });
+
+
+it('reads only persisted entry identity and revision without materializing or listing work', async () => {
+  const f = await setup();
+  const bot = await f.service.create({ name: 'Private name', instructions: 'private instructions' });
+  f.ensureEntry.mockClear();
+  const original = await f.service.attentionProfiles();
+  expect(original).toEqual([{ botId: bot.id, entry: bot.entry, recordRevision: f.records.get(`bot.profile:${bot.id}`)!.recordRevision }]);
+  await f.service.update(bot.id, { name: 'Updated name' });
+  const next = await f.service.attentionProfiles();
+  expect(next[0]!.entry).toEqual(original[0]!.entry);
+  expect(next[0]!.recordRevision).toBeGreaterThan(original[0]!.recordRevision);
+  expect(f.ensureEntry).not.toHaveBeenCalled();
+  expect(f.listWork).not.toHaveBeenCalled();
+  expect(JSON.stringify(next)).not.toContain('private instructions');
+});

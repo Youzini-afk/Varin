@@ -11,7 +11,8 @@ import { registerThreadRoutes } from './thread-routes.js';
  * Catalog behavior and persistence are exercised in the Rust owner's real-database tests. */
 function fixture() {
   const requests = vi.fn(async (_method: string, _params: unknown, _signal?: AbortSignal): Promise<unknown> => []);
-  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
+  const exits = new Set<(error: Error) => void>();
+  const runtime = new AgentRuntimeClient({ subscribeExit(listener: (error: Error) => void) { exits.add(listener); return () => exits.delete(listener); }, onToolReleased() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
   const adapter = new ThreadAdapter(runtime, { resolveModel: vi.fn(), rebindModel: vi.fn() }, vi.fn(), vi.fn());
   const routes = new Map<string, RequestHandler[]>();
   const app = { post: (path: string, ...chain: RequestHandler[]) => routes.set(path, chain), get() {} } as unknown as Express;
@@ -40,7 +41,7 @@ function fixture() {
     return Response.json(output ?? {}, { status });
   };
   vi.stubGlobal('fetch', (url: string, init: RequestInit) => request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body))));
-  return { api: createThreadsHttpAPI(), requests, request, adapter };
+  return { api: createThreadsHttpAPI(), requests, request, adapter, failKernel: (error: Error) => { for (const listener of exits) listener(error); } };
 }
 afterEach(() => vi.unstubAllGlobals());
 const target = { runtime: 'agent' as const, threadId: 'original-thread' };
@@ -172,4 +173,19 @@ it('cancels only the original attention read and does not turn unavailable data 
   controller.abort();
   await rejected;
   expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.thread.attention.read']);
+});
+
+
+it('rejects owner replacement during cross-owner attention decoration', async () => {
+  const f = fixture();
+  let reads = 0;
+  f.adapter.bindAttentionProfiles(async () => {
+    if (++reads === 2) f.failKernel(new Error('original kernel replaced'));
+    return [];
+  });
+  f.requests.mockResolvedValue({ epoch: 7, eventCursor: 42,
+    coverage: { native: 'complete', external: 'unsupported', scope: 'host' },
+    branches: [], items: [], teamExecutions: [], botGates: [],
+    counts: { actionRequired: 0, affectedBranches: 0, unknownEffects: 0 } });
+  await expect(f.adapter.attention()).rejects.toThrow('original kernel replaced');
 });

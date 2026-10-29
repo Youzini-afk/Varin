@@ -45,11 +45,24 @@ export interface ThreadAttentionTeamExecution {
   avatar?: string; state: string; childRunId: string | null; childRunState: Run['state'] | null;
   activity?: 'preparing' | 'running' | 'waiting' | 'settling' | 'preparation_failed';
 }
+/** Stable original dispatch relation, including completed work; no task or tool bodies. */
+export interface ThreadAttentionDelegation {
+  operationId: string; parentThreadId: string; parentBranchId: string; parentRunId: string;
+  childThreadId: string; childBranchId: string; acceptedCursor: number | null;
+}
+/** Host-verified Bot profile entry; not inferred from a Thread name or execution role. */
+export interface ThreadAttentionBotEntry {
+  botId: string; threadId: string; branchId: string; profileRevision: number;
+}
 export interface ThreadAttentionSnapshot {
   epoch: number; eventCursor: number;
   coverage: { native: 'complete'; external: 'unsupported'; scope: 'host' };
   branches: ThreadAttentionBranch[]; items: ThreadAttentionItem[];
   teamExecutions: ThreadAttentionTeamExecution[];
+  /** Absent on older Hosts. Only visible work and its necessary ancestry are included. */
+  delegations?: ThreadAttentionDelegation[];
+  /** Cross-owner revision-verified entries; missing/empty does not prove a Thread is a task lead. */
+  botEntries?: ThreadAttentionBotEntry[];
   counts: { actionRequired: number; affectedBranches: number; unknownEffects: number };
 }
 export type ThreadThinkingLevel = import('@varin/protocol').ThinkingLevel;

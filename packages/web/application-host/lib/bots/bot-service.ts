@@ -120,6 +120,8 @@ const parseActivity = (value: unknown): BotActivity => {
 };
 
 export interface BotService {
+  /** Private read-only identity proof for Host attention; never exposed as a Bot route. */
+  attentionProfiles(): Promise<import('../kernel/thread-attention.js').AttentionBotProfile[]>;
   list(): Promise<BotSummary[]>;
   get(botId: string): Promise<BotSummary | null>;
   create(input?: BotCreateInput): Promise<BotSummary>;
@@ -540,6 +542,11 @@ export function createBotService(options: BotServiceOptions): BotService {
   };
 
   return {
+    attentionProfiles: async () => (await listRecords()).map(record => {
+      const bot = parseProfile(record);
+      if (!bot) throw new HarnessServiceError('failed', 'Bot identity proof is unavailable');
+      return { botId: bot.id, entry: bot.entry, recordRevision: record.recordRevision };
+    }),
     list,
     get,
     create,

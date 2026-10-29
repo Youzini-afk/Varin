@@ -88,6 +88,25 @@ pub struct AttentionTeamExecution {
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AttentionDelegation {
+    pub operation_id: String,
+    pub parent_thread_id: String,
+    pub parent_branch_id: String,
+    pub parent_run_id: String,
+    pub child_thread_id: String,
+    pub child_branch_id: String,
+    pub accepted_cursor: Option<u64>,
+}
+/// Private proof for the Host's read-only BotProfile entry decoration, not a new identity owner.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttentionBotGate {
+    pub bot_id: String,
+    pub profile_revision: u64,
+    pub kernel_epoch: u64,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AttentionSnapshot {
     pub epoch: u64,
     pub event_cursor: u64,
@@ -95,6 +114,8 @@ pub struct AttentionSnapshot {
     pub branches: Vec<AttentionBranch>,
     pub items: Vec<AttentionItem>,
     pub team_executions: Vec<AttentionTeamExecution>,
+    pub delegations: Vec<AttentionDelegation>,
+    pub bot_gates: Vec<AttentionBotGate>,
     pub counts: AttentionCounts,
 }
 /// Capture only location/owner under the Catalog mutex. SQL and serialization run on a worker.
@@ -517,6 +538,52 @@ impl AttentionRead {
                 }
             }
         }
+        // Stable relations outlive current execution/report delivery. Restrict the recursive
+        // read to displayed Threads and their actual ancestors, never all retained task history.
+        let thread_ids = branches
+            .values()
+            .map(|b| &b.thread_id)
+            .collect::<BTreeSet<_>>();
+        let mut q = db.prepare("WITH RECURSIVE lineage(thread_id) AS (
+          SELECT value FROM json_each(?1) UNION
+          SELECT json_extract(c.body,'$.parent_thread_id') FROM child_tasks c
+            JOIN lineage l ON c.child_thread_id=l.thread_id)
+          SELECT c.body,(SELECT min(e.cursor) FROM events e WHERE e.subject=c.id AND e.kind='child.accepted')
+          FROM child_tasks c JOIN lineage l ON c.child_thread_id=l.thread_id ORDER BY c.id")?;
+        let mut delegations = Vec::new();
+        for row in q.query_map([serde_json::to_string(&thread_ids)?], |r| {
+            Ok((r.get::<_, String>(0)?, if r.get::<_, Option<i64>>(1)?.is_some() { Some(read_number(r, 1)?) } else { None }))
+        })? {
+            check(cancel)?;
+            let (body, accepted_cursor) = row?;
+            let relation: delegated::ChildRelation = serde_json::from_str(&body)?;
+            delegations.push(AttentionDelegation {
+                operation_id: relation.operation_id,
+                parent_thread_id: relation.parent_thread_id,
+                parent_branch_id: relation.parent_branch_id,
+                parent_run_id: relation.parent_run_id,
+                child_thread_id: relation.child_thread_id,
+                child_branch_id: relation.child_branch_id,
+                accepted_cursor,
+            });
+        }
+        let bot_ids = branches
+            .values()
+            .filter_map(|b| b.bot_id.as_ref())
+            .collect::<BTreeSet<_>>();
+        let mut q = db.prepare(
+            "SELECT bot_id,profile_revision,kernel_epoch FROM bot_execution_gates
+            WHERE bot_id IN (SELECT value FROM json_each(?1)) ORDER BY bot_id",
+        )?;
+        let bot_gates = q
+            .query_map([serde_json::to_string(&bot_ids)?], |r| {
+                Ok(AttentionBotGate {
+                    bot_id: r.get(0)?,
+                    profile_revision: read_number(r, 1)?,
+                    kernel_epoch: read_number(r, 2)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         items.retain(|i| branches.contains_key(&i.branch_id));
         items.sort_by(|a, b| a.key.cmp(&b.key));
         let counts = AttentionCounts {
@@ -542,6 +609,8 @@ impl AttentionRead {
             branches: branches.into_values().collect(),
             items,
             team_executions,
+            delegations,
+            bot_gates,
             counts,
         })
     }

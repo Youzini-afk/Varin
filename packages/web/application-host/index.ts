@@ -2126,6 +2126,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
+  threads.bindAttentionProfiles(() => botService.attentionProfiles());
   threads.bindTitles(threadTitles);
   void threadTitles.recover();
   const nextSteps = createNextStepService({ runtime: agentRuntime, modelText,

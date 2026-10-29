@@ -238,7 +238,16 @@ fn cancelled_report_leaves_current_directory_only_after_the_parent_receives_the_
         f.db.commit_execution(&f.context.run_id,epoch,&record).unwrap();
     }
     assert!(f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().is_none());
-    assert!(!f.db.capture_attention_read().load(&||false).unwrap().team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
+    let hidden = f.db.capture_attention_read().load(&||false).unwrap();
+    assert!(!hidden.team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
+    assert!(!hidden.delegations.iter().any(|r|r.child_thread_id==child.child_thread_id));
+    let revision=f.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
+    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"show-completed-child".into(),expected_revision:revision,title:None,pinned:None,archived:Some(false)}).unwrap();
+    let visible = f.db.capture_attention_read().load(&||false).unwrap();
+    assert!(!visible.team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
+    let relation=visible.delegations.iter().find(|r|r.child_thread_id==child.child_thread_id).unwrap();
+    assert_eq!(relation.accepted_cursor,Some(child.cursor));
+    assert_eq!(relation.parent_branch_id,child.parent_branch_id);
     let history=f.db.history("branch:parent").unwrap();assert_eq!(history.len(),before+1);
     assert!(history.iter().all(|item|!item.content.to_string().contains("当前协作任务")));
     let page=f.db.capture_family_read("thread:parent",None,None).unwrap().list_page(false,FamilyListQuery{scope:Some("history".into()),query:Some(child.agent_id.to_lowercase()),limit:Some(1),..Default::default()},&||false).unwrap();

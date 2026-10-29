@@ -1,3 +1,4 @@
+import { readThreadAttention, type AttentionBotProfiles } from './thread-attention.js';
 import { admitContextJobCandidate, contextCompactionScope } from './context-job-preparation.js';
 import type { ContextCompactionOwner } from './context-compaction.js';
 import type { ContextAgentOwner } from './context-agent.js';
@@ -468,8 +469,16 @@ export class ThreadAdapter {
     return this.models.listModels();
   }
 
-  attention(signal?: AbortSignal) {
-    return this.runtime.attention(signal);
+  private attentionProfiles?: AttentionBotProfiles;
+  bindAttentionProfiles(reader: AttentionBotProfiles): void { this.attentionProfiles = reader; }
+  async attention(signal?: AbortSignal) {
+    let replaced: Error | undefined;
+    const detach = this.runtime.onExit(error => { replaced = error; });
+    try {
+      const snapshot = await readThreadAttention(() => this.runtime.attention(signal), this.attentionProfiles, signal);
+      if (replaced) throw replaced;
+      return snapshot;
+    } finally { detach?.(); }
   }
   list(options: import('@varin/application-client').ThreadListOptions = {}, signal?: AbortSignal) {
     return this.runtime.threadCatalog(options, signal);

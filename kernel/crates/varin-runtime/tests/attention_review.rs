@@ -54,7 +54,8 @@ fn attention_is_one_snapshot_and_owner_replacement_is_not_empty_success() {
             profile_revision: 1,
             activity_operation_id: None,
             permitted: true,
-        }).unwrap();
+        })
+        .unwrap();
     }
     db.create_bot_thread("bot-thread", "bot-branch", "original-bot")
         .unwrap();
@@ -72,11 +73,23 @@ fn attention_is_one_snapshot_and_owner_replacement_is_not_empty_success() {
                     .borrow_mut()
                     .create_bot_thread("concurrent", "concurrent-branch", "concurrent-bot")
                     .unwrap();
+                writer
+                    .borrow_mut()
+                    .publish_bot_gate(varin_runtime::catalog::bot::BotGate {
+                        bot_id: "original-bot".into(),
+                        profile_revision: 2,
+                        activity_operation_id: None,
+                        permitted: true,
+                    })
+                    .unwrap();
             }
             false
         })
         .unwrap();
     assert_eq!(snapshot.event_cursor, before);
+    assert_eq!(snapshot.bot_gates.len(), 1);
+    assert_eq!(snapshot.bot_gates[0].profile_revision, 1);
+    assert_eq!(snapshot.bot_gates[0].kernel_epoch, snapshot.epoch);
     assert_eq!(snapshot.branches.len(), 3);
     assert_eq!(snapshot.counts.action_required, 0);
     let direct = snapshot
@@ -95,17 +108,29 @@ fn attention_is_one_snapshot_and_owner_replacement_is_not_empty_success() {
         assert_eq!(branch.parent_thread_id, None);
     }
     let wire = serde_json::to_value(&snapshot).unwrap();
-    assert_eq!(wire["branches"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|b| b["threadId"] == "first")
-        .unwrap().get("botId"), Some(&Value::Null));
+    assert_eq!(
+        wire["branches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["threadId"] == "first")
+            .unwrap()
+            .get("botId"),
+        Some(&Value::Null)
+    );
     assert!(!wire.to_string().contains("private body"));
     drop(writer);
     let next = db.capture_attention_read().load(&|| false).unwrap();
     assert_eq!(next.branches.len(), 4);
     assert!(next.event_cursor > before);
+    assert_eq!(
+        next.bot_gates
+            .iter()
+            .find(|gate| gate.bot_id == "original-bot")
+            .unwrap()
+            .profile_revision,
+        2
+    );
     assert_eq!(
         next.branches
             .iter()
@@ -283,6 +308,16 @@ fn attention_uses_original_bot_ancestry_without_rewriting_child_identity() {
     assert_eq!(branch.bot_id.as_deref(), Some("owning-bot"));
     assert_eq!(branch.branch_id, child.child_branch_id);
     assert_eq!(branch.parent_thread_id.as_deref(), Some("thread:parent"));
+    let relation = &snapshot.delegations[0];
+    assert_eq!(relation.operation_id, child.operation_id);
+    assert_eq!(relation.child_branch_id, child.child_branch_id);
+    assert_eq!(relation.parent_branch_id, child.parent_branch_id);
+    assert_eq!(relation.accepted_cursor, Some(child.cursor));
+    f.settle_exchange();
+    f.db.cancel_child(&child.operation_id).unwrap();
+    let after = f.db.capture_attention_read().load(&|| false).unwrap();
+    assert_eq!(after.delegations[0].accepted_cursor, Some(child.cursor));
+    assert_eq!(after.delegations[0].parent_run_id, child.parent_run_id);
     let wire = serde_json::to_string(&snapshot).unwrap();
     assert!(!wire.contains("credential-ref"));
 }
