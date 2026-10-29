@@ -10,3 +10,7 @@ export const COMPANION_SCENE_GEOMETRY = {
   computerRight: { x: 166, y: 147 },
   artworkExtent: { left: 9, right: 285 },
 } as const;
+
+/** Three readable identity seats at the native 360px character size; further
+ * confirmed scoped members are represented by the factual overflow count. */
+export { COMPANION_TEAM_VISIBLE_LIMIT } from '@varin/application-client/desktop';

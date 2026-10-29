@@ -1,3 +1,5 @@
+import { isAgentAvatarId } from '@varin/protocol';
+import { COMPANION_TEAM_VISIBLE_LIMIT, type DesktopCompanionTeam } from '@varin/application-client/desktop';
 import { companionWorldRect } from './companion-window.js';
 type Bounds = ReturnType<typeof companionWorldRect>;
 
@@ -33,11 +35,27 @@ export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDesc
     || !['transition','engaged','present','read','page-turn','type','review','revise','scan-left','scan-right','select','split','dispatch-left','dispatch-right','watch','ask','offer','attend','acknowledge','organize-align','organize-select','verify-scan','verify-compare'].includes(String(d.cue))
     || !(d.cueInstance === undefined || Number.isSafeInteger(d.cueInstance) && (d.cueInstance as number) >= 0)
     || typeof d.suppressed !== 'boolean' || typeof d.reducedMotion !== 'boolean' || typeof d.menuOpen !== 'boolean') throw new Error('Invalid scene descriptor');
+  let team: DesktopCompanionTeam | undefined;
+  if (d.team !== undefined) {
+    const value = d.team as Record<string, unknown>;
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.members) || value.members.length > COMPANION_TEAM_VISIBLE_LIMIT
+      || !(value.overflowCount === null || Number.isSafeInteger(value.overflowCount) && (value.overflowCount as number) >= 0)) throw new Error('Invalid companion team');
+    const keys = new Set<string>();
+    const members: DesktopCompanionTeam['members'] = value.members.map(raw => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid companion team member');
+      const member = raw as Record<string, unknown>;
+      if (typeof member.key !== 'string' || !member.key || member.key.length > 200 || keys.has(member.key) || !isAgentAvatarId(member.avatar)
+        || !['preparing','running','waiting','settling','failed','leaving'].includes(String(member.state))) throw new Error('Invalid companion team member');
+      keys.add(member.key);
+      return { key: member.key, avatar: member.avatar, state: member.state as DesktopCompanionTeam['members'][number]['state'] };
+    });
+    team = { members, overflowCount: value.overflowCount as number | null };
+  }
   if (d.kind === 'status' ? !['queued','external','retry','failure','cancelling','disconnected','synchronizing','uncertain'].includes(String(d.status)) : d.status !== undefined) throw new Error('Invalid scene status');
   if (d.outcome !== null && (d.phase !== 'resolve' || (d.outcome === 'answered' ? d.kind !== 'question' : d.kind !== 'permission'))) throw new Error('Scene outcome does not match its presentation');
   return { revision: d.revision as number, scope: d.scope, kind: d.kind as CompanionSceneKind | null,
     phase: d.phase as CompanionSceneDescriptor['phase'], outcome: d.outcome as CompanionSceneDescriptor['outcome'],
-    ...(d.status === undefined ? {} : { status: d.status as NonNullable<CompanionSceneDescriptor['status']> }), count: d.count as number | null, ...(d.cueInstance === undefined ? {} : { cueInstance: d.cueInstance as number }), cue: d.cue as CompanionSceneDescriptor['cue'], suppressed: d.suppressed, reducedMotion: d.reducedMotion, menuOpen: d.menuOpen };
+    ...(team ? { team } : {}), ...(d.status === undefined ? {} : { status: d.status as NonNullable<CompanionSceneDescriptor['status']> }), count: d.count as number | null, ...(d.cueInstance === undefined ? {} : { cueInstance: d.cueInstance as number }), cue: d.cue as CompanionSceneDescriptor['cue'], suppressed: d.suppressed, reducedMotion: d.reducedMotion, menuOpen: d.menuOpen };
 }
 
 export function companionSceneLayout(content: Bounds, viewport: unknown, workArea: Bounds) {
@@ -72,7 +90,7 @@ export class CompanionSceneWindows {
     if (entry?.window.isDestroyed()) { this.clear(owner.id); entry = undefined; }
     if (entry && descriptor.revision <= entry.descriptor.revision) return;
     if (!entry) {
-      if (descriptor.kind === null) return;
+      if (descriptor.kind === null && !descriptor.team?.members.length) return;
       entry = { owner, window: this.create(geometry.bounds), descriptor, viewport: { ...viewport }, receivedAt: Date.now(), ready: false, blocked: false, queue: Promise.resolve() };
       this.entries.set(owner.id, entry);
       const created = entry;
@@ -119,7 +137,8 @@ export class CompanionSceneWindows {
   private visible(entry: SceneEntry): boolean {
     const age = Date.now() - entry.receivedAt;
     const expired = entry.descriptor.phase === 'withdraw' ? age >= 600 : entry.descriptor.phase === 'resolve' && age >= 900;
-    return !expired && !entry.blocked && !entry.descriptor.suppressed && entry.descriptor.kind !== null
+    const hasTeam = !!entry.descriptor.team?.members.length;
+    return (hasTeam || !expired) && !entry.blocked && !entry.descriptor.suppressed && (entry.descriptor.kind !== null || hasTeam)
       && !entry.owner.isDestroyed() && entry.owner.isVisible() && !entry.owner.isMinimized();
   }
   clear(ownerId: number): void {

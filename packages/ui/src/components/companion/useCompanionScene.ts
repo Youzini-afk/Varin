@@ -7,7 +7,7 @@ import { visibleSceneViewport, type SceneViewport } from './sceneViewport';
 
 /** Sends semantic changes only; the decorative surface owns no Host APIs or decisions. */
 export function useCompanionScene(canvas: React.RefObject<HTMLCanvasElement | null>, fact: SceneFact, scope: string,
-  suppressed: boolean, menuOpen: boolean, visibleCue?: { cue: DesktopCompanionScene['cue']; instance: number; action: string | undefined }) {
+  suppressed: boolean, menuOpen: boolean, visibleCue?: { cue: DesktopCompanionScene['cue']; instance: number; action: string | undefined }, team?: DesktopCompanionScene['team']) {
   const revision = React.useRef(0);
   const lastViewport = React.useRef<SceneViewport | null>(null);
   const lastMessage = React.useRef('');
@@ -24,14 +24,14 @@ export function useCompanionScene(canvas: React.RefObject<HTMLCanvasElement | nu
     media.addEventListener('change', update); document.addEventListener('visibilitychange', visibility); window.addEventListener('resize', resize); window.addEventListener('scroll', resize, true);
     return () => { cancelAnimationFrame(pendingFrame); observer.disconnect(); media.removeEventListener('change', update); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('resize', resize); window.removeEventListener('scroll', resize, true); };
   }, []);
-  const signature = JSON.stringify([fact, scope, suppressed, menuOpen, visibleCue, reduced, hidden, sizeRevision]);
+  const signature = JSON.stringify([fact, scope, suppressed, menuOpen, visibleCue, team, reduced, hidden, sizeRevision]);
   React.useEffect(() => {
     if (!isElectronShell()) return;
     const { viewport, visible } = visibleSceneViewport(canvas.current?.getBoundingClientRect(), window.innerWidth, window.innerHeight, lastViewport.current);
     if (!viewport) return;
     if (visible) lastViewport.current = viewport;
     const matchingCue = cueMatchesScene(fact.kind, visibleCue?.action) ? visibleCue : undefined;
-    const next = { ...fact, scope, suppressed: suppressed || hidden || !visible, reducedMotion: reduced, menuOpen, cue: matchingCue?.cue ?? 'transition' as const, cueInstance: matchingCue?.instance };
+    const next = { ...fact, ...(team ? { team } : {}), scope, suppressed: suppressed || hidden || !visible, reducedMotion: reduced, menuOpen, cue: matchingCue?.cue ?? 'transition' as const, cueInstance: matchingCue?.instance };
     const message = JSON.stringify([next, viewport]);
     if (lastMessage.current === message) return;
     lastMessage.current = message;

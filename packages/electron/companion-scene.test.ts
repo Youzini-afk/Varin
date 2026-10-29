@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { CompanionSceneWindows, companionSceneLayout, type CompanionSceneDescriptor, type CompanionScenePayload } from './companion-scene';
+import { CompanionSceneWindows, companionSceneLayout, readCompanionSceneDescriptor, type CompanionSceneDescriptor, type CompanionScenePayload } from './companion-scene';
 
 const descriptor = (revision: number, extra: Partial<CompanionSceneDescriptor> = {}): CompanionSceneDescriptor => ({ revision, scope: 'host/thread/branch', kind: 'reading', phase: 'active', outcome: null, count: null, suppressed: false, reducedMotion: false, menuOpen: false, cue: 'engaged', ...extra });
 const viewport = { x: 0, y: 0, width: 360, height: 360, viewportWidth: 360, viewportHeight: 480 };
@@ -73,4 +73,30 @@ it('does not replay an expired short-event tail when the decorative window loads
     f.manager.update(f.owner, descriptor(4, { kind: 'permission' }), viewport); await flush();
     expect(f.windows[0]?.visible).toBe(true);
   } finally { clock.mockRestore(); }
+});
+
+
+it('admits only bounded local avatar identities, never renderer markup or duplicate child seats', () => {
+  const team = { members: [{ key: 'scope-child-1', avatar: 'slope-lilac' as const, state: 'running' as const }], overflowCount: 2 };
+  expect(readCompanionSceneDescriptor(descriptor(1, { kind: 'dispatch', team })).team).toEqual(team);
+  for (const invalid of [
+    { ...team, members: [{ ...team.members[0], avatar: 'https://remote.invalid/avatar.svg' }] },
+    { ...team, members: [team.members[0], team.members[0]] },
+    { ...team, overflowCount: -1 },
+    { ...team, members: [0,1,2,3].map(n => ({ ...team.members[0], key: String(n) })) },
+  ]) expect(() => readCompanionSceneDescriptor({ ...descriptor(2), team: invalid })).toThrow('team');
+});
+
+
+it('keeps factual child seats across primary changes and admits a team-only quiet surface', async () => {
+  const f=fixture();
+  const team={ members:[{key:'same-child',avatar:'slope-lilac' as const,state:'running' as const}],overflowCount:0 };
+  f.manager.update(f.owner,descriptor(1,{kind:null,phase:'withdraw',team}),viewport);
+  f.windows[0]?.ready?.();await flush();expect(f.windows[0]?.visible).toBe(true);
+  f.manager.update(f.owner,descriptor(2,{kind:'reading',team}),viewport);await flush();
+  expect(f.windows).toHaveLength(1);expect(f.windows[0]?.payloads.at(-1)?.descriptor.team).toEqual(team);
+  f.manager.block(f.owner.id,true);await flush();expect(f.windows[0]?.visible).toBe(false);
+  f.manager.block(f.owner.id,false);await flush();expect(f.windows[0]?.visible).toBe(true);
+  f.manager.update(f.owner,descriptor(3,{kind:null,phase:'withdraw',team:{members:[],overflowCount:0},suppressed:true}),viewport);await flush();
+  expect(f.windows[0]?.visible).toBe(false);
 });

@@ -362,6 +362,14 @@ export type DesktopWebRenderResult = {
 // Command map — desktop_* commands with typed args and results
 // ---------------------------------------------------------------------------
 
+/** Current decorative team layout has three legible positions; this is not an execution limit. */
+export const COMPANION_TEAM_VISIBLE_LIMIT = 3;
+export interface DesktopCompanionTeam {
+  members: { key: string; avatar: import('@varin/protocol').AgentAvatarId; state: 'preparing' | 'running' | 'waiting' | 'settling' | 'failed' | 'leaving' }[];
+  /** Null means the scoped roster is not known completely, not zero other work. */
+  overflowCount: number | null;
+}
+
 /** Decorative companion data only: no content, execution or approval capability. */
 export interface DesktopCompanionScene {
   revision: number;
@@ -375,6 +383,7 @@ export interface DesktopCompanionScene {
   menuOpen: boolean;
   cue: 'transition' | 'engaged' | 'present' | 'read' | 'page-turn' | 'type' | 'review' | 'revise' | 'scan-left' | 'scan-right' | 'select' | 'split' | 'dispatch-left' | 'dispatch-right' | 'watch' | 'ask' | 'offer' | 'attend' | 'acknowledge' | 'organize-align' | 'organize-select' | 'verify-scan' | 'verify-compare';
   cueInstance?: number;
+  team?: DesktopCompanionTeam;
   status?: 'queued' | 'external' | 'retry' | 'failure' | 'cancelling' | 'disconnected' | 'synchronizing' | 'uncertain';
 }
 
