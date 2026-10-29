@@ -366,15 +366,16 @@ export type DesktopWebRenderResult = {
 export interface DesktopCompanionScene {
   revision: number;
   scope: string;
-  kind: 'reading' | 'editing' | 'searching' | 'dispatch' | 'question' | 'permission' | null;
+  kind: 'reading' | 'editing' | 'searching' | 'dispatch' | 'question' | 'permission' | 'organize' | 'verify' | 'status' | null;
   phase: 'active' | 'resolve' | 'withdraw';
   outcome: 'allowed' | 'denied' | 'answered' | null;
   count: number | null;
   suppressed: boolean;
   reducedMotion: boolean;
   menuOpen: boolean;
-  cue: 'transition' | 'engaged' | 'present' | 'read' | 'page-turn' | 'type' | 'review' | 'revise' | 'scan-left' | 'scan-right' | 'select' | 'split' | 'dispatch-left' | 'dispatch-right' | 'watch' | 'ask' | 'offer' | 'attend' | 'acknowledge';
+  cue: 'transition' | 'engaged' | 'present' | 'read' | 'page-turn' | 'type' | 'review' | 'revise' | 'scan-left' | 'scan-right' | 'select' | 'split' | 'dispatch-left' | 'dispatch-right' | 'watch' | 'ask' | 'offer' | 'attend' | 'acknowledge' | 'organize-align' | 'organize-select' | 'verify-scan' | 'verify-compare';
   cueInstance?: number;
+  status?: 'queued' | 'external' | 'retry' | 'failure' | 'cancelling' | 'disconnected' | 'synchronizing' | 'uncertain';
 }
 
 export interface VarinDesktopCommandMap {

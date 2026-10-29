@@ -67,6 +67,43 @@ function artwork(d: DesktopCompanionScene, elapsed: number, cueElapsed = elapsed
       if(d.count!==null) z+=`<text x="${rx+23}" y="${ry+29}" text-anchor="middle" fill="${ink}" font-size="12" font-family="system-ui">${d.count}</text>`;
       break;
     }
+    case 'organize': {
+      const accent=motion && ['organize-align','organize-select'].includes(d.cue) ? ease(cueElapsed/260) : 0;
+      const x=edge==='right'?12:224;
+      z=group(page(x+5,115,36,39,purple),0,-8*(1-entrance)-4*(1-accent))
+        +group(page(x+15,111,36,39),-6*(1-accent),0)
+        +path(`M${x} 149 L${x+6} 174 L${x+58} 174 L${x+63} 149 Z`,blue,'url(#paper)')
+        +path(`M${x+9} 148 l13 0 l3 -5 l17 0 l3 5 l11 0`,purple)
+        +(d.cue==='organize-select'?path(`M${x+25} 145 l16 0`,cyan,'none',3):'');
+      z+=path(`M${x+25} 174 Q${x<100?84:204} 183 ${x<100?cl.x:cr.x} ${x<100?cl.y:cr.y}`,purple);
+      break;
+    }
+    case 'verify': {
+      const x=edge==='right'?8:221;
+      const scan=motion&&d.cue==='verify-scan'?ease(cueElapsed/350):.45;
+      z=page(x,115,28,45)+page(x+33,115,28,45,cyan)
+        +path(`M${x+3} 167 L${x+3} 171 L${x+58} 171 L${x+58} 167`,purple)
+        +path(`M${x+5} ${128+scan*20} l18 0`,cyan,'none',3)
+        +(d.cue==='verify-compare'?path(`M${x+39} 141 l16 0`,gold,'none',3):'');
+      z=group(z,0,6*(1-entrance));
+      break;
+    }
+    case 'status': {
+      const x=edge==='right'?12:232,y=177;
+      z=path(`M${x+5} ${y} L${x+39} ${y} Q${x+44} ${y} ${x+44} ${y+5} L${x+44} ${y+21} L${x} ${y+21} L${x} ${y+5} Q${x} ${y} ${x+5} ${y}`,blue,'url(#paper)',1.5);
+      switch(d.status) {
+        case 'queued': z+=page(x+9,y+4,13,12)+page(x+19,y+7,13,11); break;
+        case 'external': z+=path(`M${x+9} ${y+7} l0 8 M${x+35} ${y+7} l0 8`,cyan)+dot(x+22,y+11,cyan,3); break;
+        case 'retry': z+=path(`M${x+11} ${y+15} A9 9 0 1 1 ${x+31} ${y+10}`,gold)+path(`M${x+20} ${y+8} l0 7 M${x+25} ${y+8} l0 7`,gold); break;
+        case 'failure': z+=path(`M${x+22} ${y+4} l0 8`,peach,'none',3)+dot(x+22,y+17,peach,1.5); break;
+        case 'cancelling': z+=path(`M${x+10} ${y+10} l8 0 M${x+26} ${y+10} l8 0 M${x+19} ${y+6} l6 0 l0 9 l-6 0 Z`,gold); break;
+        case 'disconnected': z+=path(`M${x+9} ${y+11} l9 0 M${x+26} ${y+11} l9 0 M${x+20} ${y+6} l-3 10 M${x+27} ${y+6} l-3 10`,blue); break;
+        case 'synchronizing': z+=path(`M${x+12} ${y+13} A10 7 0 0 1 ${x+31} ${y+7} M${x+32} ${y+9} A10 7 0 0 1 ${x+13} ${y+16}`,cyan); break;
+        case 'uncertain': z+=path(`M${x+22} ${y+2} l11 9 l-11 9 l-11 -9 Z`,gold)+dot(x+22,y+11,gold,2); break;
+      }
+      z=group(z,0,5*(1-entrance));
+      break;
+    }
     case 'question': {
       const answered=d.phase==='resolve'&&d.outcome==='answered';
       z=path('M214 76 Q216 69 227 70 L275 71 Q285 72 284 83 L283 116 Q281 124 269 123 L236 123 L217 137 L222 121 Q212 121 213 110 Z',blue,'url(#paper)');
@@ -134,12 +171,13 @@ export function mountCompanionScene(root: HTMLElement) {
     }
     root.innerHTML=`<svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="paper" x1="0" y1="0" x2=".1" y2="1"><stop stop-color="#fffdf8"/><stop offset="1" stop-color="#eaf1f8"/></linearGradient><filter id="paper-depth" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#273449" flood-opacity=".18"/></filter><clipPath id="outside-face"><path d="M-100 -100H400V350H-100Z M${face.x} ${face.y}V${face.y+face.height}H${face.x+face.width}V${face.y}Z" clip-rule="evenodd"/></clipPath><clipPath id="left-lane"><rect x="-100" y="-100" width="250" height="450"/></clipPath><clipPath id="right-lane"><rect x="150" y="-100" width="250" height="450"/></clipPath></defs><g transform="translate(${tx} ${ty}) scale(${scale})" opacity="${d.menuOpen?0:opacity}"><g clip-path="url(#outside-face)" filter="url(#paper-depth)">${layers}</g></g></svg>`;
     if(terminal&&phaseAge>=end) { root.replaceChildren(); return; }
-    if(!d.reducedMotion || terminal) frame=requestAnimationFrame(render);
+    const finiteAccent = ['status','organize','verify'].includes(d.kind ?? '');
+    if(terminal || !d.reducedMotion && (!finiteAccent || elapsed < 350 || now-cueStarted < 400)) frame=requestAnimationFrame(render);
   };
   const update=(value:SceneUpdate)=>{
     if(value.descriptor.revision<lastRevision)return;
     lastRevision=value.descriptor.revision;
-    const same=current?.descriptor.scope===value.descriptor.scope&&current?.descriptor.kind===value.descriptor.kind&&current?.descriptor.phase===value.descriptor.phase;
+    const same=current?.descriptor.scope===value.descriptor.scope&&current?.descriptor.kind===value.descriptor.kind&&current?.descriptor.phase===value.descriptor.phase&&current?.descriptor.status===value.descriptor.status;
 
     if(!same){
       const now=performance.now();

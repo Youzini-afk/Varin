@@ -3,6 +3,11 @@ import type { DesktopCompanionScene } from '@varin/application-client';
 export function sceneCue(value?: string): DesktopCompanionScene['cue'] {
   if (!value) return 'transition';
   const v=value.toUpperCase();
+  if (v === 'ORGANIZE_ALIGN') return 'organize-align';
+  if (v === 'ORGANIZE_SELECT') return 'organize-select';
+  if (v === 'VERIFY_SCAN') return 'verify-scan';
+  if (v === 'VERIFY_COMPARE') return 'verify-compare';
+  if (v === 'EXPLAIN') return 'type';
   if (v === 'PAGE_TURN') return 'page-turn';
   if (v === 'READ_SETTLE') return 'read';
   if (v.startsWith('REVISE') && !v.includes('PREPARE')) return 'revise';
@@ -27,6 +32,8 @@ export function sceneCue(value?: string): DesktopCompanionScene['cue'] {
 
 export function cueMatchesScene(kind: DesktopCompanionScene['kind'], drawnAction: string | undefined): boolean {
   if (!kind) return false;
-  const action = { reading: 'reading', editing: 'editing', searching: 'browsing', dispatch: 'dispatch', question: 'query', permission: 'permission' };
+  if (kind === 'status') return false; // Status admission is factual, not a performed operation.
+  if (kind === 'editing' && drawnAction === 'output') return true;
+  const action = { reading: 'reading', editing: 'editing', searching: 'browsing', dispatch: 'dispatch', question: 'query', permission: 'permission', organize: 'organizing', verify: 'checking' };
   return drawnAction === action[kind];
 }

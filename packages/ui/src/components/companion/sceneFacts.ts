@@ -2,9 +2,9 @@ import type { DesktopCompanionScene, ThreadSnapshot } from '@varin/application-c
 import { projectCompanionIntent, unresolvedPermissionId, type ObservationHealth } from './presentation';
 import { operationPresentation } from './toolPresentation';
 
-export type SceneFact = Pick<DesktopCompanionScene, 'kind' | 'phase' | 'outcome' | 'count'>;
+export type SceneFact = Pick<DesktopCompanionScene, 'kind' | 'phase' | 'outcome' | 'count' | 'status'>;
 const none: SceneFact = { kind: null, phase: 'withdraw', outcome: null, count: null };
-const kinds: Record<string, DesktopCompanionScene['kind']> = { T01: 'reading', T02: 'editing', T04: 'searching', T08: 'dispatch', W02: 'permission', W03: 'question' };
+const kinds: Record<string, DesktopCompanionScene['kind']> = { T01: 'reading', T02: 'editing', T04: 'searching', T06: 'organize', T07: 'verify', T08: 'dispatch', W02: 'permission', W03: 'question' };
 const object = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const permission = (operation: ThreadSnapshot['operations'][number]) => object(object(operation.result?.kind === 'control' ? operation.result.value : null)?.permission);
 
@@ -57,6 +57,14 @@ export class CompanionSceneFacts {
   }
 }
 
+const statuses: Record<string, DesktopCompanionScene['status']> = { W01: 'queued', W04: 'external', W05: 'retry', E01: 'failure', E02: 'cancelling', E04: 'disconnected', E05: 'synchronizing', E06: 'uncertain' };
+/** Current facts own the one status slot. It never overlays an unresolved question/permission. */
+export function sceneForIntent(fact: SceneFact, state: string | null): SceneFact {
+  const status = state ? statuses[state] : undefined;
+  if (status) return { kind: 'status', status, phase: 'active', outcome: null, count: null };
+  if (state === 'C05') return { kind: 'editing', phase: 'active', outcome: null, count: null };
+  return fact;
+}
 export function reviewSceneFact(state: string): SceneFact {
-  return { kind: kinds[state] ?? null, phase: 'active', outcome: null, count: state === 'T08' ? 2 : null };
+  return sceneForIntent({ kind: kinds[state] ?? null, phase: 'active', outcome: null, count: state === 'T08' ? 2 : null }, state);
 }

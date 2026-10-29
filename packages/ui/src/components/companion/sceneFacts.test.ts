@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'vitest';
 import type { ThreadSnapshot } from '@varin/application-client';
 import { visibleSceneViewport } from './sceneViewport';
-import { CompanionSceneFacts } from './sceneFacts';
+import { CompanionSceneFacts, sceneForIntent } from './sceneFacts';
 const snapshot = (operations: unknown[], childActivity = {}) => ({ operations, childActivity, activeRun: null } as unknown as ThreadSnapshot);
 const tool = (name: string, id = name) => ({ id, phase: 'running', intent: { kind: 'tool', call: { name, schema_version: '1' }, contract: { name, schema_version: '1' } } });
 describe('companion decorative facts', () => {
   test('distinguishes all six real scene families and retains one short-event withdrawal', () => {
     const facts = new CompanionSceneFacts();
-    for (const [name, kind] of [['file_read','reading'],['file_edit','editing'],['websearch','searching'],['code_retrieval','dispatch']] as const)
+    for (const [name, kind] of [['file_read','reading'],['file_edit','editing'],['websearch','searching'],['code_retrieval','dispatch'],['materials','organize'],['office_render','verify']] as const)
       expect(facts.observe(snapshot([tool(name)]), 'current').kind).toBe(kind);
     expect(facts.observe(snapshot([{ id:'question', executor:'ask_user', phase:'waiting' }]), 'current').kind).toBe('question');
     const p={ id:'p',decision:null,call:{},scope:{} };
@@ -66,4 +66,12 @@ test('suppresses the last legal scene while scrolling and restores only a fully 
   expect(visibleSceneViewport({...rect,y:-60},360,480,null)).toEqual({viewport:null,visible:false});
   expect(visibleSceneViewport(rect,360,300,first.viewport).visible).toBe(false);
   expect(visibleSceneViewport({...rect,y:20},360,480,first.viewport)).toMatchObject({visible:true,viewport:{y:20}});
+});
+
+test('current uncertainty replaces old work but never impersonates a permission receipt', () => {
+ const prior = { kind: 'editing' as const, phase: 'active' as const, outcome: null, count: null };
+ expect(sceneForIntent(prior, 'E04')).toMatchObject({kind:'status',status:'disconnected',outcome:null});
+ const permission = {kind:'permission' as const,phase:'active' as const,outcome:null,count:null};
+ expect(sceneForIntent(permission,'W02')).toBe(permission);
+ expect(sceneForIntent(prior,'W05')).toMatchObject({kind:'status',status:'retry',outcome:null});
 });

@@ -19,7 +19,7 @@ export interface CompanionScenePayload {
   descriptor: CompanionSceneDescriptor;
   layout: { character: Bounds; visible: Bounds };
 }
-const kinds = new Set(['reading','editing','searching','dispatch','question','permission']);
+const kinds = new Set(['reading','editing','searching','dispatch','question','permission','organize','verify','status']);
 /** Narrow presentation data only: no renderer-provided markup, URL, task content or command. */
 export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDescriptor {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Missing scene descriptor');
@@ -30,13 +30,14 @@ export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDesc
     || !['active','resolve','withdraw'].includes(String(d.phase))
     || ![null,'allowed','denied','answered'].includes(d.outcome as null | string)
     || !(d.count === null || Number.isSafeInteger(d.count) && (d.count as number) >= 0 && (d.count as number) <= 99)
-    || !['transition','engaged','present','read','page-turn','type','review','revise','scan-left','scan-right','select','split','dispatch-left','dispatch-right','watch','ask','offer','attend','acknowledge'].includes(String(d.cue))
+    || !['transition','engaged','present','read','page-turn','type','review','revise','scan-left','scan-right','select','split','dispatch-left','dispatch-right','watch','ask','offer','attend','acknowledge','organize-align','organize-select','verify-scan','verify-compare'].includes(String(d.cue))
     || !(d.cueInstance === undefined || Number.isSafeInteger(d.cueInstance) && (d.cueInstance as number) >= 0)
     || typeof d.suppressed !== 'boolean' || typeof d.reducedMotion !== 'boolean' || typeof d.menuOpen !== 'boolean') throw new Error('Invalid scene descriptor');
+  if (d.kind === 'status' ? !['queued','external','retry','failure','cancelling','disconnected','synchronizing','uncertain'].includes(String(d.status)) : d.status !== undefined) throw new Error('Invalid scene status');
   if (d.outcome !== null && (d.phase !== 'resolve' || (d.outcome === 'answered' ? d.kind !== 'question' : d.kind !== 'permission'))) throw new Error('Scene outcome does not match its presentation');
   return { revision: d.revision as number, scope: d.scope, kind: d.kind as CompanionSceneKind | null,
     phase: d.phase as CompanionSceneDescriptor['phase'], outcome: d.outcome as CompanionSceneDescriptor['outcome'],
-    count: d.count as number | null, ...(d.cueInstance === undefined ? {} : { cueInstance: d.cueInstance as number }), cue: d.cue as CompanionSceneDescriptor['cue'], suppressed: d.suppressed, reducedMotion: d.reducedMotion, menuOpen: d.menuOpen };
+    ...(d.status === undefined ? {} : { status: d.status as NonNullable<CompanionSceneDescriptor['status']> }), count: d.count as number | null, ...(d.cueInstance === undefined ? {} : { cueInstance: d.cueInstance as number }), cue: d.cue as CompanionSceneDescriptor['cue'], suppressed: d.suppressed, reducedMotion: d.reducedMotion, menuOpen: d.menuOpen };
 }
 
 export function companionSceneLayout(content: Bounds, viewport: unknown, workArea: Bounds) {

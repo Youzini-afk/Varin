@@ -53,6 +53,8 @@ it('ignores stale data, suppresses immediately during drag and cannot resurrect 
   f.manager.update(f.owner, descriptor(13), viewport); await flush(); expect(f.windows[0]?.visible).toBe(true);
   f.manager.clear(f.owner.id); f.windows[0]?.ready?.(); await flush(); expect(f.windows[0]?.closed).toBe(true);
   expect(() => f.manager.update(f.owner, descriptor(14, { outcome: 'allowed' }), viewport)).toThrow('outcome');
+  expect(() => f.manager.update(f.owner, descriptor(14, {kind:'status'}), viewport)).toThrow('status');
+  expect(() => f.manager.update(f.owner, descriptor(14, {kind:'status',status:'retry',phase:'resolve',outcome:'allowed'}), viewport)).toThrow('outcome');
   expect(() => f.manager.update(f.owner, descriptor(14), { ...viewport, width: 999 })).toThrow('viewport');
 });
 

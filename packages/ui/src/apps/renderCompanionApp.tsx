@@ -1,3 +1,5 @@
+import { useCompanionLeisure } from '@/components/companion/useCompanionLeisure';
+import { CompanionProgressFacts, withCompanionProgress, type CompanionProgress } from '@/components/companion/progressPresentation';
 import { sceneCue } from '@/components/companion/sceneCues';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -9,7 +11,7 @@ import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
 import { projectCompanionIntent, newlyAnsweredQuestion, type ObservationHealth } from '@/components/companion/presentation';
 import { initializeLocale, I18nProvider, useI18n, type I18nKey } from '@/lib/i18n';
-import { CompanionSceneFacts, reviewSceneFact, type SceneFact } from '@/components/companion/sceneFacts';
+import { CompanionSceneFacts, reviewSceneFact, sceneForIntent, type SceneFact } from '@/components/companion/sceneFacts';
 import { useCompanionScene } from '@/components/companion/useCompanionScene';
 import catalog from '../../../../tools/desktop-companion-animation/coverage.json';
 
@@ -51,8 +53,17 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [presentation, setPresentation] = React.useState('C01');
   const [reviewRoute, setReviewRoute] = React.useState(false);
   const [controlsOpen, setControlsOpen] = React.useState(false);
-  const [localAction, setLocalAction] = React.useState<'welcome' | 'tap-response' | null>(review ? null : 'welcome');
-  const intent = projectCompanionIntent(snapshot, health);
+  const [localAction, setLocalAction] = React.useState<'welcome' | 'tap-response' | 'hover-response' | null>(review ? null : 'welcome');
+  const progressFacts = React.useRef(new CompanionProgressFacts());
+  const [providerProgress, setProviderProgress] = React.useState<CompanionProgress | null>(null);
+  React.useEffect(() => {
+    if (!providerProgress) return;
+    // Expiration changes presentation only, never retries or completes Host work.
+    const delay = Math.max(0, Math.min(2_147_483_647, providerProgress.until - Date.now()));
+    const timer = window.setTimeout(() => setProviderProgress(current => current === providerProgress ? (current.until <= Date.now() ? null : { ...current }) : current), delay);
+    return () => window.clearTimeout(timer);
+  }, [providerProgress]);
+  const intent = withCompanionProgress(projectCompanionIntent(snapshot, health), providerProgress, health, snapshot?.activeRun, Date.now());
   const visualIntent = review && reviewRoute ? { state: presentation, reason: 'Explicit presentation review, not Host facts' } : intent;
   // Shared neutral/attentive performances are visual fallbacks, not invented tool categories.
   const requestedAction = !reviewRoute && liveAnswer && health === 'current' && visualIntent.state !== 'C06' && visualIntent.state !== 'W02' && visualIntent.state !== 'W03' && !visualIntent.state?.startsWith('E') ? 'understood' : visualIntent.state === 'L07' || (!reviewRoute && visualIntent.state === 'C06' && liveCompletion !== snapshot?.activeRun?.id)
@@ -71,16 +82,27 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     : visualIntent.state === 'E05' ? 'disconnected' : visualIntent.state === 'T03' && requestedAction !== 'understood' ? 'execution-observe' : requestedAction;
   const visualAction = preferredAction && assetList.some(item => item.action === preferredAction && item.reviewStatus === 'accepted' && item.stage === 'motion-candidate' && item.geometryReference && item.entryPose && item.exitPose) ? preferredAction
     : hasActiveWork && !visualIntent.state?.startsWith('E') ? 'external-wait' : preferredAction;
-  const localAllowed = !reviewRoute && !manualReview && !['W02','W03','E01','E02','E04','E05','E06'].includes(intent.state ?? '');
-  const displayAction = localAction && localAllowed && assetList.some(item => item.action === localAction && item.reviewStatus === 'accepted') ? localAction : visualAction;
+  const localAllowed = !reviewRoute && !manualReview && !hasActiveWork && !liveCompletion && !['W02','W03','E01','E02','E04','E05','E06'].includes(intent.state ?? '');
+  const primaryAction = localAction && localAllowed && assetList.some(item => item.action === localAction && item.reviewStatus === 'accepted') ? localAction : visualAction;
   const canvas = React.useRef<HTMLCanvasElement>(null);
   const beforeNativeLift = React.useRef<() => void>(() => {});
   const companionWindow = useCompanionWindow(canvas, review, () => beforeNativeLift.current());
+  const restDue = useCompanionLeisure(localAllowed && companionWindow.phase === 'rest' && !controlsOpen && (health === 'current' || health === 'unselected'), companionWindow.activityRevision);
+  const displayAction = restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
+  const seenHover = React.useRef(0);
+  React.useEffect(() => {
+    if (!companionWindow.hoverRevision || seenHover.current === companionWindow.hoverRevision) return;
+    seenHover.current = companionWindow.hoverRevision;
+    const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
+    // Closed-only attention must not close an open laptop merely to react to hover.
+    if (localAllowed && !controlsOpen && shown && assetList.some(item => item.action === 'hover-response' && item.reviewStatus === 'accepted' && item.geometryReference === shown.geometryReference && item.entryPose === shown.entryPose && item.exitPose === shown.exitPose)) setLocalAction('hover-response');
+  }, [companionWindow.hoverRevision, localAllowed, controlsOpen, assetList]);
+  React.useEffect(() => { if (!companionWindow.hovered) setLocalAction(current => current === 'hover-response' ? null : current); }, [companionWindow.hovered]);
   const displayedDrawing = React.useRef<{ packageId: string; exposure: number } | null>(null);
   const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current });
-  const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation) : sceneFact;
+  const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation) : sceneForIntent(sceneFact, intent.state);
   useCompanionScene(canvas, sceneCurrent, `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
-    companionWindow.phase !== 'rest' || (!reviewRoute && health !== 'current') || manualReview, controlsOpen, visibleCue);
+    companionWindow.phase !== 'rest' || (!reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen, visibleCue);
   React.useEffect(() => {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'permission-allowed') setLivePermissionReceipt(false);
@@ -123,6 +145,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   React.useEffect(() => {
     if (selected) setLocalAction(null);
     lastSceneReceipt.current = null; setLivePermissionReceipt(false);
+    setProviderProgress(progressFacts.current.reset());
     sceneScope.current++; setSceneFact(sceneFacts.current.reset());
     setSnapshot(undefined); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null);
     if (!apis.threads || !selected || selected.generation !== generation) { setConnection('No thread selected'); setHealth('unselected'); return; }
@@ -144,8 +167,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         if (nextRun?.state === 'completed' && previous?.id === nextRun.id && !['completed','failed','cancelled'].includes(previous.state)) setLiveCompletion(nextRun.id);
         previousRun.current = nextRun ? { id: nextRun.id, state: nextRun.state } : null;
         setSnapshot(value); setHealth('current'); setConnection('Observing existing thread — read only'); } },
-      cause => { if (!closed) { setLivePermissionReceipt(false); lastSceneReceipt.current = null; setSceneFact(sceneFacts.current.reset()); setHealth('unknown'); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null); setConnection(`Connection unknown: ${String(cause)}`); } },
-      undefined, undefined, undefined, { contextInspection: false });
+      cause => { if (!closed) { setProviderProgress(progressFacts.current.reset()); setLivePermissionReceipt(false); lastSceneReceipt.current = null; setSceneFact(sceneFacts.current.reset()); setHealth('unknown'); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null); setConnection(`Connection unknown: ${String(cause)}`); } },
+      (parts, context) => { if (!closed) setProviderProgress(progressFacts.current.observe(parts, context, Date.now())); }, undefined, undefined, { contextInspection: false });
     projection.start();
     return () => { closed = true; projection.close(); };
   }, [apis.threads, selected, generation]);

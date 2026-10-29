@@ -4,6 +4,17 @@ import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 /** Pointer ownership is local presentation; never sends cancellation or permission commands. */
 export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | null>, reviewPointer = false, beforeNativeLift?: () => void) {
   const [tapRevision, setTapRevision] = React.useState(0);
+  const [hovered, setHovered] = React.useState(false);
+  const [hoverRevision, setHoverRevision] = React.useState(0);
+  const [activityRevision, setActivityRevision] = React.useState(0);
+  const hoverTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverInside = React.useRef(false);
+  const hoverPoint = React.useRef<{ x: number; y: number } | null>(null);
+  const hoverCooldown = React.useRef(0);
+  const clearHover = React.useCallback(() => {
+    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null; hoverInside.current = false; hoverPoint.current = null; setHovered(false);
+  }, []);
   const [phase, setPhase] = React.useState<'rest' | 'lifting' | 'landing'>('rest');
   const [pinned, setPinned] = React.useState(false);
   const [passthrough, setPassthrough] = React.useState(false);
@@ -58,12 +69,12 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
     if (!current.moving && completedClick) setTapRevision(value => value + 1);
   }, [canvas, send, resetPassthrough]);
   React.useEffect(() => {
-    const cancel = () => end();
+    const cancel = () => { clearHover(); end(); };
     window.addEventListener('blur', cancel);
-    const hidden = () => { if (document.hidden) end(); };
+    const hidden = () => { if (document.hidden) { clearHover(); end(); } };
     document.addEventListener('visibilitychange', hidden);
-    return () => { window.removeEventListener('blur', cancel); document.removeEventListener('visibilitychange', hidden); end(); worldStool('clear'); };
-  }, [end, worldStool]);
+    return () => { window.removeEventListener('blur', cancel); document.removeEventListener('visibilitychange', hidden); clearHover(); end(); worldStool('clear'); };
+  }, [end, worldStool, clearHover]);
   React.useEffect(() => {
     if (!passthrough || !isElectronShell()) return;
     let active = true;
@@ -85,22 +96,39 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
     window.addEventListener('mousemove', move); reconcile();
     return () => { active = false; reevaluatePointer.current = () => {}; window.removeEventListener('mousemove', move); resetPassthrough(); };
   }, [hit, passthrough, resetPassthrough]);
-  return { phase, tapRevision, notice, pinned, worldStool, passthrough, setPassthrough, refreshHitMask,
+  return { phase, tapRevision, hovered, hoverRevision, activityRevision, notice, pinned, worldStool, passthrough, setPassthrough, refreshHitMask,
     settle: () => setPhase('rest'),
     togglePinned: async () => { try { const result = await invokeDesktop('desktop_set_window_pinned', { pinned: !pinned }); setPinned(result?.pinned ?? false); } catch(error) { setNotice(String(error)); } },
     handlers: {
       onPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
         if ((!isElectronShell() && !reviewPointer) || event.button !== 0 || !hit(event.clientX, event.clientY)) return;
+        clearHover(); setActivityRevision(value => value + 1);
         event.preventDefault(); resetPassthrough(); pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY, anchor: { x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight }, moving: false };
         event.currentTarget.setPointerCapture(event.pointerId);
       },
       onPointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
         const current = pointer.current;
-        if (!current || current.id !== event.pointerId) return;
+        if (!current) {
+          if (event.pointerType !== 'mouse' || !hit(event.clientX, event.clientY)) { clearHover(); return; }
+          hoverPoint.current = { x: event.clientX, y: event.clientY };
+          if (!hoverInside.current) {
+            hoverInside.current = true; setHovered(true);
+            if (Date.now() >= hoverCooldown.current) hoverTimer.current = setTimeout(() => {
+              hoverTimer.current = null;
+              const point = hoverPoint.current;
+              if (!hoverInside.current || pointer.current || document.hidden || !point || !hit(point.x, point.y)) return;
+              hoverCooldown.current = Date.now() + 10_000;
+              setActivityRevision(value => value + 1); setHoverRevision(value => value + 1);
+            }, 700);
+          }
+          return;
+        }
+        if (current.id !== event.pointerId) return;
         if (!current.moving && Math.hypot(event.clientX-current.x,event.clientY-current.y) < 3) return;
         if (!current.moving) { current.moving = true; beforeNativeLift?.(); send('start'); setPhase('lifting'); }
         send('move');
       },
+      onPointerLeave: clearHover,
       onPointerUp: () => end(true), onPointerCancel: () => end(), onLostPointerCapture: () => end(),
     },
   };
