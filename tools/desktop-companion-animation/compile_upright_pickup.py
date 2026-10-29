@@ -1,7 +1,7 @@
 """Source-keyed graph compiler; no new player, inferred poses or artwork."""
 import json,hashlib
 
-def compile_pickup(root, inventory, core, *, extra_detached=None, extra_recovery=None, ordinary_frames=None):
+def compile_pickup(root, inventory, core, *, extra_detached=None, extra_recovery=None, ordinary_frames=None, authored_pickup=None):
  rel=root/'relocation'; work=root.parent; nodes={}; sources={}
  index=json.loads((rel/'current-source-detached-index-v4.json').read_text()); detached={e['sourceSHA256']:e for e in index['entries']}
  detached.update(extra_detached or {})
@@ -61,11 +61,43 @@ def compile_pickup(root, inventory, core, *, extra_detached=None, extra_recovery
    steps.append({**f,'durationMs':min(f['durationMs'],100)})
    if f['sha256'] in bysha:return steps,bysha[f['sha256']]['angle']
   raise ValueError('No lid support prefix')
+ # Explicit artwork graph uses the existing flat continuation contract. It is
+ # not a second player or an instruction to infer intermediate contacts.
+ authoredEntries={}
+ if authored_pickup:
+  for row in authored_pickup['nodes']:
+   id=row['id']
+   if not isinstance(id,str) or not id.startswith('v2-') or id[3:] in nodes:
+    raise ValueError('Authored pickup node ID is duplicate or not an existing v2 graph ID: '+str(id))
+   h=image(row['sourcePath'],row['sourceSHA256']);gesture=row['gesture']
+   entry=gesture.get('entrySourceSha256')
+   if entry:
+    if entry in authoredEntries:raise ValueError('Duplicate authored pickup entry source: '+entry)
+    authoredEntries[entry]=id
+   node(id[3:],h,row['durationMs'],**gesture)
+  if set(authored_pickup['replaceEntrySources'])!=set(authoredEntries):
+   raise ValueError('Authored replacement entry sources must exactly match its entry nodes')
+ def authored_join(source):
+  if not authoredEntries:return None
+  steps=[{'sha256':source,'durationMs':60}];seen=set()
+  while True:
+   for i,f in enumerate(steps):
+    if f['sha256'] in authoredEntries:return steps[:i],authoredEntries[f['sha256']]
+   end=steps[-1]['sha256']
+   if end in seen or end in {closed,user,screen} or end in bysha or end not in recovery:return None
+   seen.add(end);tail=recovery[end]['steps']
+   if not tail:return None
+   steps.extend(tail)
  coreEntries={e['sourceSHA256'] for e in core['entries']}
  for source in ordinary:
-  steps,angle=plan(source)
+  if source in authoredEntries:continue
+  custom=authored_join(source)
+  if custom:
+   steps,target=custom;angle=None
+  else:steps,angle=plan(source)
   ids=[f'v2-pick-{source[:16]}-{i}' for i in range(len(steps))]
   tail=([f'v2-lid-touch-{angle}',f'v2-lid-air-{angle}',*[f'v2-lid-air-{a}' for a in order[order.index(angle)+1:]],core_id('airborneNeutral')] if angle is not None else [core_id('closedDetached'),*[core_id(e['node'],e['durationMs']) for e in core['nodes']['closedDetached']['grabNext']]])
+  if custom:tail=[target,*nodes[target[3:]]['gesture']['grabNext']]
   for i,f in enumerate(steps):
    h=f['sha256'];e=detached[h];dh=image(rel/e['detachedSource'],e['detachedSHA256'])
    props={'grabNext':ids[i+1:]+tail,'restoreSourceSha256':h,'restoreOnRelease':True}

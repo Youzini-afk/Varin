@@ -12,10 +12,13 @@ parser.add_argument('--output',type=Path,required=True)
 parser.add_argument('--director-manifest',type=Path,help='Optional explicit authored management sequences; review-only, not a production selection')
 parser.add_argument('--local-interaction-manifest',type=Path,action='append',help='Optional exact local hover/repeat source contract; candidate only')
 parser.add_argument('--performance-manifest',type=Path,help='Explicit replacement performances and actual-source recovery; excludes legacy v3 display plans, keeps mechanical base; candidate only')
+parser.add_argument('--pickup-manifest',type=Path,help='Optional explicit source-keyed pickup/landing graph for replacement performances; candidate only')
 parser.add_argument('--detached-index',type=Path,required=True,help='explicit immutable new-source no-stool index')
 a=parser.parse_args();R=a.root.resolve();B=a.base_source.resolve();OUT=a.output.resolve();OUT.mkdir(parents=True,exist_ok=True)
 if a.performance_manifest and (a.director_manifest or a.local_interaction_manifest):
  parser.error('--performance-manifest cannot mix with legacy director/local manifests')
+if a.pickup_manifest and not a.performance_manifest:
+ parser.error('--pickup-manifest requires --performance-manifest')
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 BASE_SHA='399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268'
 if sha(a.base_bundle)!=BASE_SHA:raise ValueError('Base is not the frozen upright selected bundle; rebuild v2, do not use mutable selected v3 output')
@@ -164,8 +167,32 @@ for h in sorted(newOrdinary):
  else:ready.append({'sha256':h})
 if replacementActions is not None and missing:
  raise ValueError('Replacement source recovery/detached contacts are incomplete: '+json.dumps(missing))
+authoredPickup=None
+if a.pickup_manifest:
+ pickupPath=a.pickup_manifest.resolve();authoredPickup=json.loads(pickupPath.read_text())
+ provenance.append({'source':str(pickupPath.relative_to(R)),'sha256':sha(pickupPath)})
+ declared=authoredPickup.get('replaceEntrySources')
+ if not isinstance(declared,list) or not declared or len(set(declared))!=len(declared) or any(not isinstance(h,str) or len(h)!=64 for h in declared):
+  raise ValueError('Authored pickup must explicitly declare unique actual source replacements')
+ if not isinstance(authoredPickup.get('nodes'),list) or not authoredPickup['nodes']:
+  raise ValueError('Authored pickup requires explicit nodes')
+ ids=set();allowed={'grabNext','releaseNext','embeddedStool','settled','restoreOnRelease','releaseViaFrames','restorePreviousOnSettle','grabImmediate','entrySourceSha256','restoreSourceSha256'}
+ for row in authoredPickup['nodes']:
+  if not isinstance(row.get('id'),str) or not row['id'].startswith('v2-') or row['id'] in ids or row['id'] in baseIds:raise ValueError('Authored pickup node IDs must not duplicate or shadow base IDs')
+  ids.add(row.get('id'));frame(pickupPath.parent,row)
+  row['sourcePath']=(pickupPath.parent/row['source']).resolve();g=row.get('gesture')
+  if not isinstance(g,dict) or set(g)-allowed:raise ValueError('Unknown authored gesture field')
+  if any(not isinstance(g.get(k),list) or any(not isinstance(x,str) or not x for x in g[k]) for k in ('grabNext','releaseNext')):
+   raise ValueError('Authored gesture routes must be explicit ordered node ID lists')
+  if any(type(g.get(k)) is not bool for k in ('embeddedStool','settled','restoreOnRelease')):
+   raise ValueError('Authored gesture contact and settle flags must be explicit booleans')
+  if any(k in g and type(g[k]) is not bool for k in ('releaseViaFrames','restorePreviousOnSettle')):
+   raise ValueError('Authored optional gesture flags must be booleans')
+  if any(k in g and (not isinstance(g[k],str) or not g[k]) for k in ('grabImmediate','entrySourceSha256','restoreSourceSha256')):raise ValueError('Authored gesture source and immediate identifiers must be nonempty strings')
+  if g.get('restoreSourceSha256') and g['releaseNext'] and not g.get('releaseViaFrames'):raise ValueError('Authored drawn release with restore source requires releaseViaFrames')
+  if g['embeddedStool'] and not g.get('grabImmediate'):raise ValueError('Authored seated gesture needs its same-pose immediate detached node')
 core=json.loads((B/'relocation/core-transition-contract-v3.json').read_text())
-nodes,pickSources=compile_pickup(B,json.loads((B/'integration/inventory.json').read_text()),core,extra_detached=detached,extra_recovery=recovery,ordinary_frames=ready)
+nodes,pickSources=compile_pickup(B,json.loads((B/'integration/inventory.json').read_text()),core,extra_detached=detached,extra_recovery=recovery,ordinary_frames=ready,authored_pickup=authoredPickup)
 for h,f in pickSources.items():sources[h]=B.parent/f['source']
 
 # New pages have their own names; no duplication/repacking of base textures.
@@ -271,9 +298,40 @@ for name,n in nodes.items():
  id='v2-'+name
  if id in baseIds:continue
  p=add(id,[n],'gesture');p['gesture']=n['gesture']
+if authoredPickup:
+ # Retain old nodes for their existing internal references, but remove the old
+ # entry binding. Both consumers must resolve one authoritative source entry.
+ replaceEntries=set(authoredPickup['replaceEntrySources'])
+ newEntryIds={row['id'] for row in authoredPickup['nodes'] if row['gesture'].get('entrySourceSha256')}
+ for p in packages+newPackages:
+  g=p.get('gesture')
+  if g and g.get('entrySourceSha256') in replaceEntries and p['id'] not in newEntryIds:g.pop('entrySourceSha256')
 # Existing actions superseded by new authored performances cannot win shortest-path selection.
 replaced={p['action'] for p in newPackages if p.get('action')}
 packages=[p for p in packages if p.get('action') not in replaced or replacementActions is None and p.get('action')=='tap-response' and p['entryPose']!='upright-v2:closed']+newPackages
+if authoredPickup:
+ allIds={};entryIds={};authoredIds={row['id'] for row in authoredPickup['nodes']}
+ seatedSources={f['sha256'] for p in packages if not p.get('gesture') or p['gesture']['embeddedStool'] for f in p['frames']}
+ for p in packages:
+  if p['id'] in allIds:raise ValueError('Duplicate final pickup/package ID: '+p['id'])
+  allIds[p['id']]=p
+  g=p.get('gesture',{});entry=g.get('entrySourceSha256')
+  if entry:
+   if entry in entryIds:raise ValueError('Ambiguous final pickup source entry: '+entry)
+   entryIds[entry]=p['id']
+ for p in packages:
+  g=p.get('gesture')
+  if not g:continue
+  targets=[*g['grabNext'],*g['releaseNext']]+([g['grabImmediate']] if g.get('grabImmediate') else [])
+  if any(t not in allIds or not allIds[t].get('gesture') for t in targets):raise ValueError('Dangling/non-gesture pickup route: '+p['id'])
+  if g.get('grabImmediate') and allIds[g['grabImmediate']]['gesture']['embeddedStool']:raise ValueError('Immediate pickup counterpart still contains stool: '+p['id'])
+  if p['id'] in authoredIds:
+   if g.get('entrySourceSha256') and (g['embeddedStool'] or g['entrySourceSha256'] not in seatedSources):raise ValueError('Authored entry must detach an actual seated source: '+p['id'])
+   if g.get('restoreSourceSha256') and g['restoreSourceSha256'] not in seatedSources:raise ValueError('Authored restore source has no actual seated counterpart: '+p['id'])
+   restores=g['restoreOnRelease'] and bool(g.get('restoreSourceSha256')) and not g.get('releaseViaFrames')
+   lands=bool(g['releaseNext']) and allIds[g['releaseNext'][-1]]['gesture']['settled']
+   if not (g['settled'] or restores or lands):raise ValueError('Authored release must restore its source or terminate settled: '+p['id'])
+   if g.get('releaseViaFrames') and not lands:raise ValueError('Authored release must terminate at a settled source: '+p['id'])
 for item in provenance:
  if sha(B/item['baseSource'] if 'baseSource' in item else R/item['source'])!=item['sha256']:raise ValueError('Source changed while compiling; retry after owner freezes source')
 result={**base,'candidateOnly':True,'packages':packages};(OUT/'bundle.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
