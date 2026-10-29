@@ -2,7 +2,7 @@ import React from 'react';
 import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 
 /** Pointer ownership is local presentation; never sends cancellation or permission commands. */
-export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | null>) {
+export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | null>, reviewPointer = false, beforeNativeLift?: () => void) {
   const [tapRevision, setTapRevision] = React.useState(0);
   const [phase, setPhase] = React.useState<'rest' | 'lifting' | 'landing'>('rest');
   const [pinned, setPinned] = React.useState(false);
@@ -85,7 +85,7 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
     togglePinned: async () => { try { const result = await invokeDesktop('desktop_set_window_pinned', { pinned: !pinned }); setPinned(result?.pinned ?? false); } catch(error) { setNotice(String(error)); } },
     handlers: {
       onPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
-        if (!isElectronShell() || event.button !== 0 || !hit(event.clientX, event.clientY)) return;
+        if ((!isElectronShell() && !reviewPointer) || event.button !== 0 || !hit(event.clientX, event.clientY)) return;
         event.preventDefault(); resetPassthrough(); pointer.current = { id: event.pointerId, x: event.screenX, y: event.screenY, moving: false };
         event.currentTarget.setPointerCapture(event.pointerId);
       },
@@ -93,7 +93,7 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
         const current = pointer.current;
         if (!current || current.id !== event.pointerId) return;
         if (!current.moving && Math.hypot(event.screenX-current.x,event.screenY-current.y) < 3) return;
-        if (!current.moving) { current.moving = true; send('start'); setPhase('lifting'); }
+        if (!current.moving) { current.moving = true; beforeNativeLift?.(); send('start'); setPhase('lifting'); }
         send('move');
       },
       onPointerUp: end, onPointerCancel: end, onLostPointerCapture: end,

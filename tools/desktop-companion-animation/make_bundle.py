@@ -2,6 +2,7 @@
 """Collect explicit authored packages into a flat local-file bundle; never promote review status."""
 import argparse
 import json
+import hashlib
 from pathlib import Path
 import shutil
 
@@ -13,6 +14,7 @@ rows = json.loads(args.inventory.read_text())
 args.output.mkdir(parents=True, exist_ok=True)
 packages = []
 ids = set()
+atlases = {}
 for index, row in enumerate(rows):
     source = (args.inventory.parent / row['package']).resolve()
     package = json.loads(source.read_text())
@@ -24,8 +26,12 @@ for index, row in enumerate(rows):
         origin = (source.parent / page['file']).resolve()
         if not origin.is_relative_to(source.parent):
             raise ValueError('Atlas escapes source package')
-        name = f'action-{index:03d}-atlas-{page_index:03d}.png'
-        shutil.copy2(origin, args.output / name)
+        digest = hashlib.sha256(origin.read_bytes()).hexdigest()
+        name = atlases.get(digest)
+        if name is None:
+            name = f'action-{index:03d}-atlas-{page_index:03d}.png'
+            shutil.copy2(origin, args.output / name)
+            atlases[digest] = name
         page['file'] = name
         page.pop('image', None)
     packages.append(package)

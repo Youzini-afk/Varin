@@ -43,8 +43,10 @@ export function frameAt(asset, timeMs) {
 
 /** Latest presentation request wins; it never sends application commands. */
 export class CompanionPlayback {
-  constructor(assets) { this.assets = assets; this.current = null; this.timeMs = 0; this.pending = null; this.path = []; this.blocker = null; this.hold = false; this.canDisplay = () => true; this.loading = null; this.nextStartMs = 0; }
+  constructor(assets) { this.assets = assets; this.current = null; this.timeMs = 0; this.pending = null; this.path = []; this.blocker = null; this.hold = false; this.canDisplay = () => true; this.loading = null; this.nextStartMs = 0; this.gesture = null; this.latestIntent = null; this.worldEvent = null; this.worldRevision = 0; }
   request(id, { urgent = false } = {}) {
+    this.latestIntent = id;
+    if (this.gesture) return { status: 'ready', clips: [] }; // Host facts keep updating; only its latest artistic intent waits.
     this.loading = null; this.nextStartMs = 0;
     if (this.current?.id === id) {
       this.pending = null; this.path = []; this.hold = false; this.blocker = null;
@@ -54,6 +56,91 @@ export class CompanionPlayback {
     this.path = []; // Latest artistic intent wins, not application events.
     this.hold = false;
     return this.plan();
+  }
+  emitWorld(phase) { this.worldEvent = { phase, packageId: this.current?.id ?? null, revision: ++this.worldRevision }; }
+  queueGesture(ids) {
+    if (ids.some(id => !usable(this.assets.find(asset => asset.id === id)))) {
+      this.blocker = 'Missing visually accepted gesture continuation'; this.path = []; this.hold = true; return false;
+    }
+    this.path = [...ids]; this.loading = null; this.nextStartMs = 0; this.hold = false; this.blocker = null; return true;
+  }
+  alignDisplayed(displayed) {
+    const asset = displayed && this.assets.find(item => item.id === displayed.packageId);
+    const frame = asset?.frames[displayed.exposure];
+    if (!asset || !frame || !this.canDisplay(asset.id)) return;
+    this.current = asset; this.timeMs = frame.startMs;
+  }
+  grab(displayed) {
+    this.alignDisplayed(displayed);
+    if (this.gesture && !this.current?.gesture) { this.gesture = null; this.path = []; this.loading = null; }
+    if (this.gesture) {
+      this.gesture.released = false; this.gesture.restoreMs = null; this.gesture.restoreNext = null;
+      if (this.gesture.worldStarted) this.emitWorld('lift');
+      return this.queueGesture(this.current.gesture?.grabNext ?? []);
+    }
+    const source = this.current && frameAt(this.current, this.timeMs)?.sha256;
+    const entry = source && this.assets.find(asset => usable(asset) && asset.gesture?.entrySourceSha256 === source);
+    if (!entry) { this.blocker = 'No reviewed same-exposure pickup entry for this drawing'; return false; }
+    this.gesture = { previous: this.current, previousTime: this.timeMs, released: false, restoreMs: null, worldStarted: false };
+    this.pending = null;
+    if (!this.queueGesture([entry.id, ...entry.gesture.grabNext])) { this.gesture = null; return false; }
+    this.advance(); return true;
+  }
+  release(displayed) {
+    if (!this.gesture || this.gesture.released) return;
+    this.alignDisplayed(displayed);
+    this.gesture.released = true;
+    if (!this.current?.gesture) { this.finishGesture(true); return; }
+    if (!this.gesture.worldStarted) { this.finishGesture(true); return; }
+    this.emitWorld('landing');
+    const restoreSource = this.current.gesture?.restoreSourceSha256;
+    if (restoreSource) {
+      const candidates = [this.gesture.previous, ...this.assets.filter(asset => !asset.gesture && usable(asset))];
+      const target = candidates.find(asset => asset.frames.some(frame => frame.sha256 === restoreSource));
+      const frame = target?.frames.find(item => item.sha256 === restoreSource);
+      if (target && frame) { this.gesture.previous = target; this.gesture.previousTime = frame.startMs; }
+      else {
+        const seated = this.assets.find(asset => usable(asset) && asset.gesture?.embeddedStool && asset.frames.some(item => item.sha256 === restoreSource));
+        if (seated) this.gesture.restoreNext = [seated.id, ...seated.gesture.releaseNext];
+        else { this.blocker = 'No actual seated counterpart installed for this recovery drawing'; this.hold = true; this.path = []; return; }
+      }
+    }
+    if (this.current.gesture?.restoreOnRelease || restoreSource) {
+      this.path = []; this.loading = null; this.gesture.restoreMs = 100;
+    } else this.queueGesture(this.current.gesture?.releaseNext ?? []);
+  }
+  finishGesture(restorePrevious = false) {
+    const gesture = this.gesture;
+    if (!gesture) return;
+    if (restorePrevious && this.current?.id !== gesture.previous.id) {
+      gesture.restoring = true;
+      this.path = [gesture.previous.id]; this.loading = null; this.nextStartMs = gesture.previousTime;
+      this.advance(); return;
+    }
+    this.gesture = null; this.loading = null; this.path = []; this.hold = false;
+    this.emitWorld('clear'); this.pending = this.latestIntent === this.current?.id ? null : this.latestIntent;
+    if (this.pending) this.plan();
+  }
+  tickGesture(elapsedMs) {
+    let remaining = elapsedMs;
+    while (this.gesture && remaining > 0 && !this.hold && !this.loading) {
+      if (this.gesture.restoreMs !== null) {
+        const step = Math.min(remaining, this.gesture.restoreMs);
+        this.gesture.restoreMs -= step; remaining -= step;
+        if (this.gesture.restoreMs === 0) {
+          if (this.gesture.restoreNext) { const next = this.gesture.restoreNext; this.gesture.restoreNext = null; this.gesture.restoreMs = null; this.queueGesture(next); this.advance(); }
+          else this.finishGesture(true);
+        }
+        continue;
+      }
+      const step = Math.min(remaining, Math.max(0, this.current.durationMs - this.timeMs));
+      this.timeMs += step; remaining -= step;
+      if (this.timeMs < this.current.durationMs) break;
+      if (this.path.length) this.advance();
+      else if (this.gesture.released && this.current.gesture?.settled) this.finishGesture();
+      else break; // Actual authored airborne hold; never manufacture a new pose.
+    }
+    if (!this.gesture && remaining > 0) this.tick(remaining);
   }
   target() { return this.assets.find(a => a.id === this.pending); }
   /** Only explicitly authored safe drawings may exit before a clip's end. */
@@ -100,11 +187,17 @@ export class CompanionPlayback {
     this.loading = null; this.path.shift();
     const next = this.assets.find(a => a.id === nextId);
     this.current = next; this.timeMs = this.nextStartMs; this.nextStartMs = 0; this.hold = false;
+    if (this.gesture?.restoring && next.id === this.gesture.previous.id) { this.finishGesture(); return true; }
+    if (this.gesture && next.gesture) {
+      if (!this.gesture.worldStarted) { this.gesture.worldStarted = true; this.emitWorld('lift'); }
+      if (next.gesture.embeddedStool) this.emitWorld('clear');
+    }
     if (next.id === this.pending) this.pending = null;
     return true;
   }
   tick(elapsedMs) {
     if (!Number.isFinite(elapsedMs) || elapsedMs < 0) throw new Error('elapsedMs must be finite and non-negative');
+    if (this.gesture) { this.tickGesture(elapsedMs); return; }
     let remaining = elapsedMs;
     while (this.current && !this.hold && !this.loading && remaining > 0) {
       // Check every entered exposure, not only the final frame after a slow display tick.

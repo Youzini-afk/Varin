@@ -291,5 +291,19 @@
         "scope": "OBSERVE independent tab17,320px1x; local tap only"
       }
     ]
+  },
+  "relocation": {
+    "contractSha256": "4c4a2dfa76de5849697487cbe2ee93d10f6d7ed7a757d42b4e79fdbc20d9f717",
+    "actualOrdinarySourceCoverage": {
+      "mapped": 134,
+      "total": 134
+    },
+    "coreLedger": "relocation/core-acceptance-ledger-v1.json",
+    "entryLedgers": "Per-entry acceptance records in frozen transition-contract-v7/relocation.source.json",
+    "controllerVerification": {
+      "releaseRegrabCases": 12288,
+      "failures": 0
+    },
+    "scope": "Finite source/group visual review plus real authored-path controller checks. Not a claim of native OS drag/window QA or uniformly final smoothness."
   }
 }

@@ -15,6 +15,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const review = new URLSearchParams(window.location.search).get('review') === '1';
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [threads, setThreads] = React.useState<ThreadSummary[]>([]);
+  const [threadListUnavailable, setThreadListUnavailable] = React.useState(false);
   const [selected, setSelected] = React.useState<{ generation: number; identity: ThreadIdentity } | null>(null);
   const [snapshot, setSnapshot] = React.useState<ThreadSnapshot>();
   const previousRun = React.useRef<{ id: string; state: string } | null>(null);
@@ -29,7 +30,10 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [imageLibrary, setImageLibrary] = React.useState<Record<string, ImageBitmap[]>>({});
   const imageCache = React.useRef<Record<string, ImageBitmap[]>>({});
   const atlasReader = React.useRef<((name: string) => Promise<ImageBitmap>) | null>(null);
-  const loadingImages = React.useRef(new Map<string, Promise<void>>());
+  const loadingImages = React.useRef(new Map<string, object>());
+  const decodedPages = React.useRef(new Map<string, { promise: Promise<ImageBitmap>; image?: ImageBitmap }>());
+  const wantedImages = React.useRef(new Set<string>());
+  const wantedAtlasFiles = React.useRef(new Set<string>());
   const [playing, setPlaying] = React.useState(false);
   const [manualReview, setManualReview] = React.useState(false);
   const [exposure, setExposure] = React.useState(0);
@@ -53,14 +57,17 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     : hasActiveWork && !visualIntent.state?.startsWith('E') ? 'external-wait' : preferredAction;
   const localAllowed = !reviewRoute && !manualReview && !['W02','W03','E01','E02','E04','E05','E06'].includes(intent.state ?? '');
   const displayAction = localAction && localAllowed && assetList.some(item => item.action === localAction && item.reviewStatus === 'accepted') ? localAction : visualAction;
-  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary));
+  const canvas = React.useRef<HTMLCanvasElement>(null);
+  const beforeNativeLift = React.useRef<() => void>(() => {});
+  const companionWindow = useCompanionWindow(canvas, review, () => beforeNativeLift.current());
+  const displayedDrawing = React.useRef<{ packageId: string; exposure: number } | null>(null);
+  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current });
   React.useEffect(() => {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'understood') setLiveAnswer(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === localAction) setLocalAction(null);
   }, [automatic.finished, automatic.packageId, assetList, localAction]);
-  const canvas = React.useRef<HTMLCanvasElement>(null);
-  const companionWindow = useCompanionWindow(canvas);
+
   const seenTap = React.useRef(0);
   React.useEffect(() => {
     if (!companionWindow.tapRevision || seenTap.current === companionWindow.tapRevision) return;
@@ -79,6 +86,15 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       .catch(cause => { if (!abort.signal.aborted) setConnection(String(cause)); });
     return () => abort.abort();
   }, [apis.threads, generation]);
+  React.useEffect(() => {
+    if (!controlsOpen || !apis.threads) return;
+    const abort = new AbortController();
+    setThreadListUnavailable(false);
+    void apis.threads.list(undefined, abort.signal).then(rows => { if (!abort.signal.aborted) setThreads(rows); })
+      .catch(() => { if (!abort.signal.aborted) setThreadListUnavailable(true); });
+    // Refresh discovery only. Selection and its read-only projection remain authoritative.
+    return () => abort.abort();
+  }, [controlsOpen, apis.threads, generation]);
   React.useEffect(() => {
     if (selected) setLocalAction(null);
     setSnapshot(undefined); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null);
@@ -104,7 +120,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   }, [apis.threads, selected, generation]);
   React.useEffect(() => () => {
     loadGeneration.current++;
-    for (const images of Object.values(imageCache.current)) for (const picture of images) picture.close();
+    for (const page of decodedPages.current.values()) page.image?.close();
+    decodedPages.current.clear();
   }, []);
   const installBundle = async (raw: unknown, readImage: (name: string) => Promise<ImageBitmap>, allowCandidates: boolean) => {
     ++loadGeneration.current;
@@ -113,7 +130,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       const data = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
       const nextPackages = Array.isArray(data.packages) ? data.packages.map(value => readCompanionPackage(value, allowCandidates)) : [readCompanionPackage(raw, allowCandidates)];
       if (!nextPackages.length || new Set(nextPackages.map(item => item.id)).size !== nextPackages.length) throw new Error('Empty bundle or duplicate sequence identity');
-      for (const images of Object.values(imageCache.current)) for (const image of images) image.close();
+      for (const page of decodedPages.current.values()) page.image?.close();
+      decodedPages.current.clear();
       imageCache.current = {}; loadingImages.current.clear(); atlasReader.current = readImage;
       setImageLibrary({}); setAssetList(nextPackages);
       setAsset(allowCandidates ? nextPackages[0] : undefined); setExposure(0);
@@ -123,9 +141,24 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   // While decoding, the controller keeps the last valid drawing; Host facts update immediately.
   React.useEffect(() => {
     const wanted = new Set([asset?.id, automatic.packageId, automatic.neededPackageId].filter((id): id is string => !!id));
+    for (const id of [...wanted]) {
+      const parent = assetList.find(item => item.id === id);
+      if (!parent || parent.gesture) continue;
+      for (const frame of parent.frames) {
+        const entry = frame.sha256 && assetList.find(item => item.reviewStatus === 'accepted' && item.gesture?.entrySourceSha256 === frame.sha256);
+        if (entry) { wanted.add(entry.id); for (const next of entry.gesture!.grabNext.slice(0,2)) wanted.add(next); }
+      }
+    }
+    wantedImages.current = wanted;
+    // A package may return while its old page promises are still settling. Invalidate
+    // the old job now so it cannot publish closed pages or delete its replacement.
+    for (const id of loadingImages.current.keys()) if (!wanted.has(id)) loadingImages.current.delete(id);
+    const wantedPages = new Set(assetList.filter(item => wanted.has(item.id)).flatMap(item => item.pages.map(page => page.file)));
+    wantedAtlasFiles.current = wantedPages;
+    for (const [file, page] of decodedPages.current) if (!wantedPages.has(file) && page.image) { page.image.close(); decodedPages.current.delete(file); }
     let evicted = false;
     for (const [id, images] of Object.entries(imageCache.current)) if (!wanted.has(id)) {
-      images.forEach(image => image.close()); delete imageCache.current[id]; evicted = true;
+      delete imageCache.current[id]; evicted = true;
     }
     if (evicted) setImageLibrary({ ...imageCache.current });
     for (const id of wanted) {
@@ -133,20 +166,36 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       const sequence = assetList.find(item => item.id === id), reader = atlasReader.current;
       if (!sequence || !reader) continue;
       const revision = loadGeneration.current;
-      const job = (async () => {
+      const job = {};
+      loadingImages.current.set(id, job);
+      void (async () => {
+        const isCurrent = () => revision === loadGeneration.current && loadingImages.current.get(id) === job;
         const images: ImageBitmap[] = [];
         try {
-          for (const page of sequence.pages) images.push(await reader(page.file));
+          for (const page of sequence.pages) {
+            if (!isCurrent()) return;
+            let cached = decodedPages.current.get(page.file);
+            if (!cached) {
+              const created: { promise: Promise<ImageBitmap>; image?: ImageBitmap } = { promise: reader(page.file) };
+              created.promise = created.promise.then(image => {
+                if (revision !== loadGeneration.current || !wantedAtlasFiles.current.has(page.file)) { image.close(); throw new Error('Superseded artwork load'); }
+                created.image = image; return image;
+              }).catch(cause => { if (decodedPages.current.get(page.file) === created) decodedPages.current.delete(page.file); throw cause; });
+              decodedPages.current.set(page.file, created); cached = created;
+            }
+            const image = await cached.promise;
+            if (!isCurrent()) return;
+            images.push(image);
+          }
           for (const frame of sequence.frames) {
             const image = images[frame.page]!;
             if (frame.rect[0] + frame.rect[2] > image.width || frame.rect[1] + frame.rect[3] > image.height) throw new Error('Atlas region exceeds actual image');
           }
-          if (revision !== loadGeneration.current) { images.forEach(image => image.close()); return; }
+          if (!isCurrent() || !wantedImages.current.has(id)) return;
           imageCache.current[id] = images; setImageLibrary({ ...imageCache.current });
-        } catch (cause) { images.forEach(image => image.close()); if (revision === loadGeneration.current) setError(String(cause)); }
-        finally { if (revision === loadGeneration.current) loadingImages.current.delete(id); }
+        } catch (cause) { if (isCurrent() && wantedImages.current.has(id)) setError(String(cause)); }
+        finally { if (isCurrent()) loadingImages.current.delete(id); }
       })();
-      loadingImages.current.set(id, job);
     }
   }, [asset?.id, assetList, automatic.packageId, automatic.neededPackageId, imageLibrary]);
   const loadFiles = async (files: FileList | null) => {
@@ -185,16 +234,40 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       if (current && current.id !== asset?.id) setAsset(current);
     }
   }, [automatic.packageId, assetList, asset?.id, playing, manualReview]);
-  React.useEffect(() => {
-    if (!asset || pictures.length !== asset.pages.length) return;
+  const drawActualFrame = (sequence: CompanionPackage, images: ImageBitmap[], exposure: number) => {
     const node = canvas.current, context = node?.getContext('2d');
-    if (!node || !context) return;
-    [node.width, node.height] = asset.canvas;
-    const frame = asset.frames[displayedExposure] ?? asset.frames[0]!;
+    if (!node || !context || images.length !== sequence.pages.length) return;
+    [node.width, node.height] = sequence.canvas;
+    const frame = sequence.frames[exposure] ?? sequence.frames[0]!;
     context.clearRect(0, 0, node.width, node.height);
-    context.drawImage(pictures[frame.page]!, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
+    context.drawImage(images[frame.page]!, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
+    displayedDrawing.current = { packageId: sequence.id, exposure };
     companionWindow.refreshHitMask();
+  };
+  // Swap to the predecoded same-exposure drawing before sending native movement,
+  // rather than letting an embedded stool travel for a React/animation frame.
+  beforeNativeLift.current = () => {
+    const next = automatic.beginGrab(displayedDrawing.current);
+    const sequence = next && assetList.find(item => item.id === next.packageId);
+    const images = next && imageCache.current[next.packageId];
+    if (sequence && images && next) { drawActualFrame(sequence, images, next.exposure); setAsset(sequence); setExposure(next.exposure); }
+  };
+  React.useEffect(() => {
+    if (asset) drawActualFrame(asset, pictures, displayedExposure);
   }, [asset, pictures, displayedExposure, companionWindow.refreshHitMask]);
+  const handledWorld = React.useRef(0);
+  React.useEffect(() => {
+    const event = automatic.worldEvent;
+    if (!event || handledWorld.current === event.revision) return;
+    if (event.phase !== 'clear') {
+      const drawn = assetList.find(item => item.id === displayedDrawing.current?.packageId);
+      if (!drawn?.gesture || drawn.gesture.embeddedStool) return;
+    }
+    handledWorld.current = event.revision; companionWindow.worldStool(event.phase);
+  }, [automatic.worldEvent, asset?.id, assetList, displayedExposure, companionWindow.worldStool]);
+  React.useEffect(() => {
+    if (companionWindow.phase === 'landing' && !automatic.gestureActive) companionWindow.settle();
+  }, [automatic.gestureActive, companionWindow.phase]);
   React.useEffect(() => {
     if (!playing || !asset) return;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -235,7 +308,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         {catalog.states.map(state => <option key={state.id} value={state.id}>{state.id} {state.label}</option>)}
       </select></label>
       <input type="file" multiple accept=".json,.png" aria-label="Select bundle or sequence JSON and PNG atlases" onChange={event => void loadFiles(event.target.files)} />
-      {assetList.length > 1 && <select aria-label="Review an actual package in the bundle" value={asset?.id ?? ''} onChange={event => { setManualReview(true); setPlaying(false); setExposure(0); setAsset(assetList.find(item => item.id === event.target.value)); }}>{assetList.map(item => <option key={item.id} value={item.id}>{item.id}</option>)}</select>}
+      {assetList.length > 1 && <select aria-label="Review an actual package in the bundle" value={asset?.id ?? ''} onChange={event => { setManualReview(true); setPlaying(false); setExposure(0); setAsset(assetList.find(item => item.id === event.target.value)); }}>{asset?.gesture && <option value={asset.id}>Pointer movement · internal drawing</option>}{assetList.filter(item => !item.gesture).map(item => <option key={item.id} value={item.id}>{item.id}</option>)}</select>}
       {asset && <><p>{asset.id} · {asset.stage ?? 'unstated stage'} · {asset.warning}</p>
         <button onClick={() => { setManualReview(true); setExposure(0); setPlaying(value => !value); }}>{playing ? 'Stop' : 'Replay authored timing'}</button>
         <button onClick={() => { setManualReview(true); setPlaying(false); setExposure(Math.min(asset.frames.length - 1, displayedExposure + 1)); }}>Next exposure</button>
@@ -250,6 +323,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         const value: ThreadIdentity = { runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id };
         return <option key={JSON.stringify(value)} value={JSON.stringify(value)}>{thread.title || thread.thread_id} / {branch.branch_id}</option>;
       }))}</select>
+      {threadListUnavailable && <p role="status">{t('companion.unavailable')}</p>}
       <p role="status">{review ? connection : health === 'current' ? t('companion.observing') : health === 'unknown' || connection.includes('Error') ? t('companion.unavailable') : t('companion.noThread')}</p>{review && automatic.blocker && <p>Artwork: {automatic.blocker}</p>}{review && <p>Host presentation: {intent.state ?? 'Unclassified execution'} · {intent.reason}</p>}
       {review && snapshot && <p>Run: {run?.state ?? 'No active run'} · cancellation requested: {String(run?.cancel_requested ?? false)} · nonterminal operations: {pending.length} · unknown effects: {unknownEffects.length}</p>}
       <button disabled={!identity || !isElectronShell()} onClick={() => { if (identity) void invokeDesktop('desktop_focus_main_window', identity); }}>{t('companion.openThread')}</button>

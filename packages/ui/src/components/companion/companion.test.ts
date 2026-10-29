@@ -94,3 +94,22 @@ it('acknowledges only a newly observed actual clarification answer, not cancella
   expect(newlyAnsweredQuestion(new Set(), snap({ operations: [answered] }))).toBeNull();
   expect(newlyAnsweredQuestion(new Set(['q']), snap({ operations: [{ ...answered, outcome: 'cancelled', result: { kind: 'control', value: { cancelled: true } } }] }))).toBeNull();
 });
+
+it('uses the actually displayed pickup frame, keeps latest intent, and restores same exposure on early release', () => {
+  const asset = (id: string, sha: string): PlaybackAsset => ({ id, entryPose: 'seat', exitPose: 'seat', geometryReference: 'shared', stage: 'motion-candidate', reviewStatus: 'accepted', canvas: [16,16], pages: [{file:'atlas.png'}], durationMs: 100, frames: [{page:0,rect:[0,0,8,8],offset:[0,0],startMs:0,durationMs:100,sha256:sha}] });
+  const seated = asset('seated','actual'), work = asset('work','work');
+  const entry = {...asset('detached','detached'),gesture:{entrySourceSha256:'actual',grabNext:['carry'],releaseNext:[],embeddedStool:false,settled:false,restoreOnRelease:true}};
+  const carry = {...asset('carry','carry'),gesture:{grabNext:[],releaseNext:['land'],embeddedStool:false,settled:false,restoreOnRelease:false}};
+  const land = {...asset('land','land'),gesture:{grabNext:['carry'],releaseNext:[],embeddedStool:true,settled:true,restoreOnRelease:false}};
+  const p = new CompanionPlayback([seated,entry,carry,land,work]);p.request('seated');
+  expect(p.grab({packageId:'seated',exposure:0})).toBe(true); expect(p.current?.id).toBe('detached');
+  p.release({packageId:'detached',exposure:0});p.tick(100);expect(p.current?.id).toBe('seated');expect(p.gesture).toBeNull();
+  p.grab({packageId:'seated',exposure:0});p.tick(100);expect(p.current?.id).toBe('carry');
+  p.request('work');expect(p.current?.id).toBe('carry'); // Host presentation never steals the drag canvas.
+  p.release({packageId:'carry',exposure:0});p.release();p.tick(200);expect(p.current?.id).toBe('work');expect(p.gesture).toBeNull();
+  carry.gesture = { ...carry.gesture, restoreSourceSha256: 'work' } as typeof carry.gesture;
+  p.request('seated');p.tick(100);p.grab({packageId:'seated',exposure:0});p.tick(100);
+  p.release({packageId:'carry',exposure:0});
+  p.canDisplay = id => id !== 'work';p.tick(100);expect(p.current?.id).toBe('carry');expect(p.loading).toBe('work');
+  p.canDisplay = () => true;p.advance();expect(p.current?.id).toBe('work');expect(p.gesture).toBeNull(); // Exact seated counterpart, not the original pre-grab angle.
+});
