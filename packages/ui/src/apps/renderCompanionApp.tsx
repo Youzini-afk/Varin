@@ -423,7 +423,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       }
       if (!abort.signal.aborted && loadGeneration.current === initialGeneration) { setBundledEpoch(digest); await installBundle(raw, async name => {
         // Decoder has already restricted each page to a basename; no arbitrary URLs/paths.
-        const image = await fetch(new URL(encodeURIComponent(name), base), { signal: abort.signal });
+        const atlasUrl = new URL(encodeURIComponent(name), base);
+        atlasUrl.searchParams.set('epoch', digest);
+        const image = await fetch(atlasUrl, { signal: abort.signal });
         if (!image.ok) throw new Error(`Bundled atlas unavailable: ${name}`);
         return createImageBitmap(await image.blob());
       }, directorReview); }
