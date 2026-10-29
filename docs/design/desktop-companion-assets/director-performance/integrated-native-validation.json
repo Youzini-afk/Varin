@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-29",
+  "scope": "Finite Linux native GUI QA via CUA/Sky; no builds/source/Git/staging/public selection changes or real model tasks",
+  "commit": "ab677829dd9caa421d12f8166ed44015e15614e1",
+  "candidateSha256": "5729d265051fefca4e11deec46980d18aa9f7041d265abb28aa76d0c8f144ed9",
+  "observed": [
+    "Isolated native launch succeeded; observed terminal Stopped message before fg %1.",
+    "Candidate checkbox displayed 5729d265051f; actual Host explicitly read-only/empty and fixture explicitly non-real.",
+    "Stage-only toggle top-aligns full 360px scene with only small restore overlay. Escape restores controls.",
+    "Three leads A/B/C: rear A visible, front B/C clear, no extra Bot root lead; own smaller A/C children in team-active fixture.",
+    "Physical right-edge drag suppressed team during landing, restored stool/team; returning drag successful. Edge labels truncate and children consolidate.",
+    "B authorization and C question separately labelled; B-cleared/C-pending retains C question, with C report visible.",
+    "Unknown scenario marks all leads unknown; recovery restores observed work/result states.",
+    "Returning actual Host removes all fixture actors and laptop closes naturally.",
+    "Real Sky consecutive taps produced visible facial response with laptop remaining closed.",
+    "Actual Host idle sampled over more than 60 seconds after final tap; no hair-touch captured.",
+    "Companion Close removed companion/decorative windows; main normal close removed all Varin windows. Terminal returned prompt; log graceful shutdown complete.",
+    "Settings restored byte-exact after process exit; default profile not changed."
+  ],
+  "notClaimed": [
+    "Hair-touch actual playback or no-replay behavior: inconclusive screenshot timing, not certified pass/fail.",
+    "Short hover/first-tap peak; exact response frames.",
+    "Pixel-exact rear alpha overlap: rear visible but outside opaque silhouette in sampled layouts.",
+    "All approach/return intermediates, child-end/intake/result-specific permutations.",
+    "Decorative input ownership exhaustively certified; no fixture IDs navigated.",
+    "Release, full CI, Windows/macOS or all-frame certification."
+  ],
+  "blockers": [],
+  "screenshots": "Viewed through CUA only; no saved screenshot files claimed.",
+  "log": "/workspace/shared/varin-native-validation/gui-companion-integrated-review.log",
+  "logSha256": "1eb9c17def60699e14767b5cdb2e03b34df7074b059a3c716cef10d62552b054",
+  "restoredSettingsSha256": "87ee5fe4ec53a5fd4226d8ca790df57bd94e82c597dc8b72e94a6353a39bdcab"
+}

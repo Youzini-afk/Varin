@@ -1,6 +1,6 @@
 # Varin 主管式桌宠：项目台、负责人和子任务精灵
 
-状态：2026-10-29，用户最新角色方向已确认；主管式投影与视觉原型制作中，**旧的项目工具 → Varin 身体动作直连不作为最终默认表现推广**。本文覆盖[多任务关注方案](desktop-companion-multitask-attention.md)中的角色和表现叙事；其只读全局事实、异步身份、完整待处理与可访问入口仍然保留。
+状态：2026-10-29，用户最新角色方向已确认；Bot 统筹 / Agent 提醒投影、B 2.5D 小队与本地互动已接入正常消费链，**旧的项目工具 → Varin 身体动作直连不作为最终默认表现推广**。本文覆盖[多任务关注方案](desktop-companion-multitask-attention.md)中的角色和表现叙事；其只读全局事实、异步身份、完整待处理与可访问入口仍然保留。
 
 完整的管理、异常与日常演员表演见[主管动作矩阵](desktop-companion-director-performance.md)，包括逐动作 E/H/X、主 agent/子队分工、现有源复用与真实补画缺口。
 
@@ -37,7 +37,7 @@ Varin：接待、协调、跟进、递交待决事项、呈现已确认结果
 ## 2. 主 agent：同一家族的项目负责人，不再创造第二个 Varin
 
 - 身份源是已有 `ThreadAttentionBranch.threadId + avatar`，调用 `agentAvatarForIdentity(threadId, avatar)`；与侧栏/聊天中同一线程头像一致。branch 和 currentRun 标定该项目当前执行，不能伪装为 child execution。
-- 头像主体、脸和用户选定的色形保留；只在桌宠项目台加**负责人角色外观**。设计比较过短肩领/短披肩与菱形扣、分派斜带与侧文书夹、双翻领与肩签；用户已认可第一种概念方向，但混合头像的通用套装存在穿模，正逐头像修正。生产适配仍须依据 24px 左右的剪影和遮挡关系审阅，不靠颜色或皇冠区分，也不改头像库的全局默认值。
+- 头像主体、脸和用户选定的色形保留；只在桌宠项目台加**负责人角色外观**。设计比较过短肩领/短披肩与菱形扣、分派斜带与侧文书夹、双翻领与肩签；用户已认可第一种概念方向，但混合头像的通用套装存在穿模，已逐头像完成当前适配。后续视觉复核仍须依据 24px 左右的剪影和遮挡关系审阅，不靠颜色或皇冠区分，也不改头像库的全局默认值。
 - 子精灵沿既有头像形状，无负责人外套。负责人在项目卡的标题/进度栏旁占固定位置，子队在其下方或外侧扩展，层级由位置与轮廓建立，不把负责人简单放大成第二个桌宠。
 - 无当前 Run 时，真实负责人仍可作为项目身份的静态标记；不显示忙碌、不演派发。新 Run 使用原头像的新执行状态，旧完成回执不能让新执行消失。
 - 负责人角色装饰是此表面的呈现层，不写回用户的 avatar 设置，不创建新 agent profile。
@@ -101,7 +101,7 @@ Varin 接收 A 的结果状态卡，轻指 A 的完成标记；B 主 agent 保�
 
 ## 6. 精确关系：只画真实负责人和真实子队
 
-全局 attention 的 branch 是执行身份，不单凭 parentThreadId 判定角色。新增候选 `botEntries` 从 Host 校验过的 Bot profile entry/revision 提供本体边界，`delegations` 从既有稳定派发关系提供精确父子分支与原始 acceptedCursor；终态移出 CURRENT 不能让项目负责人退化成未知子任务。backend `7fa96e77` 已实现并以 native fixture 验证同事务紧凑 `teamExecutions`，不是未来占位合同。每项包含原 parent thread/branch/run、child operation、execution ID、child thread/branch、原已保存头像、owner state、childRunId/childRunState 及必要 activity。只有 exact relation 才把子请求接到具体父 branch；单独 parentThreadId 仍不足以猜分支归属。
+全局 attention 的 branch 是执行身份，不单凭 parentThreadId 判定角色。只读 `botEntries` 从 Host 校验过的 Bot profile entry/revision 提供本体边界，`delegations` 从既有稳定派发关系提供精确父子分支与原始 acceptedCursor；终态移出 CURRENT 不能让项目负责人退化成未知子任务。backend `7fa96e77` 已实现并以 native fixture 验证同事务紧凑 `teamExecutions`，不是未来占位合同。每项包含原 parent thread/branch/run、child operation、execution ID、child thread/branch、原已保存头像、owner state、childRunId/childRunState 及必要 activity。只有 exact relation 才把子请求接到具体父 branch；单独 parentThreadId 仍不足以猜分支归属。
 
 当前关系范围是现有 Family CURRENT 中每个真实 child 的最新 execution；包括仍需交付/结算的终态成员，不含任意历史。child Run terminal 而 delegated owner 仍 ready 时为 settling；owner 真正 terminal 才离场。原 parentRun 跨 continuation 保留。没有任务输入/正文/工具参数，没有新的调度或写入，沿同一个全局只读 attention 流更新，不为每个项目开 full snapshot/projection。
 每个可见工作席显示实际主 agent，并通过 `portfolio.teams` 的 projectKey 展示自己的真实直接子队（最多三席、每席最多三个可见成员，各有真实 overflow）；空队保持空，不凭负责人工作状态捏造子成员。未覆盖的小队信息显示未读取/未知，不能用装饰精灵凑数。旧父 Run 派发的真实工作可继续属于同一父 branch，精灵按自己的原 parentRun/execution 校验；terminal 所有结局都中性离场，失败保留在结果/待处理。准备失败但未终结可显示温和问题标记。
@@ -122,29 +122,29 @@ Bot 收件只由已核验根的真实新派发事件触发：同 epoch 的前后
 
 `directorPresentation.ts` 先提供独立纯投影原型：输入全局 attention、观察健康、检查身份与本地可见/拖动状态；输出管理 body verb、稳定项目卡、真实主 agent identity、检查镜头、覆盖范围及 exact 短边缘。不导入工具分类，不调用写 API，不生成报告。现有 `attentionCoordinator`、ledger、面板和 child identity 校验继续复用，旧 `projectCompanionIntent` 保留给项目执行详情。
 
-候选 `directorPortfolio.ts` / `useDirectorPortfolio` 将投影映射为最多三个稳定 A/B/C 席位及每个可见项目各自的直接子队；传给非交互场景的是短 opaque key、白名单头像、状态/类别枚举和当前已证实的计数。默认同时发送可读的真实任务短标题 caption（最多 24 个 Unicode 码点，超长末尾省略，空白规范化并清除控制/双向覆盖字符），以纯文本节点绘制；A/B/C 只作稳定席位辅助，不迫使用户打开面板才能知道主体。隐藏任务名选项省略 caption，但不改变席位或执行状态。完整标题与 thread/branch/run/request 身份留在交互 UI 的 legend；短标题绝不作为 HTML、URL、命令或导航目标解释。epoch/cursor 不匹配或健康未知时计数为 unknown，移除工具细节与小队，不把旧事实写成零。项目工具细节按自己的 identity/run 核验，独立于 Varin 身体 cue；身体 cue 只控制管理交接/倾听/汇拢。子任务检查不复制成另一个根项目，也不把其孙任务画到根负责人的直接小队。
+`directorPortfolio.ts` / `useDirectorPortfolio` 将投影映射为最多三个稳定 A/B/C 席位及每个可见项目各自的直接子队；传给非交互场景的是短 opaque key、白名单头像、状态/类别枚举和当前已证实的计数。默认同时发送可读的真实任务短标题 caption（最多 24 个 Unicode 码点，超长末尾省略，空白规范化并清除控制/双向覆盖字符），以纯文本节点绘制；A/B/C 只作稳定席位辅助，不迫使用户打开面板才能知道主体。隐藏任务名选项省略 caption，但不改变席位或执行状态。完整标题与 thread/branch/run/request 身份留在交互 UI 的 legend；短标题绝不作为 HTML、URL、命令或导航目标解释。epoch/cursor 不匹配或健康未知时计数为 unknown，移除工具细节与小队，不把旧事实写成零。项目工具细节按自己的 identity/run 核验，独立于 Varin 身体 cue；身体 cue 只控制管理交接/倾听/汇拢。子任务检查不复制成另一个根项目，也不把其孙任务画到根负责人的直接小队。
 
-实际主体姿态映射、项目台构图、主 agent 角色外观对齐后，只先接隔离 review 消费者；不升级默认 app 或已选资源。验收至少覆盖：无检查选择但多项目执行、每 50ms 工具变化不影响主体、两请求独立解决、一个项目完成另一个仍忙、检查镜头变化不切 body actor、历史结果/重连不重演、exact 负责人/子执行关系和 terminal 退出。
+正常入口现消费已选 B 2.5D 小队及精确项目角色投影；离线 fixture 与候选加载仍仅在显式 review 入口。回归范围包括：无检查选择但多项目执行、每 50ms 工具变化不影响主体、两请求独立解决、一个项目完成另一个仍忙、检查镜头变化不切 body actor、历史结果/重连不重演、exact 负责人/子执行关系和 terminal 退出。
 
 ### 请求类别与短标题的呈现合同
 
 项目 notice 从同一 attention snapshot 的实际归属事项去重生成：可操作授权为 permission，问题或 elicitation 为 question，其余审阅与异常为 inspect，多类为 mixed；陈旧来源为 unknown，无事项时省略。卡片与 brief 使用真实类别，不从 needs-user 猜授权。requestCount 只统计真实待决，uncertainCount 独立；失败和结果未知不会变成可回答请求。B 授权与 C 问题并存分别显示锁与问号，B 单独解除不清除 C。
 
-浮层默认显示有界纯文本短标题，A/B/C 只辅助辨识；用户可隐藏任务名，完整标题和实际导航仍在交互面板。字符清理和转义不改变执行身份或权限。当前接线属于隔离 review 候选，公共角色资源尚未切换。
+浮层默认显示有界纯文本短标题，A/B/C 只辅助辨识；用户可隐藏任务名，完整标题和实际导航仍在交互面板。字符清理和转义不改变执行身份或权限。当前接线用于正常入口；显式 review 仍用于离线情境与候选比较。
 
 ### Normal-entry integration (2026-10-29)
 
-Management presentation is independent of the developer review switch. Normal playback enables it only after the installed bundle passes the existing accepted-art decoder and contains the complete upright management action capability (`director-supervise`, both LISTEN directions, GATHER, intake, local attention, and closed idle). A review-only bundle is rejected by the normal loader; this capability check does not promote any source. The legacy selected bundle remains on its previous path until the parent-controlled exact asset selection is installed.
+Management presentation is independent of the developer review switch. Normal playback enables it only after the installed bundle passes the existing accepted-art decoder and contains the complete upright management action capability (`director-supervise`, both LISTEN directions, GATHER, intake, local attention, and closed idle). A review-only bundle is rejected by the normal loader; this capability check does not promote any source. The accepted bundle below is now selected; normal playback uses its supported director and local-interaction capabilities.
 
 In management mode the real current-Host attention projection drives the portfolio. A chosen project is an inspection lens, not Varin becoming its tool executor. The existing accessible attention panel provides project inspection, exact per-project requests, opening the corresponding real task, and returning to the overview. The normal compact menu exposes “Projects and requests” and a decorative-title privacy switch. Offline fixture controls and permissive candidate decoding remain exclusively in the explicit development review entry.
 
 Local attention and global idle eligibility use this same management mode. A cold welcome is permitted only on the current, available portfolio; work supersedes rather than queues it. Hover/tap, hidden/drag cleanup, scope-bound recovery and the accepted source pickup graph retain the same single body controller. The decorative window remains inert and cannot approve or execute project work. This section records implementation, not an additional normal-entry native acceptance claim.
 
-## Selected normal-entry checkpoint (2026-10-29)
+## 当前正常入口与验证边界（2026-10-29）
 
-The exact reviewed candidate `40c6f4f9f0c46c2b4c248fcf798fe3c726b77bb6dac7a59accbd485db2eeb4d2` was selected through the artifact-bound selector. The installed accepted bundle is `ed6830296471e492521e7f0b9adc026f057a0e744726faa86462c5cee90ad2aa`; the earlier `399bf` baseline remains preserved in source history and reconstruction inputs. Normal playback now enables the director capability from accepted assets, while candidate admission and offline examples remain development-review-only.
+当前公共 selected bundle 为 `1303a69840be467335a6400d9d8ebbd73d94b7a0fcd5cebebb22b44a9588bc18`，对应候选 `5729`；它替换此前的 `ed683`。B 2.5D 小队用于正常 director 入口；开盖 hover、开/闭盖连续轻点的有限变化、安静顺侧发均已纳入已选资源及各自事实/姿态准入，不再统称 review-only。原选择与验证 JSON、冻结源目录中的 README/manifest 均保持原样，记录各自制作或审核当时的状态；其中 candidate-only/未切 selected 字样是历史归档说明，当前选用状态以本节为准，不改归档 inventory 哈希。
 
-See `desktop-companion-assets/director-performance/selection-review.json`, `native-squad-validation.json`, and `native-normal-validation.json` for separate art-selection, multi-project offline/native, and normal real-Host-empty smoke scopes. These records do not claim live paid concurrent runs, release performance, or every frame on every OS. The UI and Electron type checks, targeted projection/interaction/renderer/validator tests, full web/main builds, and native window cleanup were checked at this checkpoint.
+有限 Linux QA 未发现阻塞；原生 hair/hover 连续捕获仍未得到充分结论，不能因资源已选就声称所有动态均已验收。没有 Windows/macOS 或所有中间帧认证。拖动时小队隐藏、落座后按最新事实恢复，当前没有小队动画避让。权限/问题保持精确项目归属；本地查看、hover 或轻点不是批准或回答。
 
 ### Product role binding: Bot versus Agent (2026-10-29)
 

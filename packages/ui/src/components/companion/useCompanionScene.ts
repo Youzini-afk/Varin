@@ -7,7 +7,7 @@ import { visibleSceneViewport, type SceneViewport } from './sceneViewport';
 
 /** Sends semantic changes only; the decorative surface owns no Host APIs or decisions. */
 export function useCompanionScene(canvas: React.RefObject<HTMLCanvasElement | null>, fact: SceneFact, scope: string,
-  suppressed: boolean, menuOpen: boolean, visibleCue?: { cue: DesktopCompanionScene['cue']; instance: number; action: string | undefined; context?: string | null }, team?: DesktopCompanionScene['team'], portfolio?: DesktopCompanionScene['portfolio'], presentationKey?: string | null, drawing?: DesktopCompanionScene['drawing'], spatialReview = false) {
+  suppressed: boolean, menuOpen: boolean, visibleCue?: { cue: DesktopCompanionScene['cue']; instance: number; action: string | undefined; context?: string | null }, team?: DesktopCompanionScene['team'], portfolio?: DesktopCompanionScene['portfolio'], presentationKey?: string | null, drawing?: DesktopCompanionScene['drawing'], spatialEnabled = false) {
   const revision = React.useRef(0);
   const lastViewport = React.useRef<SceneViewport | null>(null);
   const lastMessage = React.useRef('');
@@ -29,21 +29,21 @@ export function useCompanionScene(canvas: React.RefObject<HTMLCanvasElement | nu
     media.addEventListener('change', update); document.addEventListener('visibilitychange', visibility); window.addEventListener('resize', resize); window.addEventListener('scroll', resize, true);
     return () => { cancelAnimationFrame(pendingFrame); observer.disconnect(); media.removeEventListener('change', update); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('resize', resize); window.removeEventListener('scroll', resize, true); };
   }, []);
-  const layoutSubject = spatialReview ? JSON.stringify([portfolio?.mode === 'inspection' ? portfolio.inspectedKey : portfolio?.subjectKey, portfolio?.projects.map(project => [project.key, project.label])]) : '';
+  const layoutSubject = spatialEnabled ? JSON.stringify([portfolio?.mode === 'inspection' ? portfolio.inspectedKey : portfolio?.subjectKey, portfolio?.projects.map(project => [project.key, project.label])]) : '';
   const knownSide = layoutReceipt?.layoutSubject === layoutSubject && layoutReceipt?.scope === scope && layoutReceipt.viewportRevision === sizeRevision ? layoutReceipt.inspectionSide : null;
-  const signature = JSON.stringify([knownSide, fact, scope, suppressed, menuOpen, visibleCue, team, portfolio, presentationKey, drawing, spatialReview, reduced, hidden, sizeRevision]);
+  const signature = JSON.stringify([knownSide, fact, scope, suppressed, menuOpen, visibleCue, team, portfolio, presentationKey, drawing, spatialEnabled, reduced, hidden, sizeRevision]);
   React.useEffect(() => {
     if (!isElectronShell()) return;
     const { viewport, visible } = visibleSceneViewport(canvas.current?.getBoundingClientRect(), window.innerWidth, window.innerHeight, lastViewport.current);
     if (!viewport) return;
-    if (spatialReview) {
+    if (spatialEnabled) {
       const floors = [...document.querySelectorAll('[data-companion-scene-floor]')].map(node => node.getBoundingClientRect().top).filter(top => top >= viewport.y && top <= window.innerHeight);
       if (floors.length) (viewport as SceneViewport & { decorationBottom?: number }).decorationBottom = Math.min(...floors);
     }
     if (visible) lastViewport.current = viewport;
     const managementCue = directorCueMatchesPresentation(visibleCue, presentationKey, knownSide);
     const matchingCue = (portfolio ? managementCue : cueMatchesScene(fact.kind, visibleCue?.action)) ? visibleCue : undefined;
-    const next = { ...(spatialReview && drawing ? { drawing } : {}), ...(spatialReview ? { layout: 'spatial-b-v1' as const } : {}), ...(portfolio ? { kind: 'portfolio' as const, phase: 'active' as const, outcome: null, count: null, portfolio } : { ...fact, ...(team ? { team } : {}) }), scope, suppressed: suppressed || hidden || !visible, reducedMotion: reduced, menuOpen, cue: matchingCue?.cue ?? 'transition' as const, cueInstance: matchingCue?.instance };
+    const next = { ...(spatialEnabled && drawing ? { drawing } : {}), ...(spatialEnabled ? { layout: 'spatial-b-v1' as const } : {}), ...(portfolio ? { kind: 'portfolio' as const, phase: 'active' as const, outcome: null, count: null, portfolio } : { ...fact, ...(team ? { team } : {}) }), scope, suppressed: suppressed || hidden || !visible, reducedMotion: reduced, menuOpen, cue: matchingCue?.cue ?? 'transition' as const, cueInstance: matchingCue?.instance };
     const message = JSON.stringify([next, viewport]);
     if (lastMessage.current === message) return;
     lastMessage.current = message;
