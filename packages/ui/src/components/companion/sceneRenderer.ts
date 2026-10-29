@@ -147,5 +147,7 @@ export function mountCompanionScene(root: HTMLElement) {
   const event=(e:Event)=>update((e as CustomEvent<SceneUpdate>).detail);
   const visibility=()=>{if(frame)cancelAnimationFrame(frame);if(document.hidden)root.replaceChildren();else {started=performance.now();frame=requestAnimationFrame(render);}};
   window.addEventListener('varin-companion-scene',event);document.addEventListener('visibilitychange',visibility);
-  return { update, dispose:()=>{cancelAnimationFrame(frame);root.replaceChildren();window.removeEventListener('varin-companion-scene',event);document.removeEventListener('visibilitychange',visibility);} };
+  document.documentElement.dataset.varinCompanionSceneReady = 'true';
+  window.dispatchEvent(new Event('varin-companion-scene-ready'));
+  return { update, dispose:()=>{delete document.documentElement.dataset.varinCompanionSceneReady;cancelAnimationFrame(frame);root.replaceChildren();window.removeEventListener('varin-companion-scene',event);document.removeEventListener('visibilitychange',visibility);} };
 }

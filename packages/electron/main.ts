@@ -2871,8 +2871,23 @@ const companionScenes = new CompanionSceneWindows(bounds => {
     setAlwaysOnTop: (value) => { if (window.isAlwaysOnTop() !== value) window.setAlwaysOnTop(value); },
     publish: async (value) => { await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('varin-companion-scene',{detail:${JSON.stringify(value)}}))`); },
     onReady: (callback) => {
-      let ready = false, loaded = false;
-      const start = () => { if (ready && loaded && !window.isDestroyed()) callback(); };
+      let ready = false, loaded = false, started = false;
+      const start = () => {
+        if (!ready || !loaded || started || window.isDestroyed()) return;
+        started = true;
+        // A document load is not proof that its dynamic module installed the
+        // listener. Await the inert renderer's explicit mount, with a failure
+        // deadline (not a sleep or a polling loop), before publishing any facts.
+        void window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+          if (document.documentElement.dataset.varinCompanionSceneReady === 'true') { resolve(); return; }
+          const mounted = () => { clearTimeout(timer); resolve(); };
+          const timer = setTimeout(() => { window.removeEventListener('varin-companion-scene-ready', mounted); reject(new Error('Decorative scene mount timed out')); }, 15000);
+          window.addEventListener('varin-companion-scene-ready', mounted, { once: true });
+        })`).then(() => { if (!window.isDestroyed()) callback(); }).catch(error => {
+          log.warn('[companion] decorative scene did not become ready', error);
+          if (!window.isDestroyed()) window.close();
+        });
+      };
       window.once('ready-to-show', () => { ready = true; start(); });
       window.webContents.once('did-finish-load', () => { loaded = true; start(); });
     },
