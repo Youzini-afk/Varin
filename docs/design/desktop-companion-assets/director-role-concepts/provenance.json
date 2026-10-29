@@ -1,0 +1,67 @@
+{
+  "status": "internal concept only, no production promotion",
+  "avatarSource": "packages/ui/src/components/ui/agent-avatar-art.ts",
+  "avatarSourceSha256": "4b206489693a6f0ad75b79c0eae58d4e850da3474151887b9381a3c8a265e542",
+  "selectedCharacterBundleSha256": "399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268",
+  "characterPlates": [
+    {
+      "action": "dispatch",
+      "package": "v2-dispatch",
+      "frameIndex": 0,
+      "sourceSha256": "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04",
+      "cue": "WATCH",
+      "atlas": "atlas-002.png",
+      "rect": [
+        994,
+        1014,
+        492,
+        502
+      ],
+      "offset": [
+        10,
+        0
+      ]
+    },
+    {
+      "action": "understood",
+      "package": "v2-question-receipt",
+      "frameIndex": 2,
+      "sourceSha256": "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482",
+      "cue": "ANSWER_RECEIVED",
+      "atlas": "atlas-000.png",
+      "rect": [
+        498,
+        1520,
+        492,
+        502
+      ],
+      "offset": [
+        10,
+        0
+      ]
+    },
+    {
+      "action": "permission",
+      "package": "v2-permission-hold",
+      "frameIndex": 0,
+      "sourceSha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+      "cue": "ATTEND",
+      "atlas": "atlas-000.png",
+      "rect": [
+        2,
+        1520,
+        492,
+        502
+      ],
+      "offset": [
+        10,
+        0
+      ]
+    }
+  ],
+  "prototypeSha256": "9e8ce32e1b80872eec639586c6a03e0361f41061ef689008fd06a9ccad510ab0",
+  "mainIdentityResolver": "agentAvatarForIdentity(branch.threadId, branch.avatar)",
+  "roleIsSavedAvatarMutation": false,
+  "originalPrototypeSha256": "3954c19b42f89d391356a6a50a40d554594ec908b2f5cc82dfe6f2fbdf5dc8ba",
+  "archiveChanges": "Portable repository-relative default; motion HTML references three deduplicated immutable plate PNGs; temporary avatar import cache removed after build."
+}
