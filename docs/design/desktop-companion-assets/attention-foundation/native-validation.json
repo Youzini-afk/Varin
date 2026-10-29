@@ -1,0 +1,68 @@
+{
+  "ready": true,
+  "at": "2026-10-29T12:21:26.880Z",
+  "purpose": "Native QA of committed read-only attention, panel, focus and auxiliary lifecycle. Not director artistic acceptance.",
+  "foundationCommit": "cb4f935094a3bd7bbc4cd6d5384039803c42511e",
+  "backendCommit": "7fa96e77",
+  "sourceManifestSHA256": "433a02562bf884f3cda8a98dc689c193f42c04aa9ea64f8562435c2f2db01374",
+  "frozenSourcesUnchanged": true,
+  "publicBundleSHA256": "399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268",
+  "fullWebFiles": 1279,
+  "webManifestSHA256": "8b8041ff8172e33953d33bcef56f4dc03b9801d8d34e428be045338ad8bde65a",
+  "hostFiles": 2720,
+  "hostManifestSHA256": "80aa05e5b53dc2b458b4802427cc9c72beffb047d7182cf73920692d7dd02ce6",
+  "mainSHA256": "2df01008dde0ab009cce50d4cb941cb15be911ad22d61109a7bde895d21f1b30",
+  "preloadSHA256": "df811fdff5d2b74fa1f107dee1a2534125cf9908cbe63c54caebef59e3db252c",
+  "kernelSHA256": "2d955f13df4d211c96b3bf2a610e9769dffecbb150964ca3c634685090aa9550",
+  "kernelManifest": {
+    "schema": 3,
+    "executable": "varin-kernel",
+    "targetTriple": "x86_64-unknown-linux-gnu",
+    "platform": "linux",
+    "arch": "x64",
+    "binaryFormat": "elf",
+    "buildIdentity": "0.9.33",
+    "protocolVersion": 71,
+    "kernelVersion": "0.1.0",
+    "sha256": "2d955f13df4d211c96b3bf2a610e9769dffecbb150964ca3c634685090aa9550"
+  },
+  "kernelProfile": "existing opt0 single-codegen-unit development/native QA build; no Rust rebuild in this pipeline",
+  "settingsUnchanged": true,
+  "settingsSHA256": "87ee5fe4ec53a5fd4226d8ca790df57bd94e82c597dc8b72e94a6353a39bdcab",
+  "launcherSHA256": "1e49c00b18568e5935dfe49293f9097015b6631bdf9d611134a7dd955e2987c3",
+  "pipeline": [
+    "build:web with VARIN_KERNEL_PREBUILT (runtime dependencies, Application Host, CLI, complete Vite entries)",
+    "bundle:main main/preload + Node syntax",
+    "supported build-kernel prebuilt stage",
+    "full artifact hash verification and commitWebAssetGeneration atomic stage"
+  ],
+  "buildExit": 0,
+  "nativeGui": {
+    "performedBy": "parent native GUI observer",
+    "endedAt": "2026-10-29T12:38:56Z",
+    "logSHA256": "45236546607cfd0fb63d56cc34c5aa3f096b93363c279c5b1e1e9b8dea8c45df",
+    "settingsRestoredToPrebuildSHA": true,
+    "passed": [
+      "Current protocol 71 attention kernel and complete Application Host started through independent launcher",
+      "Native attention panel reported current Host/native task coverage and healthy empty request ledger",
+      "Refresh and other-task expansion responded",
+      "Escape closed panel; Return reopened from restored entry focus",
+      "360x480 companion panel remained within viewport",
+      "Normal main-window close removed all Varin and auxiliary windows"
+    ],
+    "notClaimed": [
+      "No paid model tasks or artificial live concurrent requests were created",
+      "Concurrent request ownership remains covered by executed Catalog fixture tests, not a GUI concurrency claim",
+      "Director management artwork, project leaders and new portfolio composition are not accepted by this foundation smoke",
+      "Opt0 kernel is a development QA artifact, not a performance/release build"
+    ],
+    "warnings": "Only pre-existing GPU/DBus environment diagnostics; no attention protocol or auxiliary readiness errors reported"
+  },
+  "notPerformed": [
+    "verify:native/socket checker",
+    "security/TMPDIR changes",
+    "745 candidate or director body promotion",
+    "performance/release build claim"
+  ],
+  "artifactPurpose": "Saved role-neutral attention/panel foundation; public upright-v2 selected bundle unchanged."
+}

@@ -1,3 +1,7 @@
+import { useCompanionDirector } from '@/components/companion/useCompanionDirector';
+import { useDirectorPortfolio } from '@/components/companion/useDirectorPortfolio';
+import { directorToolDetail } from '@/components/companion/directorPortfolio';
+import { directorBodyAction } from '@/components/companion/directorBody';
 import { useCompanionAttention } from '@/components/companion/useCompanionAttention';
 import { useCompanionVisualIntent } from '@/components/companion/useCompanionVisualIntent';
 import { CompanionAttentionPanel, CompanionAttentionSummary } from '@/components/companion/CompanionAttentionPanel';
@@ -22,6 +26,9 @@ import catalog from '../../../../tools/desktop-companion-animation/coverage.json
 function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const { t } = useI18n();
   const review = new URLSearchParams(window.location.search).get('review') === '1';
+  const directorReview = review && new URLSearchParams(window.location.search).get('director') === '1';
+  const [hideTaskNames, setHideTaskNames] = React.useState(false);
+  const [finishedDirectorSentence, setFinishedDirectorSentence] = React.useState<string | null>(null);
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const attention = useCompanionAttention(apis.threads, generation);
   const teamProjector = React.useRef(new CompanionChildTeam());
@@ -61,7 +68,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [playing, setPlaying] = React.useState(false);
   const [manualReview, setManualReview] = React.useState(false);
   const [exposure, setExposure] = React.useState(0);
-  const [visibleCue, setVisibleCue] = React.useState<{ cue: ReturnType<typeof sceneCue>; instance: number; action: string | undefined }>();
+  const [visibleCue, setVisibleCue] = React.useState<{ cue: ReturnType<typeof sceneCue>; instance: number; action: string | undefined; context: string | null }>();
   const visibleCueCounter = React.useRef(0);
   const lastVisibleCue = React.useRef('');
   const [presentation, setPresentation] = React.useState('C01');
@@ -138,9 +145,22 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (document.hidden) visibility();
     return () => document.removeEventListener('visibilitychange', visibility);
   }, [attention.refresh]);
+  const director = useCompanionDirector(directorReview ? attention : { ...attention, snapshot: null, health: 'unknown' }, selected?.generation === generation ? selected.identity : null, generation,
+    { visible: directorReview && !document.hidden, interacting: companionWindow.phase !== 'rest', cardCapacity: 3 });
+  const directorDetail = directorToolDetail(snapshot, health);
+  const portfolioProjection = useDirectorPortfolio(director, directorReview ? attention.snapshot : null, generation, directorReview && directorDetail ? [directorDetail] : [], { hideTaskNames });
+  const rawScene = sceneForIntent(sceneFact, intent.state);
+  const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation)
+    : stableIntent.state !== intent.state && rawScene.phase === 'active' ? { kind: null, phase: 'withdraw', outcome: null, count: null } as SceneFact : rawScene;
+  const directorContextKey = JSON.stringify([generation, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
+  const directorLayout = useCompanionScene(canvas, sceneCurrent, directorReview ? `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
+    companionWindow.phase !== 'rest' || (!directorReview && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorReview || reviewRoute ? undefined : team, directorReview ? portfolioProjection.portfolio : undefined, directorReview ? directorContextKey : null);
   const restDue = useCompanionLeisure(localAllowed && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (health === 'current' || health === 'unselected'), companionWindow.activityRevision);
-  const displayAction = restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
+  const ordinaryDisplayAction = restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
   const seenHover = React.useRef(0);
+  const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null);
+  const directorSentenceKey = JSON.stringify([directorContextKey, directorLayout?.inspectionSide]);
+  const displayAction = directorReview ? finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction : ordinaryDisplayAction;
   React.useEffect(() => {
     if (!companionWindow.hoverRevision || seenHover.current === companionWindow.hoverRevision) return;
     seenHover.current = companionWindow.hoverRevision;
@@ -149,13 +169,15 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (localAllowed && !controlsOpen && shown && assetList.some(item => item.action === 'hover-response' && item.reviewStatus === 'accepted' && item.geometryReference === shown.geometryReference && item.entryPose === shown.entryPose && item.exitPose === shown.exitPose)) setLocalAction('hover-response');
   }, [companionWindow.hoverRevision, localAllowed, controlsOpen, assetList]);
   React.useEffect(() => { if (!companionWindow.hovered) setLocalAction(current => current === 'hover-response' ? null : current); }, [companionWindow.hovered]);
-  const displayedDrawing = React.useRef<{ packageId: string; exposure: number } | null>(null);
-  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current });
-  const rawScene = sceneForIntent(sceneFact, intent.state);
-  const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation)
-    : stableIntent.state !== intent.state && rawScene.phase === 'active' ? { kind: null, phase: 'withdraw', outcome: null, count: null } as SceneFact : rawScene;
-  useCompanionScene(canvas, sceneCurrent, `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
-    companionWindow.phase !== 'rest' || (!reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, reviewRoute ? undefined : team);
+  const displayedDrawing = React.useRef<{ packageId: string; exposure: number; context: string | null } | null>(null);
+  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current }, { allowCandidates: directorReview, presentationKey: directorReview ? directorContextKey : null });
+  React.useEffect(() => {
+    if (directorReview && automatic.context === directorContextKey && automatic.finished && directorRequestedAction !== 'director-supervise'
+      && assetList.find(item => item.id === automatic.packageId)?.action === directorRequestedAction) {
+      setFinishedDirectorSentence(directorSentenceKey);
+      if (director.body.edge) director.consumeEdge(director.body.edge.key);
+    }
+  }, [directorReview, automatic.finished, automatic.context, directorContextKey, automatic.packageId, directorRequestedAction, directorSentenceKey, assetList]);
   React.useEffect(() => {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'output-emphasis') setOutputBeat(false);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
@@ -254,7 +276,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       const parent = assetList.find(item => item.id === id);
       if (!parent || parent.gesture) continue;
       for (const frame of parent.frames) {
-        const entry = frame.sha256 && assetList.find(item => item.reviewStatus === 'accepted' && item.gesture?.entrySourceSha256 === frame.sha256);
+        const entry = frame.sha256 && assetList.find(item => (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate') && item.gesture?.entrySourceSha256 === frame.sha256);
         if (entry) { wanted.add(entry.id); for (const next of entry.gesture!.grabNext.slice(0,2)) wanted.add(next); }
       }
     }
@@ -350,12 +372,13 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     const frame = sequence.frames[exposure] ?? sequence.frames[0]!;
     context.clearRect(0, 0, node.width, node.height);
     context.drawImage(images[frame.page]!, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
-    displayedDrawing.current = { packageId: sequence.id, exposure };
-    const cue = frame.cue ? sceneCue(frame.cue) : 'engaged';
-    const cueKey = JSON.stringify([sequence.sceneAction ?? sequence.action, cue]);
+    const cue = frame.cue ? sceneCue(frame.cue, sequence.sceneAction ?? sequence.action) : 'engaged';
+    const drawnContext = !manualReview && !playing && automatic.packageId === sequence.id && automatic.exposure === exposure ? automatic.context : null;
+    displayedDrawing.current = { packageId: sequence.id, exposure, context: drawnContext };
+    const cueKey = JSON.stringify([sequence.sceneAction ?? sequence.action, cue, drawnContext]);
     if (lastVisibleCue.current !== cueKey) {
       lastVisibleCue.current = cueKey;
-      setVisibleCue({ cue, action: sequence.sceneAction ?? sequence.action, instance: ++visibleCueCounter.current });
+      setVisibleCue({ cue, context: drawnContext, action: sequence.sceneAction ?? sequence.action, instance: ++visibleCueCounter.current });
     }
     companionWindow.refreshHitMask();
   };
@@ -370,7 +393,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   };
   React.useEffect(() => {
     if (asset) drawActualFrame(asset, pictures, displayedExposure);
-  }, [asset, pictures, displayedExposure, companionWindow.refreshHitMask]);
+  }, [asset, pictures, displayedExposure, automatic.context, automatic.packageId, automatic.exposure, companionWindow.refreshHitMask]);
   const handledWorld = React.useRef(0);
   React.useEffect(() => {
     const event = automatic.worldEvent;
@@ -433,6 +456,13 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     <canvas ref={canvas} {...companionWindow.handlers} style={{ width: 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
     {error && !review && <p role="alert" style={panel}>{error}</p>}
     {!asset && <p style={panel}>{assetList.length ? t('companion.loading') : t('companion.missing')}</p>}
+    {directorReview && <section style={panel} aria-label="Director candidate portfolio">
+      <strong>Director candidate — read-only project inspection, not final artwork selection</strong>
+      <p>Management: {director.body.verb}. Project execution detail does not select Varin's body.</p>
+      <label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />Hide decorative task names</label>
+      <div>{portfolioProjection.legend.map(item => <button key={item.key} onClick={() => setSelected({ generation, identity: item.identity })}>{item.label} · {item.title || 'Untitled task'}</button>)}</div>
+      {!assetList.some(item => item.action === 'director-supervise') && <p>Load the explicit complete director candidate bundle to review management performances. No old tool-action fallback is used.</p>}
+    </section>}
     {!review && <section style={{ ...panel, position: 'fixed', bottom: 3, left: 5, right: 5, margin: 0, maxHeight: 104, overflow: 'auto', boxSizing: 'border-box' }}><CompanionAttentionSummary attention={attention} focusTitle={focusTitle} focused={!!identity} focusStatus={shortStatus} onInspect={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }} /></section>}
     {attentionOpen && <div style={{ position: 'fixed', inset: '6px 4px', maxHeight: 'calc(100vh - 12px)', zIndex: 30, overflow: 'auto' }}><CompanionAttentionPanel attention={attention} identity={identity} focusTitle={focusTitle} onFocus={target => { setSelected({ generation, identity: target }); setAttentionOpen(false); }} onOpenThread={openThread} onClose={() => setAttentionOpen(false)} onRefresh={attention.refresh} /></div>}
     {(review || controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}

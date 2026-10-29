@@ -1,3 +1,4 @@
+import {escapePortfolioText,portfolioCaption,managementPacketPose} from './portfolioArtwork';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_AVATAR_ART } from '../ui/agent-avatar-art';
 import { mountCompanionScene, type SceneUpdate } from './sceneRenderer';
@@ -63,4 +64,75 @@ describe('atelier scene renderer',()=>{
   s.update(scene('question',{revision:3,suppressed:true}));tick(150);expect(root.innerHTML).toBe('');expect(jobs.size).toBe(0);
   s.update(scene('question',{revision:2}));expect(jobs.size).toBe(0);s.dispose();
  });
+});
+
+describe('review-only director portfolio',()=>{
+ const portfolio={mode:'inspection' as const,projects:[{key:'opaque-a',label:'A' as const,lead:{avatar:'ribbon-blue' as const,role:'project-lead' as const},status:'active' as const,requestCount:0,uncertainCount:0,detail:'reading' as const}],inspectedKey:'opaque-a',subjectKey:null,overflowCards:2,team:{projectKey:'opaque-a',members:[{key:'child',avatar:'scoop-pistachio' as const,state:'running' as const}],overflowCount:1}};
+ it.each(['left','right'] as const)('uses native %s inspection side, real identities and exact overflow',side=>{
+  const s=mountCompanionScene(root),v=scene('portfolio',{portfolio});v.layout={...layout,inspectionSide:side};s.update(v);tick(700);
+  expect(root.innerHTML).toContain('data-project-slot="A"');expect(root.innerHTML).toContain(AGENT_AVATAR_ART['ribbon-blue'].body);expect(root.innerHTML).toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);expect(root.innerHTML).toContain('+2');expect(root.innerHTML).toContain('+1');expect(root.innerHTML).not.toContain('opaque-a');expect(jobs.size).toBe(0);s.dispose();
+ });
+ it('does not guess inspection side or show a mismatched child squad',()=>{
+  const s=mountCompanionScene(root);s.update(scene('portfolio',{portfolio}));tick(700);expect(root.innerHTML).not.toContain('data-project-slot');
+  const v=scene('portfolio',{revision:2,portfolio:{...portfolio,team:{...portfolio.team,projectKey:'other'}}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(1400);expect(root.innerHTML).not.toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);s.dispose();
+ });
+ it('tool details update without body tool cues, have bounded accents, and unknown clears child evidence',()=>{
+  const s=mountCompanionScene(root),v=scene('portfolio',{portfolio});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(700);
+  const next={...v,descriptor:{...v.descriptor,revision:2,portfolio:{...portfolio,projects:[{...portfolio.projects[0]!,detail:'searching' as const}]}}};s.update(next);tick(800);expect(jobs.size).toBe(1);tick(1300);expect(jobs.size).toBe(0);
+  s.update({...next,descriptor:{...next.descriptor,revision:3,portfolio:{...portfolio,projects:[{...portfolio.projects[0]!,status:'unknown'}]}}});tick(1400);expect(root.innerHTML).not.toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);s.dispose();
+ });
+ it('routes a new B result to B while A remains inspected without lending A children to B',()=>{
+  const s=mountCompanionScene(root),b={...portfolio.projects[0]!,key:'opaque-b',label:'B' as const,status:'result' as const};
+  const v=scene('portfolio',{portfolio:{...portfolio,mode:'result',subjectKey:b.key,projects:[...portfolio.projects,b]}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(700);
+  expect(root.innerHTML).toContain('data-brief-project="B"');expect(root.innerHTML).toContain('data-project-slot="A"');expect(root.innerHTML).toContain('队2');expect(root.innerHTML).toContain('推进');expect(root.innerHTML).not.toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);s.dispose();
+ });
+
+ it('renders bounded task names as escaped inert text and respects omitted captions',()=>{
+  expect(escapePortfolioText('&<>"\'')).toBe('&amp;&lt;&gt;&quot;&apos;');
+  expect(portfolioCaption('重构登录页面并修复布局')).toBe('重构登录…');
+  const s=mountCompanionScene(root),v=scene('portfolio',{portfolio:{...portfolio,projects:[{...portfolio.projects[0]!,caption:'<svg/&'}]}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(700);
+  expect(root.innerHTML).toContain('&lt;svg/&amp;');expect(root.innerHTML).not.toContain('<svg/&');
+  s.update({...v,descriptor:{...v.descriptor,revision:2,portfolio}});tick(1400);expect(root.innerHTML).not.toContain('&lt;svg/');s.dispose();
+ });
+
+ it.each(['left','right'] as const)('gathers the same summary to fixed laptop on %s, with continuous stage endpoints',side=>{
+  const out=managementPacketPose('gather-out',180,side)!;
+  const start=managementPacketPose('gather-in',0,side)!;
+  expect(out).toEqual(start);
+  expect(managementPacketPose('gather-in',340,side)).toMatchObject({x:166,y:147,opacity:1});
+  expect(managementPacketPose('address-user',0,side)).toMatchObject({x:166,y:147});
+  expect(managementPacketPose('management-release',130,side)?.opacity).toBe(0);
+  expect(managementPacketPose('type',0,side)).toBeNull();
+  expect(managementPacketPose('gather-in',0,side,true)).toMatchObject({x:166,y:147});
+ });
+
+ it('keeps B permission and C question distinct and removes only the resolved notice',()=>{
+  const s=mountCompanionScene(root),b={...portfolio.projects[0]!,key:'b',label:'B' as const,status:'needs-user' as const,notice:'permission' as const,requestCount:1},c={...b,key:'c',label:'C' as const,notice:'question' as const};
+  const v=scene('portfolio',{portfolio:{...portfolio,mode:'attention',inspectedKey:null,projects:[b,c]}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(700);
+  expect(root.innerHTML).toContain('data-notice="permission"');expect(root.innerHTML).toContain('data-notice="question"');expect(root.innerHTML).toContain('待授权');expect(root.innerHTML).toContain('待回答');
+  s.update({...v,descriptor:{...v.descriptor,revision:2,portfolio:{...v.descriptor.portfolio!,projects:[{...b,status:'active',notice:undefined,requestCount:0},c]}}});tick(1400);
+  expect(root.innerHTML).not.toContain('data-notice="permission"');expect(root.innerHTML).toContain('data-notice="question"');s.dispose();
+ });
+
+ it('holds an identified summary through authored preparation gaps and clears it on scope change',()=>{
+  const s=mountCompanionScene(root),v=scene('portfolio',{cue:'address-user',portfolio:{...portfolio,mode:'result',subjectKey:'opaque-a'}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(700);
+  expect(root.innerHTML).toContain('data-summary-project="A"');
+  s.update({...v,descriptor:{...v.descriptor,revision:2,cue:'transition'}});tick(830);expect(root.innerHTML).toContain('data-summary-project="A"');
+  s.update({...v,descriptor:{...v.descriptor,revision:3,scope:'other',cue:'transition'}});tick(1400);expect(root.innerHTML).not.toContain('data-summary-project');s.dispose();
+ });
+
+ it.each(['left','right'] as const)('receives then delegates through the actual right palm without crossing the face (%s dock)',side=>{
+  expect(managementPacketPose('management-receive',420,side)).toMatchObject({x:166,y:147});
+  const lead={x:side==='right'?230:22,y:21};
+  expect(managementPacketPose('management-delegate',180,side,false,lead)).toMatchObject({x:231,y:96});
+  expect(managementPacketPose('management-delegate',400,side,false,lead)).toMatchObject({...lead,opacity:0});
+  for(let age=0;age<=400;age+=10){const point=managementPacketPose('management-delegate',age,side,false,lead)!;expect(point.x+13>=82&&point.x-13<=216&&point.y+9>=18&&point.y-9<=108).toBe(false);}
+ });
+
+ it('yields the large dossier to the handoff and restores it during real return',()=>{
+  const s=mountCompanionScene(root),v=scene('portfolio',{cue:'management-delegate',portfolio:{...portfolio,mode:'intake',subjectKey:'opaque-a'}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(100);
+  expect(root.innerHTML).toContain('data-brief-project="A" opacity="0"');expect(root.innerHTML).toContain('data-project-slot="A"');
+  s.update({...v,descriptor:{...v.descriptor,revision:2,cue:'transition'}});tick(400);expect(root.innerHTML).toContain('data-brief-project="A" opacity="1"');s.dispose();
+ });
+
 });

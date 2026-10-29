@@ -1,0 +1,148 @@
+{
+  "canvas": [
+    512,
+    512
+  ],
+  "newCharacterImagesGenerated": 0,
+  "sources": [
+    {
+      "id": "neutral",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/neutral.png"
+    },
+    {
+      "id": "listen",
+      "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/listen.png"
+    },
+    {
+      "id": "arrival",
+      "sha256": "c473fb86d418aa2c285a353952f0eea37eaa6e9336ec9c3f3f4a87d32b17910b",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/arrival.png"
+    },
+    {
+      "id": "thought",
+      "sha256": "7aa3b640cf56e6ed1312062d501dca6583dfaa2ed295c56ecf224827a2d64d6a",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/thought.png"
+    },
+    {
+      "id": "explain",
+      "sha256": "1a47069a7abb4aa5569ef8cea1221b6db223e0e3149b148f5821749d7fa897a7",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "points into laptop, not side captain",
+      "path": "references/explain.png"
+    },
+    {
+      "id": "locate",
+      "sha256": "8a7853e0f3a4626c502ce95e8edca8558368ac596eff64392be031805b79c7a8",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "points into laptop, not side captain",
+      "path": "references/locate.png"
+    },
+    {
+      "id": "offer",
+      "sha256": "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/offer.png"
+    },
+    {
+      "id": "offer-mid",
+      "sha256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/offer-mid.png"
+    },
+    {
+      "id": "dispatch",
+      "sha256": "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/dispatch.png"
+    },
+    {
+      "id": "yaw",
+      "sha256": "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/yaw.png"
+    },
+    {
+      "id": "read",
+      "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "reuse": "R1 same pixels, new staging",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/read.png"
+    },
+    {
+      "id": "closed",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "reuse": "R0 same meaning",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/closed.png"
+    },
+    {
+      "id": "yawn",
+      "sha256": "94c077061ec9a08dd08252ca349ea6e4b6f0c774a633c045117a853dd68ab565",
+      "reuse": "R0 same meaning",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/yawn.png"
+    },
+    {
+      "id": "doze",
+      "sha256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260",
+      "reuse": "R0 same meaning",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/doze.png"
+    },
+    {
+      "id": "wake",
+      "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+      "reuse": "R0 same meaning",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/wake.png"
+    },
+    {
+      "id": "hover",
+      "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+      "reuse": "R0 same meaning",
+      "status": "existing artwork; not proof of director runtime acceptance",
+      "direction": "keep actual source orientation",
+      "path": "references/hover.png"
+    }
+  ],
+  "missing": [
+    "D-LISTEN-TURN",
+    "D-LISTEN-LEAN",
+    "D-GATHER-OUT",
+    "D-GATHER-IN",
+    "D-GATHER-TURN-USER"
+  ],
+  "conditionalOnly": [
+    "comfortable shoulder settle if actual neutral/listen timing fails",
+    "true bridging drawing if gather-to-offer anatomy does not connect"
+  ]
+}

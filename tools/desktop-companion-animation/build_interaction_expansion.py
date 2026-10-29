@@ -8,6 +8,7 @@ parser.add_argument('--root',type=Path,required=True,help='production-v3 source 
 parser.add_argument('--base-source',type=Path,required=True,help='reproducible production-v2 source root')
 parser.add_argument('--base-bundle',type=Path,required=True,help='immutable selected v2 bundle.json; may be rebuilt from source')
 parser.add_argument('--output',type=Path,required=True)
+parser.add_argument('--director-manifest',type=Path,help='Optional explicit authored management sequences; review-only, not a production selection')
 parser.add_argument('--detached-index',type=Path,required=True,help='explicit immutable new-source no-stool index')
 a=parser.parse_args();R=a.root.resolve();B=a.base_source.resolve();OUT=a.output.resolve();OUT.mkdir(parents=True,exist_ok=True)
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
@@ -57,6 +58,21 @@ if localManifest.exists():
  for row in local['safeRecoveryByActualSource']:
   h=row['actualSourceSHA256']
   recovery[h]={'steps':[frame(localManifest.parent,f) for f in row['frames']]}
+
+# Management performances retain directional action identity. Project execution
+# detail is not their trigger and must never be inferred from these source cues.
+if a.director_manifest:
+ directorPath=a.director_manifest.resolve();director=json.loads(directorPath.read_text())
+ provenance.append({'source':str(directorPath.relative_to(R)),'sha256':sha(directorPath)})
+ for name,action in director['actions'].items():
+  localPlans.append({'id':name,'kind':'action','action':name,'loop':None,'frames':[frame(directorPath.parent,f) for f in action['frames']]})
+ for h,row in director['ordinaryRecoveryBySourceSHA'].items():
+  path=directorPath.parent/row['actualSource']
+  if sha(path)!=h:raise ValueError('Director actual recovery source mismatch')
+  sources[h]=path;steps=[frame(directorPath.parent,f) for f in row['frames']]
+  # A group's own rest has no internal return; keep its existing cross-family
+  # real hand recovery rather than erasing that route with an empty endpoint.
+  if steps or h not in recovery:recovery[h]={'steps':steps}
 
 # Add only source-exact new entries; the prior 55-entry graph remains untouched.
 rel=R/'relocation';indexPath=a.detached_index.resolve()
@@ -138,7 +154,35 @@ for p in localPlans:
  # would replay a response during unrelated interruption. Current consumer
  # uses the source-exact neutral recovery followed by its closed tap action.
  if p['id'].endswith('hover-to-tap'):continue
- add('v3-'+p['id'],p['frames'],p['kind'],p.get('action') if p['kind']=='action' else None,p.get('loop'))
+ add('v3-'+p['id'],p['frames'],p['kind'],p.get('action') if p['kind']=='action' else None,p.get('loop'),p.get('action') if (p.get('action') or '').startswith('director-') else None)
+if a.director_manifest:
+ # Explicit new ordering, not a borrowed question/permission sentence. This
+ # bridge remains a candidate until the actual hand-contact timing is reviewed.
+ neutral=sha(B/'shared/upright-open-neutral-v2.png')
+ attend='fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f'
+ if attend not in placements:raise ValueError('Missing exact existing attend hand drawing')
+ listen='0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a'
+ add('v3-director-neutral-to-listen',[{'sha256':h,'durationMs':ms,'cue':'RECOVERY_ONLY'} for h,ms in [(neutral,120),(attend,120),(listen,180)]])
+ # Comfortable supervision is a held listening pose with its already drawn
+ # blink, not the focused project's typing/reading loop renamed as management.
+ blink=next(p for p in base['packages'] if p['id']=='v2-question-hold')['frames']
+ add('v3-director-supervise',[{'sha256':f['sha256'],'durationMs':f['durationMs'],'cue':'REST','pauseSafe':f['sha256']==listen} for f in blink], 'action','director-supervise',[0,len(blink)],'director-supervise')
+ # A complete one-shot project intake uses real receipt then handoff drawings.
+ # It is triggered only by a scoped project edge, never by a tool/child count.
+ received=next(p for p in plans if p['name']=='accept-open')['frames'][1:]
+ intake=[{**f,'cue':'RECEIVE_PROJECT' if f['cue']=='RECEIVED' else 'RECOVERY_ONLY'} for f in received]
+ collaborationPath=B/'editing-dispatch/sequence-manifest.json'
+ collaboration=json.loads(collaborationPath.read_text())['sequences']['collaboration']['frames']
+ provenance.append({'baseSource':'editing-dispatch/sequence-manifest.json','sha256':sha(collaborationPath)})
+ # One right-hand handoff, then its authored inward rotation/lowering; no
+ # repeated dispatch and no tool typing tail. The graphic travels to the lead.
+ for i in [1,2,3,4,5,6,9,11]:
+  f=collaboration[i];h=f['sourceSHA256']
+  if h not in placements:raise ValueError('Missing exact intake donor drawing')
+  intake.append({'sha256':h,'durationMs':f['holdMs'] if i!=11 else 200,'cue':'HANDOFF_LEAD' if i==4 else 'RECOVERY_ONLY','pauseSafe':i==11})
+ add('v3-director-intake',intake,'action','director-intake',None,'director-intake')
+
+
 for h,r in recovery.items():
  if r['steps']:add('v3-recover-'+h[:16],[{'sha256':h,'durationMs':1,'cue':'RECOVERY_ONLY'},*[{**f,'cue':'RECOVERY_ONLY'} for f in r['steps']]])
 for name,n in nodes.items():
@@ -149,7 +193,7 @@ for name,n in nodes.items():
 replaced={p['action'] for p in newPackages if p.get('action')}
 packages=[p for p in packages if p.get('action') not in replaced or p.get('action')=='tap-response' and p['entryPose']!='upright-v2:closed']+newPackages
 for item in provenance:
- if sha(R/item['source'])!=item['sha256']:raise ValueError('Source changed while compiling; retry after owner freezes source')
+ if sha(B/item['baseSource'] if 'baseSource' in item else R/item['source'])!=item['sha256']:raise ValueError('Source changed while compiling; retry after owner freezes source')
 result={**base,'candidateOnly':True,'packages':packages};(OUT/'bundle.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
 receipt={'baseBundleSHA256':BASE_SHA,'candidateSHA256':sha(OUT/'bundle.json'),'sourceManifests':provenance,'newUniqueDrawings':len(new),'baseTexturesUnchanged':True,'atlasFileBytes':sum((OUT/f).stat().st_size for f in {page['file'] for p in packages for page in p['pages']}),'newOrdinarySources':len(newOrdinary),'missing':missing,'newEntrySources':len(ready),'packageCount':len(packages),'productionInstalled':False,'reviewStatus':'candidate'}
 (OUT/'build-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n');print(json.dumps(receipt,indent=2))

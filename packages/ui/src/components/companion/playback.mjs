@@ -43,17 +43,18 @@ export function frameAt(asset, timeMs) {
 
 /** Latest presentation request wins; it never sends application commands. */
 export class CompanionPlayback {
-  constructor(assets, { allowCandidates = false } = {}) { this.allowCandidates = allowCandidates; this.assets = assets; this.current = null; this.timeMs = 0; this.pending = null; this.path = []; this.blocker = null; this.hold = false; this.canDisplay = () => true; this.loading = null; this.nextStartMs = 0; this.gesture = null; this.latestIntent = null; this.worldEvent = null; this.worldRevision = 0; }
+  constructor(assets, { allowCandidates = false } = {}) { this.allowCandidates = allowCandidates; this.assets = assets; this.current = null; this.timeMs = 0; this.pending = null; this.path = []; this.blocker = null; this.hold = false; this.canDisplay = () => true; this.loading = null; this.nextStartMs = 0; this.gesture = null; this.latestIntent = null; this.bridgeIntent = null; this.currentContext = null; this.pendingContext = null; this.latestContext = null; this.worldEvent = null; this.worldRevision = 0; }
   usable(asset) { return usable(asset, this.allowCandidates); }
-  request(id, { urgent = false } = {}) {
-    this.latestIntent = id;
+  request(id, { urgent = false, context = null } = {}) {
+    this.latestIntent = id; this.latestContext = context;
+    this.bridgeIntent = null; // A new request may interrupt an in-flight authored bridge.
     if (this.gesture) return { status: 'ready', clips: [] }; // Host facts keep updating; only its latest artistic intent waits.
     this.loading = null; this.nextStartMs = 0;
-    if (this.current?.id === id) {
+    if (this.current?.id === id && this.currentContext === context) {
       this.pending = null; this.path = []; this.hold = false; this.blocker = null;
       return { status: 'ready', clips: [] };
     }
-    this.pending = id;
+    this.pending = id; this.pendingContext = context;
     this.path = []; // Latest artistic intent wins, not application events.
     this.hold = false;
     return this.plan();
@@ -70,6 +71,7 @@ export class CompanionPlayback {
     const frame = asset?.frames[displayed.exposure];
     if (!asset || !frame || !this.canDisplay(asset.id)) return;
     this.current = asset; this.timeMs = frame.startMs;
+    if ('context' in displayed) this.currentContext = displayed.context ?? null;
   }
   grab(displayed) {
     this.alignDisplayed(displayed);
@@ -88,7 +90,7 @@ export class CompanionPlayback {
     const source = this.current && frameAt(this.current, this.timeMs)?.sha256;
     const entry = source && this.assets.find(asset => this.usable(asset) && asset.gesture?.entrySourceSha256 === source);
     if (!entry) { this.blocker = 'No reviewed same-exposure pickup entry for this drawing'; return false; }
-    this.gesture = { previous: this.current, previousTime: this.timeMs, released: false, restoreMs: null, worldStarted: false };
+    this.gesture = { previous: this.current, previousContext: this.currentContext, previousTime: this.timeMs, released: false, restoreMs: null, worldStarted: false };
     this.pending = null;
     if (!this.queueGesture([entry.id, ...entry.gesture.grabNext])) { this.gesture = null; return false; }
     this.advance(); return true;
@@ -134,7 +136,7 @@ export class CompanionPlayback {
       this.advance(); return;
     }
     this.gesture = null; this.loading = null; this.path = []; this.hold = false;
-    this.emitWorld('clear'); this.pending = this.latestIntent === this.current?.id ? null : this.latestIntent;
+    this.emitWorld('clear'); this.pending = this.latestIntent === this.current?.id && this.latestContext === this.currentContext ? null : this.latestIntent; this.pendingContext = this.latestContext;
     if (this.pending) this.plan();
   }
   tickGesture(elapsedMs) {
@@ -173,7 +175,7 @@ export class CompanionPlayback {
     for (const pose of frame?.exitTo ?? []) {
       if (pose !== frame.pose) continue;
       const result = route({ ...this.current, exitPose: pose }, target, this.assets, this.allowCandidates);
-      if (result.status === 'ready' && result.clips[0] !== this.current.id) {
+      if (result.status === 'ready' && (result.clips[0] !== this.current.id || this.pendingContext !== this.currentContext && frame.sha256 && frame.sha256 === target.frames[0].sha256)) {
         this.path = [...result.clips]; this.blocker = null; this.advance(); return true;
       }
     }
@@ -208,6 +210,8 @@ export class CompanionPlayback {
     if (!this.canDisplay(nextId)) { this.loading = nextId; return false; }
     this.loading = null; this.path.shift();
     const next = this.assets.find(a => a.id === nextId);
+    this.bridgeIntent = next.kind === 'bridge' ? this.pending : null;
+    this.currentContext = this.gesture?.restoring ? this.gesture.previousContext : next.id === this.pending ? this.pendingContext : null;
     this.current = next; this.timeMs = this.nextStartMs; this.nextStartMs = 0; this.hold = false;
     if (this.gesture?.restoring && next.id === this.gesture.previous.id) { this.finishGesture(); return true; }
     if (this.gesture && next.gesture) {
@@ -223,7 +227,10 @@ export class CompanionPlayback {
     let remaining = elapsedMs;
     while (this.current && !this.hold && !this.loading && remaining > 0) {
       // Check every entered exposure, not only the final frame after a slow display tick.
-      if (this.leaveSafeDrawing()) continue;
+      // Do not replan the same intent at every intermediate bridge drawing:
+      // a safe hand pose can have a route back to the bridge's own entrance.
+      // Only a new request invalidates this committed continuation.
+      if (!(this.current.kind === 'bridge' && this.bridgeIntent === this.pending) && this.leaveSafeDrawing()) continue;
       const frame = frameAt(this.current, this.timeMs);
       const boundary = Math.min(this.current.durationMs, frame.startMs + frame.durationMs);
       const step = Math.min(remaining, Math.max(0, boundary - this.timeMs));

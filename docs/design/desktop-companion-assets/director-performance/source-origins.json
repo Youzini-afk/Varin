@@ -1,0 +1,18 @@
+{
+  "neutral": "varin-animation-production-v2/shared/upright-open-neutral-v2.png",
+  "listen": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+  "arrival": "varin-animation-production-v3/task-reactions/poses/arrival-chest.png",
+  "thought": "varin-animation-production-v3/task-reactions/poses/thought-chin.png",
+  "explain": "varin-animation-production-v3/task-reactions/poses/explain-content.png",
+  "locate": "varin-animation-production-v3/task-reactions/poses/error-locate.png",
+  "offer": "varin-animation-production-v2/question-permission/poses/offer.png",
+  "offer-mid": "varin-animation-production-v2/question-permission/poses/offer-mid.png",
+  "dispatch": "varin-animation-production-v2/editing-dispatch/frames/dispatch-a-gaze.png",
+  "yaw": "varin-animation-production-v2/reading-search/search-right-v1-candidate.png",
+  "read": "varin-animation-production-v2/shared/open-screen-read-v2.png",
+  "closed": "varin-animation-production-v2/lid/frames/closed-rest-rigid-v2.png",
+  "yawn": "varin-animation-production-v3/companionship/frames/yawn-cover-v1.png",
+  "doze": "varin-animation-production-v3/companionship/frames/doze-v1.png",
+  "wake": "varin-animation-production-v3/companionship/frames/wake-alert-v1.png",
+  "hover": "varin-animation-production-v3/companionship/frames/hover-attend-v1.png"
+}

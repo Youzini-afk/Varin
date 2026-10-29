@@ -1,14 +1,16 @@
 # 桌宠多任务关注、待办与子 agent 精灵
 
-状态：2026-10-29 **方案已批准，完整多任务实现与联调中**。本方案针对多任务相互挤兑与难以理解的问题，不把全局能力冒充为当前已实现行为。继承[动画制作](desktop-companion-animation-production.md)、[交互扩展](desktop-companion-interaction-expansion.md)的单播放器、真实接触回收、只读观察和原 Host 边界。
+状态：2026-10-29 **只读全局 attention 与交互面板基础已实现，并完成 Linux 原生有限验证；主管表演与项目台仍在独立候选联调。** 本方案针对多任务相互挤兑与难以理解的问题，区分已验证基础和未验收表演。继承[动画制作](desktop-companion-animation-production.md)、[交互扩展](desktop-companion-interaction-expansion.md)的单播放器、真实接触回收、只读观察和原 Host 边界。
+
+> 角色方向更新：用户明确 Varin 是主管/秘书。本文的数据、待处理和身份安全方案继续沿用；“关注任务即身体执行主体”的旧叙事由[主管式项目台方案](desktop-companion-director.md)覆盖。检查选择不再把 Varin 变为某项目执行者。
 
 ## 结论：一个主角，一件正在表达的事，一份随时可查的待办
 
-桌宠是 **Varin 的陪伴者**，不是某个线程的执行器；但它的身体和工作道具在任一时刻只表达**一个明确标注的关注任务**。不试图用一个人的连续动作实时重演所有线程。其他任务继续真实执行，在概览和待处理列表里出现，不靠抢走身体来证明自己存在。
+Varin 是整体主管与秘书，不是某个线程的执行器。身体在任一时刻表达一个明确的管理语句；项目卡、真实负责人和子队保留自己的身份与执行提示。检查某个项目只是查看镜头，不把 Varin 变成该项目的执行者。其他项目的事实和待处理事项无需抢走身体才能出现。
 
 用户始终能回答三个问题：
 
-1. 她现在在表达谁？——“关注：论文整理 · 阅读材料”。
+1. 她正在管理什么？——“查看论文整理项目”；阅读材料是该项目负责人的执行详情。
 2. 还有什么需要我？——“实验复现需要确认；另有 1 个问题（已观察范围）”。
 3. 为什么没有跟着每个工具切换？——“关注任务正在处理多项工具；详情显示最新状态”。
 
@@ -170,6 +172,8 @@ computer/MCP 类别沿原 owner metadata 查询；`pending_mcp_interactions` 会
 
 ### 身份与资源复用
 
+当前子队属于关注的父 thread/branch，而不只属于其最新 Run。旧父 Run 派发的孩子仍可能真实运行；按每个 child/execution 自身的原 parent_run_id 校验，不用 snapshot.activeRun.id 过滤。主 Run 更新不重排仍在工作的孩子。
+
 - `components/ui/AgentAvatar.tsx` 调用 `@varin/protocol` 的 `agentAvatarForIdentity(identity, avatar)` 和 `agent-avatar-art.ts`。复用同一 child thread ID 与已保存 avatar，保证聊天卡、子任务列表、桌宠一致。
 - `ChatDelegation.tsx` 现有优先链为 child avatar、exact execution avatar、agent avatar、同线程目录保存值；`ChildTasks` 用 child ID/头像。桌宠以当前确证的 execution/child 对应资料建立相同身份解析，不导入主窗 store 当跨窗口权威。没有显式头像时用既有确定性 identity fallback，不随机分配。
 - 通过 `execution.child_operation_id → children.operation_id` 找到对应 child，再取得 `child.child_thread_id + child.avatar`；若需要 execution 中头像作为 fallback，仍须先验证两者 child identity 一致。对每一只精灵校验 `hostGeneration + parent_thread_id + parent_branch_id + parent_run_id + child_operation_id + execution_id + child_thread_id + child_branch_id`。**头像身份**按 child thread 稳定，**一次派发/续跑的生命周期**按 execution_id；同一孩子新轮次不能吃到旧完成回执。
@@ -187,7 +191,8 @@ computer/MCP 类别沿原 owner metadata 查询；`pending_mcp_interactions` 会
 | childActivity running | 小幅稳定浮动/朝工作方向，不围人物高速转圈 |
 | waiting | 稳定悬停 + 等待标记，不默认画权限锁 |
 | settling | 轻收束但仍在席；不画完成勾 |
-| preparation_failed / failed | 安静异常标记，摘要保留对应任务，避免失败头像无声消失 |
+| 非终态 preparation_failed | 安静异常标记，摘要保留对应任务；这是准备问题，不假称该执行已终结 |
+| exact execution failed | 精灵中性收回，错误明确留在全局待处理/结果列表，不画完成勾，也不永久占据工作席位 |
 | 当前 exact execution 明确 completed | 若实际看过其活动且没有同 child 新活动，短收回离场；其结果保留可查，非全队庆祝 |
 | cancelled | 中性撤回；取消意图未证实结算时不先消失 |
 | 快照不再包含 / unknown / 关注变化 | 中性收回或置为最后已知；不补演完成，不以 count 差触发胜利 |
@@ -231,3 +236,9 @@ computer/MCP 类别沿原 owner metadata 查询；`pending_mcp_interactions` 会
 **完整交付所需读模型（与前两批并行）**：按上述推荐实现轻量 attention snapshot/invalidation，满足自动全目录待处理保证；证明初始读取竞争、断线 cursor 追平、归档/删除存续工作、多 request 与权限撤销，不让 UI 自建权威。可选跟随主窗另有 focus 消息合同，和此全局事实合同分开。
 
 文档检查不代替 runtime/实机验收。实现包含 `attentionCoordinator`、`attentionLedger`、`attentionPresentation`、`CompanionAttentionPanel`、`childTeam` 与原应用接线；父任务统一最终验证、资源接入与提交。已有单播放器和 Host 权限边界不变。
+
+## 已验证的基础范围
+
+Linux 原生窗口使用 `cb4f9350` attention/面板基础、`7fa96e77` 协议 71 QA kernel 和未改变的 upright-v2 资源，实际验证了当前 Host 原生任务覆盖提示、健康空待办、刷新/展开、Esc 关闭与入口焦点恢复、360×480 可达布局及主窗退出后的附属窗口清理。设置已逐字节恢复。精确产物与日志身份见 [foundation 验证记录](desktop-companion-assets/attention-foundation/native-validation.json)。
+
+这次没有制造付费模型任务；并发请求归属由实际运行的 Catalog fixtures 覆盖，不冒称 GUI 多任务实测。它不构成主管新身体语句、项目负责人角色库、portfolio 联动或 Windows/macOS 的最终验收。

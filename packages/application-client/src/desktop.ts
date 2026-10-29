@@ -370,20 +370,49 @@ export interface DesktopCompanionTeam {
   overflowCount: number | null;
 }
 
+/** Review-only director composition. Opaque seats identify real projects, never new executors. */
+export const COMPANION_PROJECT_VISIBLE_LIMIT = 3;
+export interface DesktopCompanionPortfolio {
+  mode: 'overview' | 'intake' | 'inspection' | 'attention' | 'result';
+  projects: {
+    key: string;
+    label: 'A' | 'B' | 'C';
+    /** Optional plain short display name; never an identity or executable markup. */
+    caption?: string;
+    lead: { avatar: import('@varin/protocol').AgentAvatarId; role: 'project-lead' | 'child-agent' };
+    status: 'needs-user' | 'uncertain' | 'active' | 'settling' | 'result' | 'available' | 'unknown';
+    notice?: 'permission' | 'question' | 'mixed' | 'inspect' | 'unknown';
+    requestCount: number | null;
+    uncertainCount: number | null;
+    /** Factual detail belongs to this project, independently of Varin's body cue. */
+    detail?: 'reading' | 'editing' | 'searching' | 'executing' | 'computing' | 'organizing' | 'verifying' | 'delegating' | 'generating' | 'waiting';
+  }[];
+  inspectedKey: string | null;
+  subjectKey: string | null;
+  overflowCards: number | null;
+  team?: DesktopCompanionTeam & { projectKey: string };
+}
+export interface DesktopCompanionSceneLayoutReceipt {
+  scope: string;
+  revision: number;
+  inspectionSide: 'left' | 'right' | null;
+}
+
 /** Decorative companion data only: no content, execution or approval capability. */
 export interface DesktopCompanionScene {
   revision: number;
   scope: string;
-  kind: 'reading' | 'editing' | 'searching' | 'dispatch' | 'question' | 'permission' | 'organize' | 'verify' | 'status' | null;
+  kind: 'reading' | 'editing' | 'searching' | 'dispatch' | 'question' | 'permission' | 'organize' | 'verify' | 'status' | 'portfolio' | null;
   phase: 'active' | 'resolve' | 'withdraw';
   outcome: 'allowed' | 'denied' | 'answered' | null;
   count: number | null;
   suppressed: boolean;
   reducedMotion: boolean;
   menuOpen: boolean;
-  cue: 'transition' | 'engaged' | 'present' | 'read' | 'page-turn' | 'type' | 'review' | 'revise' | 'scan-left' | 'scan-right' | 'select' | 'split' | 'dispatch-left' | 'dispatch-right' | 'watch' | 'ask' | 'offer' | 'attend' | 'acknowledge' | 'organize-align' | 'organize-select' | 'verify-scan' | 'verify-compare';
+  cue: 'transition' | 'engaged' | 'present' | 'read' | 'page-turn' | 'type' | 'review' | 'revise' | 'scan-left' | 'scan-right' | 'select' | 'split' | 'dispatch-left' | 'dispatch-right' | 'watch' | 'ask' | 'offer' | 'attend' | 'acknowledge' | 'organize-align' | 'organize-select' | 'verify-scan' | 'verify-compare' | 'listen-left' | 'listen-right' | 'gather-out' | 'gather-in' | 'address-user' | 'management-present' | 'management-release' | 'management-receive' | 'management-delegate';
   cueInstance?: number;
   team?: DesktopCompanionTeam;
+  portfolio?: DesktopCompanionPortfolio;
   status?: 'queued' | 'external' | 'retry' | 'failure' | 'cancelling' | 'disconnected' | 'synchronizing' | 'uncertain';
 }
 
@@ -392,7 +421,7 @@ export interface VarinDesktopCommandMap {
   desktop_start_window_drag: { args: void; result: null };
   desktop_get_companion: { args: void; result: { enabled: boolean; visible: boolean } };
   desktop_set_companion: { args: { enabled: boolean }; result: { enabled: boolean; visible: boolean } };
-  desktop_companion_scene: { args: { descriptor: DesktopCompanionScene; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number } }; result: null };
+  desktop_companion_scene: { args: { descriptor: DesktopCompanionScene; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number } }; result: DesktopCompanionSceneLayoutReceipt | null };
   desktop_companion_stool: { args: { phase: 'clear' } | { phase: 'lift' | 'landing'; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number } }; result: null };
   desktop_companion_drag: { args: { phase: 'start'; anchor: { x: number; y: number } } | { phase: 'move' | 'end' }; result: null };
   desktop_companion_passthrough: { args: { enabled: boolean }; result: { supported: boolean; enabled: boolean } };

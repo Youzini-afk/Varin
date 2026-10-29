@@ -1,5 +1,6 @@
 import { isAgentAvatarId } from '@varin/protocol';
 import { COMPANION_TEAM_VISIBLE_LIMIT, type DesktopCompanionTeam } from '@varin/application-client/desktop';
+import { readCompanionPortfolio } from './companion-portfolio.js';
 import { companionWorldRect } from './companion-window.js';
 type Bounds = ReturnType<typeof companionWorldRect>;
 
@@ -19,25 +20,10 @@ export interface CompanionSceneWindow {
 }
 export interface CompanionScenePayload {
   descriptor: CompanionSceneDescriptor;
-  layout: { character: Bounds; visible: Bounds };
+  layout: { character: Bounds; visible: Bounds; inspectionSide: 'left' | 'right' };
 }
-const kinds = new Set(['reading','editing','searching','dispatch','question','permission','organize','verify','status']);
-/** Narrow presentation data only: no renderer-provided markup, URL, task content or command. */
-export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDescriptor {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Missing scene descriptor');
-  const d = value as Record<string, unknown>;
-  if (!Number.isSafeInteger(d.revision) || (d.revision as number) < 0
-    || typeof d.scope !== 'string' || d.scope.length > 200
-    || (d.kind !== null && !kinds.has(String(d.kind)))
-    || !['active','resolve','withdraw'].includes(String(d.phase))
-    || ![null,'allowed','denied','answered'].includes(d.outcome as null | string)
-    || !(d.count === null || Number.isSafeInteger(d.count) && (d.count as number) >= 0 && (d.count as number) <= 99)
-    || !['transition','engaged','present','read','page-turn','type','review','revise','scan-left','scan-right','select','split','dispatch-left','dispatch-right','watch','ask','offer','attend','acknowledge','organize-align','organize-select','verify-scan','verify-compare'].includes(String(d.cue))
-    || !(d.cueInstance === undefined || Number.isSafeInteger(d.cueInstance) && (d.cueInstance as number) >= 0)
-    || typeof d.suppressed !== 'boolean' || typeof d.reducedMotion !== 'boolean' || typeof d.menuOpen !== 'boolean') throw new Error('Invalid scene descriptor');
-  let team: DesktopCompanionTeam | undefined;
-  if (d.team !== undefined) {
-    const value = d.team as Record<string, unknown>;
+export function readCompanionTeam(input: unknown): DesktopCompanionTeam {
+    const value = input as Record<string, unknown>;
     if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.members) || value.members.length > COMPANION_TEAM_VISIBLE_LIMIT
       || !(value.overflowCount === null || Number.isSafeInteger(value.overflowCount) && (value.overflowCount as number) >= 0)) throw new Error('Invalid companion team');
     const keys = new Set<string>();
@@ -49,13 +35,33 @@ export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDesc
       keys.add(member.key);
       return { key: member.key, avatar: member.avatar, state: member.state as DesktopCompanionTeam['members'][number]['state'] };
     });
-    team = { members, overflowCount: value.overflowCount as number | null };
-  }
+    return { members, overflowCount: value.overflowCount as number | null };
+}
+
+const kinds = new Set(['reading','editing','searching','dispatch','question','permission','organize','verify','status','portfolio']);
+/** Narrow presentation data only: no renderer-provided markup, URL, task content or command. */
+export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDescriptor {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Missing scene descriptor');
+  const d = value as Record<string, unknown>;
+  if (!Number.isSafeInteger(d.revision) || (d.revision as number) < 0
+    || typeof d.scope !== 'string' || d.scope.length > 200
+    || (d.kind !== null && !kinds.has(String(d.kind)))
+    || !['active','resolve','withdraw'].includes(String(d.phase))
+    || ![null,'allowed','denied','answered'].includes(d.outcome as null | string)
+    || !(d.count === null || Number.isSafeInteger(d.count) && (d.count as number) >= 0 && (d.count as number) <= 99)
+    || !['transition','engaged','present','read','page-turn','type','review','revise','scan-left','scan-right','select','split','dispatch-left','dispatch-right','watch','ask','offer','attend','acknowledge','organize-align','organize-select','verify-scan','verify-compare','listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate'].includes(String(d.cue))
+    || !(d.cueInstance === undefined || Number.isSafeInteger(d.cueInstance) && (d.cueInstance as number) >= 0)
+    || typeof d.suppressed !== 'boolean' || typeof d.reducedMotion !== 'boolean' || typeof d.menuOpen !== 'boolean') throw new Error('Invalid scene descriptor');
+  const team = d.team === undefined ? undefined : readCompanionTeam(d.team);
   if (d.kind === 'status' ? !['queued','external','retry','failure','cancelling','disconnected','synchronizing','uncertain'].includes(String(d.status)) : d.status !== undefined) throw new Error('Invalid scene status');
+  const portfolio = d.kind === 'portfolio' ? readCompanionPortfolio(d.portfolio, readCompanionTeam) : undefined;
+  if (d.kind !== 'portfolio' && d.portfolio !== undefined) throw new Error('Unexpected portfolio');
+  if (portfolio && d.team !== undefined) throw new Error('Portfolio owns its scoped team');
+  if (portfolio && !['transition','listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate'].includes(String(d.cue))) throw new Error('Portfolio body cue must describe a management gesture');
   if (d.outcome !== null && (d.phase !== 'resolve' || (d.outcome === 'answered' ? d.kind !== 'question' : d.kind !== 'permission'))) throw new Error('Scene outcome does not match its presentation');
   return { revision: d.revision as number, scope: d.scope, kind: d.kind as CompanionSceneKind | null,
     phase: d.phase as CompanionSceneDescriptor['phase'], outcome: d.outcome as CompanionSceneDescriptor['outcome'],
-    ...(team ? { team } : {}), ...(d.status === undefined ? {} : { status: d.status as NonNullable<CompanionSceneDescriptor['status']> }), count: d.count as number | null, ...(d.cueInstance === undefined ? {} : { cueInstance: d.cueInstance as number }), cue: d.cue as CompanionSceneDescriptor['cue'], suppressed: d.suppressed, reducedMotion: d.reducedMotion, menuOpen: d.menuOpen };
+    ...(portfolio ? { portfolio } : {}), ...(team ? { team } : {}), ...(d.status === undefined ? {} : { status: d.status as NonNullable<CompanionSceneDescriptor['status']> }), count: d.count as number | null, ...(d.cueInstance === undefined ? {} : { cueInstance: d.cueInstance as number }), cue: d.cue as CompanionSceneDescriptor['cue'], suppressed: d.suppressed, reducedMotion: d.reducedMotion, menuOpen: d.menuOpen };
 }
 
 export function companionSceneLayout(content: Bounds, viewport: unknown, workArea: Bounds) {
@@ -66,7 +72,10 @@ export function companionSceneLayout(content: Bounds, viewport: unknown, workAre
   const bounds = { x: character.x - Math.round((width-character.width)/2), y: character.y-(height-character.height), width, height };
   const left = Math.max(bounds.x,workArea.x), top = Math.max(bounds.y,workArea.y);
   const right = Math.min(bounds.x+width,workArea.x+workArea.width), bottom = Math.min(bounds.y+height,workArea.y+workArea.height);
-  return { bounds, layout: {
+  const rightFits = character.x + character.width * 1.14 <= workArea.x + workArea.width;
+  const leftFits = character.x - character.width * 0.18 >= workArea.x;
+  const inspectionSide: 'left' | 'right' = rightFits || !leftFits ? 'right' : 'left';
+  return { bounds, layout: { inspectionSide,
     character: { x: (character.x-bounds.x)/width, y: (character.y-bounds.y)/height, width: character.width/width, height: character.height/height },
     visible: { x: (left-bounds.x)/width, y: (top-bounds.y)/height, width: Math.max(0,right-left)/width, height: Math.max(0,bottom-top)/height },
   } };
@@ -113,6 +122,15 @@ export class CompanionSceneWindows {
       entry.descriptor = descriptor; entry.viewport = { ...viewport };
     }
     this.refresh(owner.id);
+  }
+
+  inspectionReceipt(ownerId: number) {
+    const entry = this.entries.get(ownerId);
+    if (!entry || entry.descriptor.kind !== 'portfolio') return null;
+    const { descriptor } = entry;
+    const inspectionSide = entry.blocked || descriptor.suppressed || descriptor.menuOpen || !entry.owner.isVisible()
+      ? null : companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds())).layout.inspectionSide;
+    return { scope: descriptor.scope, revision: descriptor.revision, inspectionSide };
   }
 
   block(ownerId: number, blocked: boolean): void {

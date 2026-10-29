@@ -4016,7 +4016,7 @@ const handleInvoke = async (
       const owner = requireCompanionWindow(browserWindow);
       companionScenes.update(owner, args.descriptor, args.viewport as CompanionSceneViewport);
       companionScenes.block(owner.id, companionMovement.isDragging(owner.id));
-      return null;
+      return companionScenes.inspectionReceipt(owner.id);
     }
     case 'desktop_companion_stool': {
       const owner = requireCompanionWindow(browserWindow);

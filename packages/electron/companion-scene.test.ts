@@ -118,3 +118,29 @@ it('allows only the existing same-scope final spirit a bounded neutral departure
     f.manager.clearAll();
   } finally { vi.useRealTimers(); }
 });
+
+it('accepts only bounded portfolio identities and an inspected project-owned team', () => {
+  const portfolio = { mode: 'inspection', projects: [{ key: 'project-1', label: 'A', lead: { avatar: 'slope-lilac', role: 'project-lead' }, status: 'active', requestCount: 0, uncertainCount: 0 }], inspectedKey: 'project-1', subjectKey: null, overflowCards: 0 };
+  const d = descriptor(1, { kind: 'portfolio', cue: 'transition', portfolio: portfolio as NonNullable<CompanionSceneDescriptor['portfolio']> });
+  expect(readCompanionSceneDescriptor(d).portfolio?.projects[0]?.lead.avatar).toBe('slope-lilac');
+  for (const notice of ['permission','question','mixed','inspect','unknown']) expect(readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [{ ...portfolio.projects[0], notice }] } }).portfolio?.projects[0]?.notice).toBe(notice);
+  expect(() => readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [{ ...portfolio.projects[0], notice: 'approved' }] } })).toThrow();
+  expect(readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [{ ...portfolio.projects[0], caption: '材料 <检查>' }] } }).portfolio?.projects[0]?.caption).toBe('材料 <检查>');
+  expect(() => readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [{ ...portfolio.projects[0], caption: 'x'.repeat(25) }] } })).toThrow();
+  expect(() => readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [{ ...portfolio.projects[0], caption: 'a\u202eb' }] } })).toThrow();
+  expect(() => readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, team: { projectKey: 'absent', members: [], overflowCount: 0 } } })).toThrow();
+  expect(() => readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [...portfolio.projects, ...portfolio.projects] } })).toThrow();
+  expect(() => readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, inspectedKey: 'absent' } })).toThrow();
+  expect(() => readCompanionSceneDescriptor({ ...d, outcome: 'allowed', phase: 'resolve' })).toThrow();
+});
+
+it('resolves a single native inspection side and clears its receipt while dragging', () => {
+  const f = fixture();
+  const p = { mode: 'overview', projects: [], inspectedKey: null, subjectKey: null, overflowCards: 0 } as const;
+  f.manager.update(f.owner, descriptor(4, { kind: 'portfolio', cue: 'transition', portfolio: { ...p, projects: [] } }), viewport);
+  expect(f.manager.inspectionReceipt(f.owner.id)).toEqual({ scope: 'host/thread/branch', revision: 4, inspectionSide: 'right' });
+  f.owner.bounds.x = 900;
+  expect(f.manager.inspectionReceipt(f.owner.id)?.inspectionSide).toBe('left');
+  f.manager.block(f.owner.id, true);
+  expect(f.manager.inspectionReceipt(f.owner.id)?.inspectionSide).toBeNull();
+});

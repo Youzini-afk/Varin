@@ -43,6 +43,17 @@ def compile_pickup(root, inventory, core, *, extra_detached=None, extra_recovery
   stop=next((i for i,f in enumerate(steps) if f['sha256'] in bysha),None)
   if stop is not None:return steps[:stop+1],bysha[steps[stop]['sha256']]['angle']
   end=steps[-1]['sha256']
+  seen={h}
+  # A management sentence can recover to the exact listen-rest pose before
+  # the already authored neutral hand return. Follow explicit source edges,
+  # never substitute a family label or jump directly to the neutral body.
+  while end not in {closed,user,screen} and end not in bysha:
+   if end in seen or end not in recovery:raise ValueError(f'No finite authored recovery continuation for {h}: {end}')
+   seen.add(end);tail=recovery[end]['steps']
+   if not tail:raise ValueError(f'Empty authored recovery continuation for {end}')
+   steps.extend(tail);end=steps[-1]['sha256']
+  stop=next((i for i,f in enumerate(steps) if f['sha256'] in bysha),None)
+  if stop is not None:return steps[:stop+1],bysha[steps[stop]['sha256']]['angle']
   if end==closed:return steps,None
   if end==screen:steps.extend({**f,'durationMs':min(f['durationMs'],130)} for f in gaze[1:]);end=user
   if end!=user:raise ValueError(f'No authored support connection for {h}: {end}')

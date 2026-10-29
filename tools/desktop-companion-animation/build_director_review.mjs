@@ -1,0 +1,23 @@
+/** Explicit offline fixture review; no Host connection and no production selection. */
+import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { resolve, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+const here=dirname(fileURLToPath(import.meta.url)), repo=resolve(here,'../..');
+const [bundlePath,output]=process.argv.slice(2).map(value=>resolve(value));
+if(!bundlePath||!output)throw new Error('Usage: build_director_review.mjs candidate/bundle.json output');
+const raw=await readFile(bundlePath), data=JSON.parse(raw);
+if(data.candidateOnly!==true)throw new Error('This review expects an explicitly candidate bundle');
+await mkdir(join(output,'candidate'),{recursive:true});
+for(const name of new Set(['bundle.json',...data.packages.flatMap(p=>p.pages.map(page=>page.file))]))await copyFile(join(dirname(bundlePath),name),join(output,'candidate',name));
+const source=`export { CompanionPlayback, frameAt } from ${JSON.stringify(join(repo,'packages/ui/src/components/companion/playback.mjs'))};
+export { mountCompanionScene } from ${JSON.stringify(join(repo,'packages/ui/src/components/companion/sceneRenderer.ts'))};
+export { sceneCue } from ${JSON.stringify(join(repo,'packages/ui/src/components/companion/sceneCues.ts'))};`;
+if(typeof Bun==='undefined')throw new Error('Run this review builder with the repository Bun toolchain');
+await writeFile(join(output,'runtime-entry.ts'),source);
+const built=await Bun.build({entrypoints:[join(output,'runtime-entry.ts')],outdir:output,target:'browser',format:'esm',naming:'runtime.js'});
+if(!built.success)throw new AggregateError(built.logs,'Review runtime bundle failed');
+await copyFile(join(here,'director_review.html'),join(output,'index.html'));
+const sha=value=>createHash('sha256').update(value).digest('hex');
+await writeFile(join(output,'review-receipt.json'),JSON.stringify({candidateBundleSHA256:sha(raw),runtimeSHA256:sha(await readFile(join(output,'runtime.js'))),fixtureOnly:true,usesProductionPlayerAndSceneRenderer:true,noHostConnection:true,notClaimed:['No candidate promotion','No native window or drag acceptance','No factual task events: all review controls are labelled fixtures']},null,2)+'\n');
+console.log(output);
