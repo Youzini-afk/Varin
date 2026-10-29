@@ -1,0 +1,62 @@
+[
+  {
+    "id": "open-common-rest-v1",
+    "tool": "built-in imagegen",
+    "raw": "shared/raw/open-common-rest-v1.png",
+    "rawSHA256": "8b9db489f29fe2abcab995d9c34dd79ae48948501a29583c63e6f137da56d3ab",
+    "nativeSize": [
+      1254,
+      1254
+    ],
+    "postprocessing": "none; unmodified raw",
+    "prompt": "shared/prompts/open-common-rest-v1.txt",
+    "exactPrompt": "Use case: identity-preserve, coordinated full-character pose edit for animation. This exact Varin portrait is the identity and camera anchor. Create ONE new comfortable shared resting pose, not an action peak. Preserve her exact apparent age, skull width/height, face proportions, blue eyes, pale lavender long hair, side bun and viewer-right blue ornament, blue-gray clothing patterns, hollow diamond pendant, knees/boots, stool and camera scale. The OPEN laptop rests physically on her thighs in exactly the same position and hinge angle. Change support topology naturally: her IMAGE-LEFT hand leaves the keyboard and rests around the SIDE EDGE OF THE LAPTOP BASE near the hinge (not gripping the vertical screen), wrist/elbow anatomically relaxed. Her IMAGE-RIGHT hand rests softly on the near base edge or thigh beside it, fingers relaxed, ready to lift later; do not put it over the support hand. Chest/shoulders comfortable and coordinated, neck naturally upright, no head-down/sideways tilt. This is one coherent body pose: shoulders and sleeves must accommodate changed arms naturally without changing garment identity. Keep head position and size, pelvis seat position, leg geometry, laptop/seat scale and entire full-frame silhouette as close to original as physically possible. Do not crop/recenter/zoom, add props/text, change computer model, close lid, mirror, make face smaller or redraw costume. Genuine transparent background with clean anti-aliased alpha, no colored matte/fringe. Single full square frame at same viewport, preferably512x512, no sheet.\n",
+    "inputs": [
+      {
+        "path": "shared/references/upright-open-neutral-v2.png",
+        "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+      }
+    ],
+    "status": "unselected; rejected-as-animation; identity/rest study only"
+  },
+  {
+    "id": "open-common-rest-v2",
+    "tool": "built-in imagegen",
+    "raw": "shared/raw/open-common-rest-v2.png",
+    "rawSHA256": "28261d937b4492905c22114ee84163e19b9b3dd74e3bbeaadab46eec45054f56",
+    "nativeSize": [
+      1254,
+      1254
+    ],
+    "postprocessing": "none; unmodified raw",
+    "prompt": "shared/prompts/open-common-rest-v2.txt",
+    "exactPrompt": "Precise pose correction of this exact Varin frame. Keep the whole identity, face, head size, blue-gray costume, hollow pendant, hair, OPEN laptop angle, knees/boots/stool and camera exactly the same. Correct ONLY the IMAGE-LEFT support hand and its sleeve anatomy: the hand must support the SIDE/UNDERSIDE OF THE LAPTOP BASE at the lower hinge corner, NOT curl across or hold the vertical screen panel. Lower the fingers approximately 12-15 pixels in the512viewport so they are just below the bottom edge/hinge of the screen, palm under the horizontal base edge, thumb gently on the base rim. Screen panel above hinge has no fingers across its front. Elbow rests relaxed beside her torso and sleeve follows this lower hand naturally. Laptop stays on thighs, do not lift/change its tilt. Right hand remains relaxed on near base/thigh, unchanged. One coherent full-body transparent square frame; no crop/zoom/head changes, no added symbols, exact same visible proportions. Preserve alpha; no colored edge matte.\n",
+    "inputs": [
+      {
+        "path": "shared/raw/open-common-rest-v1.png",
+        "sha256": "8b9db489f29fe2abcab995d9c34dd79ae48948501a29583c63e6f137da56d3ab"
+      }
+    ],
+    "status": "unselected; rejected-as-animation; identity/rest study only"
+  },
+  {
+    "id": "response-sixframe-study-v1",
+    "tool": "built-in imagegen",
+    "raw": "user-response/raw/response-sixframe-study-v1.png",
+    "rawSHA256": "76821d9630fc773d399f0066d6d2e7f8992c418dbd50e5248f9fe250c56639d1",
+    "nativeSize": [
+      1536,
+      1024
+    ],
+    "postprocessing": "none; unmodified raw",
+    "prompt": "user-response/prompts/response-sixframe-study-v1.txt",
+    "exactPrompt": "Use case: identity-preserve continuous animation drawing study. Create ONE coordinated 6-frame ANIMATION CONTACT SHEET of the exact referenced Varin, not six unrelated portraits. Layout exactly 3 columns by 2 rows of equal square cells, read left-to-right top row then bottom row. Intended canvas1536x1024, each cell512 square. No text, no grid lines, no props besides her existing open laptop and stool, genuinely transparent background. Every cell shows her WHOLE BODY and stool with identical camera, pelvis/feet position, head/skull size and original identity/clothes/hair ornament/hollow diamond. The OPEN laptop stays resting on thighs, same size/hinge angle; picture-RIGHT hand (beside ID badge) steadily supports its base THROUGHOUT. Picture-LEFT hand expresses one small warm greeting in a continuous easy arc close to her body, NOT pointing at any project. The body must move together: chest/shoulder/upper arm start, head follows the neck naturally, free forearm moves, then sleeve/hair tips lag and settle. Do NOT freeze torso and only swap faces or move only an arm. Do NOT rotate/scale whole person. Preserve garment construction and hair roots. Act calm, soft, lightly playful, no exaggerated facial change. Frame1 comfortable shared-rest pose like reference. Frame2 small anticipation: right support steady, left fingers release low from laptop side, chest/shoulders start to sit up, free elbow still low. Frame3 smooth halfway rise: left forearm comes up in front of own upper torso, wrist opening, chest slightly forward as a coordinated unit, skull same volume no down-facing face substitution. Frame4 small open-palmed greeting at lower chest height BELOW face, shoulder/elbow/wrist integrated, head upright with warm eye contact, hair tips only small lag. Frame5 actual return: palm relaxes, elbow lowers, chest returns, hand approaching its original laptop-side rest; not simply frame3 reversed, sleeve falls with gravity. Frame6 hand recontacts the same original base-edge position and shoulders settle; head and body return to frame1, hair/sleeve softly finish settling. One finite movement, not a repetitive wave. Make all 6 frames mutually anatomically consistent, especially same face, head width, arm lengths, laptop, boots, skirt and pendant. No cropping of hair/feet in any cell. This is a jointly drawn full-body motion path, not separate random poses.\n",
+    "inputs": [
+      {
+        "path": "shared/raw/open-common-rest-v2.png",
+        "sha256": "28261d937b4492905c22114ee84163e19b9b3dd74e3bbeaadab46eec45054f56"
+      }
+    ],
+    "status": "unselected; rejected-as-animation; identity/rest study only"
+  }
+]
