@@ -1,0 +1,64 @@
+{
+  "status": "candidate; visual review still required",
+  "explicitFittedIdentities": [
+    "ribbon-blue",
+    "scoop-pistachio",
+    "lens-lilac",
+    "overlap-coral"
+  ],
+  "unreviewedIdentityFallback": "none; fail closed in prototype",
+  "faceChecks": [
+    {
+      "id": "ribbon-blue",
+      "faceRoi": {
+        "x": 14,
+        "y": 23,
+        "width": 39,
+        "height": 17
+      },
+      "rgbaChannelDifferences": 0,
+      "passed": true
+    },
+    {
+      "id": "scoop-pistachio",
+      "faceRoi": {
+        "x": 14,
+        "y": 23,
+        "width": 39,
+        "height": 17
+      },
+      "rgbaChannelDifferences": 0,
+      "passed": true
+    },
+    {
+      "id": "lens-lilac",
+      "faceRoi": {
+        "x": 14,
+        "y": 23,
+        "width": 39,
+        "height": 17
+      },
+      "rgbaChannelDifferences": 0,
+      "passed": true
+    },
+    {
+      "id": "overlap-coral",
+      "faceRoi": {
+        "x": 14,
+        "y": 23,
+        "width": 39,
+        "height": 17
+      },
+      "rgbaChannelDifferences": 0,
+      "passed": true
+    }
+  ],
+  "layers": [
+    "cape",
+    "saved avatar with neckline occlusion",
+    "front collar",
+    "clasp",
+    "front clipped folio"
+  ],
+  "notRuntimeAsset": true
+}

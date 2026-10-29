@@ -1,0 +1,9 @@
+import path from'node:path';import{createRequire}from'node:module';import{fitted,child}from'./fitted-captains.mjs';
+const OUT=path.dirname(new URL(import.meta.url).pathname),REPO=process.argv[2]||path.resolve(OUT,'../../../../..'),req=createRequire(REPO+'/package.json'),sharp=req('sharp');sharp.concurrency(1);sharp.cache(false);
+const t=(x,y,s,n=16,c='#4c5268',weight=400,anchor='start')=>`<text x="${x}" y="${y}" font-family="Noto Sans CJK SC,sans-serif" font-size="${n}" font-weight="${weight}" fill="${c}" text-anchor="${anchor}">${s}</text>`;
+let b=t(38,54,'主 Agent · 领队短披肩',32,'#4c5268',600)+t(40,89,'按每种精灵轮廓适配',18,'#788598');
+const family=[['ribbon-blue','雾蓝'],['scoop-pistachio','浅绿'],['lens-lilac','淡紫'],['overlap-coral','珊瑚']];
+family.forEach(([id,label],i)=>{const x=30+i*350;b+=`<rect x="${x}" y="122" width="330" height="430" rx="20" fill="${i%2?'#e7edf4':'#fafbfd'}" stroke="#dce3ed"/>`+t(x+20,156,label,18,'#596681',600)+child(id,x+20,176,128)+fitted(id,x+178,176,128)+`<path d="M${x+151} 242 h18 m-5 -4 l5 4 l-5 4" fill="none" stroke="#aab6c8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`+t(x+84,330,'子 Agent',14,'#788598',400,'middle')+t(x+242,330,'主 Agent',14,'#596681',600,'middle')+`<path d="M${x+20} 364 h290" stroke="#d6deea"/>`+t(x+20,394,'小尺寸',13,'#788598');
+ [24,32,48].forEach((n,j)=>{const cx=x+58+j*104;b+=fitted(id,cx-n/2,435+(48-n)/2,n)+t(cx,516,`${n}px`,12,'#788598',400,'middle');});});
+b+=t(720,594,'同一张脸，同一位精灵。短披肩、菱形扣与任务夹，只标记领队职责。',16,'#788598',400,'middle');
+await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="626"><rect width="1440" height="626" fill="#f0f3f7"/>${b}</svg>`)).png().toFile(OUT+'/main-agent-captain-family-clean.png');console.log('Clean user-facing corrected family board rendered:1440x626.');
