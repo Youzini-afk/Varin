@@ -1,0 +1,10 @@
+{
+  "candidateOnly": true,
+  "rebuiltExact": {
+    "frames/closed-tap-playful-v1.png": true,
+    "masks/closed-tap-playful-v1.png": true,
+    "frames/closed-tap-playful-v1-provenance.json": true
+  },
+  "actualReachableSourceCount": 2,
+  "manifestAllReferencesMatchSHA": true
+}

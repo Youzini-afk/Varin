@@ -1,0 +1,80 @@
+{
+  "status": "independent candidate; parent visual review pending, no selected change",
+  "geometryReference": "varin-upright-v2",
+  "canvas": [
+    512,
+    512
+  ],
+  "actions": {
+    "tap-repeat-response-closed": {
+      "publicAction": "tap-repeat-response",
+      "entryPose": "upright-v2:closed",
+      "exitPose": "upright-v2:closed",
+      "entrySource": "references/closed-rest-rigid-v2.png",
+      "exitSource": "references/closed-rest-rigid-v2.png",
+      "wholeSequenceLoop": false,
+      "frames": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "actualSourceSHA": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 100,
+          "phase": "enter",
+          "cue": "LOCAL_NOTICE",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/closed-tap-playful-v1.png",
+          "actualSourceSHA": "8dde658ad824907c8aab61d5a3a37c0062f2c11d93d11f044732e1c89a19b697",
+          "durationMs": 380,
+          "phase": "hold",
+          "cue": "LOCAL_PLAYFUL",
+          "pauseSafe": true
+        },
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "actualSourceSHA": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "phase": "exit",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    }
+  },
+  "ordinaryRecoveryByActualSHA": {
+    "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb": [
+      {
+        "source": "references/closed-rest-rigid-v2.png",
+        "actualSourceSHA": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+        "durationMs": 80,
+        "phase": "exit",
+        "cue": "REST",
+        "pauseSafe": true
+      }
+    ],
+    "8dde658ad824907c8aab61d5a3a37c0062f2c11d93d11f044732e1c89a19b697": [
+      {
+        "source": "references/closed-rest-rigid-v2.png",
+        "actualSourceSHA": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+        "durationMs": 100,
+        "phase": "exit",
+        "cue": "REST",
+        "pauseSafe": true
+      }
+    ]
+  },
+  "newSources": [
+    {
+      "source": "frames/closed-tap-playful-v1.png",
+      "sha256": "8dde658ad824907c8aab61d5a3a37c0062f2c11d93d11f044732e1c89a19b697",
+      "mask": "masks/closed-tap-playful-v1.png"
+    }
+  ],
+  "eligibility": "one repeated-tap variation per burst, after initial response completes, clearly idle; no approval/nod; stays closed",
+  "interruption": "stable face exposure immediately recovers to exact closed; new facts immediate; exactSHA grab required",
+  "verification": {
+    "outsideMaskExact": true,
+    "bodyBelow200Exact": true,
+    "openClosedCanonicalHeadUnder200Equal": true
+  }
+}

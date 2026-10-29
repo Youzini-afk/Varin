@@ -1,0 +1,72 @@
+[
+  {
+    "path": "README.md",
+    "sha256": "cce091df78add48f5f357cbc3a9d6ad779f284fc307d0e71e33ae2d04f824145",
+    "bytes": 969
+  },
+  {
+    "path": "frames/closed-tap-playful-v1-provenance.json",
+    "sha256": "315f509fc847de17ff1f073b90299f490aad4ac4884d983ae11b7c02bc4eac75",
+    "bytes": 718
+  },
+  {
+    "path": "frames/closed-tap-playful-v1.png",
+    "sha256": "8dde658ad824907c8aab61d5a3a37c0062f2c11d93d11f044732e1c89a19b697",
+    "bytes": 336726
+  },
+  {
+    "path": "generation-inputs.json",
+    "sha256": "74422487899e0877d0c1624868d08ed6f09e129cdbed693f25ce359bbc7d9882",
+    "bytes": 1503
+  },
+  {
+    "path": "manifest.json",
+    "sha256": "489f5f75f13eb9b6fbda7c6b1b213f2cf6d750cd714b3adb6bb2d8cae5d4fc14",
+    "bytes": 2758
+  },
+  {
+    "path": "masks/closed-tap-playful-v1.png",
+    "sha256": "84c56884a96427613216d23725146c47d77d9474d9c69aac7422f60926ba06d4",
+    "bytes": 1875
+  },
+  {
+    "path": "prompts/closed-tap-playful-v1.txt",
+    "sha256": "05def1a39c4362516db29e73e97bfb6594cdb244c8820f99d84abeaaa9f9c000",
+    "bytes": 1007
+  },
+  {
+    "path": "qa/closed-playful-contact.jpg",
+    "sha256": "bd26e53bc217d049882727d49aa41bd8909b9f7a5070b85a3a30831dbb4c4c11",
+    "bytes": 82927
+  },
+  {
+    "path": "raw/closed-tap-playful-v1.png",
+    "sha256": "57b904a687f95b7e956c34b6cb303655522bf66443a6fe204d7db98d90d76e70",
+    "bytes": 1611194
+  },
+  {
+    "path": "rebuild-verification.json",
+    "sha256": "c5513e537f9cb912d5f61121d2a867672dc78993a1b24b8096d6e4c44b344383",
+    "bytes": 277
+  },
+  {
+    "path": "references/closed-rest-rigid-v2.png",
+    "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+    "bytes": 336835
+  },
+  {
+    "path": "references/open-tap-playful-v1.png",
+    "sha256": "f195320d4ee0e041df695a9b739ba48da7804cca900b8ccd8a4ea97f595e6b59",
+    "bytes": 332052
+  },
+  {
+    "path": "register_pose.py",
+    "sha256": "271f021f9ea649570f1f719397a51458a210fe4ec71728997f6159f7e197aa98",
+    "bytes": 2397
+  },
+  {
+    "path": "verify_portable.py",
+    "sha256": "d141dd85a1587a382333ee8a2e1f4a5d729797ffac45c11a84a2b88739912c98",
+    "bytes": 1049
+  }
+]

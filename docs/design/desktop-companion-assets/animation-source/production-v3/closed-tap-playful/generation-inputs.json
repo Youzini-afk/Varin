@@ -1,0 +1,16 @@
+{
+  "tool": "built-in imagegen",
+  "exactPrompt": "Use case: identity-preserve precise local facial expression edit. Image 1 is the CLOSED LAPTOP Varin sprite to edit. Image 2 is expression-reference ONLY: her already approved restrained playful raised-eyebrow small smile. Create a genuine CLOSED-state facial variant directly from image1: one brow slightly raised and blue eyes gently relaxed, a small closed-mouth amused smile meaning 'yes, I noticed you', not angry, exaggerated, flirting, blushing, winking or eye-rolling. Match image2's degree of mild playfulness, but DO NOT copy its open computer or body. Change only eyebrows/eyelids/mouth inside the same face. Preserve skull and face outline and blue eye sizes, upright neck, head position, hair/ornament, hollow pendant, costume, both hands resting on CLOSED computer, exact lid angle and geometry, knees/boots/stool/all framing. All non-face pixels unchanged. No nod, head tilt, props, text, or opening the laptop. Same 512 square full viewport with transparent background, one character frame.\n",
+  "inputs": [
+    {
+      "path": "references/closed-rest-rigid-v2.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+    },
+    {
+      "path": "references/open-tap-playful-v1.png",
+      "sha256": "f195320d4ee0e041df695a9b739ba48da7804cca900b8ccd8a4ea97f595e6b59"
+    }
+  ],
+  "raw": "raw/closed-tap-playful-v1.png",
+  "rawSHA256": "57b904a687f95b7e956c34b6cb303655522bf66443a6fe204d7db98d90d76e70"
+}

@@ -1,0 +1,8 @@
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/closed-tap-playful/build.py
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/closed-tap-playful/frames/closed-tap-playful-v1-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/closed-tap-playful/frames/closed-tap-playful-v1.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/closed-tap-playful/index.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/closed-tap-playful/review.jpg
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/closed-tap-playful/verification.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/closed-tap-playful/selection.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/closed-tap-playful/COMMIT_FILES.txt

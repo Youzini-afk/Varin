@@ -1,0 +1,37 @@
+{
+  "pathBase": "production-v3",
+  "geometryReference": "varin-upright-v2",
+  "sourceManifest": "closed-tap-playful/manifest.json",
+  "sourceManifestSHA256": "489f5f75f13eb9b6fbda7c6b1b213f2cf6d750cd714b3adb6bb2d8cae5d4fc14",
+  "entries": [
+    {
+      "source": "closed-tap-playful/frames/closed-tap-playful-v1.png",
+      "sourceSHA256": "8dde658ad824907c8aab61d5a3a37c0062f2c11d93d11f044732e1c89a19b697",
+      "detachedSource": "relocation/closed-tap-playful/frames/closed-tap-playful-v1.png",
+      "detachedSHA256": "99a59fedaedf1dd40bb414ee4dc425fa3bca811bc3684fd60ca289754ba4b9f3",
+      "mask": "relocation/closed-tap-playful/frames/closed-tap-playful-v1-mask.png",
+      "maskSHA256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "outsideMaskPixelExact": true,
+      "lowerBodyY200ExactToCanonical": true,
+      "embeddedStool": false,
+      "ordinaryRecovery": [
+        {
+          "source": "references/closed-rest-rigid-v2.png",
+          "actualSourceSHA": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 100,
+          "phase": "exit",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "ordinaryRecoveryPathBase": "closed-tap-playful",
+      "restoreSeatedSameExposure": true,
+      "stage": "candidate; art and actual player acceptance separate"
+    }
+  ],
+  "actualActionRecoverySourceCount": 2,
+  "missing": [],
+  "method": "Exact same lower geometry as canonical; accepted canonical no-stool source/matte, no new generated identity or pose",
+  "interruptRule": "Same displayed SHA first; suppress semantic cues on author recovery; exact seated counterpart on early release; current exposure on regrab",
+  "status": "candidate, no selected/public change"
+}
