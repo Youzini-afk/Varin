@@ -271,7 +271,7 @@ export function BotPanel({ model, open, floating, onOpenChange }: {
   return <aside ref={panel} className={cn('workbench-resource-canvas bot-panel relative flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden bg-background', !open && 'pointer-events-none')}
     data-open={open} data-resizing={drag !== null || undefined} data-floating={floating || undefined} inert={!open || undefined} style={style}
     onKeyDown={event => { if (event.key === 'Escape' && floating && open) onOpenChange(false); }}>
-    {open ? <div aria-hidden="true" className="absolute left-0 top-0 z-40 h-full w-px bg-border" /> : null}
+    {open ? <div aria-hidden="true" className="bot-panel-seam" /> : null}
     {open && !floating ? <div className="bot-panel-handle" role="separator" aria-orientation="vertical" aria-label={t('bot.panel.resize')} tabIndex={0}
       aria-valuenow={Math.round(shown)} aria-valuemin={BOT_PANEL_WIDTH.min} aria-valuemax={BOT_PANEL_WIDTH.max}
       onPointerDown={begin} onDoubleClick={() => setWidth(BOT_PANEL_WIDTH.initial)} onKeyDown={onKey} /> : null}

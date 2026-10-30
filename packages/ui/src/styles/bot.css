@@ -135,6 +135,12 @@
 .bot-nav-group[data-open="false"] .bot-nav-sessions { grid-template-rows: 0fr; }
 
 /* ── Right panel frame (§5, §5.9) ──────────────────────────────────────────────────────── */
+/* Docked beside the conversation the panel joins its surface instead of standing apart as a card:
+   no gutter, no corners at the seam, the conversation's top edge carried across, and only a faint
+   hairline between the two. The floating card keeps its own ring. */
+.bot-panel.workbench-resource-canvas:not([data-floating]) { --wb-canvas-gap: 0px; border-radius: 0; border-top: 1px solid var(--border); }
+.bot-panel-seam { position: absolute; left: 0; top: 0; z-index: 40; width: 1px; height: 100%; pointer-events: none; background: color-mix(in srgb, var(--border) 45%, transparent); }
+.bot-panel[data-floating] .bot-panel-seam { display: none; }
 .bot-panel[data-resizing] { transition: none; user-select: none; }
 .bot-panel[data-resizing] > div { transition: none; }
 .bot-panel-handle {
