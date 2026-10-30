@@ -52,3 +52,14 @@ test('known lost drawing context cannot publish a successful new frame', () => {
   expect(paintCompanionFrame(target.canvas, scratch.canvas, sequence, [image], 0)).toBe(false);
   expect(target.context.drawImage).not.toHaveBeenCalled();
 });
+
+test('material readback or write failure cannot erase the visible frame or report a committed drawing', () => {
+  const target = surface(), scratch = surface();
+  for (const operation of ['getImageData', 'putImageData']) {
+    expect(paintCompanionFrame(target.canvas, scratch.canvas, sequence, [image], 0, () => { throw new Error(operation); })).toBe(false);
+    expect(target.pixels()).toBe('last-good'); expect(target.context.drawImage).not.toHaveBeenCalled();
+  }
+  const material = vi.fn();
+  expect(paintCompanionFrame(target.canvas, scratch.canvas, sequence, [image], 0, material)).toBe(true);
+  expect(material).toHaveBeenCalledWith(scratch.context);
+});

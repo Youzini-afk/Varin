@@ -23,6 +23,7 @@ import { readCompanionPackage, readCompanionEndpoints, type CompanionEndpoints, 
 import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
 import { route, type PlaybackAsset } from '@/components/companion/playback.mjs';
+import { CompanionAccentMaterial } from '@/components/companion/companionAccentMaterial';
 import { paintCompanionFrame } from '@/components/companion/paintCompanionFrame';
 import { pickupPreloadDependencies } from '@/components/companion/pickupPreload';
 import { projectCompanionIntent, newlyAnsweredQuestion, companionObserverAction, companionReceipt, currentCompanionReceipt, consumeCompanionReceipt, type CompanionReceipt, type ObservationHealth } from '@/components/companion/presentation';
@@ -165,6 +166,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   }, [providerProgress, intent.state, health, assetList, outputBeat]);
   const canvas = React.useRef<HTMLCanvasElement>(null);
   const paintSurface = React.useRef<HTMLCanvasElement | null>(null);
+  const accentMaterial = React.useRef(new CompanionAccentMaterial());
   const beforeNativeLift = React.useRef<() => void>(() => {});
   const repeatTapAllowed = React.useRef(false);
   const companionWindow = useCompanionWindow(canvas, review, () => beforeNativeLift.current(), () => repeatTapAllowed.current);
@@ -369,6 +371,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   }, []);
   const installBundle = async (raw: unknown, readImage: (name: string) => Promise<ImageBitmap>, allowCandidates: boolean, manualSelection = false) => {
     ++loadGeneration.current;
+    accentMaterial.current.clear();
     if (manualSelection) { setBundledEpoch(null); setVisibleDrawing(undefined); lastVisibleDrawingKey.current = ''; }
     setPlaying(false); setError('');
     try {
@@ -495,7 +498,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     const node = canvas.current;
     if (!node) return;
     paintSurface.current ??= document.createElement('canvas');
-    if (!paintCompanionFrame(node, paintSurface.current, sequence, images, exposure)) return;
+    if (!paintCompanionFrame(node, paintSurface.current, sequence, images, exposure, stage => {
+      accentMaterial.current.apply(stage, sequence, images[sequence.frames[exposure]!.page]!, exposure, bundledEpoch);
+    })) return;
     const frame = sequence.frames[exposure]!;
     const cue = frame.cue ? sceneCue(frame.cue, sequence.sceneAction ?? sequence.action) : 'engaged';
     const drawnContext = !manualReview && !playing && automatic.packageId === sequence.id && automatic.exposure === exposure ? automatic.context : null;

@@ -4,7 +4,7 @@ import type { CompanionPackage } from './sequencePackage';
  * A decode/detached-bitmap failure leaves the last successful drawing authoritative.
  * One reusable canvas, not another animation owner or an interpolated pose. */
 export function paintCompanionFrame(canvas: HTMLCanvasElement, scratch: HTMLCanvasElement,
-  sequence: CompanionPackage, images: readonly ImageBitmap[], exposure: number): boolean {
+  sequence: CompanionPackage, images: readonly ImageBitmap[], exposure: number, material?: (stage: CanvasRenderingContext2D) => void): boolean {
   const frame = sequence.frames[exposure], image = frame && images[frame.page];
   const [width, height] = sequence.canvas;
   if (images.length !== sequence.pages.length || !frame || !image || !image.width || !image.height
@@ -16,6 +16,7 @@ export function paintCompanionFrame(canvas: HTMLCanvasElement, scratch: HTMLCanv
     if (scratch.height !== height) scratch.height = height;
     stage.clearRect(0, 0, width, height);
     stage.drawImage(image, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
+    material?.(stage);
     if (stage.isContextLost?.()) return false;
     // Normal exposures share 512px geometry: never reset the visible canvas per frame.
     if (canvas.width !== width) canvas.width = width;
