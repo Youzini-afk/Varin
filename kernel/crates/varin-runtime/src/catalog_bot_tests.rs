@@ -371,6 +371,123 @@ fn bot_history_uses_original_item_identity_and_rejects_cross_bot_or_unreachable_
     assert!(db.capture_bot_history("other-bot", "thread", "main", &input.input_id, &input.input_id).is_err());
     assert!(db.capture_bot_history("bot", "thread", "fork", "unreachable-head", &input.input_id).unwrap().load(&||false).is_err());
 }
+
+#[test]
+fn incremental_history_reads_only_the_selected_tail_and_identifies_a_rewound_boundary() {
+    let fixture = Fixture::new(); let mut db = fixture.open(); let receipt = bot_submit(&mut db);
+    let original = db.head("main").unwrap();
+    let one = db.append_history(&receipt.run_id, db.epoch(), original.as_deref(), HistorySource::Assistant, json!("first"), None).unwrap();
+    let two = db.append_history(&receipt.run_id, db.epoch(), Some(&one.id), HistorySource::Assistant, json!("second"), None).unwrap();
+    let page = db.capture_history_page("main").unwrap().load_since(None, None, original.as_deref(), 1, &||false).unwrap();
+    assert_eq!(page.items[0].id, two.id);
+    let next = db.capture_history_page("main").unwrap().load_since(page.head.as_deref(), page.previous.as_deref(), original.as_deref(), 1, &||false).unwrap();
+    assert_eq!(next.items[0].id, one.id);
+    assert!(next.previous.is_none());
+    assert!(db.capture_history_page("main").unwrap().load_since(None, None, Some(&two.id), 100, &||false).unwrap().items.is_empty());
+    assert!(db.capture_history_page("main").unwrap().load_since(Some(&one.id), None, Some(&two.id), 100, &||false).unwrap().boundary_reset);
+}
+
+#[test]
+fn bot_following_keeps_original_identity_and_separates_read_send_and_memory_grants() {
+    use super::bot_work::{BotMatter, MatterThread, MatterUpdate};
+    let fixture = Fixture::new(); let mut db = fixture.open(); bot_submit(&mut db);
+    db.create_thread("ordinary", "ordinary-main").unwrap();
+    let matter = BotMatter { id: "release".into(), revision: 0, title: "Release".into(), description: "Follow the original work".into(), archived: false,
+        threads: vec![MatterThread { thread_id: "ordinary".into(), branch_id: "ordinary-main".into(), send: false, memory: false }] };
+    let mut update = MatterUpdate { bot_id: "bot".into(), key: "follow".into(), expected_revision: 0, matter };
+    let saved = db.update_bot_matter(update.clone(), None).unwrap();
+    assert_eq!(saved, db.update_bot_matter(update.clone(), None).unwrap());
+    assert_eq!(db.bot_for_thread("ordinary").unwrap(), None);
+    assert!(super::bot_work::linked(&db.db,"thread","ordinary",Some("ordinary-main"),false,false).unwrap());
+    assert!(!super::bot_work::linked(&db.db,"thread","ordinary",Some("ordinary-main"),true,false).unwrap());
+    assert!(!super::bot_work::linked(&db.db,"thread","ordinary",Some("ordinary-main"),false,true).unwrap());
+    let read = db.capture_family_read("thread",Some("ordinary"),Some("ordinary-main")).unwrap();
+    update.key = "grant-send".into(); update.expected_revision = saved.revision; update.matter = saved;
+    update.matter.threads[0].send = true;
+    let saved = db.update_bot_matter(update.clone(),None).unwrap();
+    assert!(super::bot_work::can_message(&db.db,"thread","main","ordinary","ordinary-main").unwrap());
+    update.key = "unfollow".into(); update.expected_revision = saved.revision; update.matter = saved; update.matter.archived = true;
+    db.update_bot_matter(update,None).unwrap();
+    assert!(read.authorize(&||false).is_err());
+    assert_eq!(db.bot_for_thread("ordinary").unwrap(),None);
+}
+
+#[test]
+fn bot_forgotten_source_filters_unicode_and_attributed_work_updates_without_changing_originals() {
+    use crate::execution::{Content, ConversationHistory, ConversationItem, Provenance};
+    use sha2::{Digest,Sha256};
+    let original = "Keep 🐾 this; forget this choice.";
+    let revision = hex::encode(Sha256::digest(original.as_bytes()));
+    let state: memory::MemoryState = serde_json::from_value(json!({"revision":1,"memories":[],"noteRevisions":{},"botKnowledge":{
+        "botId":"bot","threadId":"thread","items":[],"corrections":[],"invalidations":[],"exclusions":[{"id":1,"scope":"bot","sources":[{
+            "kind":"history-item","id":"source","revision":revision,"start":14,"end":33,"threadId":"ordinary","branchId":"ordinary-main","headId":"source"}]}]}})).unwrap();
+    let mut history: ConversationHistory = vec![ConversationItem { resource_activation:None,id:"source".into(),provenance:Provenance::UserInstruction{input_id:"source".into()},content:Content::Text{text:original.into()},opaque:None }.into(),
+        ConversationItem {resource_activation:None,id:"update".into(),provenance:Provenance::EnvironmentFact{event_id:"work".into()},opaque:None,
+            content:Content::Output{output:crate::output::OutputBody{data:json!({"kind":"work_update","source":{"kind":"user_input","itemId":"source"}}),parts:vec![crate::output::OutputPart::Text{text:original.into()}]}}}.into()];
+    let originals = history.clone();
+    super::memory_exclusion::filter(Some(&state),&mut history).unwrap();
+    assert_eq!(originals[0].content,Content::Text{text:original.into()});
+    assert!(!serde_json::to_string(&history).unwrap().contains("forget this choice"));
+    assert!(serde_json::to_string(&history).unwrap().contains("🐾"));
+}
+
+#[test]
+fn bot_cold_followed_work_survives_reopen_and_admits_original_environment_input_once() {
+    use super::bot_work::{BotMatter,MatterThread,MatterUpdate};
+    let fixture = Fixture::new(); let mut db = fixture.open();
+    db.publish_bot_gate(gate(1,true)).unwrap();
+    db.create_bot_thread("thread","main","bot").unwrap();
+    db.create_thread("ordinary","ordinary-main").unwrap();
+    db.update_bot_matter(MatterUpdate { bot_id:"bot".into(),key:"follow".into(),expected_revision:0,
+        matter:BotMatter{id:"work".into(),revision:0,title:"Original work".into(),description:String::new(),archived:false,
+        threads:vec![MatterThread{thread_id:"ordinary".into(),branch_id:"ordinary-main".into(),send:false,memory:false}]}},None).unwrap();
+    let mut user = command(); user.thread_id="ordinary".into(); user.branch_id="ordinary-main".into(); user.key="work-user".into(); user.input=json!("The user corrected the original task.");
+    db.submit(&user).unwrap();
+    let owner=std::sync::Mutex::new(db);
+    super::bot_work_events::deliver(&owner).unwrap();
+    super::bot_work_events::deliver(&owner).unwrap();
+    let db=owner.into_inner().unwrap();
+    let count:u64=db.db.query_row("SELECT count(*) FROM input_queue WHERE origin='work_event'",[],|r|read_number(r,0)).unwrap();
+    assert_eq!(count,2);
+    drop(db);
+    let mut db=fixture.open(); db.publish_bot_gate(gate(1,true)).unwrap();
+    let pending=db.pending_cold_bot_work().unwrap(); assert_eq!(pending.len(),1);
+    let work=pending[0].clone();
+    let proposal=context::ContextProposal{key:"bot-initial".into(),branch_id:"main".into(),through_id:None,expected_revision:0,summary:String::new(),effective_system_prompt:"Long-term assistant".into(),instruction_sources:vec![],memory_checkpoint:None};
+    let basis:personalization::PersonalizationBasis=serde_json::from_value(json!({"mode":"bot","threadRole":"main","revision":0,"configurationDigest":"original","memorySnapshot":{"revision":0,"memories":[]},"threadId":"thread","projectId":null,"originalSections":[{"name":"preamble","content":"Long-term assistant"}],"instructionSources":[]})).unwrap();
+    let preparation=db.prepare_cold_bot_work(work.clone(),command().configuration,proposal,basis,None).unwrap();
+    let fake_receipt=Receipt{thread_id:"thread".into(),branch_id:"main".into(),run_id:"unused".into(),input_id:"unused".into(),cursor:0};
+    let launch=launches::LaunchSelection::from_binding(&request_snapshot(&fake_receipt).view.binding,DefaultAgentPolicy.identity(),None);
+    let prepared=preparation.load(launch).unwrap();
+    let admitted=db.admit_cold_bot_work(prepared).unwrap();
+    assert_eq!(db.run(&admitted.run_id).unwrap().thread_id,"thread");
+    assert!(db.history("main").unwrap().iter().all(|item|item.source==HistorySource::Environment));
+    assert!(db.pending_cold_bot_work().unwrap().is_empty());
+    assert_eq!(db.inspect_thread("thread").unwrap()["unread"],false);
+    assert_eq!(db.bot_for_thread("ordinary").unwrap(),None);
+    // Admission binds later pending changes to this Run; the normal request boundary delivers them.
+    let delivery=db.prepare_input_delivery(&admitted.run_id,db.epoch(),db.head("main").unwrap().as_deref()).unwrap().load().unwrap();
+    db.admit_input_delivery(delivery).unwrap().unwrap();
+    let queued:bool=db.db.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE branch_id='main' AND state='queued')",[],|row|row.get(0)).unwrap();
+    assert!(!queued);
+    assert!(serde_json::to_string(&db.history("main").unwrap()).unwrap().contains("The user corrected the original task."));
+    assert_eq!(db.cold_bot_work_receipt(&work.input_id).unwrap(),Some(admitted));
+}
+
+#[test]
+fn bot_selective_background_keeps_only_chosen_originals_without_reparenting_or_changing_sources() {
+    let fixture=Fixture::new(); let mut db=fixture.open(); let receipt=bot_submit(&mut db);
+    let unselected=db.append_history(&receipt.run_id,db.epoch(),Some(&receipt.input_id),HistorySource::Assistant,json!({"id":"unselected","provenance":{"kind":"assistant"},"content":{"kind":"text","text":"An old conclusion that should not be inherited."},"opaque":null}),None).unwrap();
+    let selected=db.append_history(&receipt.run_id,db.epoch(),Some(&unselected.id),HistorySource::Assistant,json!({"id":"selected","provenance":{"kind":"assistant"},"content":{"kind":"text","text":"The measured result: 42."},"opaque":null}),None).unwrap();
+    let source=db.run(&receipt.run_id).unwrap();
+    let background=super::background::load(&db.db,&db.content,&source,&[super::background::BackgroundReference {
+        thread_id:"thread".into(),branch_id:"main".into(),head_id:selected.id.clone(),item_ids:vec![selected.id.clone()]}]).unwrap();
+    let text=serde_json::to_string(&background).unwrap();
+    assert!(text.contains("The measured result: 42.")); assert!(!text.contains("old conclusion")); assert!(!text.contains("hello"));
+    assert_eq!(db.run(&receipt.run_id).unwrap(),source);
+    assert!(super::background::load(&db.db,&db.content,&source,&[super::background::BackgroundReference {
+        thread_id:"thread".into(),branch_id:"main".into(),head_id:unselected.id,item_ids:vec![selected.id]}]).is_err());
+}
 #[test]
 fn bot_scope_delete_retains_shared_history_atomically_then_removes_only_original_scope() {
     let f = Fixture::new(); let mut db = f.open(); let input = bot_submit(&mut db);

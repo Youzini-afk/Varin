@@ -33,6 +33,10 @@ pub enum InputActivation {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputOrigin {
     UserIngress,
+    WorkEvent {
+        event_cursor: u64,
+        activation: super::activation::IngressActivationFact,
+    },
     ContextObservation {
         owner: super::context_observations::ContextObservationSource,
         item_digest: String,
@@ -77,6 +81,7 @@ impl InputOrigin {
     pub(super) fn history_source(&self) -> HistorySource {
         match self {
             Self::ContextObservation { .. }
+            | Self::WorkEvent { .. }
             | Self::McpResource { .. }
             | Self::Followup { .. }
             | Self::Calendar { .. }
@@ -723,7 +728,7 @@ impl Catalog {
         }))
     }
 }
-fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Result<()> {
+pub(super) fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Result<()> {
     let reference: String = tx.query_row(
         "SELECT body FROM input_history_content WHERE input_id=?1",
         [&input.id],
@@ -770,6 +775,7 @@ fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInputMetadata) -> Resu
     input.delivered_cursor = Some(cursor);
     write_input(tx, &input)?;
     ingress::delivered(tx, &input)?;
+    if input.origin.history_source() == HistorySource::User { super::bot_work_events::user_input(tx, run, &input.id)?; }
     Ok(())
 }
 /// Called in the terminating Run's transaction, after releasing its branch execution owner.

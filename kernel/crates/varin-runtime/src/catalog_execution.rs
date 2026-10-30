@@ -1573,6 +1573,17 @@ impl Catalog {
                 tx.execute("UPDATE context_job_steps SET is_final=?2 WHERE request_id=?1",params![request_id,*outcome==ModelOutcome::Completed && *finish_reason==Some(FinishReason::Stop)])?;
                 // Completion, original output, semantic history and unresolved call identities commit together.
                 if *outcome == ModelOutcome::Completed {
+                    if items.iter().any(|item| match &item.content {
+                        Content::Text { text } => !text.trim().is_empty(),
+                        Content::Media { .. } => true,
+                        Content::Output { output } => output.parts.iter().any(|part| match part {
+                            crate::output::OutputPart::Text { text } => !text.trim().is_empty(),
+                            crate::output::OutputPart::Media { .. } => true,
+                        }),
+                        _ => false,
+                    }) {
+                        event(&tx, run_id, run.revision, "assistant.output", json!({"requestId":request_id}))?;
+                    }
                     for item in items {
                         let history_id = model_history_id(request_id, &item.id);
                         append_item(
@@ -2134,7 +2145,10 @@ impl Catalog {
             ExecutionRecord::StateChanged { .. } | ExecutionRecord::ContextPreparationFailed { .. } | ExecutionRecord::ExecutionFailed { .. }
         ) {
             if run.state.terminal() {
-                event(&tx, run_id, run.revision, "run.changed", serde_json::to_value(&run)?)?;
+                let mut visible = serde_json::to_value(&run)?;
+                visible["hasVisibleAssistantOutput"] = json!(tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='assistant.output')", [run_id], |row| row.get::<_, bool>(0))?);
+                  super::bot_work_events::completed(&tx, &run)?;
+                event(&tx, run_id, run.revision, "run.changed", visible)?;
                 goals::settle_run(&tx, &run)?;
             }
         }

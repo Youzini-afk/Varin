@@ -19,6 +19,7 @@ it('projects only new native durable facts with original Thread and branch ident
     { cursor: 14, kind: 'run.changed', data: { id: 'child-continuation', state: 'completed', thread_id: 'child-thread', branch_id: 'child-branch' } },
     { cursor: 15, kind: 'run.changed', data: { id: 'child-retry', state: 'failed', thread_id: 'child-thread', branch_id: 'child-branch' } },
     { cursor: 16, kind: 'permission.opened', subject: 'child-permission' });
+  events.push({ cursor: 17, kind: 'run.changed', data: { id: 'root', state: 'completed', thread_id: 'thread', branch_id: 'branch', hasVisibleAssistantOutput: false } });
   onEvent({ stream: 'durable' }); await flush();
   expect(send.mock.calls.map(([value]) => value)).toMatchObject([
     { threadId: 'thread', branchId: 'branch', runId: 'root', kind: 'completion', title: 'Native original' },

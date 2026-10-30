@@ -141,6 +141,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child), launch: async () => null,
     childPreparationProgress: vi.fn(async () => ({ updated: true })),
     readyChildSource: vi.fn(async (input: Parameters<AgentRuntimeClient['readyChildSource']>[0]) => {
+      if (!input.pin || !input.provenance) throw new Error('A continuation requires its exact pin and provenance');
       child.source = { kind: 'ready', handoff: null, pin: input.pin, selection: { mode: input.source.mode, resource_owner: input.source.resourceOwner, workspace_id: input.source.workspaceId,
         execution_workspace_id: input.source.executionWorkspaceId, branch_id: input.source.branchId, revision: input.source.revision, live_root: null }, provenance: input.provenance };
       return structuredClone(child);

@@ -23,6 +23,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ChildPreparationProgress, DelegatedExecution, InputResourcePreparation, KernelWorkingResultCandidate } from './protocol.generated.js';
 
 export interface ThreadCollaborationOwners {
+  prepareProjectSource?: import('./child-project-source.js').ChildProjectSourcePreparer;
   kernel: KernelClient;
   storageAdapter: KernelStorageAdapter;
   resolveLiveSource: LiveSourceResolver;
@@ -31,6 +32,8 @@ export interface ThreadCollaborationOwners {
   continueRun(runId: string, signal: AbortSignal): Promise<void>;
   canExecuteThread?(threadId: string): Promise<boolean>;
   recoverLaunches(signal: AbortSignal): Promise<void>;
+  recoverColdBotWork?(signal: AbortSignal): Promise<void>;
+  onWorkChanged?(): void;
   recoverCheckpoints?(signal: AbortSignal): Promise<void>;
   settleRunCheckpoints?(runId: string, signal: AbortSignal): Promise<void>;
   prepareContext: ContextPreparer;
@@ -195,6 +198,7 @@ export class ThreadCollaboration {
           }
         }
         await this.discoverLaunches(epoch.signal);
+        await this.owners.recoverColdBotWork?.(epoch.signal);
         for (const runId of resumed ?? []) void this.owners.continueRun(runId, epoch.signal).catch(error => {
           if (!epoch.signal.aborted) this.owners.onError(undefined, error);
         });
@@ -220,6 +224,8 @@ export class ThreadCollaboration {
     do {
       events = await runtime.events(this.launchCursor, 256, signal);
       signal.throwIfAborted();
+      if (events.some(event => ['bot.matter.updated', 'bot.work_queued', 'child.accepted', 'child.report_ready', 'ingress.run_ready', 'run.changed', 'thread.deleted'].includes(event.kind)
+        || event.kind === 'execution.committed' && (event.data as { kind?: string })?.kind === 'state_changed')) this.owners.onWorkChanged?.();
       for (const event of events) {
         if (event.kind.startsWith('operation.')) {
           this.domainRecoveryNeeded = true; this.dirty = true;
@@ -314,6 +320,27 @@ export class ThreadCollaboration {
       ...(fixed.environment_run_id ? { environmentRunId: fixed.environment_run_id } : {}) };
   }
   private async prepareSource(child: DelegatedExecution, signal: AbortSignal, onProgress?: (progress: ChildPreparationProgress) => void): Promise<DelegatedExecution> {
+    if (child.source?.kind === 'project') {
+      if (!this.owners.prepareProjectSource) throw new Error('Registered project source preparation is unavailable');
+      const identity: ThreadIdentity = { runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id };
+      const prepared = await this.owners.prepareProjectSource(child.source.project, identity, `child-project:${child.execution_id}`,
+        child.selected_profile.work_mode, child.source.source_path, signal);
+      const source = prepared.source;
+      let pin: import('./protocol.generated.js').ChildSourcePin | null = null;
+      if (child.selected_profile.work_mode === 'isolated_write') {
+        if (source.mode !== 'native_workspace' || !source.branchId) throw new Error('Project has no independent native workspace');
+        pin = await this.withSourceStore({ workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId }, child.child_thread_id, signal,
+          async store => {
+            const value = await store.pinBranchHandoff!(source.branchId!, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
+            return { pin_id: value.pinId, root: value.root, source: { resource_owner: source.resourceOwner, workspace_id: source.workspaceId,
+              execution_workspace_id: source.executionWorkspaceId, mode: 'fixed_branch', branch_id: source.branchId!, revision: 0, live_root: null } };
+          });
+      }
+      return this.owners.runtime.readyChildSource({ executionId: child.execution_id, pin, provenance: prepared.provenance ?? null,
+        source: { resourceOwner: source.resourceOwner, mode: source.mode, workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
+          branchId: source.branchId ?? null, revision: source.revision ?? null, liveRoot: source.liveRoot ?? null,
+          ...(source.mode === 'native_workspace' && source.nativeScope ? { nativeScope: source.nativeScope } : {}) } }, signal);
+    }
     if (child.source?.kind === 'ready' || child.source?.kind === 'shared' || child.source?.kind === 'absent') return child;
     const original = child.trigger.kind === 'dispatch' ? child.source?.handoff?.source : child.source_basis?.source;
     if (original?.resource_owner.kind === 'managed_host') {
@@ -539,6 +566,15 @@ export class ThreadCollaboration {
           }
         });
       }
+    } else if (child.source?.kind === 'project' || child.source?.kind === 'ready' && !child.source.handoff) {
+      // The project preparation belongs to this child Thread, not the parent's source handoff.
+      // The original source retirement owner reclaims prepared branches when the Thread is deleted.
+      if (child.source.kind === 'ready' && !child.receipt) {
+        const { pin, selection } = child.source;
+        await this.withSourceStore(selection, child.child_thread_id, signal, async store => {
+          await store.releaseBranchHandoffPin!(pin.source.branch_id!, pin.pin_id);
+        });
+      }
     } else {
       const handoff = child.source?.handoff;
       if (!handoff) throw new Error('Original dispatch handoff is unavailable');
@@ -624,6 +660,7 @@ export class ThreadCollaboration {
         while (writingProgress || pendingProgress && !signal.aborted) await drainProgress();
         child = await runtime.prepareChild({ executionId: child.execution_id, source: source ? { resourceOwner: source.resourceOwner, mode: source.mode, liveRoot: source.liveRoot ?? null,
           workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId ?? null, revision: source.revision ?? null,
+          ...(source.mode === 'native_workspace' && source.nativeScope ? { nativeScope: source.nativeScope } : {}),
           ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) } : null,
           context, expectedContextCheckpoint: checkpoint?.id ?? null, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
       }

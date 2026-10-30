@@ -25,6 +25,7 @@ mod host_tools;
 mod language;
 mod memory;
 mod message_tools;
+mod bot_work_tools;
 mod model;
 mod observations;
 mod plan;

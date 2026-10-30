@@ -84,7 +84,7 @@ fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     }
 }
 fn input() -> DispatchInput {
-    DispatchInput { source_path: None,
+    DispatchInput { project_id:None, background:Vec::new(), source_path: None,
         inherit_context: false,
         source_agent: None,
         name: None,
@@ -106,7 +106,7 @@ fn selected_presets_freeze_real_model_and_instructions_normal_disabled_is_indepe
     other.configuration.model_options = Some(json!({"temperature":0}));
     let mut selected = preset("worker-custom", Some(other.clone()));
     selected.avatar = Some("dome-ivory".into());
-    let catalog = ChildDispatchCatalog {
+    let catalog = ChildDispatchCatalog { projects:Vec::new(),
         native_capabilities: Vec::new(),
         identity: "configuration-1".into(),
         normal_unavailable: Some(ChildCapabilityFailure {
@@ -156,7 +156,7 @@ fn same_model_choice_key_preserves_first_catalog_and_original_request_never_uses
     let original_ref = original.reference.clone();
     drop(original);
     let parent = model(&f);
-    let catalog = ChildDispatchCatalog {
+    let catalog = ChildDispatchCatalog { projects:Vec::new(),
         native_capabilities: Vec::new(),
         identity: "first".into(),
         normal_unavailable: None,
@@ -169,7 +169,7 @@ fn same_model_choice_key_preserves_first_catalog_and_original_request_never_uses
             .active
             .unwrap();
     let changed =
-        f.db.prepare_child_catalog(Some(ChildDispatchCatalog {
+        f.db.prepare_child_catalog(Some(ChildDispatchCatalog { projects:Vec::new(),
             native_capabilities: Vec::new(),
             identity: "later-settings".into(),
             normal_unavailable: None,
@@ -244,7 +244,7 @@ fn inherited_settings_require_original_parent_basis_and_unavailable_cannot_be_na
         code: "unsupported".into(),
         capabilities: unavailable.tools.clone(),
     });
-    let catalog = ChildDispatchCatalog {
+    let catalog = ChildDispatchCatalog { projects:Vec::new(),
         native_capabilities: Vec::new(),
         identity: "inherit".into(),
         normal_unavailable: None,

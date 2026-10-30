@@ -86,6 +86,7 @@ fn submission_intent(
     launch: &Option<launches::LaunchSelection>,
     inherit_source: bool,
     child_context: Option<&Value>,
+    ingress_history: Option<&Value>,
 ) -> Result<(Value, Vec<String>)> {
     // The configuration catalog is prepared authority, like the initial context, not
     // a new user intent. An already accepted key keeps the first committed snapshot.
@@ -97,8 +98,14 @@ fn submission_intent(
             agent.remove("tools");
         }
     }
-    let input = crate::content::ContentStore::normalized_user_input(&command.key, &command.input)?;
-    let dependencies = crate::output::incoming_input_dependencies(&input)?;
+    let input = match ingress_history {
+        Some(reference) => json!({"kind":"original-ingress","history":reference}),
+        None => crate::content::ContentStore::normalized_user_input(&command.key, &command.input)?,
+    };
+    let dependencies = match ingress_history {
+        Some(reference) => reference["content_object"].as_str().map(str::to_owned).into_iter().collect(),
+        None => crate::output::incoming_input_dependencies(&input)?,
+    };
     let mut command = serde_json::to_value(command)?;
     command["input"] = input;
     Ok((
@@ -221,7 +228,7 @@ impl SubmissionPreparation {
         let Some((intent, receipt)) = &self.existing else {
             return Ok(None);
         };
-        if submission_intent(&self.command, launch, inherit_source, None).and_then(
+        if submission_intent(&self.command, launch, inherit_source, None, None).and_then(
             |(value, dependencies)| {
                 crate::content::ContentStore::payload_reference(
                     &serde_json::to_vec(&value)?,
@@ -241,6 +248,12 @@ impl SubmissionPreparation {
         launch: Option<launches::LaunchSelection>,
         inherit_source: bool,
     ) -> Result<PreparedSubmission> {
+        self.load_as(launch, inherit_source, None)
+    }
+    pub(super) fn load_ingress(self, launch: launches::LaunchSelection, input: inputs::QueuedInputMetadata, history: Value) -> Result<PreparedSubmission> {
+        self.load_as(Some(launch), false, Some(SubmissionOrigin::Ingress { input, execution_id: None, checkpoint: None, history }))
+    }
+    fn load_as(self, launch: Option<launches::LaunchSelection>, inherit_source: bool, origin: Option<SubmissionOrigin>) -> Result<PreparedSubmission> {
         if let Some(receipt) = self.existing_receipt(&launch, inherit_source)? {
             let intent = self
                 .existing
@@ -267,9 +280,9 @@ impl SubmissionPreparation {
                 inherit_source,
                 inherited_tools: None,
                 initial: None,
-                origin: SubmissionOrigin::User {
+                origin: origin.unwrap_or(SubmissionOrigin::User {
                     checkpoint: self.checkpoint,
-                },
+                }),
                 _publication: self.publication,
             });
         }
@@ -319,9 +332,9 @@ impl SubmissionPreparation {
             current: self.current,
             personalization: self.personalization,
             resources: self.resources,
-            origin: SubmissionOrigin::User {
+            origin: origin.unwrap_or(SubmissionOrigin::User {
                 checkpoint: self.checkpoint,
-            },
+            }),
             epoch: self.epoch,
             content: self.content,
             publication: self.publication,
@@ -565,7 +578,7 @@ impl PreparedSubmission {
             None
         };
         let (intent, dependencies) =
-            submission_intent(&command, &launch, inherit_source, child_context)?;
+            submission_intent(&command, &launch, inherit_source, child_context, match &origin { SubmissionOrigin::Ingress { history, .. } => Some(history), _ => None })?;
         let intent = content.save_with_dependencies(&intent, dependencies)?;
         let launch = launch
             .map(|selection| launch_content::LaunchSelectionMetadata::stage(&content, selection))

@@ -10,6 +10,7 @@
 | 系统如何装配、谁拥有状态 | [架构](architecture.md) |
 | Agent loop、历史、请求、工具、恢复与续接 | [运行时](runtime.md) |
 | 角色、任务复用、状态收纳和代码交换 | [Agent 协作](collaboration.md) |
+| 长期总助手、事项、后台回报与连续记忆 | [Bot](bot.md) |
 | Codex、Claude Code、Pi、ACP 的会话与派发 | [外部 Agent](external-agents.md) |
 | 文件来源、WorkingState、进程、跨 Host 和恢复 | [资源](resources.md) |
 | 上下文、检索、材料、知识和记忆 | [检索与上下文](retrieval.md) |
@@ -41,7 +42,6 @@
 - [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：按需隔离、实际 Host 依赖准入与清晰失败、各平台安装交付、稳定来源和增量分叉；已有引擎与挂载适配器继续完善，新准入合同和性能改造的实施状态见原文。
 - [外部 Harness 接入与跨 Agent 协作](design/external-harness-integration.md)：直接会话、外部预设、派发、消息与文件交换已接入；CLI / Skills / MCP 共享按产品决定暂缓。当前支持边界见[外部 Agent](external-agents.md)。
 - [快速检索、按需隔离与工具可靠性](design/retrieval-isolation-and-tool-reliability.md)：检索真实启动、默认共享与按次隔离、基线复用／延迟物化及资源回收已实施，边界见原文第 17 节；隔离的后续架构由上面的版本化工作区设计接续。
-- [Varin Bot：长期总助手、连续上下文与记忆](design/bot-assistant.md)：开放职责与协作、任务复用与背景交接、用户工作台介入、后台结果处理、稳定缓存与无感压缩，以及自由正文、来源、增量整理、召回和遗忘的完整记忆设计；提案尚未实施。
 - [通用模式与工具披露](design/general-agent-harness.md)：常驻与按需工具、MCP 直接入口、共享 Agent 配置，以及全模式的发现和结果质量改进；不涉及界面设计，尚未实施。
 - [科研模式与 Agent 协作](design/research-agent-harness.md)：科研搭档、共享 Worker 与调研，工具披露、预制用途及可选历史继承；不注入模式提示词，设计稿尚未实施。
 - [办公模式与浏览器、电脑协作](design/office-agent-harness.md)：文档与数据处理、浏览器和电脑操作、文件流转及连续修改；复用现有工作台与协作能力，设计稿尚未实施。

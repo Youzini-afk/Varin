@@ -21,6 +21,11 @@ for completion, failure, permission or a question; response bodies are not copie
 Payloads retain Thread, branch and Run identity and a navigation target. Thread titles can themselves
 contain private information; push transports can read them.
 
+Bot report processing is execution, independently of notification delivery. A completed Run with
+`hasVisibleAssistantOutput: false` emits no completion notification. Native Bot unread activity likewise
+distinguishes actual user/assistant communication from silent internal acceptance and completion.
+Failures and explicit permission/question requests retain their original notification behavior.
+
 `createGlobalUiEventBroadcaster()` is SSE-only. Native Thread observation uses its authenticated
 HTTP/SSE routes; terminal and dictation WebSockets retain their own transport owners. Closing a
 notification stream does not stop native work.

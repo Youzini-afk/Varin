@@ -18,7 +18,7 @@ export type ChatMemoryNature = 'experience' | 'decision' | 'preference' | 'judgm
 export interface ChatMemoryDraft {
   content: string;
   trigger: string;
-  nature: ChatMemoryNature;
+  nature?: ChatMemoryNature;
   sources: ChatMemoryPassage[];
 }
 
@@ -49,7 +49,7 @@ export interface ThreadMemoryPassage {
 export interface ThreadMemoryDraft {
   content: string;
   trigger: string;
-  nature: ChatMemoryNature;
+  nature?: ChatMemoryNature;
   sources: ThreadMemoryPassage[];
 }
 export interface ThreadMemorySelection extends ThreadIdentity {

@@ -350,7 +350,7 @@ pub(crate) fn reconcile(
             if catalog.has_code_notice(&operation.id).map_err(error)? {None} else {
                 let peer_run=catalog.run(if source_thread==run.thread_id {expected["targetRunId"].as_str()}else{expected["sourceRunId"].as_str()}.ok_or_else(||error("exchange peer Run missing"))?).map_err(error)?;
                 Some(catalog.prepare_code_notice(format!("code-exchange:{}",operation.id),run.thread_id.clone(),run.branch_id.clone(),&operation.id,execution_owner,
-                    MessageInput { source_agent:None,name:None,wait:None,target_thread_id:Some(peer_run.thread_id),target_branch_id:Some(peer_run.branch_id),reply_to:None,
+                    MessageInput { after_current: None, source_agent:None,name:None,wait:None,target_thread_id:Some(peer_run.thread_id),target_branch_id:Some(peer_run.branch_id),reply_to:None,
                         kind:varin_runtime::MessageKind::Inform,text:serde_json::to_string(&projection)? }).map_err(error)?)
             }
         };

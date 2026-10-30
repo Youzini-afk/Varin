@@ -921,8 +921,20 @@ export class AgentRuntimeClient {
   markThreadRead(input: import('./protocol.generated.js').ThreadReadPositionParams, signal?: AbortSignal): Promise<ThreadSummary> {
     return this.kernel.agentRuntimeRequest('runtime.thread.read', input, signal);
   }
-  botScope(botId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').BotScopeView> {
-    return this.kernel.agentRuntimeRequest('runtime.bot.scope.inspect', { botId }, signal);
+  botScope(botId: string, signal?: AbortSignal, historyOnly = false): Promise<import('./protocol.generated.js').BotScopeView> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.scope.inspect', { botId, historyOnly }, signal);
+  }
+  botMatters(botId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').BotMatter[]> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.matters.list', { botId }, signal);
+  }
+  pendingBotWork(signal?: AbortSignal): Promise<import('./protocol.generated.js').ColdBotWork[]> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.work.pending', {}, signal);
+  }
+  admitBotWork(input: import('./protocol.generated.js').BotWorkAdmitParams, signal?: AbortSignal): Promise<InputSubmitReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.work.admit', input, signal);
+  }
+  updateBotMatter(input: import('./protocol.generated.js').BotMatterUpdate, signal?: AbortSignal): Promise<import('./protocol.generated.js').BotMatter> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.matters.update', input, signal);
   }
   createBotThread(botId: string, threadId: string, branchId: string, signal?: AbortSignal): Promise<{threadId:string;branchId:string}> {
     return this.kernel.agentRuntimeRequest('runtime.bot.thread.create', {botId,threadId,branchId}, signal);

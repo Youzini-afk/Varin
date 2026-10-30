@@ -50,6 +50,7 @@ fn builtin_summary(name: &str) -> Option<&'static str> {
         "script_run" => "Run JavaScript in a retained script session, including nested tool calls.",
         "script_open" => "Open a persistent JavaScript execution session.",
         "dispatch" => "Delegate a task using an available Agent preset or the current model.",
+        "matters" => "Find and maintain followed matters and their original conversation references.",
         "document_read" => {
             "Read document text, structure and page images from paths or retained materials."
         }

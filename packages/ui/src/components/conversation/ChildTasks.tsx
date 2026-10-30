@@ -12,6 +12,7 @@ import { ChildTaskMenu } from './ChildTaskMenu';
 import { useI18n } from '@/lib/i18n';
 import { ChildState, ChildFileResult, ChildPreparation } from './childPresentation';
 import { childEnded, childTaskRows } from './childTaskRows';
+import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 
 /** A row follows the newest execution; each report still uses its own immutable owner. */
 export function ChildTasks({ api, identity, children, executions, activity, directory, pending, cancel, readOnly = false, onChanged, selectedId, onSelect }: {
@@ -92,6 +93,13 @@ export function ChildTasks({ api, identity, children, executions, activity, dire
       </summary>}</ChildTaskMenu>
       {opened.has(child.operation_id)&&<div className="space-y-3 border-l border-border/50 py-2 pl-3 ml-3">
         <p className="whitespace-pre-wrap break-words typography-meta">{task}</p>
+        {child.input.background?.length ? <div className="flex flex-wrap gap-1">
+          {child.input.background.map(reference => <Button key={`${reference.threadId}:${reference.branchId}:${reference.headId}`} variant="ghost" size="sm"
+            className="h-auto min-w-0 gap-1.5 px-2 py-1 typography-micro text-muted-foreground"
+            onClick={() => { void openThreadFromNavigation({threadId:reference.threadId,branchId:reference.branchId}).catch(cause=>setError(cause instanceof Error?cause.message:String(cause))); }}>
+            <Icon name="chat-1" className="size-3.5 shrink-0" />{t('bot.work.background',{count:reference.itemIds.length})}
+          </Button>)}
+        </div> : null}
         <ChildFileResult result={result} />
         {latest && <ThreadIntegrationPanel api={api} identity={identity} execution={latest} />}
         {report?.detail && <MarkdownRenderer messageId={`child:${latest?.execution_id ?? child.operation_id}`} content={report.detail} />}

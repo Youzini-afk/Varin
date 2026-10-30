@@ -87,7 +87,7 @@ it('shows pending cleanup and exposes retry when an archived Bot deletion fails'
 });
 
 
-it('preserves unsaved profile text when saving an independent preferred model', async () => {
+it('saves name, instructions and model as one profile draft', async () => {
   let current = bot('a');
   api.list.mockImplementation(async () => [current]);
   api.update.mockImplementation(async (_id, patch) => { current = { ...current, ...patch }; return current; });
@@ -96,11 +96,11 @@ it('preserves unsaved profile text when saving an independent preferred model', 
   const instructions = container.querySelector<HTMLTextAreaElement>('[aria-label="settings.bots.instructions.label"]')!;
   await act(async () => { name.value = 'Unsaved name'; name.dispatchEvent(new Event('input', { bubbles: true })); instructions.value = 'Unsaved instructions'; instructions.dispatchEvent(new Event('input', { bubbles: true })); });
   await click('choose-model');
-  expect(api.update).toHaveBeenCalledWith('a', { model: { providerId: 'gateway', modelId: 'claude' } });
+  expect(api.update).not.toHaveBeenCalled();
   expect(name.value).toBe('Unsaved name');
   expect(instructions.value).toBe('Unsaved instructions');
   await click('settings.bots.save');
-  expect(api.update).toHaveBeenLastCalledWith('a', { name: 'Unsaved name', instructions: 'Unsaved instructions' });
+  expect(api.update).toHaveBeenCalledExactlyOnceWith('a', { name: 'Unsaved name', instructions: 'Unsaved instructions', model: { providerId: 'gateway', modelId: 'claude' } });
   expect(container.querySelector('[data-settings-action-bar] [role=status]')?.textContent).toBe('settings.common.status.saved');
 });
 

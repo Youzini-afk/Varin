@@ -195,6 +195,7 @@ pub(crate) fn builtin_definitions(
     if include_goal {
         tools.push(BuiltinSchema::main_only(crate::agent_goals::schema()));
     }
+    if bot { tools.push(BuiltinSchema::main_only(crate::bot_work_tools::schema())); }
     tools.sort_by(|left, right| left.schema.name.cmp(&right.schema.name));
     tools
 }

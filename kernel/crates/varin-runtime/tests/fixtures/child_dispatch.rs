@@ -34,6 +34,10 @@ fn read_schema() -> ToolSchema {
 }
 #[allow(dead_code)]
 impl Fixture {
+    pub(crate) fn new_project_dispatch() -> Self {
+        Self::new_parent_custom(7,read_schema(),ToolSchema{requirements:None,name:DISPATCH_TOOL.into(),version:"1".into(),description:String::new(),schema:json!({"type":"object"}),output_schema:None,metadata:None},
+            false,false,false,|input,_| {input.project_id=Some("project-B".into());input.work_mode=Some(varin_runtime::catalog::dispatch::ChildWorkMode::Shared);})
+    }
     pub(crate) fn new() -> Self {
         Self::new_with_schemas(
             7,
@@ -358,7 +362,7 @@ impl Fixture {
             db.publish_bot_gate(varin_runtime::catalog::bot::BotGate { bot_id:bot.into(), profile_revision:1, activity_operation_id:Some("sleep".into()), permitted:true }).unwrap();
             db.create_bot_thread("thread:parent", "branch:parent", bot).unwrap();
         } else { db.create_thread("thread:parent", "branch:parent").unwrap(); }
-        let mut input = DispatchInput { source_path: None,
+        let mut input = DispatchInput { project_id:None, background:Vec::new(), source_path: None,
             inherit_context: false,
         source_agent: None,
             name: None,
@@ -395,7 +399,7 @@ impl Fixture {
             credential_scope: launch.credential_scope.clone(),
         };
         launch.connection_identity = model.connection_identity().unwrap();
-        launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog {
+        launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { projects:input.project_id.as_ref().map(|id|varin_runtime::catalog::dispatch::ChildProjectSource{id:id.clone(),name:"Project B".into(),path:"/registered/project-B".into(),resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local}).into_iter().collect(),
             native_capabilities: launch.tools.iter().map(|tool| {
                 use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
                 ChildCapabilityDescriptor { process: matches!(tool.name.as_str(), "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process"), name: tool.name.clone(), version: tool.version.clone(),
@@ -675,6 +679,12 @@ impl Fixture {
         }
     }
     pub(crate) fn accept(&mut self) -> varin_runtime::catalog::collaboration::ChildTask {
+        if self.input.project_id.is_some() {
+            let selected=self.db.capture_child_dispatch_invocation(&self.context).unwrap().load().unwrap().resolve(&self.input).unwrap();
+            let launch=self.db.prepare_child_launch(&self.context.run_id,self.launch.clone(),selected).unwrap().load().unwrap();
+            let prepared=self.db.prepare_child_admission(&self.context,self.input.clone(),None,launch).unwrap().load().unwrap();
+            return self.db.accept_child_references(prepared).unwrap();
+        }
         self.db
             .accept_child(
                 &self.context,

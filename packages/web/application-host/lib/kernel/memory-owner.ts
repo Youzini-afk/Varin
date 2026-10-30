@@ -10,10 +10,12 @@ export interface MemoryQuery {
   previousState?: unknown;
   origin?: string;
   arguments?: {
-    action: 'read' | 'search' | 'save' | 'delete' | 'get' | 'recall' | 'remember' | 'correct' | 'forget';
+    action: 'read' | 'search' | 'save' | 'delete' | 'get' | 'recall' | 'remember' | 'correct' | 'forget' | 'archive';
     scope?: 'global' | 'project' | 'currentThread' | 'bot' | 'user' | 'session';
     id?: number; content?: string; query?: string; revision?: number; k?: number;
     trigger?: string; nature?: string; sourceText?: string; sourceItemId?: string; includeSource?: boolean;
+    sources?: Array<{ itemId: string; quote: string }>;
+    derivedFrom?: Array<{ id: number; revision: string }>;
     expected?: import('../knowledge/store.js').KnowledgeExpectedRevision;
   };
   checkpoint?: ContextCheckpoint;

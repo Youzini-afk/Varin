@@ -30,6 +30,7 @@ interface ProjectRecord {
 }
 
 interface ScheduledTaskServiceDependencies {
+  additionalProjects?(): Promise<ProjectRecord[]>;
   projectConfigRuntime: ReturnType<typeof createProjectConfigRuntime>;
   readSettingsFromDisk: () => Promise<Record<string, unknown>>;
   sanitizeProjects: (value: unknown) => ProjectRecord[] | undefined;
@@ -73,7 +74,8 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
   const bindSourceDirectory = (directory: SourceDirectory): void => { sourceDirectory = directory; };
 
   const listProjects = async (): Promise<ProjectRecord[]> => {
-    return readScheduledProjects(readSettingsFromDisk, sanitizeProjects);
+    const [projects, additional] = await Promise.all([readScheduledProjects(readSettingsFromDisk, sanitizeProjects), dependencies.additionalProjects?.() ?? []]);
+    return [...projects, ...additional];
   };
 
   const findProjectByID = async (projectID: unknown): Promise<ProjectRecord> => {

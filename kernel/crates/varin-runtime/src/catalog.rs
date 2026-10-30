@@ -100,7 +100,7 @@ fn event(
         params![subject, sql_number(revision)?, kind, encode(&data)?],
     )?;
     let cursor = tx.last_insert_rowid() as u64;
-    threads::record_activity(tx, subject, kind, cursor)?;
+    threads::record_activity(tx, subject, kind, cursor, &data)?;
     Ok(cursor)
 }
 fn fence(run: &Run, epoch: u64) -> Result<()> {
@@ -184,6 +184,8 @@ fn initialize_metadata(
     crate::content::initialize(&tx, content)?;
     launches::initialize(&tx)?;
     context::initialize(&tx)?;
+    // Derived lookup over the original descriptive events; no second matter/task state.
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_matter_revisions ON events(subject,json_extract(data,'$.id'),cursor DESC) WHERE kind='bot.matter.updated'")?;
     if version == 0 {
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;
@@ -591,6 +593,7 @@ impl Catalog {
             "run.accepted",
             json!({"input_id":input_id}),
         )?;
+        if history.source == HistorySource::User { bot_work_events::user_input(tx, &run, &input_id)?; }
         let receipt = Receipt {
             thread_id: command.thread_id.clone(),
             branch_id: command.branch_id.clone(),
@@ -1799,6 +1802,14 @@ pub mod memory_work;
 
 #[path = "catalog_bot.rs"]
 pub mod bot;
+#[path = "catalog_bot_reports.rs"]
+mod bot_reports;
+#[path = "catalog_bot_work.rs"]
+pub mod bot_work;
+#[path = "catalog_bot_work_events.rs"]
+mod bot_work_events;
+#[path = "catalog_background.rs"]
+pub mod background;
 
 #[path = "catalog_context_jobs.rs"]
 pub mod context_jobs;
@@ -1828,6 +1839,8 @@ pub mod dispatch;
 pub mod collaboration;
 #[path = "catalog_memory.rs"]
 pub mod memory;
+#[path = "catalog_memory_exclusion.rs"]
+mod memory_exclusion;
 #[path = "catalog_memory_state.rs"]
 pub mod memory_state;
 

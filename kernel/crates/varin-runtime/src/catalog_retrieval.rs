@@ -337,7 +337,7 @@ impl Catalog {
                 operation_id: current.id.clone(),
                 origin,
             },
-            messages::MessageInput {
+            messages::MessageInput { after_current: None,
                 source_agent: None,
                 name: None,
                 wait: None,

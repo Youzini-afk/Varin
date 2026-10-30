@@ -52,6 +52,10 @@ pub struct ChildCapabilityDescriptor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DispatchInput {
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub background: Vec<super::background::BackgroundReference>,
     pub task: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inherit_context: bool,
@@ -94,7 +98,7 @@ impl DispatchInput {
             task.push_str("\n\nSearch scope (relative to the admitted source): ");
             task.push_str(&serde_json::to_string(&paths)?);
         }
-        Ok(Self { task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
+        Ok(Self { project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -105,6 +109,9 @@ impl DispatchInput {
             return Err(RuntimeError::Invalid(
                 "dispatch requires a task and a valid selected preset".into(),
             ));
+        }
+        if self.project_id.as_deref().is_some_and(|id|id.trim().is_empty()) || (self.project_id.is_some() && self.source_agent.is_some()) {
+            return Err(RuntimeError::Invalid("Choose projectId or sourceAgent as the source, not both".into()));
         }
         if let Some(tools) = &self.tools {
             validate_names(tools)?;
@@ -210,13 +217,22 @@ pub struct ExternalLaunch { pub command: String, pub args: Vec<String> }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildDispatchCatalog {
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub projects: Vec<ChildProjectSource>,
     pub identity: String,
     pub native_capabilities: Vec<ChildCapabilityDescriptor>,
     pub normal_unavailable: Option<ChildCapabilityFailure>,
     pub presets: Vec<ChildPreset>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ChildProjectSource { pub id:String, pub name:String, pub path:String, pub resource_owner:launches::SourceResourceOwner }
 impl ChildDispatchCatalog {
     pub fn validate(&self) -> Result<()> {
+        validate_names(&self.projects.iter().map(|project|project.id.clone()).collect::<Vec<_>>())?;
+        if self.projects.iter().any(|project|project.path.trim().is_empty()||project.path.contains('\0')) {
+            return Err(RuntimeError::Invalid("Registered project source is malformed".into()));
+        }
         if self.identity.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "child configuration snapshot has no identity".into(),
@@ -573,8 +589,12 @@ impl ChildDispatchSelection {
     }
     /// Resolve only an already authenticated configuration snapshot. Executable declarations
     /// are still assembled and checked by their owning tool directory in the kernel.
+    pub fn project(&self,input:&DispatchInput)->Result<Option<ChildProjectSource>> {
+        input.project_id.as_ref().map(|id|self.catalog.projects.iter().find(|p|&p.id==id).cloned().ok_or_else(||RuntimeError::Invalid(format!("Registered project {id} is not in this request; use matters projects to discover available project IDs")))).transpose()
+    }
     pub fn resolve(&self, input: &DispatchInput) -> Result<ResolvedChildSelection> {
         input.validate()?;
+        self.project(input)?;
         let available = self.catalog.presets.iter().filter(|preset| preset.unavailable.is_none() && preset.id != "code_retrieval")
             .map(|preset| preset.id.as_str()).collect::<Vec<_>>().join(", ");
         let available = if available.is_empty() { "none" } else { &available };
@@ -605,7 +625,7 @@ impl ChildDispatchSelection {
                 ));
             }
             (
-                self.preset_tools(preset),
+                if input.project_id.is_some() { preset.tools.clone() } else { self.preset_tools(preset) },
                 // Placement is chosen by this dispatch, independently of the role.
                 input.work_mode.unwrap_or(ChildWorkMode::Shared),
                 preset.instructions.clone(),
@@ -664,7 +684,7 @@ impl ChildDispatchSelection {
                 tools.push(gateway.name);
             }
         }
-        if self.frozen.source.is_none() {
+        if self.frozen.source.is_none() && input.project_id.is_none() {
             let unavailable = self.unavailable_source_tools(&tools);
             if !unavailable.is_empty() {
                 return Err(RuntimeError::Invalid(format!(
@@ -672,6 +692,13 @@ impl ChildDispatchSelection {
                     unavailable.join(", ")
                 )));
             }
+        }
+        let project_mcp=if input.project_id.is_some(){self.mcp_binding.as_ref().and_then(|binding|binding.global_delegation())}else{self.mcp_binding.clone()};
+        if input.project_id.is_some() {
+            let foreign=tools.iter().filter(|name|self.mcp_binding.as_ref().is_some_and(|original|original.tools.iter().any(|tool|&tool.name==*name))
+                && !project_mcp.as_ref().is_some_and(|selected|selected.tools.iter().any(|tool|&tool.name==*name))).cloned().collect::<Vec<_>>();
+            if input.tools.as_ref().is_some_and(|selected|selected.iter().any(|name|foreign.contains(name))){return Err(RuntimeError::Invalid("Selected workspace MCP tools belong to the original project's configuration; choose source-independent tools or the original source".into()));}
+            tools.retain(|name|!foreign.contains(name));
         }
         if tools
             .iter()
@@ -708,8 +735,7 @@ impl ChildDispatchSelection {
             model,
             tool_schema_generation: self.frozen.tool_schema_generation,
             parent_tools_ref: self.frozen.tools_ref.clone(),
-            mcp_binding: self
-                .mcp_binding
+            mcp_binding: project_mcp
                 .as_ref()
                 .and_then(|binding| binding.delegate(&tools)),
             extension_bindings: self
@@ -1222,7 +1248,10 @@ impl Catalog {
                     "child.cancel_requested",
                     Value::Null,
                 )?;
-                if report_created {event(&tx,&execution.execution_id,execution.revision,"child.report_ready",json!({"outcome":"cancelled"}))?;}
+                if report_created {
+                    event(&tx,&execution.execution_id,execution.revision,"child.report_ready",json!({"outcome":"cancelled"}))?;
+                    super::bot_reports::publish_pending(&tx, &execution.execution_id, execution.revision)?;
+                }
             }
         }
         let cursor: u64 =

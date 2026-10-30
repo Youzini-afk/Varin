@@ -16,6 +16,9 @@ pub struct ChildAdmissionPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildAdmission {
+    pub(super) project:Option<super::dispatch::ChildProjectSource>,
+    pub(super) source_path:Option<String>,
+    pub(super) background: Vec<super::background::BackgroundReference>,
     pub(super) inherited_context: Option<crate::context_retention::RetainedContext>,
     pub(super) avatar: Option<String>,
     pub(super) source_agent: Option<String>,
@@ -63,7 +66,9 @@ impl ChildAdmissionPreparation {
             ));
         }
         let parent:Run=record(&database,"runs",&self.context.run_id)?;
-        super::dispatch::validate_agent_source(&database,&parent,self.input.source_agent.as_deref(),self.handoff.as_ref())?;
+        if original.project(&self.input)?.is_some() {
+            if self.handoff.is_some(){return Err(RuntimeError::Conflict("Project dispatch cannot borrow the parent's source handoff".into()));}
+        } else {super::dispatch::validate_agent_source(&database,&parent,self.input.source_agent.as_deref(),self.handoff.as_ref())?;}
         if let Some(handoff) = &self.handoff {
             handoff.source.validate()?;
             if handoff.source_path.as_deref() != self.input.source_path.as_deref().filter(|path| *path != ".") {
@@ -112,11 +117,12 @@ impl ChildAdmissionPreparation {
         let mut launch = self.launch.selection;
         launch.source = self.handoff.as_ref().map(|handoff| handoff.source.clone());
         let input_ref = self.content.save(&serde_json::to_value(&self.input)?)?;
-        let inherited_context = if self.input.inherit_context {
-            let history = original.history.as_ref().ok_or_else(|| RuntimeError::Invalid(
+        let inherited_context = if self.input.inherit_context || !self.input.background.is_empty() {
+            let mut history = if self.input.inherit_context { crate::context_retention::conversation_background(original.history.as_ref().ok_or_else(|| RuntimeError::Invalid(
                 "The original dispatch has no retained conversation background; retry from a new dispatch request".into(),
-            ))?;
-            let history = crate::context_retention::conversation_background(history);
+            ))?) } else { Vec::new() };
+            let selected = super::background::load(&database,&self.content,&parent,&self.input.background)?;
+            for item in selected { if !history.iter().any(|existing|existing.id==item.id) { history.push(item); } }
             crate::execution::validate_history_pairs(&history)
                 .map_err(|error| RuntimeError::Invalid(format!("Cannot inherit incomplete conversation: {error}")))?;
             let counter = crate::token_count::TokenCounter::for_configuration(&self.launch.configuration);
@@ -127,6 +133,9 @@ impl ChildAdmissionPreparation {
             })
         } else { None };
         Ok(PreparedChildAdmission {
+            project:original.project(&self.input)?,
+            source_path:self.input.source_path.clone().filter(|p|p!="."),
+            background: self.input.background.clone(),
             inherited_context,
             internal_retrieval: admitted.call.name == "code_retrieval",
             avatar: self.launch.selected_profile.avatar.clone(),

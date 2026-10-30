@@ -120,6 +120,7 @@ const parseActivity = (value: unknown): BotActivity => {
 };
 
 export interface BotService {
+  primary(): Promise<BotSummary>;
   list(): Promise<BotSummary[]>;
   get(botId: string): Promise<BotSummary | null>;
   create(input?: BotCreateInput): Promise<BotSummary>;
@@ -540,6 +541,10 @@ export function createBotService(options: BotServiceOptions): BotService {
   };
 
   return {
+    primary: () => serialize('__primary__', async () => {
+      const existing = (await list()).find(bot => !bot.archived && !bot.deletion);
+      return existing ?? create({ name: 'Varin' });
+    }),
     list,
     get,
     create,

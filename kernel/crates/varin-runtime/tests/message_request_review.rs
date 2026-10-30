@@ -18,7 +18,7 @@ fn send(f: &mut Fixture, key: &str) -> MessageReceipt {
             key.into(),
             child.child_thread_id,
             child.child_branch_id,
-            MessageInput {
+            MessageInput { after_current: None,
                 source_agent: None,
             name: None,
                 wait: None,
@@ -70,7 +70,7 @@ fn user_message_from_collaboration_continues_the_same_main_thread() {
     f.settle_exchange();
     finish(&mut f, RunState::Completed);
     let original = f.db.launch_intent(&f.context.run_id).unwrap().unwrap();
-    let prepared = f.db.prepare_user_message("collaboration-main".into(), "thread:parent".into(), "branch:parent".into(), MessageInput {
+    let prepared = f.db.prepare_user_message("collaboration-main".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { after_current: None,
         source_agent: None, name: None, wait: None, target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
         reply_to: None, kind: MessageKind::Request, text: "Continue with these findings".into(),
     }).unwrap().load().unwrap();
@@ -82,6 +82,26 @@ fn user_message_from_collaboration_continues_the_same_main_thread() {
     assert_eq!(f.db.launch_intent(&run).unwrap().unwrap().selection, original.selection);
     assert_eq!(view(&f.db, &receipt).summary.delivered_run_id.as_deref(), Some(run.as_str()));
     assert_eq!(f.db.history("branch:parent").unwrap().last().unwrap().id, receipt.identity.message_id);
+}
+
+#[test]
+fn separate_work_waits_for_the_current_execution_without_steering_it() {
+    let mut f = Fixture::new();
+    f.accept(); f.settle_exchange();
+    let prepared = f.db.prepare_user_message("queued-independent-work".into(), "thread:parent".into(), "branch:parent".into(), MessageInput {
+        after_current: Some(true), source_agent: None, name: None, wait: None,
+        target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
+        reply_to: None, kind: MessageKind::Request, text: "Handle this independent task after the current one".into(),
+    }).unwrap().load().unwrap();
+    let receipt = f.db.admit_message(prepared).unwrap().receipt;
+    assert!(matches!(view(&f.db, &receipt).summary.activation, MessageActivation::Pending { .. }));
+    assert!(f.db.capture_request_activations().unwrap().is_empty());
+    assert!(view(&f.db, &receipt).summary.delivered_run_id.is_none());
+    finish(&mut f, RunState::Completed);
+    let activation = candidate(&mut f.db);
+    let RequestActivationAdmission::Bound(run) = f.db.admit_request_activation(activation).unwrap() else { panic!("new execution") };
+    assert_ne!(run, f.context.run_id);
+    assert_eq!(view(&f.db, &receipt).summary.delivered_run_id.as_deref(), Some(run.as_str()));
 }
 #[test]
 fn active_request_binds_once_joins_closed_boundary_and_cancel_cannot_reopen_it() {

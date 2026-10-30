@@ -6,6 +6,7 @@ import { botScopeId } from "../harness/owner-scope.js";
 import { createHash } from "node:crypto";
 import type { MemoryService } from "../memory/memory-service.js";
 import type { Knowledge } from "../knowledge/store.js";
+import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 
 /**
  * Bot routes (BC0): the durable Bot catalog plus entry/work resolution. These
@@ -16,6 +17,7 @@ export interface BotRoutesOptions {
   bots: BotService;
   computers?: Pick<ComputerService, "workDesktops" | "listArtifacts">;
   memory?: MemoryService;
+  work?: Pick<AgentRuntimeClient, 'botMatters' | 'updateBotMatter'>;
   requireAuth?: RequestHandler;
 }
 
@@ -49,7 +51,12 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
   response.status(500).json({ error: error instanceof Error ? error.message : fallback });
 };
 
-export function registerBotRoutes(app: Express, { bots, computers, memory, requireAuth = noAuth }: BotRoutesOptions): void {
+export function registerBotRoutes(app: Express, { bots, computers, memory, work, requireAuth = noAuth }: BotRoutesOptions): void {
+  app.post('/api/harness/bots/primary', requireAuth, async (_request: Request, response: Response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try { response.json({ bot: await bots.primary() }); }
+    catch (error) { sendError(response, error, 'Unable to open the assistant'); }
+  });
   app.get("/api/harness/bots", requireAuth, async (_request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
@@ -57,6 +64,21 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
     } catch (error) {
       sendError(response, error, "Unable to list bots");
     }
+  });
+  app.get('/api/harness/bots/:botId/matters', requireAuth, async (request: Request, response: Response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      if (!work || !await bots.get(botIdOf(request))) throw new HarnessServiceError('not-found', 'Bot work is unavailable');
+      response.json({ matters: await work.botMatters(botIdOf(request)) });
+    } catch (error) { sendError(response, error, 'Unable to read followed work'); }
+  });
+  app.post('/api/harness/bots/:botId/matters', requireAuth, async (request: Request, response: Response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      if (!work || !await bots.get(botIdOf(request))) throw new HarnessServiceError('not-found', 'Bot work is unavailable');
+      if (request.body?.botId !== botIdOf(request)) throw new HarnessServiceError('invalid-params', 'Bot work owner differs from the selected assistant');
+      response.json({ matter: await work.updateBotMatter(request.body) });
+    } catch (error) { sendError(response, error, 'Unable to update followed work'); }
   });
 
   app.post("/api/harness/bots", requireAuth, async (request: Request, response: Response) => {
@@ -158,14 +180,22 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
     if (!Number.isSafeInteger(id) || id < 0) throw new HarnessServiceError("invalid-params", "Invalid memory id");
     return id;
   };
+  const memoryItem = (item: Knowledge) => ({ id: item.id, content: item.content, trigger: item.trigger,
+    createdAt: item.createdAt, sourceKind: item.source?.kind ?? null, revision: memoryRevision(item), inactive: item.invalidAt !== undefined });
   app.get("/api/harness/bots/:botId/memory", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
       const owner = await memoryOwner(request);
-      const items = await memory!.list(owner, { activeOnly: true });
-      response.json({ items: items.map((item) => ({ id: item.id, content: item.content, trigger: item.trigger,
-        createdAt: item.createdAt, sourceKind: item.source?.kind ?? null, revision: memoryRevision(item) })) });
+      const items = await memory!.list(owner, { activeOnly: request.query.includeInactive !== 'true' });
+      response.json({ items: items.filter(item => item.forgottenAt === undefined).map(memoryItem) });
     } catch (error) { sendError(response, error, "Unable to read Bot memory"); }
+  });
+  app.get('/api/harness/bots/:botId/memory/:memoryId/history', requireAuth, async (request: Request, response: Response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      const { item, chain } = await memory!.get(await memoryOwner(request), memoryId(request));
+      response.json({ items: (chain?.chain ?? [item]).filter(row => row.forgottenAt === undefined).map(memoryItem) });
+    } catch (error) { sendError(response, error, 'Unable to read memory history'); }
   });
   app.get("/api/harness/bots/:botId/memory/:memoryId/source", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
@@ -187,6 +217,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
       }
       const expected = { content: item.content, trigger: item.trigger, status: item.status, invalidAt: item.invalidAt ?? null };
       if (request.body?.action === "forget") await memory!.forget(owner, id, expected);
+      else if (request.body?.action === 'archive') await memory!.archive(owner, id, expected);
       else if (request.body?.action === "correct" && typeof request.body.content === "string" && request.body.content.trim()) {
         await memory!.correct(owner, id, { content: request.body.content.trim(), trigger: item.trigger,
           ...(item.nature ? { nature: item.nature } : {}), source: { kind: "user-correction" }, expected });

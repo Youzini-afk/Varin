@@ -54,6 +54,16 @@ const setup = async () => {
   return { service, recreate, lifecycle, records, catalog, removeData, onDeleted, ensureEntry, applyProfile, listWork, failWrite: () => { failWrite = true; } };
 };
 
+it('creates one default assistant under concurrent opens and preserves existing assistants', async () => {
+  const { service } = await setup();
+  const [first, second] = await Promise.all([service.primary(), service.primary()]);
+  expect(first.id).toBe(second.id);
+  expect(await service.list()).toHaveLength(1);
+  const other = await service.create({ name: 'Independent assistant' });
+  expect((await service.primary()).id).toBe(first.id);
+  expect((await service.list()).map(bot => bot.id)).toContain(other.id);
+});
+
 it('closes admission and retains the profile until stopped work and data cleanup both finish', async () => {
   const { service, lifecycle, removeData, catalog, onDeleted } = await setup();
   const bot = await service.create();

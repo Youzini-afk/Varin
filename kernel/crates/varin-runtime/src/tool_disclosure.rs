@@ -122,6 +122,7 @@ pub fn is_always_declared(name: &str) -> bool {
             | "question_status"
             | "todo"
             | "memory"
+            | "matters"
             | "goal_report"
             | "follow_up"
             | "websearch"
@@ -264,7 +265,7 @@ pub fn namespace(name: &str) -> Option<&'static str> {
         | "script_open" | "script_run" | "script_close" => "execution",
         "dispatch" | "child_status" | "child_report" | "child_cancel" | "wait_child" | "threads" | "read_thread"
         | "send" | "agent_rename" | "submit_code" | "update" | "follow_up"
-        | "ask_user" | "question_status" | "todo" | "memory" | "goal_report" => "collaboration",
+        | "ask_user" | "question_status" | "todo" | "memory" | "matters" | "goal_report" => "collaboration",
         "websearch" | "webfetch" | "document_read" | "materials" | "resource_read" => "documents",
         "image_generate" | "image_edit" | "render_ui" => "media",
         "code_retrieval" | "retrieval_control" => "files",

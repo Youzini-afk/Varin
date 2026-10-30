@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
-import { listBotMemory, readBotMemorySource, updateBotMemory } from '@/lib/bots';
+import { listBotMemory, readBotMemorySource, readBotMemoryHistory, updateBotMemory } from '@/lib/bots';
 import { SettingsFooterContext, SettingsNavigationContext } from '@/components/sections/shared/settings-context';
 import { BotSettings } from './BotSettings';
 
@@ -51,17 +51,19 @@ export function BotMemoryPanel({ botId, onContentChange }: { botId: string; onCo
   const hasContent = Boolean(items?.length || error || editing);
   React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const [sources, setSources] = React.useState<Record<number, MemorySourceExcerpt[]>>({});
+  const [histories, setHistories] = React.useState<Record<number, BotMemoryItem[]>>({});
+  const [includeInactive, setIncludeInactive] = React.useState(false);
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const alive = React.useRef(true);
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   React.useEffect(() => {
     const controller = new AbortController();
-    setItems(null); setSources({}); setEditing(null);
-    void listBotMemory(botId, controller.signal).then((list) => {
+    setItems(null); setSources({}); setHistories({}); setEditing(null);
+    void listBotMemory(botId, controller.signal, includeInactive).then((list) => {
       if (!controller.signal.aborted) { setItems(list); setError(null); }
     }).catch((cause) => { if (!controller.signal.aborted) setError(String(cause)); });
     return () => controller.abort();
-  }, [botId, revision, host]);
+  }, [botId, revision, host, includeInactive]);
   const run = async (operation: () => Promise<void>) => {
     setBusy(true);
     setError(null);
@@ -71,6 +73,7 @@ export function BotMemoryPanel({ botId, onContentChange }: { botId: string; onCo
   };
   return <div className="space-y-3">
     <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('settings.bots.memory.search')} aria-label={t('settings.bots.memory.search')} />
+    <Button variant="ghost" size="sm" aria-pressed={includeInactive} onClick={() => setIncludeInactive(value => !value)}>{t('settings.bots.memory.includeInactive')}</Button>
     {error ? <div role="alert" className="typography-meta text-destructive">{error} <Button variant="ghost" size="sm" onClick={refresh}>{t('settings.harness.retry')}</Button></div> : null}
     {!items && !error ? <p role="status">{t('common.loading')}</p> : null}
     {items?.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.bots.memory.empty')}</p> : null}
@@ -82,9 +85,15 @@ export function BotMemoryPanel({ botId, onContentChange }: { botId: string; onCo
           if (alive.current) { setEditing(null); refresh(); }
         }); }}>{t('settings.bots.save')}</Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(null)}>{t('settings.common.actions.cancel')}</Button>
-      </> : <p className="whitespace-pre-wrap typography-body">{item.content}</p>}
+      </> : <p className={`whitespace-pre-wrap typography-body${item.inactive ? ' text-muted-foreground' : ''}`}>{item.content}</p>}
+      {item.inactive && <p className="typography-meta text-muted-foreground">{t('settings.bots.memory.inactive')}</p>}
       <div className="flex flex-wrap gap-1">
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setEditing(item); setDraft(item.content); }}>{t('settings.bots.memory.correct')}</Button>
+        {!item.inactive && <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setEditing(item); setDraft(item.content); }}>{t('settings.bots.memory.correct')}</Button>}
+        {!item.inactive && <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void run(async () => { await updateBotMemory(botId, item, 'archive'); if (alive.current) refresh(); }); }}>{t('settings.bots.memory.archive')}</Button>}
+        <Button variant="ghost" size="sm" disabled={busy} aria-expanded={Boolean(histories[item.id])} onClick={() => {
+          if (histories[item.id]) { setHistories(current => { const next = { ...current }; delete next[item.id]; return next; }); return; }
+          void run(async () => { const rows = await readBotMemoryHistory(botId, item.id); if (alive.current) setHistories(current => ({ ...current, [item.id]: rows })); });
+        }}>{t('settings.bots.memory.history')}</Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void run(async () => {
           const result = await readBotMemorySource(botId, item.id);
           if (alive.current) setSources((current) => ({ ...current, [item.id]: result }));
@@ -98,6 +107,10 @@ export function BotMemoryPanel({ botId, onContentChange }: { botId: string; onCo
       {sources[item.id]?.map((source, index) => <blockquote key={index} className="whitespace-pre-wrap border-l-2 border-border pl-3 typography-meta text-muted-foreground">
         {source.status === 'available' ? source.text : source.status === 'changed' ? 'The original source has changed.' : t('settings.bots.memory.sourceUnavailable')}
       </blockquote>)}
+      {histories[item.id]?.map(row => <div key={row.id} className="border-l-2 border-border pl-3 typography-meta text-muted-foreground">
+        <time dateTime={new Date(row.createdAt).toISOString()}>{new Date(row.createdAt).toLocaleString()}</time>
+        <p className="whitespace-pre-wrap">{row.content}</p>
+      </div>)}
     </article>)}
   </div>;
 }

@@ -82,6 +82,32 @@ catalog are removed. Product actions use `actionInstructions.ts`; native skills 
 editable resources. Existing user-owned prompt files are not deleted, but Varin no longer
 loads them as command templates.
 
+## Continuous Bot memory
+
+Memory bodies are free narrative; `nature` is optional. Selection and organization can cite several
+exact original spans in one proposal. Instruction status still requires its actual user source;
+reference material never gains authority through its wording. `remember`/`correct` accept source
+references and exact same-scope `derivedFrom` memory versions. User edits remain independent user writes.
+
+`bot-history.ts` reads recent actual incoming events and exchanges without hydrating tool logs.
+Background collection uses `HistoryPage.afterId` and per-branch `history-cursor:` progress. It freezes
+heads, hydrates only a model-budgeted chronological tail and advances only actually observed metadata.
+The original span coverage handles partially processed large messages; one immutable batch can be
+reused while its ranges settle. Empty metadata discovery never creates an empty memory store or calls
+a model. Explicitly followed ordinary branches require a separate `memory` association.
+
+Archive marks an item no longer applicable, preserving readable history. Forgetting also excludes
+its original ranges and dependent memories from subsequent model reads. Same-store dependency links
+are exact revisions; a correction invalidates dependent accounts atomically with the original mutation.
+Default recall and the UI hide forgotten rows even when earlier revisions are requested.
+
+The native memory projection records invalidations and source exclusions. A new exclusion fixes
+`redactedThrough` once; opaque provider continuations through that boundary are removed, while newer
+unaffected continuations retain their normal lifecycle. If an accepted summary absorbed invalid content,
+native context rebuilding follows original checkpoint/history references and excludes affected source
+ranges, inherited summaries and attributed quoted payloads. Original UI history remains unchanged.
+The same projection applies to model-facing history readers and selective task-background handoffs.
+
 ## Ordinary Thread context
 
 Native conversations use this same catalog through `kernel/thread-context.ts`. A trusted

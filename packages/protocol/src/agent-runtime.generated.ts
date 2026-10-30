@@ -3,6 +3,29 @@
 export const AGENT_AVATAR_IDS = ["slope-lilac","dome-ivory","taper-sage","pebble-blue","overlap-coral","notch-ochre","slant-mint","round-lilac","tile-blue","fold-sage","cap-coral","wave-ivory","capsule-sky","pillar-lilac","lozenge-mint","wedge-apricot","arch-butter","oval-rose","squircle-periwinkle","shield-sage","sail-ivory","lean-coral","bridge-aqua","crest-lilac","step-blue","offset-peach","orbit-sage","cushion-ochre","curve-mint","bevel-rose","drift-blue","stack-ivory","tilt-pistachio","fan-coral","mound-lavender","tab-butter","span-jade","ripple-peach","facet-blue","comma-lilac","inset-sage","pocket-rose","rise-ivory","sweep-aqua","bend-ochre","twin-periwinkle","arc-apricot","tuck-jade","plate-lavender","drop-melon","ribbon-blue","cove-sage","terrace-ivory","slide-rose","ramp-mint","echo-ochre","lens-lilac","ledge-aqua","swell-apricot","parcel-periwinkle","scoop-pistachio","beam-coral","chamfer-jade","float-butter"] as const;
 export type AgentAvatarId = typeof AGENT_AVATAR_IDS[number];
 
+export interface BotMatterThread {
+  threadId: string;
+  branchId: string;
+  send: boolean;
+  memory: boolean;
+}
+
+export interface BotMatter {
+  id: string;
+  revision: number;
+  title: string;
+  description: string;
+  archived: boolean;
+  threads: BotMatterThread[];
+}
+
+export interface BotMatterUpdate {
+  botId: string;
+  key: string;
+  expectedRevision: number;
+  matter: BotMatter;
+}
+
 export interface SourcePreparationRetentionParams {
   threadId: string;
   source: LaunchSource;
@@ -1449,6 +1472,7 @@ export interface HistoryPageParams {
   branchId: string;
   headId?: string;
   beforeId?: string;
+  afterId?: string;
   limit: number;
 }
 
@@ -1467,6 +1491,7 @@ export interface HistoryReference {
 }
 
 export interface HistoryPage {
+  boundary_reset?: boolean;
   head: string | null;
   items: HistoryReference[];
   previous: string | null;
@@ -1560,7 +1585,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 71; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 72; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -2657,7 +2682,7 @@ export interface SourceDraftProvenance { threadId: string; branchId: string; sna
 
 export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture } | { consistency: 'fixed-root'; root: string; selection?: { captureIdentity: string; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; drafts?: SourceDraftProvenance }; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
 
-export type ChildSource = { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'shared'; handoff: ChildSourceHandoff | null; selection: LaunchSource } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
+export type ChildSource = { kind: 'project'; handoff?: never; project: ChildProjectSource; source_path: string | null } | { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'shared'; handoff: ChildSourceHandoff | null; selection: LaunchSource } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 
 export interface ChildWorkingResultRef {
   publication_id: string;
@@ -2673,9 +2698,9 @@ export type ChildCodeResult = { kind: 'not_applicable' } | { kind: 'shared_sourc
 
 export interface ChildSourceReadyParams {
   executionId: string;
-  pin: ChildSourcePin;
+  pin: ChildSourcePin | null;
   source: LaunchSourceParams;
-  provenance: ChildSourceProvenance;
+  provenance: ChildSourceProvenance | null;
 }
 
 export interface ChildSettleParams {
@@ -2757,6 +2782,7 @@ export interface ChildPreset {
 }
 
 export interface ExternalChild {
+  project_source?: ChildSource | null;
   operation_id: string;
   dispatch_operation_id: string | null;
   message_kind: 'inform' | 'request' | null;
@@ -2783,7 +2809,15 @@ export interface ExternalChild {
   finished_at_ms: number | null;
 }
 
+export interface ChildProjectSource {
+  id: string;
+  name: string;
+  path: string;
+  resource_owner: SourceResourceOwner;
+}
+
 export interface ChildDispatchCatalog {
+  projects?: ChildProjectSource[];
   native_capabilities: ChildCapabilityDescriptor[];
   identity: string;
   presets: ChildPreset[];
@@ -2815,6 +2849,8 @@ export interface TreeCancellationReceipt {
 }
 
 export interface ChildInput {
+  projectId?: string;
+  background?: Array<{threadId:string;branchId:string;headId:string;itemIds:string[]}>;
   sourcePath?: string;
   inheritContext?: boolean;
   sourceAgent?: string;

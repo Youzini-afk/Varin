@@ -434,7 +434,7 @@ impl ModelProvider for ProductMemoryModel {
                     call_id: format!("memory-{step}"),
                     name: "tool_invoke".into(),
                     schema_version: "1".into(),
-                    arguments: json!({"reference":{"name":"memory","version":"bot-1"},"arguments":arguments}),
+                    arguments: json!({"reference":{"name":"memory","version":"bot-2"},"arguments":arguments}),
                 },
             })
             .unwrap_or(Content::Text {
@@ -532,7 +532,7 @@ fn product_bot_entry_admission_original_history_knowledge_tools_and_actual_model
                     let run_id = params["runId"].as_str().unwrap();
                     let (run, launch) = { let db = owner.lock().unwrap(); (db.run(run_id).map_err(domain)?, db.capture_launch(run_id).map_err(domain)?.unwrap()) };
                     let launch = launch.load().map_err(domain)?;
-                    assert!(launch.selection.tools.iter().any(|tool| tool.name == "memory" && tool.version == "bot-1"));
+                    assert!(launch.selection.tools.iter().any(|tool| tool.name == "memory" && tool.version == "bot-2"));
                     assert!(!launch.selection.tools.iter().any(|tool| tool.name == "memory" && tool.version == "1"));
                     let preparation = crate::run_assembly::RunPreparation::new(serde_json::from_value(params.clone())?, &run)?;
                     let crate::run_assembly::PreparedLaunch::Start(mut start) = assembly.prepare(preparation, None, ||false)? else { panic!("original Run launch required"); };

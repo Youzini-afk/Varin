@@ -14,7 +14,10 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import type { ProjectEntry } from '@varin/application-client';
+import type { ProjectEntry, BotSummary } from '@varin/application-client';
+import { listBots, useBotNavigation } from '@/lib/bots';
+import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
+import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import { createScheduledTasksHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, type ScheduledTask, type ThreadIdentity } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -118,12 +121,25 @@ export function ScheduledTasksDialog() {
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
   const isMobile = useUIStore((state) => state.isMobile);
-  const projects = useProjectsStore((state) => state.projects);
+  const projectEntries = useProjectsStore((state) => state.projects);
+  const [botEntries, setBotEntries] = React.useState<BotSummary[]>([]);
+  const selectedBot = useBotNavigation(state => state.botId);
+  const botWorkbench = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
+  React.useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    void listBots(controller.signal).then(rows => { if (!controller.signal.aborted) setBotEntries(rows.filter(bot => !bot.archived && !bot.deletion)); })
+      .catch(cause => { if (!controller.signal.aborted) toast.error(cause instanceof Error ? cause.message : String(cause)); });
+    return () => controller.abort();
+  }, [open]);
+  const projects = React.useMemo(() => [...projectEntries, ...botEntries.map(bot => ({ id: `bot:${bot.id}`, path: bot.homeDir, label: bot.name }))], [projectEntries, botEntries]);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const { currentTheme } = useThemeSystem();
 
   const [selectedProjectID, setSelectedProjectID] = React.useState<string>('');
+  const selectedManually = React.useRef(false);
+  React.useEffect(() => { if (!open) selectedManually.current = false; }, [open]);
   const [view, setView] = React.useState<'scheduled' | 'followups'>('scheduled');
   const [query, setQuery] = React.useState('');
   const [filter, setFilter] = React.useState<'all' | 'enabled' | 'paused' | 'completed'>('all');
@@ -216,7 +232,8 @@ export function ScheduledTasksDialog() {
     if (!open || view !== 'scheduled') {
       return;
     }
-    const preferredProjectID = activeProject?.id || projects[0]?.id || '';
+    const preferredProjectID = selectedManually.current && projects.some(project => project.id === selectedProjectID) ? selectedProjectID
+      : botWorkbench && selectedBot && projects.some(project => project.id === `bot:${selectedBot}`) ? `bot:${selectedBot}` : activeProject?.id || projects[0]?.id || '';
     setSelectedProjectID(preferredProjectID);
     if (preferredProjectID) {
       void reloadTasks(preferredProjectID);
@@ -226,7 +243,7 @@ export function ScheduledTasksDialog() {
       setLoadError(null);
     }
     return () => { reloadGeneration.current += 1; };
-  }, [open, view, activeProject, projects, reloadTasks]);
+  }, [open, view, activeProject, projects, reloadTasks, botWorkbench, selectedBot]);
 
   React.useEffect(() => {
     if (!open || view !== 'scheduled') {
@@ -350,6 +367,7 @@ export function ScheduledTasksDialog() {
       <Select
         value={selectedProjectID || '__none'}
         onValueChange={(value) => {
+          selectedManually.current = true;
           const nextProjectID = value === '__none' ? '' : value;
           setSelectedProjectID(nextProjectID);
           if (nextProjectID) {
@@ -553,7 +571,7 @@ export function ScheduledTasksDialog() {
         </div>
       ) : null}
 
-      <CalendarTaskEditorDialog open={calendarEditorOpen} projectId={selectedProjectID} task={calendarEditorTask} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
+      <CalendarTaskEditorDialog open={calendarEditorOpen} projectId={selectedProjectID} task={calendarEditorTask} initialTarget={botEntries.find(bot => `bot:${bot.id}` === selectedProjectID)?.entry} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
       <Dialog open={calendarWork !== null} onOpenChange={value => { if (!value) setCalendarWork(null); }}><DialogContent className="h-[85vh] max-w-5xl overflow-hidden"><DialogTitle>Calendar work</DialogTitle>
         {calendarWork && threads && <ThreadConversation api={threads} identity={calendarWork} onBranchCreated={setCalendarWork} />}
       </DialogContent></Dialog>

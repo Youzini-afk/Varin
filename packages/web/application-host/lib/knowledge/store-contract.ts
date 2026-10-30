@@ -61,6 +61,8 @@ export interface KnowledgeSource {
   runId?: string;
   entryId?: string;
   spans?: import("@varin/protocol").MemorySourceSpan[];
+  /** Immutable rows used to derive this account, in this same owner store. */
+  memories?: Array<{ id: NodeId; revision: string }>;
 }
 
 /** Values that identify the revision a caller opened before a mutation. */
@@ -100,6 +102,7 @@ export interface Knowledge {
   supplements?: NodeId;
   createdAt: number;
   invalidAt?: number;
+  forgottenAt?: number;
   recallCount: number;
   recalledAt?: number;
 }
@@ -397,7 +400,7 @@ export const terminalCommandDedupeKey = (sessionId: string, commandId: string): 
 export interface KnowledgeMutationOrigin { id: string; intent: string }
 export interface KnowledgeMutationReceipt {
   origin: KnowledgeMutationOrigin;
-  action: 'remember' | 'correct' | 'forget';
+  action: 'remember' | 'correct' | 'forget' | 'archive';
   result: KnowledgeCreateIfAbsentResult | { id: NodeId; previous: Knowledge } | null;
   changes: Knowledge[];
 }
@@ -461,6 +464,7 @@ export interface KnowledgeStore {
     expectedScope?: KnowledgeScope,
     expected?: KnowledgeExpectedRevision,
     origin?: KnowledgeMutationOrigin,
+    mode?: 'forget' | 'archive',
   ): Promise<void>;
   getKnowledge(id: NodeId): Promise<Knowledge | null>;
   listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]>;

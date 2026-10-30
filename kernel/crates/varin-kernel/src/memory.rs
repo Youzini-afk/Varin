@@ -64,13 +64,15 @@ pub(crate) fn schema(mutations: bool) -> ToolSchema {
     }
 }
 pub(crate) fn bot_schema(mutations: bool) -> ToolSchema {
-    ToolSchema { requirements: None, description: "Read, recall and maintain this Bot's durable Knowledge memory. Omitted/bot scope means this Bot; user scope means shared user memory; session scope means only this original Thread. Get returns row values for the expected CAS guard on correct/forget. Remember/correct require an exact original history source passage (sourceItemId disambiguates). Recall includes work-associated and shared memory. Writes commit through the original Knowledge owner; a repeated Operation returns its original receipt.".into(), output_schema: None, metadata: None,
-        name: TOOL.into(), version: if mutations { "bot-1" } else { "bot-1-read" }.into(),
+    ToolSchema { requirements: None, description: "Read, recall and maintain this Bot's durable Knowledge memory. Omitted/bot scope means this Bot; user scope means shared user memory; session scope means this original Thread. Get returns exact values and a revision for updates or derived accounts. Remember/correct can cite several original passages through sources or same-scope memory revisions through derivedFrom. Archive removes an understanding from current recall while preserving its history; forget also excludes its supporting source passages from future model context. Recall includes associated work and shared memory. The original Knowledge owner commits writes; repeating an Operation returns its original receipt.".into(), output_schema: None, metadata: None,
+        name: TOOL.into(), version: if mutations { "bot-2" } else { "bot-2-read" }.into(),
         schema: json!({"type":"object","properties":{
-            "action":{"type":"string","enum":if mutations { vec!["get","search","recall","remember","correct","forget"] } else { vec!["get","search","recall"] }},
+            "action":{"type":"string","enum":if mutations { vec!["get","search","recall","remember","correct","forget","archive"] } else { vec!["get","search","recall"] }},
             "scope":{"type":"string","enum":["bot","user","session"]},"id":{"type":"integer","minimum":1},
             "content":{"type":"string"},"trigger":{"type":"string"},"nature":{"type":"string","enum":["experience","decision","preference","judgment","instruction"]},
             "sourceText":{"type":"string"},"sourceItemId":{"type":"string"},"includeSource":{"type":"boolean"},
+            "sources":{"type":"array","items":{"type":"object","properties":{"itemId":{"type":"string"},"quote":{"type":"string"}},"required":["itemId","quote"],"additionalProperties":false},"description":"Original supporting passages; several can support one connected account."},
+            "derivedFrom":{"type":"array","items":{"type":"object","properties":{"id":{"type":"integer","minimum":1},"revision":{"type":"string"}},"required":["id","revision"],"additionalProperties":false},"description":"Same-scope memories read with get. The returned revision binds this derived account to its actual sources."},
             "query":{"type":"string"},"k":{"type":"integer","minimum":1},
             "expected":{"type":"object","properties":{"content":{"type":"string"},"trigger":{"type":"string"},"status":{"type":"string","enum":["suggested","accepted","dismissed"]},"invalidAt":{"type":["number","null"]}},"required":["content","trigger","status","invalidAt"],"additionalProperties":false}
         },"required":["action"],"additionalProperties":false}) }
@@ -85,7 +87,7 @@ fn bot_action(call: &ToolCall, mutations: bool) -> Result<bool, ExecutionError> 
         .and_then(Value::as_str)
         .ok_or_else(|| error("Bot memory action missing"))?;
     let read = matches!(action, "get" | "search" | "recall");
-    if !read && (!mutations || !matches!(action, "remember" | "correct" | "forget")) {
+    if !read && (!mutations || !matches!(action, "remember" | "correct" | "forget" | "archive")) {
         return Err(error("invalid or ungranted Bot memory action"));
     }
     if value.keys().any(|key| {
@@ -98,6 +100,8 @@ fn bot_action(call: &ToolCall, mutations: bool) -> Result<bool, ExecutionError> 
             "nature",
             "sourceText",
             "sourceItemId",
+            "sources",
+            "derivedFrom",
             "includeSource",
             "query",
             "k",
@@ -107,7 +111,7 @@ fn bot_action(call: &ToolCall, mutations: bool) -> Result<bool, ExecutionError> 
     }) || value
         .get("scope")
         .is_some_and(|scope| !matches!(scope.as_str(), Some("bot" | "user" | "session")))
-        || (matches!(action, "get" | "correct" | "forget")
+        || (matches!(action, "get" | "correct" | "forget" | "archive")
             && value
                 .get("id")
                 .and_then(Value::as_u64)
@@ -117,7 +121,7 @@ fn bot_action(call: &ToolCall, mutations: bool) -> Result<bool, ExecutionError> 
                 .get("content")
                 .and_then(Value::as_str)
                 .is_none_or(|text| text.trim().is_empty()))
-        || (matches!(action, "correct" | "forget")
+        || (matches!(action, "correct" | "forget" | "archive")
             && !value.get("expected").is_some_and(Value::is_object))
     {
         return Err(error("invalid Bot memory arguments"));

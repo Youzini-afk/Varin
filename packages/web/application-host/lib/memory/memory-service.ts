@@ -95,6 +95,7 @@ export class MemoryOwnerUnavailableError extends Error {
 }
 
 export function createMemoryService(deps: MemoryServiceDeps) {
+  const exclusionCache = new WeakMap<KnowledgeStore, { revision: string; rows: Knowledge[] }>();
   const notify = (owner: MemoryOwner, ids: readonly NodeId[]) => {
     try { deps.onChanged?.(owner, ids); } catch (error) { deps.onError?.(error); }
   };
@@ -187,7 +188,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     return result;
   };
 
-  /** Forget removes the row from current-effective recall while keeping history inspectable. */
+  /** Forget excludes both this understanding and its original supporting passages. */
   const forget = async (
     owner: MemoryOwner,
     id: NodeId,
@@ -251,9 +252,27 @@ export function createMemoryService(deps: MemoryServiceDeps) {
   };
 
   return {
+    exclusions: async (owner: MemoryOwner): Promise<Knowledge[]> => {
+      const store = owner.scope === 'user' ? await deps.userStore()
+        : owner.scope === 'session' ? await deps.threadStoreIfPresent?.(owner.ownerId!) : await storeFor(owner);
+      if (!store) return [];
+      const revision = store.knowledgeRevision();
+      let cache = exclusionCache.get(store);
+      if (!cache || cache.revision !== revision) {
+        cache = { revision, rows: (await store.listKnowledge({})).filter(row => row.forgottenAt !== undefined) };
+        exclusionCache.set(store, cache);
+      }
+      return cache.rows.filter(row => row.scope === owner.scope);
+    },
     remember,
     correct,
     forget,
+    archive: async (owner: MemoryOwner, id: NodeId, expected?: KnowledgeExpectedRevision, origin?: KnowledgeMutationOrigin) => {
+      const store = await storeFor(owner);
+      await requireRow(store, owner, id);
+      await store.retireKnowledge(id, owner.scope, expected, origin, 'archive');
+      notify(owner, [id]);
+    },
     get,
     list,
     search,

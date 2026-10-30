@@ -19,6 +19,11 @@ only execution owner; the Host supplies asset discovery and cancellable preparat
 
 ## Definition and execution
 
+Bot home directories also participate in asset discovery with `bot:<id>` scope identities. The same
+Calendar owner reads their definitions. The Bot workspace defaults a new GUI schedule to the Bot's
+actual existing entry Thread/branch; no Bot timer, synthetic user message or second scheduler is used.
+Project/Bot scope selection remains user-controlled while asynchronous discovery completes.
+
 A definition supports once/daily/weekly/cron, an explicit IANA timezone and the `skip` or
 `coalesce_once` missed policy. Once defaults to catch-up once; recurring calendars default to skip.
 New work selects a registered `providerId`/`modelId`, optional thinking/temperature, a source mode

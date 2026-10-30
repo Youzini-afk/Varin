@@ -419,6 +419,17 @@ impl HostToolBinding {
         selected.tools = tools;
         Some(selected)
     }
+    /// Project-scoped server definitions retain their original configuration directory.
+    /// Selecting a different project can inherit global servers, not the old project's config.
+    pub fn global_delegation(&self) -> Option<Self> {
+        let mut selected=self.clone();
+        selected.provenance.servers.retain(|_,server|server.owner.execution_scope==McpExecutionScope::Global);
+        if selected.provenance.servers.is_empty(){return None;}
+        selected.resources.retain(|_,key|selected.provenance.servers.values().any(|server|&server.resource_key==key));
+        selected.tools.retain(|tool|!matches!(selected.routes.get(&tool.name),Some(crate::McpRoute::Direct|crate::McpRoute::DirectTask))||selected.resources.contains_key(&tool.name));
+        selected.routes.retain(|name,_|selected.tools.iter().any(|tool|&tool.name==name));
+        Some(selected)
+    }
     /// A direct tool needs only its selected server. Gateways can select any admitted server.
     pub fn tool_uses_workspace(&self, name: &str) -> bool {
         let resource = self.resources.get(name);

@@ -30,6 +30,7 @@ export function createThreadNotificationRuntime(options: {
     if (event.kind === 'run.changed') {
       run = event.data as Run;
       if (!run || !['completed', 'failed'].includes(run.state)) return;
+      if (run.state === 'completed' && (event.data as { hasVisibleAssistantOutput?: boolean }).hasVisibleAssistantOutput === false) return;
       if (await options.runtime.childExecutionForRun(run.id, lifetime.signal)) return;
       kind = run.state === 'completed' ? 'completion' : 'error';
       body = run.state === 'completed' ? 'Response finished.' : 'This conversation needs attention after a failed run.';

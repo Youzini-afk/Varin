@@ -55,6 +55,7 @@ import { DocumentsFileObservationOwner } from './lib/kernel/file-observation-own
 import { FileObservationService } from './lib/kernel/file-observation-service.js';
 import { createScheduleToolOwner, SCHEDULE_CAPABILITY } from './lib/kernel/schedule-tool-owner.js';
 import { CalendarOwner } from './lib/scheduled-tasks/calendar-owner.js';
+import { createChildProjectSourcePreparer } from './lib/kernel/child-project-source.js';
 import { createChildProfilePreparer } from './lib/kernel/child-profiles.js';
 import { createCodeExchangeOwner, CODE_EXCHANGE_CAPABILITY } from './lib/kernel/code-exchange.js';
 import { createManagedCodeExchangeService } from './lib/kernel/managed-code-exchange.js';
@@ -584,12 +585,15 @@ const projectConfigRuntime = createProjectConfigRuntime({
   path,
   projectsDirPath: VARIN_PROJECTS_CONFIG_DIR,
 });
+let botCalendarScopes: () => Promise<Array<{ id: string; path: string }>> = async () => [];
+const scheduledScopes = async () => [...await readScheduledProjects(readSettingsFromDisk, sanitizeProjects), ...await botCalendarScopes()];
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
-  listProjects: () => readScheduledProjects(readSettingsFromDisk, sanitizeProjects),
+  listProjects: scheduledScopes,
   logger: console,
 });
 const scheduledTaskService = createScheduledTaskService({
+  additionalProjects: () => botCalendarScopes(),
   readSettingsFromDisk,
   sanitizeProjects,
   projectConfigRuntime,
@@ -1400,11 +1404,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       model: bot => botAgentModel(bot),
       listWork: async (bot, includeEntry) => {
         const scope = await agentRuntime.botScope(bot.id);
-        return scope.threads.flatMap(thread => thread.branches.flatMap(branch => {
+        const matters = (await agentRuntime.botMatters(bot.id)).filter(matter => !matter.archived);
+        const associated = new Map(matters.flatMap(matter => matter.threads.map(link => [link.threadId, link] as const)));
+        const owned = new Set(scope.threads.map(thread => thread.thread_id));
+        const followed = await Promise.all([...associated.keys()].filter(thread => !owned.has(thread)).map(thread => agentRuntime.thread(thread).catch(error => {
+          if (error instanceof KernelClientError && error.code === 'not-found') return null;
+          throw error;
+        })));
+        return [...scope.threads, ...followed.filter((thread): thread is NonNullable<typeof thread> => thread !== null && thread.deleted_at_ms === null)].flatMap(thread => thread.branches.flatMap(branch => {
           const entry = bot.entry.runtime === 'agent' && bot.entry.threadId === thread.thread_id && bot.entry.branchId === branch.branch_id;
           if (entry && !includeEntry) return [];
+          const matterIds = matters.filter(matter => matter.threads.some(link => link.threadId === thread.thread_id && link.branchId === branch.branch_id)).map(matter => matter.id);
+          if (!owned.has(thread.thread_id) && !matterIds.length) return [];
           return [{ runtime: 'agent' as const, identity: { runtime: 'agent' as const, threadId: thread.thread_id, branchId: branch.branch_id }, thread,
-            activeRun: branch.latest_run, purpose: entry ? 'bot-root' as const : 'work' as const }];
+            activeRun: branch.latest_run, matterIds, purpose: entry ? 'bot-root' as const : owned.has(thread.thread_id) ? 'work' as const : 'followed' as const }];
         }));
       },
       applyProfile: async bot => {
@@ -1462,6 +1475,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
   });
   await botService.publishExecutionGates();
+  botCalendarScopes = async () => (await botService.list()).filter(bot => !bot.deletion).map(bot => ({ id: botScopeId(bot.id), path: bot.homeDir }));
   botAdmissionReady = true;
   const botScopeRoot = async (scopeId: string): Promise<string> => {
     const bot = await botService.get(botIdFromScopeId(scopeId));
@@ -1600,10 +1614,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // keeps suggested/accepted semantics, dedupe, and correction CAS.
   const memoryOrganizer = createMemoryOrganizer({
     getInference: () => memoryInference,
-    nativeMaterials: async scopeId => {
-      if (!isBotScopeId(scopeId)) return [];
+    hasNativeSources: scopeId => botHistory.hasSources(botIdFromScopeId(scopeId)),
+    nativeMaterials: async (scopeId, afterHeads, sourceChars) => {
+      if (!isBotScopeId(scopeId)) return { materials: [], heads: {} };
       const bot = await botService.get(botIdFromScopeId(scopeId));
-      return bot?.entry.runtime === 'agent' ? botHistory.bot(bot.id) : [];
+      return bot?.entry.runtime === 'agent' ? botHistory.botBatch(bot.id, afterHeads, undefined, sourceChars) : { materials: [], heads: {} };
     },
     readNativeSource: async (scopeId, span) => (await botHistory.read(botIdFromScopeId(scopeId), span)).text,
     scopeForThread: async threadId => { const botId = (await agentRuntime.thread(threadId)).bot_id; return botId ? botScopeId(botId) : null; },
@@ -2117,6 +2132,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
     }), createChildProfilePreparer({ models: modelAuthority,
+      projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).map(project => ({ id: project.id, name: typeof project.label === 'string' && project.label || project.path, path: project.path, resource_owner: { kind: 'local' as const } })),
       externalAgents: () => externalAgents.settings(),
       settings: () => modelsService.readGlobalInferenceSettings(),
       projectWorkFocus: async projectId => {
@@ -2126,6 +2142,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
+  const prepareProjectSource = createChildProjectSourcePreparer({ projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
+    inspectBackend:(projectId,signal)=>nativeWorkspaces.inspectBackend(projectId,signal),sources: sourceDirectory, prepare: prepareThreadSource });
+  threads.bindBotWorkProfile(async botId => {
+    const bot = await botService.get(botId);
+    if (!bot || !await botService.canExecute(botId)) return null;
+    const model = await botAgentModel(bot);
+    return model ? { homeDir: bot.homeDir, model } : null;
+  });
   threads.bindTitles(threadTitles);
   void threadTitles.recover();
   const nextSteps = createNextStepService({ runtime: agentRuntime, modelText,
@@ -2256,7 +2280,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') });
   const reconcileMaterialReceipts = createMaterialReceiptReconciler({ runtime: agentRuntime, kernel: kernelClient, collections: materialCollectionsService,
     onError: (_operationId, _error) => console.error('[Materials] Original mutation receipt requires attention') });
-  const collaboration = new ThreadCollaboration({ runtime: agentRuntime,
+  const collaboration = new ThreadCollaboration({ runtime: agentRuntime, prepareProjectSource,
     canExecuteThread: async threadId => {
       const botId = (await agentRuntime.thread(threadId)).bot_id;
       return !botId || (await botService.executionGate(botId)).permitted;
@@ -2265,6 +2289,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal) },
     reconcileDomainReceipts: async signal => { await Promise.all([reconcileFileEffectReceipts(signal), reconcileMaterialReceipts(signal), reconcileScheduleReceipts(signal)]); },
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
+    recoverColdBotWork: signal => threads.recoverBotWork(signal),
+    onWorkChanged: () => broadcastGlobalUiEvent?.({ type: 'varin:bot-work-changed', properties: {} }),
     recoverCheckpoints: recoveryCheckpoints.recover, settleRunCheckpoints: recoveryCheckpoints.settle,
     prepareContext: threadContext,
     prepareMaterials: threadMaterialLifetime.prepareChild,
@@ -2272,14 +2298,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
   collaborationOwner.current = collaboration;
-  externalAgents.startChildren(createExternalSourceOwner({ kernel: kernelClient, storage: kernelStorageAdapter,
+  externalAgents.startChildren(createExternalSourceOwner({ kernel: kernelClient, storage: kernelStorageAdapter, prepareProjectSource,
     capture: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal) } }));
   void collaboration.recover();
   const refreshThreadPersonalization = () => threads.refreshPersonalization();
   void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
   void contextService.recover().catch(() => console.error('[Thread] Saved context job discovery requires attention'));
   const calendarOwner = new CalendarOwner({ runtime: agentRuntime,
-    projects: () => readScheduledProjects(readSettingsFromDisk, sanitizeProjects),
+    projects: scheduledScopes,
     prepare: (work, projectPath, signal) => threads.prepareCalendarWork(work, projectPath, signal),
     onChanged: () => { for (const client of uiVarinEventClients) { try { writeSseEvent(client, { type: 'varin:scheduled-task-changed', properties: {} }); } catch { uiVarinEventClients.delete(client); } } },
     onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
@@ -2346,6 +2372,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerRuntimeMaintenanceRoutes(app, agentRuntime, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerBotRoutes(app, {
     bots: botService,
+    work: agentRuntime,
     memory: memoryService,
     computers: computerService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),

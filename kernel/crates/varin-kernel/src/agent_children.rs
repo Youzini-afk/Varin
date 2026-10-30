@@ -200,7 +200,7 @@ pub(super) fn execute(
         let preparation = owner
             .lock()
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-            .prepare_child_source(&p.execution_id, p.pin, source, p.provenance)
+            .prepare_project_child_source(&p.execution_id, p.pin.0, source, p.provenance.0)
             .map_err(domain)?;
         let prepared = preparation.load().map_err(domain)?;
         if cancelled.load(Ordering::Acquire) {

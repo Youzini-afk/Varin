@@ -2,6 +2,7 @@ import { SettingsTabs } from '../shared/SettingsTabs';
 import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import type { BotModelSelection } from '@varin/application-client';
 import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
 import { Icon } from '@/components/icon/Icon';
 import { BotMemoryPreferences } from './BotMemoryPreferences';
@@ -51,7 +52,8 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
   const [busy, setBusy] = React.useState<string | null>(null);
   const [name, setName] = React.useState('');
   const [instructions, setInstructions] = React.useState('');
-  const [profileBaseline, setProfileBaseline] = React.useState<{ id: string; name: string; instructions: string } | null>(null);
+  const [model, setModel] = React.useState<BotModelSelection | null>(null);
+  const [profileBaseline, setProfileBaseline] = React.useState<{ id: string; name: string; instructions: string; model: BotModelSelection | null } | null>(null);
   const [showDirectory, setShowDirectory] = React.useState(!initialBotId);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [createName, setCreateName] = React.useState('');
@@ -62,9 +64,10 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
 
   const selected = bots?.find((bot) => bot.id === selectedId) ?? null;
   const workBotId = selected?.id;
-  const dirty = Boolean(profileBaseline && (name !== profileBaseline.name || instructions !== profileBaseline.instructions));
+  const dirty = Boolean(profileBaseline && (name !== profileBaseline.name || instructions !== profileBaseline.instructions
+    || model?.providerId !== profileBaseline.model?.providerId || model?.modelId !== profileBaseline.model?.modelId));
   React.useEffect(() => { onDraftStateChange?.({ dirty, saving: busy !== null }); }, [dirty, busy, onDraftStateChange]);
-  const discardProfile = () => { setError(null); if (selected) { setName(selected.name); setInstructions(selected.instructions ?? ''); setProfileBaseline({ id: selected.id, name: selected.name, instructions: selected.instructions ?? '' }); } };
+  const discardProfile = () => { setError(null); if (selected) { setName(selected.name); setInstructions(selected.instructions ?? ''); setModel(selected.model); setProfileBaseline({ id: selected.id, name: selected.name, instructions: selected.instructions ?? '', model: selected.model }); } };
   const confirmDiscard = () => !dirty || window.confirm(t('settings.bots.discardConfirm'));
   const chooseBot = (id: string) => { if (id !== selectedId && !confirmDiscard()) return; setSelectedId(id); setShowDirectory(false); };
   const locked = Boolean(selected?.archived || selected?.deletion || busy);
@@ -97,7 +100,8 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
     if (selected?.id === profileBaseline?.id && dirty) return;
     setName(selected?.name ?? '');
     setInstructions(selected?.instructions ?? '');
-    setProfileBaseline(selected ? { id: selected.id, name: selected.name, instructions: selected.instructions ?? '' } : null);
+    setModel(selected?.model ?? null);
+    setProfileBaseline(selected ? { id: selected.id, name: selected.name, instructions: selected.instructions ?? '', model: selected.model } : null);
   }, [selected, dirty, profileBaseline?.id]);
 
   React.useEffect(() => {
@@ -135,9 +139,10 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
       const saved = await updateBot(selected.id, {
         ...(name.trim() && name.trim() !== selected.name ? { name } : {}),
         instructions: instructions.trim() ? instructions : null,
+        model,
       });
-      setName(saved.name); setInstructions(saved.instructions ?? '');
-      setProfileBaseline({ id: saved.id, name: saved.name, instructions: saved.instructions ?? '' });
+      setName(saved.name); setInstructions(saved.instructions ?? ''); setModel(saved.model);
+      setProfileBaseline({ id: saved.id, name: saved.name, instructions: saved.instructions ?? '', model: saved.model });
       await refresh();
     });
   };
@@ -156,13 +161,7 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
   };
 
   const selectModel = (providerId: string, modelId: string) => {
-    if (!selected) return Promise.resolve();
-    return run('model', async () => {
-      await updateBot(selected.id, {
-        model: providerId && modelId ? { providerId, modelId } : null,
-      });
-      await refresh();
-    }).then(saved => { if (!saved) throw new Error('Model selection failed'); });
+    setModel(providerId && modelId ? { providerId, modelId } : null);
   };
 
   const botStatusLabel = (bot: BotSummary) => t(bot.deletion ? bot.deletion.error ? 'settings.bots.deleteFailed' : 'settings.bots.deleting'
@@ -242,7 +241,7 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
             onChange={(event) => setInstructions(event.target.value)} />
         </SettingsFieldRow>
         <SettingsFieldRow label={t('settings.bots.model.label')} description={<>{t('settings.bots.model.description')} {t('settings.bots.modelSavedSeparately')}</>}>
-          <BotModelSelector model={selected.model} disabled={locked} onChange={selectModel} />
+          <BotModelSelector model={model} disabled={locked} onChange={selectModel} />
         </SettingsFieldRow>
 
       </SettingsSection> : null}

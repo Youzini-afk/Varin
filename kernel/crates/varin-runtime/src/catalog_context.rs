@@ -745,10 +745,14 @@ impl ContextRead {
         let memory = memory
             .map(super::memory_state::MemoryStateRead::load)
             .transpose()?;
+        let checkpoint: ContextCheckpoint = serde_json::from_value(content.load(&reference)?)?;
+        let baseline = checkpoint.bot_memory_snapshot.as_ref().map(|snapshot| snapshot.load(&content)).transpose()?;
+        let rebuild = super::memory_exclusion::requires_rebuild(memory.as_ref(), baseline.as_ref());
+        let previous = previous.filter(|prefix| !rebuild || !prefix.history.iter().any(|item| item.id == format!("context:{}:summary", checkpoint.id)));
         let suffix = super::context_jobs::source_metadata_since(
             &database,
             head.as_deref(),
-            through_id.as_deref(),
+            if rebuild { None } else { through_id.as_deref() },
             previous.as_ref().and_then(|prefix| prefix.head.as_deref()),
         )?;
         let mut prefix = match previous {
@@ -759,8 +763,6 @@ impl ContextRead {
                 prefix
             }
             None => {
-                let checkpoint: ContextCheckpoint =
-                    serde_json::from_value(content.load(&reference)?)?;
                 let mut history = Vec::new();
                 let composition = checkpoint
                     .personalization
@@ -802,7 +804,7 @@ impl ContextRead {
                             .map_err(RuntimeError::Invalid)?,
                     );
                 }
-                if checkpoint.proposal.through_id.is_some() {
+                if checkpoint.proposal.through_id.is_some() && !rebuild {
                     history.push(ConversationItem {
                         resource_activation: None,
                         id: format!("context:{}:summary", checkpoint.id),
@@ -821,7 +823,9 @@ impl ContextRead {
                         .iter()
                         .map(|activation| activation.summary_reference().into()),
                 );
-                if let Some(retained) = &checkpoint.retained {
+                if rebuild {
+                    history.extend(super::memory_exclusion::initial_background(&database, &content, &branch_id)?);
+                } else if let Some(retained) = checkpoint.retained.as_ref() {
                     history.extend(content.load_items(&retained.items, &|| false)?);
                 }
                 CompiledContextPrefix {
@@ -847,18 +851,12 @@ impl ContextRead {
         prefix.head = head;
         // Only immutable checkpoint and conversation material is reusable. Current memory and
         // delivery receipts are projected afresh, before Engine adds Goal/binding/policy context.
-        let baseline = prefix
-            .checkpoint
-            .bot_memory_snapshot
-            .as_ref()
-            .map(|snapshot| snapshot.load(&content))
-            .transpose()?;
         let dynamic = super::memory::project(
             memory.as_ref(),
             prefix.checkpoint.personalization.as_ref(),
             &prefix.history,
             &trusted_receipts,
-            baseline.as_ref(),
+            if rebuild { None } else { baseline.as_ref() },
         )?;
         let mut projection = ContextProjection {
             compaction: None,
@@ -879,6 +877,7 @@ impl ContextRead {
         } else {
             prefix.history
         };
+        super::memory_exclusion::filter(memory.as_ref(), &mut projection.history)?;
         projection.history.extend(dynamic);
         Ok(projection)
     }

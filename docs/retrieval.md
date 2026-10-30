@@ -212,6 +212,10 @@ artifact、collection、log follow-up 使用原发布事实和耐久 occurrence�
 Bot 知识用原 KnowledgeStore 和可选 organizer。Bot owner 来自 Host/Catalog binding，不信任 caller 的 mode label；
 Bot 不收到普通 Agent 笔记/prompt override。来源 span 保留真实 Thread/branch/item 身份和精确文字范围，Markdown 渲染不重定义 offset。
 
+Bot 记忆支持自由正文、多处来源和可选分类，事项与实际 incoming 交流参与召回。后台整理按原分支位置增量读取，
+按实际模型预算取正文并推进真实覆盖，不每轮展开全部历史。修订和不再适用使派生概述失效；遗忘进一步过滤来源范围，
+并在后续请求前重建已经吸收相关内容的有效上下文。原始聊天作为资产保留，详见[长期总助手](bot.md)。
+
 显式保存、自动提议、纠正和遗忘均保留 provenance，推断与明确要求分开。已审来源覆盖包括空判断并可重启恢复，变更来源重开范围。
 Prepared proposal 核对原 mutation receipt，不在写入未知时另生成答案。原文 reader 对被引来源返回 changed/missing/unavailable，
 不能用另一版文字充当引用。

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { openKnowledgeStoreEngine } from "../knowledge/store-engine.js";
 import type { KnowledgeScope, KnowledgeStore } from "../knowledge/store-contract.js";
 import { createMemoryService, type MemoryOwner } from "./memory-service.js";
+import { sourceRevision } from './memory-sources.js';
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
 const TEST_DIR = mkdtempSync(join(tmpdir(), "varin-test-memory-service-"));
@@ -72,6 +73,31 @@ describe("memory service (BC1)", () => {
     expect(result.item.source?.threadId).toBe("thread:s-1");
     const hits = await service().search(workspaceOwner, "tagged commit");
     expect(hits.some((hit) => hit.node.id === result.item.id)).toBe(true);
+  });
+
+  it('keeps a narrative intact and invalidates derived accounts on editing and forgetting', async () => {
+    const svc = service();
+    const base = (await svc.remember(botOwner, { content: 'Prefers blue accents, after rejecting a blue tint over the whole interface.', trigger: 'appearance' })).item;
+    const revision = sourceRevision(JSON.stringify([base.content, base.trigger, base.createdAt]));
+    const derived = (await svc.remember(botOwner, { content: 'Use a neutral surface with selected blue accents.', source: { kind: 'derived', memories: [{ id: base.id, revision }] } })).item;
+    await expect(svc.correct(botOwner,base.id,{content:'New understanding',source:{kind:'derived',memories:[{id:derived.id,revision:sourceRevision(JSON.stringify([derived.content,derived.trigger,derived.createdAt]))}]}})).rejects.toMatchObject({code:'conflict'});
+    expect((await svc.get(botOwner,base.id)).item.invalidAt).toBeUndefined();
+    const store = stores.get('bot:bot-1')!;
+    await store.updateAcceptedKnowledge(base.id, { content: 'Prefers subdued blue accents on neutral surfaces.', trigger: base.trigger });
+    expect((await svc.get(botOwner, derived.id)).item.invalidAt).toBeTypeOf('number');
+    await svc.forget(botOwner, base.id);
+    expect((await svc.exclusions(botOwner)).map(row => row.id)).toEqual(expect.arrayContaining([base.id, derived.id]));
+    expect(await svc.list(botOwner, { activeOnly: true })).toEqual([]);
+  });
+
+  it('archives without excluding original passages and keeps that distinction through later forgetting', async () => {
+    const svc = service();
+    const item = (await svc.remember(botOwner, { content: 'A prior release process.' })).item;
+    await svc.archive(botOwner, item.id);
+    expect((await svc.get(botOwner, item.id)).item.invalidAt).toBeTypeOf('number');
+    expect(await svc.exclusions(botOwner)).toEqual([]);
+    await svc.forget(botOwner, item.id);
+    expect((await svc.exclusions(botOwner)).map(row => row.id)).toContain(item.id);
   });
 
   it("dedupes a restated active memory", async () => {

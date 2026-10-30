@@ -120,14 +120,26 @@ pub(super) fn record_activity(
     subject: &str,
     kind: &str,
     cursor: u64,
+    data: &Value,
 ) -> Result<()> {
     let thread: Option<String> = match kind {
-        "run.accepted" | "run.changed" | "run.cancel_requested" => tx.query_row("SELECT b.thread_id FROM runs r JOIN branches b ON b.id=r.branch_id WHERE r.id=?1", [subject], |r| r.get(0)).optional()?,
+        "run.accepted" | "run.changed" | "run.cancel_requested" | "assistant.output" => tx.query_row("SELECT b.thread_id FROM runs r JOIN branches b ON b.id=r.branch_id WHERE r.id=?1", [subject], |r| r.get(0)).optional()?,
         "history.appended" => tx.query_row("SELECT thread_id FROM branches WHERE id=?1", [subject], |r| r.get(0)).optional()?,
         "permission.opened" | "question.opened" => tx.query_row("SELECT b.thread_id FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE o.id=?1", [subject], |r| r.get(0)).optional()?,
         _ => None,
     };
     if let Some(thread) = thread {
+        let bot_entry: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM bot_thread_bindings WHERE thread_id=?1)", [&thread], |row|row.get(0))?;
+        if bot_entry {
+            let visible = match kind {
+                "run.accepted" => tx.query_row("SELECT EXISTS(SELECT 1 FROM history WHERE run_id=?1 AND json_extract(body,'$.source')='user')", [subject], |row|row.get(0))?,
+                "run.changed" => data["state"] == "failed" || data["hasVisibleAssistantOutput"] == true,
+                "run.cancel_requested" => false,
+                "history.appended" => tx.query_row("SELECT EXISTS(SELECT 1 FROM history WHERE id=?1 AND json_extract(body,'$.source')='user')", [data["id"].as_str().unwrap_or_default()], |row|row.get(0))?,
+                _ => true,
+            };
+            if !visible { return Ok(()); }
+        }
         tx.execute(
             "UPDATE threads SET activity_cursor=?2,updated_at_ms=max(updated_at_ms,?3) WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM child_tasks c JOIN operations o ON o.id=c.id WHERE c.child_thread_id=?1 AND json_extract(o.body,'$.executor')='code_retrieval')",
             params![thread, sql_number(cursor)?, sql_number(now_ms()?)?],

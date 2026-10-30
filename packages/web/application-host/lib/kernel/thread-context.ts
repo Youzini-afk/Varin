@@ -98,7 +98,7 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     const { runtime_identity: _profileIdentity, child_profile: _profileChild, ...personalized } = personalizeAgentSystemPrompt(original, context);
     return {
       ...(resources ? { resources } : {}),
-      effectiveSystemPrompt: renderAgentSystemPrompt({ runtime_identity: original.runtime_identity ?? '', ...personalized, ...(original.child_profile ? { child_profile: original.child_profile } : {}), ...(bot ? { bot_profile: `You are ${bot.name}, a persistent Bot with your own work and memory. Read current facts before acting.\n${bot.instructions ?? ''}` } : {}) }),
+      effectiveSystemPrompt: renderAgentSystemPrompt({ runtime_identity: original.runtime_identity ?? '', ...personalized, ...(original.child_profile ? { child_profile: original.child_profile } : {}), ...(bot ? { bot_profile: `You are ${bot.name}, a long-term assistant working with the user. Understand them through conversation and use the available capabilities to help. You can work directly or collaborate with other Agents; choose how to participate, organize work and communicate as the situation calls for. You can continue working with existing Agents and their relevant background, or start new work.\n${bot.instructions ?? ''}` } : {}) }),
       instructionSources: [...basis.instructionSources, `agent.personalization:profiles:${configurationDigest}`],
       memoryCheckpoint: bot ? `bot.knowledge:${bot.id}:context` : `agent.personalization:${memorySnapshot.revision}:${digest({ scopes, memories: context.memories })}`,
       personalization: { ...provenance, memorySnapshot, configurationDigest,

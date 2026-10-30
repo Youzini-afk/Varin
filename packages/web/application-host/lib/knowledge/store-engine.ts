@@ -31,7 +31,7 @@ const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
 type Vector = import("triviumdb").Vector;
 type TransactionOperation = import("triviumdb").TransactionOperation;
 
-import { mergeSourceSpans, overlappingSource, parseSourceSpans } from "../memory/memory-sources.js";
+import { mergeSourceSpans, overlappingSource, parseSourceSpans, sourceRevision } from "../memory/memory-sources.js";
 import {
   type EmbeddingProvider,
   type NodeId,
@@ -255,6 +255,12 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         ...(pick("runId") ? { runId: pick("runId")! } : {}),
         ...(pick("entryId") ? { entryId: pick("entryId")! } : {}),
         ...(Array.isArray(source["spans"]) ? { spans: parseSourceSpans(source["spans"]) } : {}),
+        ...(Array.isArray(source['memories']) ? { memories: source['memories'].map(value => {
+          const dependency = value as Record<string, unknown> | null;
+          if (!dependency || !Number.isSafeInteger(dependency['id']) || Number(dependency['id']) < 0 || typeof dependency['revision'] !== 'string')
+            throw new KnowledgeMutationError('invalid', 'Stored memory dependency is malformed');
+          return { id: Number(dependency['id']), revision: dependency['revision'] };
+        }) } : {}),
       };
     };
     const knowledgeFromPayload = (id: NodeId, p: Record<string, unknown>): Knowledge | null => {
@@ -275,11 +281,19 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         ...(supplements !== undefined ? { supplements } : {}),
         createdAt: p["createdAt"] as number,
         ...(invalidAt !== undefined ? { invalidAt } : {}),
+        ...(typeof p['forgottenAt'] === 'number' ? { forgottenAt: p['forgottenAt'] } : {}),
         recallCount: (p["recallCount"] as number) ?? 0,
         ...(p["recalledAt"] !== undefined ? { recalledAt: p["recalledAt"] as number } : {}),
       };
     };
-    const knowledgeInsertPayload = (k: KnowledgeInput, now: number): Record<string, unknown> => ({
+    const knowledgeInsertPayload = (k: KnowledgeInput, now: number): Record<string, unknown> => {
+      for (const dependency of k.source?.memories ?? []) {
+        const target = db.getPayload(dependency.id) as Record<string, unknown> | null;
+        if (!target || target['type'] !== 'knowledge' || target['scope'] !== k.scope || target['status'] !== 'accepted'
+          || target['invalidAt'] !== undefined || dependency.revision !== sourceRevision(JSON.stringify([target['content'], target['trigger'], target['createdAt']])))
+          throw new KnowledgeMutationError('conflict', `Memory source ${dependency.id} has changed or is unavailable`);
+      }
+      return ({
       type: "knowledge",
       scope: k.scope,
       status: k.status,
@@ -289,7 +303,25 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       ...(k.source ? { source: k.source } : {}),
       createdAt: now,
       recallCount: 0,
-    });
+      });
+    };
+    const dependentChanges = (root: NodeId, at: number, forgotten = false): { operations: TransactionOperation[]; rows: Knowledge[] } => {
+      const invalid = new Set([root]); const operations: TransactionOperation[] = []; const rows: Knowledge[] = [];
+      const candidates = lookup({ type: 'knowledge' });
+      for (;;) {
+        const next = candidates.filter(row => !invalid.has(row.id)
+          && knowledgeSourceFromPayload(row.payload['source'])?.memories?.some(source => invalid.has(source.id)));
+        if (!next.length) break;
+        for (const row of next) {
+          invalid.add(row.id);
+          if (row.payload['invalidAt'] !== undefined && (!forgotten || row.payload['forgottenAt'] !== undefined)) continue;
+          const payload = { ...row.payload, invalidAt: row.payload['invalidAt'] ?? at, invalidatedBy: root, ...(forgotten ? { forgottenAt: at } : {}) };
+          operations.push({ type: 'updatePayload', id: row.id, payload });
+          rows.push(knowledgeFromPayload(row.id, payload)!);
+        }
+      }
+      return { operations, rows };
+    };
     /** Validate before inserting or retiring any row: a rejected edge must not
      * leave an uncommitted mutation in the live TDB handle. */
     const assertSupplementsTarget = (target: NodeId | undefined, scope: KnowledgeScope): void => {
@@ -995,10 +1027,10 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
           }
           if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
-          db.patchPayload(id, { $set: { content: patch.content, trigger: patch.trigger } });
-          persistence.commit();
-          bumpKnowledgeEpoch();
-          notifyKnowledge([id]);
+          const updated = { ...payload, content: patch.content, trigger: patch.trigger };
+          const dependents = dependentChanges(id, Date.now());
+          commitKnowledge([{ type: 'updatePayload', id, payload: updated }, ...dependents.operations],
+            [knowledgeFromPayload(id, updated)!, ...dependents.rows]);
         });
       },
 
@@ -1030,6 +1062,10 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           const now = Date.now();
           const inheritedNature = input.nature ?? previous.nature;
           const inheritedSource = input.source ?? previous.source;
+          const dependents = dependentChanges(id, now);
+          if (inheritedSource?.memories?.some(source => source.id === id || dependents.rows.some(row => row.id === source.id))) {
+            throw new KnowledgeMutationError('conflict', 'Correction sources include the memory or dependent accounts this change retires; cite an independent current source');
+          }
           const nextPayload = knowledgeInsertPayload({
             ...input,
             scope,
@@ -1044,17 +1080,17 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           const supplements = input.supplements ?? previous.supplements;
           commitKnowledge([{ type: 'insertWithId', id: nextId, vector: placeholderVec, payload: nextPayload },
             { type: 'updatePayload', id, payload: retired }, { type: 'link', src: nextId, dst: id, label: 'supersedes', weight: 1 },
-            ...(supplements === undefined ? [] : [{ type: 'link' as const, src: nextId, dst: supplements, label: 'supplements', weight: 1 }])],
-            [knowledgeFromPayload(nextId, nextPayload)!, knowledgeFromPayload(id, retired)!], origin, 'correct', { id: nextId, previous });
+            ...(supplements === undefined ? [] : [{ type: 'link' as const, src: nextId, dst: supplements, label: 'supplements', weight: 1 }]), ...dependents.operations],
+            [knowledgeFromPayload(nextId, nextPayload)!, knowledgeFromPayload(id, retired)!, ...dependents.rows], origin, 'correct', { id: nextId, previous });
           return { id: nextId, previous };
         });
       },
 
-      async retireKnowledge(id, expectedScope, expected, origin): Promise<void> {
+      async retireKnowledge(id, expectedScope, expected, origin, mode = 'forget'): Promise<void> {
         return enqueueWrite(() => {
           const prior = origin && mutationReceipt(origin);
           if (prior) {
-            if (prior.action !== 'forget') throw new KnowledgeMutationError('conflict', 'Memory mutation action changed');
+            if (prior.action !== mode) throw new KnowledgeMutationError('conflict', 'Memory mutation action changed');
             return;
           }
           const payload = db.getPayload(id) as Record<string, unknown> | null;
@@ -1072,9 +1108,12 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
               throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
             }
           }
-          const retired = payload['invalidAt'] !== undefined ? payload : { ...payload, invalidAt: Date.now() };
-          commitKnowledge(retired === payload ? [] : [{ type: 'updatePayload', id, payload: retired }],
-            retired === payload ? [] : [knowledgeFromPayload(id, retired)!], origin, 'forget');
+          const at = Date.now();
+          const retired = mode === 'forget' ? payload['forgottenAt'] !== undefined ? payload : { ...payload, invalidAt: payload['invalidAt'] ?? at, forgottenAt: at }
+            : payload['invalidAt'] !== undefined ? payload : { ...payload, invalidAt: at };
+          const dependents = dependentChanges(id, at, mode === 'forget');
+          commitKnowledge([...(retired === payload ? [] : [{ type: 'updatePayload' as const, id, payload: retired }]), ...dependents.operations],
+            [...(retired === payload ? [] : [knowledgeFromPayload(id, retired)!]), ...dependents.rows], origin, mode);
         });
       },
 

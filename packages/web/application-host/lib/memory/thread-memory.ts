@@ -63,10 +63,10 @@ export function createThreadMemory(options: {
         async save(input) {
             const actual = await target(input);
             const draft = input.draft;
-            if (!draft || typeof draft.content !== 'string' || !draft.content.trim() || typeof draft.trigger !== 'string' || !MEMORY_NATURES.includes(draft.nature))
+            if (!draft || typeof draft.content !== 'string' || !draft.content.trim() || typeof draft.trigger !== 'string' || draft.nature !== undefined && !MEMORY_NATURES.includes(draft.nature))
                 throw new KnowledgeMutationError('invalid', 'A memory statement and recall cue are required');
             const sources = await validate(input, draft.sources, true);
-            const result = await options.memory.remember(actual, { content: draft.content, trigger: draft.trigger, nature: draft.nature,
+            const result = await options.memory.remember(actual, { content: draft.content, trigger: draft.trigger, ...(draft.nature ? { nature: draft.nature } : {}),
                 source: { kind: 'user-extracted', threadId: input.threadId, spans: sources.map(source => source.span) } });
             return { created: result.created, owner: actual, item: result.item };
         },

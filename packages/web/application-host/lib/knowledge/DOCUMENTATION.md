@@ -33,6 +33,12 @@ for every open store without measurements on real mixed catalogs.
 
 ## Execution ownership
 
+Bot memory sources can retain multiple original spans and exact same-scope memory dependencies
+(`sources.memories`). Updates and retirement invalidate dependent accounts in the same KnowledgeStore
+transaction. `invalidAt` represents no longer applicable; `forgottenAt` additionally excludes original
+source material and dependent revisions from future model use. Archive/forget/correct keep the original
+Knowledge mutation receipt and CAS. These optional properties do not create a new database or writer.
+
 `store.ts` is the async Host facade; `store-contract.ts` owns its existing DTOs and
 error classes without loading a native addon. `store-process.ts` lazily starts private
 Node storage owners per Host module generation: one for authoritative workspace/user

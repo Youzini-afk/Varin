@@ -107,6 +107,40 @@ export class ThreadAdapter {
   private readContextPolicy?: (run: import('@varin/protocol').Run, signal?: AbortSignal) => Promise<NonNullable<ThreadContextState['policy']>>;
   bindContextPolicy(reader: (run: import('@varin/protocol').Run, signal?: AbortSignal) => Promise<NonNullable<ThreadContextState['policy']>>): void { this.readContextPolicy = reader; }
   private sourceDirectory?: SourceDirectory;
+  private botWorkProfile?: (botId: string, signal: AbortSignal) => Promise<{ homeDir: string; model: ThreadModel } | null>;
+  private readonly coldBotPreparations = new Set<string>();
+  bindBotWorkProfile(resolve: NonNullable<ThreadAdapter['botWorkProfile']>): void { this.botWorkProfile = resolve; }
+  /** Model/source preparation only; the original ingress retains scheduling and admission. */
+  async recoverBotWork(signal: AbortSignal): Promise<void> {
+    if (!this.botWorkProfile || !this.prepareContext) return;
+    for (const work of await this.runtime.pendingBotWork(signal)) {
+      if (this.coldBotPreparations.has(work.inputId)) continue;
+      this.coldBotPreparations.add(work.inputId);
+      void this.launchAdmitted(`cold:${work.inputId}`, async () => {
+        const profile = await this.botWorkProfile!(work.botId, signal);
+        if (!profile) return;
+        const identity: ThreadIdentity = { runtime: 'agent', threadId: work.threadId, branchId: work.branchId };
+        const location = await this.resolveSource(identity, { resourceOwner: { kind: 'local' }, path: profile.homeDir }, signal);
+        const { source } = await this.prepareSource({ ...identity, key: work.inputId, resourceOwner: location.resourceOwner,
+          workspaceId: location.workspaceId, mode: 'live_root', content: { mode: 'saved-files' }, captureScopes: [] }, signal);
+        await this.admitSource(source, identity, undefined, signal);
+        const model = await waitForModelBinding(this.models.resolveModel(profile.model), model => model.credentialOwner.release(), signal);
+        try {
+          const initialContext = await this.prepareContext!(identity, source, { mode: 'bot', threadRole: 'main', projectId: `bot:${work.botId}` }, signal);
+          const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ projectId: `bot:${work.botId}`, modelOwner: model.credentialOwner,
+            parent: { configuration: model.configuration, credential_scope: await model.credentialOwner.scope() } }, signal) : undefined;
+          signal.throwIfAborted();
+          const receipt = await this.runtime.admitBotWork({ work, configuration: model.configuration, initialContext,
+            launch: { inheritSource: false, source: { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId,
+              executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId ?? null, revision: source.revision ?? null,
+              mode: source.mode, liveRoot: source.liveRoot ?? null }, enabledTools: source.tools, credentialScope: await model.credentialOwner.scope(),
+              ...(childDispatch ? { childDispatch } : {}) } }, signal);
+          void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner, signal }).catch(() => undefined);
+        } finally { model.credentialOwner.release(); }
+      }, signal).catch(error => { if (!signal.aborted) this.onLaunchError(work.inputId, error); })
+        .finally(() => this.coldBotPreparations.delete(work.inputId));
+    }
+  }
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
   private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
   private codeExchangeReader?: import('./thread-code-exchange.js').ThreadCodeExchangeReader;

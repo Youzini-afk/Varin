@@ -109,11 +109,11 @@ impl Catalog {
         let mut child = self
             .external_message_target(&context.run_id, target)?
             .ok_or_else(|| RuntimeError::NotFound(target.into()))?;
-        if input.source_agent.is_some()
+        if input.after_current == Some(true) || input.source_agent.is_some()
             || input.target_branch_id.is_some()
             || input.reply_to.is_some()
         {
-            return Err(RuntimeError::Invalid("this external conversation keeps its original workspace; use targetThreadId and text. sourceAgent, native branches and replyTo are not supported by its protocol".into()));
+            return Err(RuntimeError::Invalid("this external conversation keeps its original workspace; use targetThreadId and text. afterCurrent, sourceAgent, native branches and replyTo are not supported by its protocol; wait for its current native turn or start separate work".into()));
         }
         let c: Value = record(&self.db, "external_conversations", &child.conversation_id)?;
         if c["deleted"] == true {

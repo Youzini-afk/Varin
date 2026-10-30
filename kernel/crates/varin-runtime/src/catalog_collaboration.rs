@@ -168,6 +168,7 @@ impl ChildSourceHandoff {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildSource {
+    Project { project:super::dispatch::ChildProjectSource, source_path:Option<String> },
     /// The original invocation selected no file source. This is neither preparation nor failure.
     Absent,
     Pending {
@@ -189,14 +190,14 @@ pub enum ChildSource {
 impl ChildSource {
     pub fn handoff(&self) -> Option<&ChildSourceHandoff> {
         match self {
-            Self::Absent => None,
+            Self::Absent | Self::Project { .. } => None,
             Self::Pending { handoff } => Some(handoff),
             Self::Ready { handoff, .. } | Self::Shared { handoff, .. } => handoff.as_ref(),
         }
     }
     pub fn pin(&self) -> Option<&ChildSourcePin> {
         match self {
-            Self::Absent | Self::Shared { .. } => None,
+            Self::Absent | Self::Project { .. } | Self::Shared { .. } => None,
             Self::Ready { pin, .. } => Some(pin),
             Self::Pending { handoff } => match &handoff.root {
                 ChildSourceRoot::Fixed { pin } | ChildSourceRoot::Native { pin } | ChildSourceRoot::Derived { pin, .. } => Some(pin),
@@ -449,6 +450,7 @@ impl Catalog {
         let context = &prepared.context;
         let child_launch = &prepared.launch;
         let handoff = &prepared.handoff;
+        super::background::authorize(&self.db, &self.run(&context.run_id)?.thread_id, &prepared.background)?;
         if let Some(old) = optional_record::<delegated::ChildRelation>(
             &self.db,
             "child_tasks",
@@ -469,7 +471,7 @@ impl Catalog {
                 "dispatch origin has different input or source".into(),
             ));
         }
-        let project_id = self.run_project_id(&context.run_id)?;
+        let project_id = prepared.project.as_ref().map(|p|p.id.clone()).or(self.run_project_id(&context.run_id)?);
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", &context.run_id)?;
         fence(&run, self.epoch)?;
@@ -487,7 +489,7 @@ impl Catalog {
             ));
         }
         let parent: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
-        super::dispatch::validate_agent_source(&tx,&run,prepared.source_agent.as_deref(),handoff.as_ref())?;
+        if prepared.project.is_none(){super::dispatch::validate_agent_source(&tx,&run,prepared.source_agent.as_deref(),handoff.as_ref())?;}
         if parent.selection.tool_schema_generation != child_launch.tool_schema_generation
             || parent.selection.tools_ref != prepared.parent_tools_ref
         {
@@ -523,13 +525,13 @@ impl Catalog {
                 call_id: prepared.call_id.clone(),
                 child_thread_id,
                 child_branch_id,
-                project_id,
+                project_id:project_id.clone(),
                 input_ref: prepared.input_ref,
                 configuration_ref: prepared.configuration_ref,
                 selected_profile_ref: prepared.selected_profile_ref,
                 dispatch_context_ref: prepared.frozen_reference,
                 launch: prepared.launch,
-                source: prepared.handoff.map_or(ChildSource::Absent, |handoff| {
+                source: prepared.handoff.map_or_else(|| prepared.project.map_or(ChildSource::Absent, |project|ChildSource::Project{project,source_path:prepared.source_path}), |handoff| {
                     if prepared.work_mode != super::dispatch::ChildWorkMode::IsolatedWrite
                         && (handoff.source.mode == SourceMode::Materialized
                             || matches!(handoff.root, ChildSourceRoot::Physical { .. } | ChildSourceRoot::Derived { .. }))
@@ -554,9 +556,9 @@ impl Catalog {
                         ChildSource::Pending { handoff }
                     }
                 }),
-                code_result: if parent.selection.source.is_none() {
+                code_result: if project_id.is_none() && parent.selection.source.is_none() {
                     ChildCodeResult::NotApplicable
-                } else if prepared.work_mode == super::dispatch::ChildWorkMode::Shared && (shared_physical || prepared.internal_retrieval) {
+                } else if prepared.work_mode == super::dispatch::ChildWorkMode::Shared && (shared_physical || project_id.is_some() || prepared.internal_retrieval) {
                     ChildCodeResult::SharedSource
                 } else if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly {
                     ChildCodeResult::NoChanges
@@ -986,7 +988,7 @@ impl ChildPreparation {
         let expected = match &child.source {
             ChildSource::Absent => None,
             ChildSource::Ready { selection, .. } | ChildSource::Shared { selection, .. } => Some(selection),
-            ChildSource::Pending { .. } => {
+            ChildSource::Pending { .. } | ChildSource::Project { .. } => {
                 return Err(RuntimeError::Conflict("child source is not ready".into()));
             }
         };
@@ -1152,6 +1154,7 @@ impl Catalog {
             "child.report_ready",
             json!({"sender_thread_id":child.child_thread_id,"outcome":child.report.as_ref().map(|r|r.outcome),"atMs":observations::wall_time_ms()?}),
         )?;
+        super::bot_reports::publish_pending(&tx, &child.execution_id, child.revision)?;
         tx.commit()?;
         Ok(child)
     }
@@ -1426,6 +1429,7 @@ impl UnacceptedChildDependenciesRead {
             dependencies.source_pin = selected
                 .frozen
                 .source
+                .filter(|_|input.project_id.is_none())
                 .map(|source| UnacceptedChildSourcePin {
                     source,
                     pin_id: format!("child-pin:{}", dependencies.operation_id),
@@ -1540,9 +1544,9 @@ impl Catalog {
 pub struct ChildSourcePreparation {
     execution: delegated::DelegatedExecution,
     profile_ref:Value,
-    pin: ChildSourcePin,
+    pin: Option<ChildSourcePin>,
     selection: launches::SourceSelection,
-    provenance: ChildSourceProvenance,
+    provenance: Option<ChildSourceProvenance>,
     epoch: u64,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
@@ -1555,7 +1559,12 @@ pub struct PreparedChildSource {
 }
 impl ChildSourcePreparation {
     pub fn load(self) -> Result<PreparedChildSource> {
-        self.pin.source.validate()?;
+        if let Some(ChildSource::Project{project,..})=self.execution.source.clone() {
+            return self.load_project(project);
+        }
+        let pin=self.pin.ok_or_else(||RuntimeError::Invalid("Prepared source pin is missing".into()))?;
+        let provenance=self.provenance.ok_or_else(||RuntimeError::Invalid("Prepared source provenance is missing".into()))?;
+        pin.source.validate()?;
         self.selection.validate()?;
         let branch = format!("child-source:{}", self.execution.execution_id);
         let profile:super::dispatch::ChildSelectedProfile=serde_json::from_value(self.content.load(&self.profile_ref)?)?;
@@ -1593,16 +1602,16 @@ impl ChildSourcePreparation {
             || self.selection.resource_owner != base.resource_owner
             || self.selection.workspace_id != base.workspace_id
             || self.selection.execution_workspace_id != if mode==SourceMode::NativeWorkspace {launches::native_execution_workspace_id(&self.execution.execution_id)}else{base.execution_workspace_id.clone()}
-            || self.pin.source.mode != SourceMode::FixedBranch
-            || self.pin.source.branch_id.as_deref() != Some(&branch)
-            || self.pin.source.revision != Some(0)
-            || self.pin.source.resource_owner != self.selection.resource_owner
-            || self.pin.source.workspace_id != self.selection.workspace_id
-            || self.pin.source.execution_workspace_id != self.selection.execution_workspace_id
-            || self.pin.root.is_empty()
-            || self.pin.pin_id.is_empty()
+            || pin.source.mode != SourceMode::FixedBranch
+            || pin.source.branch_id.as_deref() != Some(&branch)
+            || pin.source.revision != Some(0)
+            || pin.source.resource_owner != self.selection.resource_owner
+            || pin.source.workspace_id != self.selection.workspace_id
+            || pin.source.execution_workspace_id != self.selection.execution_workspace_id
+            || pin.root.is_empty()
+            || pin.pin_id.is_empty()
             || (self.execution.source_basis.is_some()
-                && self.pin.pin_id != format!("child-source-pin:{}", self.execution.execution_id))
+                && pin.pin_id != format!("child-source-pin:{}", self.execution.execution_id))
         {
             return Err(RuntimeError::Conflict(
                 "prepared delegated source identity changed".into(),
@@ -1610,12 +1619,12 @@ impl ChildSourcePreparation {
         }
         let provenance_ref = self
             .content
-            .save(&serde_json::to_value(&self.provenance)?)?;
+            .save(&serde_json::to_value(&provenance)?)?;
         if let Some(basis) = &self.execution.source_basis {
             let matches = if let delegated::ChildSourceBasis::Refreshed { incoming, root, .. } = basis {
-                matches!(&self.provenance, ChildSourceProvenance::RefreshedRoot { root: next, previous_root, incoming: selected, incoming_root, .. }
-                    if next == &self.pin.root && previous_root == root && selected == incoming && !incoming_root.is_empty())
-            } else { self.pin.root == basis.root() && provenance_ref == *basis.provenance_ref() };
+                matches!(&provenance, ChildSourceProvenance::RefreshedRoot { root: next, previous_root, incoming: selected, incoming_root, .. }
+                    if next == &pin.root && previous_root == root && selected == incoming && !incoming_root.is_empty())
+            } else { pin.root == basis.root() && provenance_ref == *basis.provenance_ref() };
             if !matches {
                 return Err(RuntimeError::Conflict(
                     "continued source differs from its exact immutable basis".into(),
@@ -1623,14 +1632,14 @@ impl ChildSourcePreparation {
             }
         } else if let Some(handoff) = &handoff {
             if let ChildSourceRoot::Fixed { pin } | ChildSourceRoot::Native { pin } = &handoff.root {
-                if pin.root != self.pin.root
-                    || !matches!(&self.provenance,ChildSourceProvenance::FixedRoot{root,..} if root==&pin.root)
+                if pin.root != pin.root
+                    || !matches!(&provenance,ChildSourceProvenance::FixedRoot{root,..} if root==&pin.root)
                 {
                     return Err(RuntimeError::Conflict(
                         "fixed child source differs from its handoff".into(),
                     ));
                 }
-            } else if matches!(self.provenance, ChildSourceProvenance::FixedRoot { .. }) {
+            } else if matches!(provenance, ChildSourceProvenance::FixedRoot { .. }) {
                 return Err(RuntimeError::Conflict(
                     "physical capture cannot claim a fixed-root source".into(),
                 ));
@@ -1638,7 +1647,7 @@ impl ChildSourcePreparation {
         }
         let source = ChildSource::Ready {
             handoff,
-            pin: self.pin,
+            pin: pin,
             selection: self.selection,
             provenance_ref,
         };
@@ -1650,6 +1659,31 @@ impl ChildSourcePreparation {
         })
     }
 }
+impl ChildSourcePreparation {
+    fn load_project(self,project:super::dispatch::ChildProjectSource)->Result<PreparedChildSource> {
+        self.selection.validate()?;
+        if self.selection.resource_owner!=project.resource_owner {return Err(RuntimeError::Conflict("Project source Host changed".into()));}
+        let profile:super::dispatch::ChildSelectedProfile=serde_json::from_value(self.content.load(&self.profile_ref)?)?;
+        let source=if profile.work_mode==super::dispatch::ChildWorkMode::IsolatedWrite {
+            let pin=self.pin.ok_or_else(||RuntimeError::Invalid("Independent project source requires its original pin".into()))?;
+            pin.source.validate()?;
+            if self.selection.mode!=SourceMode::NativeWorkspace || pin.source.mode!=SourceMode::FixedBranch || pin.source.branch_id!=self.selection.branch_id
+                || pin.source.revision!=Some(0) || pin.source.workspace_id!=self.selection.workspace_id || pin.source.execution_workspace_id!=self.selection.execution_workspace_id
+                || pin.source.resource_owner!=self.selection.resource_owner || pin.pin_id.is_empty() || pin.root.is_empty() {
+                return Err(RuntimeError::Conflict("Independent project source identity changed".into()));
+            }
+            let provenance=self.provenance.ok_or_else(||RuntimeError::Invalid("Project source provenance is missing".into()))?;
+            ChildSource::Ready{handoff:None,pin,selection:self.selection,provenance_ref:self.content.save(&serde_json::to_value(provenance)?)?}
+        } else {
+            if !matches!(self.selection.mode,SourceMode::LiveRoot|SourceMode::NativeWorkspace) || self.pin.is_some() {
+                return Err(RuntimeError::Conflict("Shared project source must refer to its actual live workspace".into()));
+            }
+            ChildSource::Shared{handoff:None,selection:self.selection}
+        };
+        Ok(PreparedChildSource{execution:self.execution,source,epoch:self.epoch,_publication:self.publication})
+    }
+}
+
 impl Catalog {
     pub fn prepare_child_source(
         &self,
@@ -1662,13 +1696,22 @@ impl Catalog {
         let profile_ref=delegated::relation(&self.db,&execution.child_operation_id)?.selected_profile_ref;
         Ok(ChildSourcePreparation {
             execution,profile_ref,
-            pin,
+            pin:Some(pin),
             selection,
-            provenance,
+            provenance:Some(provenance),
             epoch: self.epoch,
             content: self.content.clone(),
             publication: self.content.begin_publication(),
         })
+    }
+    pub fn prepare_project_child_source(&self,execution_id:&str,pin:Option<ChildSourcePin>,selection:launches::SourceSelection,provenance:Option<ChildSourceProvenance>)->Result<ChildSourcePreparation> {
+        let execution=self.delegated_execution(execution_id)?;
+        if !matches!(execution.source,Some(ChildSource::Project{..})) {
+            return self.prepare_child_source(execution_id,pin.ok_or_else(||RuntimeError::Invalid("Prepared source pin is missing".into()))?,selection,
+                provenance.ok_or_else(||RuntimeError::Invalid("Prepared source provenance is missing".into()))?);
+        }
+        let profile_ref=delegated::relation(&self.db,&execution.child_operation_id)?.selected_profile_ref;
+        Ok(ChildSourcePreparation{execution,profile_ref,pin,selection,provenance,epoch:self.epoch,content:self.content.clone(),publication:self.content.begin_publication()})
     }
     pub fn attach_child_source(&mut self, prepared: PreparedChildSource) -> Result<ChildTask> {
         let mut execution = self.delegated_execution(&prepared.execution.execution_id)?;

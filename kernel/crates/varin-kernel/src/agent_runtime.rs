@@ -56,6 +56,8 @@ mod followup_commands;
 
 #[path = "agent_calendar.rs"]
 mod calendar_commands;
+#[path = "agent_bot_work.rs"]
+mod bot_work_commands;
 
 #[path = "agent_inputs.rs"]
 mod input_commands;
@@ -875,12 +877,13 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
-                        if method.starts_with("runtime.calendar.") {
+                        if method.starts_with("runtime.calendar.") || method.starts_with("runtime.bot.work.") {
                             if matches!(
                                 method,
                                 "runtime.calendar.sync"
                                     | "runtime.calendar.admit"
                                     | "runtime.calendar.prepare"
+                                    | "runtime.bot.work.admit"
                             ) {
                                 let runtime = runtime.clone();
                                 let method = method.to_owned();
@@ -889,9 +892,8 @@ pub(crate) fn spawn(
                                 let done = finished.clone();
                                 let cancelled = cancellation.clone();
                                 thread::spawn(move || {
-                                    let result = calendar_commands::execute(
-                                        runtime, &method, params, &cancelled,
-                                    );
+                                    let result = if method.starts_with("runtime.bot.work.") { bot_work_commands::execute(runtime, &method, params, &cancelled) }
+                                        else { calendar_commands::execute(runtime, &method, params, &cancelled) };
                                     let response = match result {
                                         Ok(value) => response_ok(&response_id, value),
                                         Err(error) => response_error(&response_id, &error),
@@ -902,6 +904,7 @@ pub(crate) fn spawn(
                                 deferred = true;
                                 return Ok(Value::Null);
                             }
+                            if method.starts_with("runtime.bot.work.") { return bot_work_commands::execute(runtime.clone(), method, params, &cancellation); }
                             return calendar_commands::execute(
                                 runtime.clone(),
                                 method,
@@ -2304,9 +2307,10 @@ pub(crate) fn spawn(
                             content_tasks
                                 .send(Box::new(move || {
                                     let result = read
-                                        .load(
+                                        .load_since(
                                             p.head_id.as_deref(),
                                             p.before_id.as_deref(),
+                                            p.after_id.as_deref(),
                                             limit,
                                             &|| cancelled.load(Ordering::Acquire),
                                         )
@@ -2681,9 +2685,17 @@ pub(crate) fn live_mcp_binding(
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
+    if method == "runtime.bot.matters.list" {
+        let p: BotScopeParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.bot_matters(&p.bot_id).map_err(domain)?)?);
+    }
+    if method == "runtime.bot.matters.update" {
+        let p = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.update_bot_matter(p, None).map_err(domain)?)?);
+    }
     if method == "runtime.bot.scope.inspect" {
         let p: BotScopeParams = serde_json::from_value(params)?;
-        return catalog.inspect_bot_scope(&p.bot_id).map_err(domain);
+        return catalog.inspect_bot_scope_for(&p.bot_id, p.history_only.unwrap_or(false)).map_err(domain);
     }
     if method == "runtime.bot.gate.publish" {
         let p: varin_runtime::catalog::bot::BotGate = serde_json::from_value(params)?;

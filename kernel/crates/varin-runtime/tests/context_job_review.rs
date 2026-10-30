@@ -1133,7 +1133,7 @@ fn bot_summary_freezes_original_knowledge_and_publishes_only_its_baseline_with_g
     );
     assert_eq!(preview.memory_checkpoint, active.memory_checkpoint);
     let text = serde_json::to_string(&active.history).unwrap();
-    assert!(!text.contains("FROZEN_ORIGINAL_KNOWLEDGE") && !text.contains("UNCHANGED_KNOWLEDGE"));
+    assert!(!text.contains("FROZEN_ORIGINAL_KNOWLEDGE") && text.contains("UNCHANGED_KNOWLEDGE"), "rebuilding a stale summary retains independent valid knowledge");
     assert!(text.contains("LATE_CORRECTED_KNOWLEDGE") && text.contains("forgotten"));
     sync(
         &mut db,
@@ -1177,7 +1177,7 @@ fn bot_summary_freezes_original_knowledge_and_publishes_only_its_baseline_with_g
     assert!(!final_request.contains("LATE_CORRECTED_KNOWLEDGE"));
     assert!(
         !final_request.contains("FROZEN_ORIGINAL_KNOWLEDGE")
-            && !final_request.contains("UNCHANGED_KNOWLEDGE")
+            && final_request.contains("UNCHANGED_KNOWLEDGE")
     );
     assert!(final_request.contains("forgotten"));
     assert!(

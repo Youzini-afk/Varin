@@ -355,7 +355,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
     let configuration = json!({"providerFamily":"openai-responses","endpoint":"http://127.0.0.1:1/model","allowAnonymous":false,"model":"fixture-model","configurationGeneration":2});
     let model = varin_runtime::catalog::dispatch::ChildModelBinding { configuration: serde_json::from_value(configuration.clone()).unwrap(), credential_scope: launch.credential_scope.clone() };
     launch.connection_identity = model.connection_identity().unwrap();
-    launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog {
+    launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { projects:Vec::new(),
         native_capabilities: Vec::new(),
         identity: "test-profiles".into(),
         normal_unavailable: None,

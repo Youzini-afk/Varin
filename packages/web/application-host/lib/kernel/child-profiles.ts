@@ -5,7 +5,7 @@ import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, me
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ThreadThinkingLevel, ExternalAgentSettings } from '@varin/application-client';
-import type { ChildCapabilityDescriptor, ChildCapabilityFailure, ChildDispatchCatalog, ChildModelBinding, ChildPreset } from './protocol.generated.js';
+import type { ChildCapabilityDescriptor, ChildCapabilityFailure, ChildDispatchCatalog, ChildModelBinding, ChildPreset, ChildProjectSource } from './protocol.generated.js';
 import { waitWithSignal } from '../cancellation.js';
 import { waitForModelBinding } from './model-binding-lifetime.js';
 
@@ -21,8 +21,8 @@ export type ChildProfilePreparer = (input: ChildProfileInput, signal?: AbortSign
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : record(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
-const freeze = (presets: ChildPreset[], normal_unavailable: ChildCapabilityFailure | null, native_capabilities: ChildCapabilityDescriptor[] = []): ChildDispatchCatalog => ({
-  identity: createHash('sha256').update(JSON.stringify(canonical({ presets, normal_unavailable, native_capabilities }))).digest('hex'), presets, normal_unavailable, native_capabilities,
+const freeze = (presets: ChildPreset[], normal_unavailable: ChildCapabilityFailure | null, native_capabilities: ChildCapabilityDescriptor[] = [], projects: ChildProjectSource[] = []): ChildDispatchCatalog => ({
+  identity: createHash('sha256').update(JSON.stringify(canonical({ presets, normal_unavailable, native_capabilities, projects }))).digest('hex'), presets, normal_unavailable, native_capabilities, projects,
 });
 const unavailable = (code: string, capabilities: string[] = []): ChildCapabilityFailure => ({ code, capabilities });
 
@@ -30,6 +30,7 @@ export function createChildProfilePreparer(owners: {
   /** The existing global SettingsManager snapshot, never project overrides or a Pi Session. */
   settings(): Promise<unknown>;
   projectWorkFocus?(projectId: string): Promise<WorkFocusId | undefined>;
+  projects?(): Promise<ChildProjectSource[]>;
   capabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]>;
   models: ThreadModelAuthority;
   externalAgents?(): Promise<ExternalAgentSettings>;
@@ -107,6 +108,6 @@ export function createChildProfilePreparer(owners: {
     }));
     signal?.throwIfAborted();
     return freeze(presets, settings.models.worker?.enabled === false && settings.models.verifier?.enabled === false
-      && !presets.some(preset => !preset.unavailable) ? unavailable('child-roles-disabled') : null, descriptors);
+      && !presets.some(preset => !preset.unavailable) ? unavailable('child-roles-disabled') : null, descriptors, await owners.projects?.() ?? []);
   };
 }

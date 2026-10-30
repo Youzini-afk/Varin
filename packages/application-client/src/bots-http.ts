@@ -63,7 +63,7 @@ export const decodeBotWork = (value: unknown): BotWorkItem => {
   if (work.runtime === 'agent') {
     const identity = entry(work.identity);
     if (identity.threadId !== string(thread.thread_id)
-      || !['bot-root', 'work'].includes(string(work.purpose)) || !nullableString(thread.bot_id)) invalid();
+      || !['bot-root', 'work', 'followed'].includes(string(work.purpose)) || !nullableString(thread.bot_id)) invalid();
     const branchId = identity.branchId;
     const branches = array(thread.branches, value => {
       const branch = record(value); string(branch.branch_id); if (!nullableString(branch.head) || !nullableString(branch.active_run_id)) invalid();
@@ -81,6 +81,7 @@ const memoryItem = (value: unknown): BotMemoryItem => {
   const item = record(value);
   if (!Number.isSafeInteger(item.id) || Number(item.id) < 0 || typeof item.createdAt !== 'number' || !Number.isFinite(item.createdAt) || !nullableString(item.sourceKind)) invalid();
   string(item.content); string(item.trigger); string(item.revision);
+  if (item.inactive !== undefined && typeof item.inactive !== 'boolean') invalid();
   return item as unknown as BotMemoryItem;
 };
 const sourceExcerpt = (value: unknown): MemorySourceExcerpt => {
@@ -100,7 +101,7 @@ const memoryOwner = (value: unknown): ChatMemoryOwner => {
 };
 const memoryDraft = (value: unknown): ThreadMemoryDraft => {
   const draft = record(value); string(draft.content); string(draft.trigger);
-  if (!['experience', 'decision', 'preference', 'judgment', 'instruction'].includes(string(draft.nature))) invalid();
+  if (draft.nature !== undefined && !['experience', 'decision', 'preference', 'judgment', 'instruction'].includes(string(draft.nature))) invalid();
   const sources = array(draft.sources, value => {
     const source = record(value); string(source.itemId); string(source.text); string(source.revision);
     if (!Number.isSafeInteger(source.start) || Number(source.start) < 0) invalid();
@@ -115,6 +116,18 @@ const memoryReceipt = (value: unknown): ChatMemoryReceipt => {
   string(item.content); string(item.trigger);
   if (item.invalidAt !== undefined && (typeof item.invalidAt !== 'number' || !Number.isFinite(item.invalidAt))) invalid();
   return receipt as unknown as ChatMemoryReceipt;
+};
+
+const decodeMatter = (value: unknown): import('@varin/protocol').BotMatter => {
+  const matter = record(value);
+  string(matter.id); string(matter.title); string(matter.description);
+  if (!Number.isSafeInteger(matter.revision) || Number(matter.revision) < 1 || typeof matter.archived !== 'boolean') invalid();
+  array(matter.threads, value => {
+    const link = record(value); string(link.threadId); string(link.branchId);
+    if (typeof link.send !== 'boolean' || typeof link.memory !== 'boolean') invalid();
+    return link;
+  });
+  return matter as unknown as import('@varin/protocol').BotMatter;
 };
 
 /** Runtime-independent Bot transport. Host replacement never publishes an old Bot view. */
@@ -143,6 +156,11 @@ export function createBotsHttpAPI(): BotsAPI {
       undo: async input => { const result = await request('/api/bot-memory/undo', 'POST', input); if (result.undone !== true) invalid(); return { undone: true }; },
     },
     list: async signal => array((await request('/api/harness/bots', 'GET', undefined, signal)).bots, decodeBot),
+    primary: async signal => decodeBot((await request('/api/harness/bots/primary', 'POST', undefined, signal)).bot),
+    matters: {
+      list: async (botId, signal) => array((await request(`${path(botId)}/matters`, 'GET', undefined, signal)).matters, decodeMatter),
+      update: async input => decodeMatter((await request(`${path(input.botId)}/matters`, 'POST', input)).matter),
+    },
     get: async (id, signal) => { const result = await request(path(id), 'GET', undefined, signal); return result.bot === null ? null : decodeBot(result.bot); },
     create: async (input = {}) => decodeBot((await request('/api/harness/bots', 'POST', input)).bot),
     update: async (id, patch) => decodeBot((await request(`${path(id)}/update`, 'POST', patch)).bot),
@@ -152,7 +170,8 @@ export function createBotsHttpAPI(): BotsAPI {
     entry: async (id, signal) => decodeBotEntryResult(await request(`${path(id)}/entry`, 'POST', undefined, signal)),
     work: async (id, signal) => array((await request(`${path(id)}/work`, 'GET', undefined, signal)).threads, decodeBotWork),
     memory: {
-      list: async (id, signal) => array((await request(`${path(id)}/memory`, 'GET', undefined, signal)).items, memoryItem),
+      list: async (id, signal, includeInactive) => array((await request(`${path(id)}/memory${includeInactive ? '?includeInactive=true' : ''}`, 'GET', undefined, signal)).items, memoryItem),
+      history: async (id, memoryId, signal) => array((await request(`${path(id)}/memory/${memoryId}/history`, 'GET', undefined, signal)).items, memoryItem),
       source: async (id, memoryId, signal) => array((await request(`${path(id)}/memory/${memoryId}/source`, 'GET', undefined, signal)).sources, sourceExcerpt),
       update: async (id, item, action, content) => { await request(`${path(id)}/memory/${item.id}`, 'POST', { action, revision: item.revision, content }); },
     },

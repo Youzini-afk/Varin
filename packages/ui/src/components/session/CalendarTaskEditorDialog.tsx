@@ -14,7 +14,8 @@ const sourceOwnerKey = (owner: SourceResourceOwner) => owner.kind === 'local'
 const changedHostMessage = 'Application Host changed. Close this editor and reopen it from the current project.';
 
 /** Edits external definitions only. Preview/admission and every occurrence stay with the Host. */
-export function CalendarTaskEditorDialog({ open, projectId, task, onOpenChange, onSave }: {
+export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget, onOpenChange, onSave }: {
+  initialTarget?: import('@varin/application-client').ThreadIdentity | undefined;
   open: boolean; projectId: string; task: ScheduledTask | null; onOpenChange(open: boolean): void; onSave(task: Partial<ScheduledTask>): Promise<void>;
 }) {
   const { threads } = useRuntimeAPIs();
@@ -75,7 +76,7 @@ export function CalendarTaskEditorDialog({ open, projectId, task, onOpenChange, 
     setTimes(task?.schedule.times?.join(', ') ?? task?.schedule.time ?? '09:00'); setDate(task?.schedule.date ?? '');
     setWeekdays(task?.schedule.weekdays?.join(', ') ?? '1'); setCron(task?.schedule.cron ?? '0 9 * * *');
     setEnabled(task?.enabled ?? false); setMissed(task?.missedPolicy ?? (task?.schedule.kind === 'once' ? 'coalesce_once' : 'skip'));
-    setTarget(task?.target?.kind ?? 'new_work'); setError(''); setSaving(false);
+    setTarget(task?.target?.kind ?? (initialTarget ? 'existing_work' : 'new_work')); setError(''); setSaving(false);
     const selection = task?.target;
     const selectedSource: CalendarSource = selection?.kind === 'new_work' ? selection.source : { kind: 'project' };
     setSourceKind(selectedSource.kind); setSource(selectedSource);
@@ -84,7 +85,7 @@ export function CalendarTaskEditorDialog({ open, projectId, task, onOpenChange, 
       setModel(JSON.stringify([selection.model.providerId, selection.model.modelId])); setThinking(selection.model.thinkingLevel ?? 'off');
       setSourceMode(selection.sourceMode === 'native_workspace' ? 'live_root' : selection.sourceMode); setGoal(selection.goal !== null); setBudget(selection.goal?.budget ? String(selection.goal.budget.maxOutputTokens) : '');
     } else { setModel(''); setThinking('off'); setSourceMode('materialized'); setGoal(false); setBudget(''); }
-    setThreadId(selection?.kind === 'existing_work' ? selection.threadId : ''); setBranchId(selection?.kind === 'existing_work' ? selection.branchId : '');
+    setThreadId(selection?.kind === 'existing_work' ? selection.threadId : initialTarget?.threadId ?? ''); setBranchId(selection?.kind === 'existing_work' ? selection.branchId : initialTarget?.branchId ?? '');
     setModels([]);
     void threads?.listModels().then(value => { if (isCurrent()) setModels(value); }, value => { if (isCurrent()) setError(value instanceof Error ? value.message : 'Model catalog unavailable'); });
     void schedules.listSources(projectId, controller.signal).then(value => {
@@ -93,7 +94,7 @@ export function CalendarTaskEditorDialog({ open, projectId, task, onOpenChange, 
       if (isCurrent()) setDirectoryError(value instanceof Error ? value.message : 'Source Hosts could not be loaded');
     }).finally(() => { if (isCurrent()) setLoadingSources(false); });
     return () => { controller.abort(); editorGeneration.current += 1; retireResolution(); };
-  }, [open, projectId, task, threads, retireResolution]);
+  }, [open, projectId, task, threads, retireResolution, initialTarget?.threadId, initialTarget?.branchId]);
   const selectedHost = resourceOwner ? sourceTargets.targets.find(value => sourceOwnerKey(value.resourceOwner) === sourceOwnerKey(resourceOwner)) : undefined;
   const resolveSource = async () => {
     if (saving || resolving || !resourceOwner || !selectedHost || !path.trim()) return;

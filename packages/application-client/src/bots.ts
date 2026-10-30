@@ -81,13 +81,14 @@ export interface BotSummary extends BotProfile {
 
 /** One native Thread branch in the Bot's owner scope. */
 export interface BotWorkItem {
+  matterIds?: string[];
   desktops?: ComputerDesktop[];
   artifacts?: ComputerArtifact[];
   runtime: 'agent';
   identity: ThreadIdentity;
   thread: ThreadSummary;
   activeRun: Run | null;
-  purpose: 'bot-root' | 'work';
+  purpose: 'bot-root' | 'work' | 'followed';
 }
 
 export interface BotMemoryItem {
@@ -97,6 +98,7 @@ export interface BotMemoryItem {
   createdAt: number;
   revision: string;
   sourceKind: string | null;
+  inactive?: boolean;
 }
 
 /** Framework-neutral product boundary. All navigation uses the returned tagged identity. */
@@ -105,6 +107,11 @@ export interface BotsAPI {
   list(signal?: AbortSignal): Promise<BotSummary[]>;
   get(botId: string, signal?: AbortSignal): Promise<BotSummary | null>;
   create(input?: BotCreateInput): Promise<BotSummary>;
+  primary(signal?: AbortSignal): Promise<BotSummary>;
+  matters: {
+    list(botId: string, signal?: AbortSignal): Promise<import('@varin/protocol').BotMatter[]>;
+    update(input: import('@varin/protocol').BotMatterUpdate): Promise<import('@varin/protocol').BotMatter>;
+  };
   update(botId: string, patch: BotUpdateInput): Promise<BotSummary>;
   archive(botId: string): Promise<BotSummary>;
   remove(botId: string): Promise<BotSummary | null>;
@@ -112,8 +119,9 @@ export interface BotsAPI {
   entry(botId: string, signal?: AbortSignal): Promise<BotEntryResult>;
   work(botId: string, signal?: AbortSignal): Promise<BotWorkItem[]>;
   memory: {
-    list(botId: string, signal?: AbortSignal): Promise<BotMemoryItem[]>;
+    list(botId: string, signal?: AbortSignal, includeInactive?: boolean): Promise<BotMemoryItem[]>;
+    history(botId: string, id: number, signal?: AbortSignal): Promise<BotMemoryItem[]>;
     source(botId: string, id: number, signal?: AbortSignal): Promise<MemorySourceExcerpt[]>;
-    update(botId: string, item: BotMemoryItem, action: 'correct' | 'forget', content?: string): Promise<void>;
+    update(botId: string, item: BotMemoryItem, action: 'correct' | 'forget' | 'archive', content?: string): Promise<void>;
   };
 }

@@ -391,6 +391,7 @@ impl RunAssembly {
             declarations.extend(crate::capability_tools::declarations(runtime.catalog()));
             declarations.extend(crate::family_tools::declarations(runtime.catalog()));
             declarations.push(crate::message_tools::declaration(runtime.catalog()));
+            if is_bot { declarations.push(crate::bot_work_tools::declaration(runtime.catalog())); }
             declarations.push(crate::followup_tools::declaration(
                 runtime.catalog(),
                 collaboration_source.clone(),

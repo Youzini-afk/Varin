@@ -1104,6 +1104,11 @@ impl ContextJobPreparation {
                     .and_then(|value| serde_json::from_value(value).map_err(Into::into))
             })
             .transpose()?;
+        let memory_state: Option<memory::MemoryState> = self.memory_reference.as_ref()
+            .map(|reference| self.content.load(reference).and_then(|value| serde_json::from_value(value).map_err(Into::into))).transpose()?;
+        let memory_baseline = active_checkpoint.as_ref().and_then(|checkpoint| checkpoint.bot_memory_snapshot.as_ref())
+            .map(|snapshot| snapshot.load(&self.content)).transpose()?;
+        let rebuild = super::memory_exclusion::requires_rebuild(memory_state.as_ref(), memory_baseline.as_ref());
         if let Some(candidate) = &self.request.personalization {
             candidate.validate()?;
         }
@@ -1136,7 +1141,7 @@ impl ContextJobPreparation {
             }
         }
         require_ancestor(&database, &self.request.branch_id, &self.request.through_id)?;
-        if let Some(boundary) = &self.source.through_id {
+        if let Some(boundary) = self.source.through_id.as_ref().filter(|_| !rebuild) {
             let visible: bool = database.query_row("WITH RECURSIVE ancestors(id,parent) AS (SELECT id,parent FROM history WHERE id=?1 UNION ALL SELECT h.id,h.parent FROM history h JOIN ancestors a ON h.id=a.parent) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",params![self.request.through_id,boundary],|row|row.get(0))?;
             if !visible {
                 return Err(RuntimeError::Conflict(
@@ -1147,12 +1152,14 @@ impl ContextJobPreparation {
         let source = source_metadata_until(
             &database,
             Some(&self.request.through_id),
-            self.source.through_id.as_deref(),
+            if rebuild { None } else { self.source.through_id.as_deref() },
         )?;
         let source_metadata = serde_json::to_value(&source)?;
-        let mut history = active_checkpoint.as_ref().and_then(|checkpoint| checkpoint.retained.as_ref())
+        let mut history = active_checkpoint.as_ref().filter(|_| !rebuild).and_then(|checkpoint| checkpoint.retained.as_ref())
             .map(|retained| self.content.load_items(&retained.items, &|| false)).transpose()?.unwrap_or_default();
+        if rebuild { history.extend(super::memory_exclusion::initial_background(&database, &self.content, &self.request.branch_id)?); }
         history.extend(hydrate_source(&self.content, source)?);
+        super::memory_exclusion::filter(memory_state.as_ref(), &mut history)?;
         if let Some(basis) = self
             .request
             .personalization
@@ -1198,7 +1205,7 @@ impl ContextJobPreparation {
             .map_err(|error| RuntimeError::Conflict(error.to_string()))?;
         let prior = active_checkpoint
             .clone()
-            .filter(|_| self.source.through_id.is_some())
+            .filter(|_| self.source.through_id.is_some() && !rebuild)
             .map(|checkpoint| ConversationItem {
                 resource_activation: None,
                 id: format!("context-job:{}:prior-summary", self.request.key),

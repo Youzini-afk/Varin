@@ -180,7 +180,7 @@ struct MemberCursor { caller:String, root:String, before:i64, maximum:i64, scope
 const CURRENT: &str = "(EXISTS(SELECT 1 FROM branches b WHERE b.thread_id=t.id AND b.active_run IS NOT NULL)
  OR EXISTS(SELECT 1 FROM code_exchange_peers p JOIN operations o ON o.id=p.operation_id WHERE p.peer_thread_id=t.id AND (json_extract(o.body,'$.phase')!='terminal' OR json_extract(o.body,'$.effect')='unknown'))
  OR EXISTS(SELECT 1 FROM input_queue q WHERE q.branch_id IN (SELECT id FROM branches WHERE thread_id=t.id) AND q.state='queued' AND q.activation='activating')
- OR EXISTS(SELECT 1 FROM child_tasks c JOIN delegated_executions d ON d.child_operation_id=c.id WHERE c.child_thread_id=t.id AND d.rowid=(SELECT max(x.rowid) FROM delegated_executions x WHERE x.child_operation_id=c.id) AND (json_extract(d.body,'$.report') IS NULL OR json_extract(d.body,'$.code_result.kind') IN ('pending','settling','candidate') OR NOT EXISTS(SELECT 1 FROM deliveries x WHERE x.state='\"committed\"' AND (x.observer='agent-status:'||d.id OR (d.id=c.id AND x.observer='child-report-history:'||c.id))))))";
+ OR EXISTS(SELECT 1 FROM child_tasks c JOIN delegated_executions d ON d.child_operation_id=c.id WHERE c.child_thread_id=t.id AND d.rowid=(SELECT max(x.rowid) FROM delegated_executions x WHERE x.child_operation_id=c.id) AND (json_extract(d.body,'$.report') IS NULL OR json_extract(d.body,'$.code_result.kind') IN ('pending','settling','candidate') OR NOT EXISTS(SELECT 1 FROM deliveries x WHERE x.state='\"committed\"' AND (x.observer='agent-status:'||d.id OR x.observer='child-report-history:'||d.id OR (x.observer='bot-report-delivery' AND x.request=d.id))))))";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunPage {
@@ -433,6 +433,13 @@ impl FamilyRead {
     fn finish(&self, cancel: &dyn Fn() -> bool) -> Result<()> {
         check(cancel)?;
         let current = super::history_views::current_history_owner(&self.database, self.epoch)?;
+        if let Some((target, branch, _)) = &self.target {
+            super::threads::require_available(&current, target)?;
+            if super::scheduling::thread_family(&current, target)? != super::scheduling::thread_family(&current, &self.caller)?
+                && !super::bot_work::linked(&current, &self.caller, target, Some(branch), false, false)? {
+                return Err(RuntimeError::Conflict("followed conversation access changed during read".into()));
+            }
+        }
         if let Some(invocation) = &self.invocation {
             let run: Run = record(&current, "runs", &invocation.context.run_id)?;
             fence(&run, self.epoch)?;
@@ -492,7 +499,8 @@ impl FamilyRead {
         }
         let root = super::scheduling::thread_family(&db, &self.caller)?;
         if let Some((target, branch, _)) = &self.target {
-            if super::scheduling::thread_family(&db, target)? != root {
+            if super::scheduling::thread_family(&db, target)? != root
+                && !super::bot_work::linked(&db, &self.caller, target, Some(branch), false, false)? {
                 return Err(RuntimeError::Conflict(
                     "Thread is outside the caller's task family".into(),
                 ));
@@ -878,6 +886,12 @@ impl FamilyRead {
         let (mut body, _) = self
             .content
             .load_stored_history_payload(&item.content, cancelled)?;
+        if let Some(invocation) = &self.invocation {
+            let db = self.open(cancelled)?;
+            let run: Run = record(&db, "runs", &invocation.context.run_id)?;
+            let state = super::memory_exclusion::load_state(&db, &self.content, &run.branch_id)?;
+            super::memory_exclusion::history_body(state.as_ref(), &item.id, &mut body)?;
+        }
         let kind = if let Ok(mut conversation) =
             serde_json::from_value::<ConversationItem<crate::output::StoredMedia>>(body.clone())
         {
@@ -1221,7 +1235,7 @@ impl FamilyRead {
     }
     pub fn output(self, request: OutputRequest, cancel: &dyn Fn() -> bool) -> Result<Value> {
         let (anchor, item) = self.original_item(request.run_id.as_deref(), request.anchor.as_deref(), &request.item_id, cancel)?;
-        let (body, _) = self.content.load_stored_history_payload(&item.content, cancel)?;
+        let (body, _) = self.semantic(&item, cancel)?;
         // These paths belong to the runtime's history envelope. Borrow the original body;
         // selecting one field must not deserialize and reserialize the entire output again.
         let content = &body["content"];

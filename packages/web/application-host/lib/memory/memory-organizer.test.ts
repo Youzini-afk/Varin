@@ -170,7 +170,7 @@ describe("memory organizer (BC2)", () => {
     },
     hasStoreForScope: (scopeId) => stores.has(scopeId),
     listScopeIds: async () => [...stores.keys()],
-    nativeMaterials: async () => materials,
+    nativeMaterials: async () => ({ materials, heads: {} }),
     readNativeSource: async (_scope, span) => {
       const material = materials.find(item => item.span.id === span.id && item.span.threadId === span.threadId);
       if (!material) throw new Error('Original source is unavailable');
@@ -275,6 +275,20 @@ describe("memory organizer (BC2)", () => {
     const org = organizer(memory()); org.noteScope('bot:ws-1'); await settled(store);
     expect(await store.listKnowledge({ scope: 'bot' })).toHaveLength(2);
     expect((await store.listOrganizerProgress())[0]?.produced).toHaveLength(2);
+  });
+
+  it('keeps a connected narrative bound to several original passages without classifying it', async () => {
+    const store = await setup('Blue accents are welcome.');
+    materials.push(material('h2', 'Do not tint the whole interface.'));
+    organizeText = JSON.stringify({ memories: [{ action: 'new', scope: 'bot',
+      content: 'The user welcomes blue accents but wants neutral backgrounds.',
+      sources: [{ source: 'u0', quote: materials[0]!.text }, { source: 'u1', quote: materials[1]!.text }],
+    }] });
+    const org = organizer(memory()); org.noteScope('bot:ws-1'); await settled(store); await org.dispose();
+    const rows = await store.listKnowledge({ scope: 'bot' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.source?.spans?.map(span => span.kind === 'history-item' ? span.id : null)).toEqual(['h1', 'h2']);
+    expect(rows[0]!.nature).toBeUndefined();
   });
   it('extracts an explicit native selection while automatic organization is disabled', async () => {
     await setup(); autoOrganize = { user: false, bot: false };

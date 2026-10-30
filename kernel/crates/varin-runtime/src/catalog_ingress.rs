@@ -27,6 +27,19 @@ pub(super) fn refresh_goal(tx: &Transaction<'_>, row: &mut QueuedInputMetadata) 
     followups::refresh_ingress_goal(tx, row)
 }
 pub(super) fn delivered(tx: &Transaction<'_>, row: &QueuedInputMetadata) -> Result<()> {
+    if let InputOrigin::WorkEvent { event_cursor, .. } = &row.origin {
+        let data: String = tx.query_row("SELECT data FROM events WHERE cursor=?1", [sql_number(*event_cursor)?], |r|r.get(0))?;
+        let data: Value = serde_json::from_str(&data)?;
+        if let Some(operation) = data["operationId"].as_str().filter(|_|data["kind"]=="external_report") {
+            tx.execute("INSERT OR IGNORE INTO deliveries(observer,fact_cursor,request,state) VALUES('bot-external-report',?1,?2,'\"committed\"')",params![sql_number(*event_cursor)?,operation])?;
+        }
+    }
+    if let InputOrigin::Message { command_key, .. } = &row.origin {
+        if let Some(execution) = command_key.strip_prefix("bot-report:") {
+            let cursor: u64 = tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='child.report_ready' ORDER BY cursor LIMIT 1", [execution], |r| read_number(r,0))?;
+            tx.execute("INSERT OR IGNORE INTO deliveries(observer,fact_cursor,request,state) VALUES('bot-report-delivery',?1,?2,'\"committed\"')", params![sql_number(cursor)?, execution])?;
+        }
+    }
     match row.origin {
         InputOrigin::Followup { .. } => followups::delivered(tx, row),
         InputOrigin::Calendar { .. } => calendar::delivered(tx, row),
@@ -44,6 +57,7 @@ pub(super) fn insert_occurrence(
 ) -> Result<QueuedInputMetadata> {
     let origin_name = match origin {
         InputOrigin::ContextObservation { .. } => "context_observation",
+        InputOrigin::WorkEvent { .. } => "work_event",
         InputOrigin::McpResource { .. } => "mcp_resource",
         InputOrigin::Followup { .. } => "followup",
         InputOrigin::Calendar { .. } => "calendar",
@@ -56,13 +70,13 @@ pub(super) fn insert_occurrence(
         }
     };
     let run_id = match &origin {
-        InputOrigin::Followup { activation, .. } | InputOrigin::Calendar { activation, .. } | InputOrigin::ComputerRequest { activation, .. } | InputOrigin::ComputerEvent { activation, .. } => {
+            InputOrigin::WorkEvent { activation, .. } | InputOrigin::Followup { activation, .. } | InputOrigin::Calendar { activation, .. } | InputOrigin::ComputerRequest { activation, .. } | InputOrigin::ComputerEvent { activation, .. } => {
             activation.run_id().map(str::to_owned)
         }
         InputOrigin::ContextObservation { .. } | InputOrigin::McpResource { .. } => None,
         _ => unreachable!(),
     };
-    let passive = matches!(&origin, InputOrigin::ContextObservation { .. } | InputOrigin::McpResource { .. }) || matches!(&origin, InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. });
+    let passive = matches!(&origin, InputOrigin::ContextObservation { .. } | InputOrigin::McpResource { .. }) || matches!(&origin, InputOrigin::ComputerEvent { activation: activation::IngressActivationFact::Passive, .. } | InputOrigin::WorkEvent { activation: activation::IngressActivationFact::Passive, .. });
     let row = QueuedInputMetadata {
         id,
         thread_id: thread,

@@ -4,9 +4,11 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import type { BotMatter } from '@varin/protocol';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { archiveBot, changeBotState, createBot, ensureBotEntry, listBots, listBotWork, updateBot, useBotNavigation, openBotConversation, botWorkId, botWorkTitle, botWorkEntry, sameBotEntry, type BotModelSelection, type BotSummary, type BotWorkItem } from '@/lib/bots';
+import { archiveBot, changeBotState, createBot, ensureBotEntry, ensurePrimaryBot, listBots, listBotWork, updateBot, useBotNavigation, openBotConversation, botWorkId, botWorkTitle, botWorkEntry, sameBotEntry, type BotModelSelection, type BotSummary, type BotWorkItem } from '@/lib/bots';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 import { ThreadConversation } from '@/components/thread/ThreadConversation';
@@ -41,7 +43,7 @@ export const BotWorkspaceShell: React.FC<Record<string, unknown>> = () => {
 const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
-  const { threads } = useRuntimeAPIs();
+  const { threads, bots: botsAPI } = useRuntimeAPIs();
   const navigation = useBotNavigation();
   const catalogThread = useThreadStore(state => state.threads.find(thread => thread.thread_id === navigation.entry?.threadId));
   const appliedNavigation = React.useRef<string | null>(null);
@@ -51,6 +53,8 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [details, setDetails] = React.useState<{ id: string; name: string; tab: 'profile' | 'memory' } | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [workResult, setWorkResult] = React.useState<{ botId: string; items: BotWorkItem[] } | null>(null);
+  const [matters, setMatters] = React.useState<{ botId: string; items: BotMatter[] } | null>(null);
+  const [workRevision, refreshWork] = React.useReducer((value: number) => value + 1, 0);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [actionBusy, setActionBusy] = React.useState<string | null>(null);
@@ -74,12 +78,17 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; opening.current?.abort(); }; }, []);
   React.useEffect(() => committed ? subscribeVarinEvents((event) => {
     if (event.type === 'bot-changed' || event.type === 'stream-ready') refresh();
+    if (event.type === 'bot-work-changed') refreshWork();
   }) : undefined, [committed]);
 
   React.useEffect(() => {
     if (!committed || settingsOpen) return;
     const controller = new AbortController();
-    void listBots(controller.signal).then((list) => {
+    void listBots(controller.signal).then(async (list) => {
+      if (!showArchived && !list.some(bot => !bot.archived && !bot.deletion)) {
+        const primary = await ensurePrimaryBot(controller.signal);
+        list = [...list.filter(bot => bot.id !== primary.id), primary];
+      }
       if (controller.signal.aborted) return;
       const active = list.filter((bot) => bot.archived === showArchived);
       setBots(list);
@@ -124,13 +133,13 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   React.useEffect(() => {
     if (!committed || !selectedId || settingsOpen) return;
     const controller = new AbortController();
-    void listBotWork(selectedId, controller.signal).then((items) => {
-      if (!controller.signal.aborted) setWorkResult({ botId: selectedId, items });
+    void Promise.all([listBotWork(selectedId, controller.signal), botsAPI?.matters.list(selectedId, controller.signal) ?? []]).then(([items, matters]) => {
+      if (!controller.signal.aborted) { setWorkResult({ botId: selectedId, items }); setMatters({ botId: selectedId, items: matters }); }
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
     });
     return () => controller.abort();
-  }, [committed, selectedId, settingsOpen, revision]);
+  }, [committed, selectedId, settingsOpen, revision, workRevision, botsAPI]);
 
   React.useEffect(() => {
     if (!navigation.botId || !navigation.entry) return;
@@ -244,6 +253,23 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
           <Icon name="add" className="size-4 shrink-0" />{t('settings.bots.create')}
         </button>
         {selected ? <>
+          {matters?.botId === selectedId && matters.items.some(matter => !matter.archived) ? <div className="px-2 pt-5">
+            <p className="pb-2 typography-meta text-muted-foreground">{t('bot.matters.title')}</p>
+            {matters.items.filter(matter => !matter.archived).map(matter => <Collapsible key={matter.id}>
+              <CollapsibleTrigger className="flex w-full items-center gap-2 py-1.5 text-left typography-meta"><Icon name="arrow-right-s" className="size-3 shrink-0" /><span className="min-w-0 break-words">{matter.title}</span></CollapsibleTrigger>
+              <CollapsibleContent><div className="space-y-2 pb-3 pl-5">
+                <p className="whitespace-pre-wrap break-words typography-meta text-muted-foreground">{matter.description}</p>
+                {matter.threads.map(link => { const item = work?.find(item => item.identity.threadId === link.threadId && item.identity.branchId === link.branchId); return item ? <button key={link.branchId} className="block max-w-full truncate typography-meta text-primary hover:underline" onClick={() => { void openBotConversation(selected.id, item.identity); }}>{botWorkTitle(item)}</button> : null; })}
+                <Button variant="ghost" size="sm" disabled={readOnly || actionBusy !== null} onClick={() => {
+                  const host = getRuntimeEndpointGeneration(); setActionBusy(`matter:${matter.id}`);
+                  void botsAPI?.matters.update({ botId: selected.id, key: crypto.randomUUID(), expectedRevision: matter.revision, matter: { ...matter, archived: true } })
+                    .then(() => { if (host === getRuntimeEndpointGeneration()) refreshWork(); })
+                    .catch(cause => { if (host === getRuntimeEndpointGeneration()) setError(String(cause)); })
+                    .finally(() => { if (host === getRuntimeEndpointGeneration()) setActionBusy(null); });
+                }}>{t('bot.matters.archive')}</Button>
+              </div></CollapsibleContent>
+            </Collapsible>)}
+          </div> : null}
           <div className="px-2 pb-1 pt-6 typography-meta text-muted-foreground">{t('settings.bots.section.work')}</div>
           {!work && !error ? <p role="status" className="px-2 py-2 typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
           {work?.length === 0 ? <p className="px-2 py-2 typography-meta text-muted-foreground">{t('settings.bots.work.empty')}</p> : null}

@@ -45,8 +45,6 @@ import { mergeSourceSpans, sourceIdentity, sourceRevision, uncoveredSourceSpans 
 
 // ── Boundaries ─────────────────────────────────────────────────────
 
-const MAX_UNITS_PER_RUN = 8;
-const MAX_EXISTING_MATERIALS = 60;
 const FAILED_RETRY_MS = 5 * 60_000;
 const SETTLE_DEBOUNCE_MS = 2_000;
 const SWEEP_INTERVAL_MS = 10 * 60_000;
@@ -54,11 +52,11 @@ const SWEEP_INTERVAL_MS = 10 * 60_000;
 const MIN_SEGMENT_CHARS = 64;
 
 const MEMORY_ORGANIZER_SYSTEM = [
-  "Extract durable memory proposals from the supplied work fragments and existing memories.",
-  "Return a JSON object: {\"memories\":[{\"action\":\"new\",\"scope\":\"bot\",\"nature\":\"decision\",\"content\":\"...\",\"trigger\":\"...\",\"source\":\"u0\",\"quote\":\"...\"}]}. An empty memories array means no durable information to add.",
+  "Memory helps future conversations and work continue from an existing understanding. Decide what is worth keeping from these experiences and how to preserve its meaning and context alongside existing memories.",
+  "Return a JSON object: {\"memories\":[{\"action\":\"new\",\"scope\":\"bot\",\"content\":\"...\",\"sources\":[{\"source\":\"u0\",\"quote\":\"...\"}]}]}. An empty memories array means nothing needs to be added. A memory may be a short observation or a connected account supported by several sources.",
   "action is new, supplement, or correct. supplement and correct require target (k:<id>) from the supplied existing memories in the source scope; correct replaces it and supplement adds related information.",
   "Choose scope from the available scopes in the input. content holds the durable information; optional trigger describes when to recall it. Optional nature is experience, decision, preference, judgment, or instruction; instruction denotes an explicit user directive.",
-  "source identifies the fragment (u<index>). quote is an exact supporting passage within that fragment, used to bind the memory to its original source.",
+  "Each source identifies a fragment (u<index>); quote is an exact supporting passage within that fragment. A single source and quote on the memory itself is also accepted. Preserve the original scope, uncertainty and changes of understanding. Only user statements can establish user instructions.",
 ].join("\n");
 
 // ── Deps and source shapes ─────────────────────────────────────────
@@ -72,7 +70,8 @@ export interface MemoryOrganizerDeps {
   /** Bot scopes from the durable Bot registry. */
   listScopeIds(): Promise<string[]>;
   canExecuteScope?(scopeId: string): Promise<boolean>;
-  nativeMaterials(scopeId: string): Promise<import('./bot-history.js').HistoryMemoryMaterial[]>;
+  nativeMaterials(scopeId: string, afterHeads?: Readonly<Record<string, string>>, sourceChars?: number): Promise<import('./bot-history.js').HistoryMemoryBatch>;
+  hasNativeSources?(scopeId: string): Promise<boolean>;
   readNativeSource(scopeId: string, span: Extract<MemorySourceSpan, { kind: 'history-item' }>): Promise<string>;
   scopeForThread(threadId: string): Promise<string | null>;
   /**
@@ -112,8 +111,7 @@ interface OrganizerProposal {
   content: string;
   trigger?: string;
   target?: number;
-  source?: string;
-  quote: string;
+  sources: Array<{ source: string; quote: string }>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -191,18 +189,19 @@ const parseProposals = (text: string): OrganizerProposal[] | null => {
     const target = typeof item["target"] === "string" && /^k:\d+$/u.test(item["target"])
       ? Number(item["target"].slice(2))
       : undefined;
-    const source = typeof item["source"] === "string" ? item["source"] : undefined;
-    const quote = typeof item["quote"] === "string" ? item["quote"] : "";
-    if (!quote.trim() || !source || !/^u\d+$/.test(source) || (action !== "new" && target === undefined)) return null;
+    const rawSources = item.sources ?? [{ source: item.source, quote: item.quote }];
+    if (!Array.isArray(rawSources) || !rawSources.length || rawSources.some(source =>
+      typeof source?.source !== 'string' || !/^u\d+$/u.test(source.source)
+      || typeof source.quote !== 'string' || !source.quote.trim()) || (action !== "new" && target === undefined)) return null;
+    const sources = rawSources as Array<{ source: string; quote: string }>;
     proposals.push({
-      quote,
+      sources,
       action,
       scope,
       ...(nature ? { nature } : {}),
       content,
       ...(trigger ? { trigger } : {}),
       ...(target !== undefined ? { target } : {}),
-      ...(source ? { source } : {}),
     });
   }
   return proposals;
@@ -319,20 +318,24 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     scopeId: string,
     unitChars: number,
     force: boolean,
-  ): Promise<OrganizerUnit[]> => {
+  ): Promise<{ units: OrganizerUnit[]; heads: Record<string, string>; hasMore: boolean; blocked: boolean }> => {
     const timestamp = now();
     const rows = await store.listOrganizerProgress();
     const progress = new Map(rows.map((row) => [row.key, row]));
     const units: OrganizerUnit[] = [];
 
-    const native = await deps.nativeMaterials(scopeId);
+    const afterHeads = Object.fromEntries(rows.filter(row => row.key.startsWith('history-cursor:') && row.sourceKey)
+      .map(row => [row.key.slice('history-cursor:'.length), row.sourceKey!]));
+    const { materials: native, heads, hasMore = false } = await deps.nativeMaterials(scopeId, afterHeads, unitChars);
+    let collectedChars = 0;
+    let blocked = false;
     if (native.length) {
       const memories = [...await store.listKnowledge({}), ...await deps.memory.list({ scope: 'user', ownerId: null })];
       const covered = [...rows.flatMap(row => row.coveredSources ?? []), ...(reservedSources.get(scopeId) ?? []), ...memories.flatMap(item => item.source?.spans ?? [])];
       for (const material of native) {
         for (const uncovered of uncoveredSourceSpans(material.span, covered)) {
           let start = uncovered.start;
-          while (start < uncovered.end && units.length < MAX_UNITS_PER_RUN) {
+          while (start < uncovered.end && collectedChars < unitChars) {
             const length = takePrefix(material.text, start, Math.min(unitChars - material.role.length - 3, uncovered.end - start));
             if (!length) throw new Error('Organizer model cannot fit the original history passage');
             const span = { ...uncovered, start, end: start + length };
@@ -341,16 +344,18 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
               source: { kind: 'memory-organizer', threadId: material.span.threadId, spans: [span] },
               ...(span.end < uncovered.end ? { hasMoreSource: true } : {}) };
             const sourceKey = unitSourceKey(scopeId, unit); const row = progress.get(key);
-            if (!isCovered(row, sourceKey) && (row?.status !== 'failed' || retryable(row, timestamp, force)))
+            if (!isCovered(row, sourceKey) && (row?.status !== 'failed' || retryable(row, timestamp, force))) {
               units.push({ ...unit, sourceKey, rangeKey: unitRangeKey(scopeId, key, start, span.end) });
+              collectedChars += length;
+            } else if (row?.status === 'failed') blocked = true;
             start = span.end;
           }
         }
-        if (units.length >= MAX_UNITS_PER_RUN) break;
+        if (collectedChars >= unitChars) break;
       }
     }
 
-    return units.slice(0, MAX_UNITS_PER_RUN);
+    return { units, heads, hasMore, blocked };
   };
 
   // ── Judgment + narration ─────────────────────────────────────────
@@ -413,7 +418,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const sourceOnly = buildPrompt(units, [], scope);
     if (!fits(sourceOnly)) return null;
     const presented: Knowledge[] = [];
-    for (const item of memories.slice(0, MAX_EXISTING_MATERIALS)) {
+    for (const item of memories) {
       if (fits(buildPrompt(units, [...presented, item], scope))) presented.push(item);
     }
     return { prompt: buildPrompt(units, presented, scope), presented };
@@ -692,7 +697,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         await assertSourceCurrent(store, scopeId, unit, recipe.budget.unitChars);
       const byUnit = new Map<string, OrganizerPreparedProposal[]>();
       for (const proposal of narrated) {
-        const unit = judged[Number(proposal.source!.slice(1))];
+        const unit = judged[Number(proposal.sources[0]!.source.slice(1))];
         if (!unit)
           throw new Error("Memory organizer referenced an unknown source");
         if (!ownerFor(proposal.scope, scopeId))
@@ -704,13 +709,22 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         const list = byUnit.get(unit.key) ?? [];
         const target = proposal.target === undefined ? undefined
           : recipe.presented.find((item) => item.id === proposal.target);
-        const spans = (unit.source.spans ?? []).flatMap((span, index) => {
-          const text = unit.source.runId ? unit.texts.at(-1)! : unit.texts[index]!.replace(/^\[[^\]]*\] /u, "");
-          const offset = text.indexOf(proposal.quote);
-          return offset < 0 ? [] : [{ ...span, start: span.start + offset, end: span.start + offset + proposal.quote.length }];
+        let userSource = false;
+        const spans = proposal.sources.flatMap(citation => {
+          const cited = judged[Number(citation.source.slice(1))];
+          if (!cited) throw new Error('Memory organizer referenced an unknown source');
+          const matches = (cited.source.spans ?? []).flatMap((span, index) => {
+            const raw = cited.source.runId ? cited.texts.at(-1)! : cited.texts[index]!;
+            const text = raw.replace(/^\[[^\]]*\] /u, '');
+            const offset = text.indexOf(citation.quote);
+            if (offset < 0) return [];
+            userSource ||= raw.startsWith('[user] ');
+            return [{ ...span, start: span.start + offset, end: span.start + offset + citation.quote.length }];
+          });
+          if (matches.length !== 1) throw new Error('Memory organizer quote must identify one exact source passage');
+          return matches;
         });
-        if (spans.length !== 1)
-          throw new Error("Memory organizer quote must identify one exact source passage");
+        if (proposal.nature === 'instruction' && !userSource) throw new Error('Only a user passage can establish an instruction');
         list.push({
           action: proposal.action,
           scope: proposal.scope,
@@ -764,6 +778,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       const settings = await readHarnessSettings();
       if (!settings.autoOrganize.bot || settings.disabled)
         return;
+      if (!existingStore && deps.hasNativeSources && !await deps.hasNativeSources(scopeId)) return;
       const inference = deps.getInference();
       const pending = (await inference.list<OrganizerRecipe>(scopeId)).filter(work => work.mode === "automatic" && !work.consumed);
       const store = existingStore ?? await deps.storeForScopeId(scopeId);
@@ -792,12 +807,19 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       let unitChars = budget.unitChars;
       let candidates: OrganizerUnit[] = [];
       let freshUnits: OrganizerUnit[] = [];
+      let observedHeads: Record<string, string> = {};
+      let sourceHasMore = false;
+      let sourceBlocked = false;
       const preparedUnits: Array<{
         unit: OrganizerUnit;
         proposals: OrganizerPreparedProposal[];
       }> = [];
       while (true) {
-        candidates = await collectUnits(store, scopeId, unitChars, force);
+        const collected = await collectUnits(store, scopeId, unitChars, force);
+        candidates = collected.units;
+        observedHeads = collected.heads;
+        sourceHasMore = collected.hasMore;
+        sourceBlocked = collected.blocked;
         const rows = new Map((await store.listOrganizerProgress()).map(row => [row.key, row]));
         freshUnits = [];
         preparedUnits.length = 0;
@@ -829,8 +851,18 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           throw error;
         }
       }
-      if (!freshUnits.length)
+      if (!freshUnits.length) {
+        const progress = await store.listOrganizerProgress();
+        if (!candidates.length && !unresolved.length && !sourceBlocked) {
+          for (const [branch, head] of Object.entries(observedHeads)) {
+            const key = `history-cursor:${branch}`;
+            if (progress.find(row => row.key === key)?.sourceKey !== head)
+              await putProgress(store, key, 'reviewed-empty', { sourceKey: head });
+          }
+          if (sourceHasMore) queued.add(scopeId);
+        }
         return;
+      }
       const selected = selectPrompt(freshUnits, planningMemories, budget.inputTokens, promptScope)!;
       const nativeBinding = await inference.bind(binding.selection, budget.maxOutputTokens);
       const key = randomUUID();
@@ -853,8 +885,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         await recordWorkError(store, freshUnits, error, work.workId);
         throw error;
       }
-      if (freshUnits.length < candidates.length || candidates.length === MAX_UNITS_PER_RUN || freshUnits.some(unit => unit.hasMoreSource))
-        queued.add(scopeId);
+      // One final metadata/coverage pass commits the frozen scan boundary after all its
+      // sources settle. It performs no extra inference when the batch is complete.
+      queued.add(scopeId);
     }
     finally {
       reservedSources.delete(scopeId);
@@ -888,17 +921,16 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       try {
         // Cheap sources first: a scope with no threads and no store file does
         // not get an empty .tdb created by a background sweep.
-        const native = await deps.nativeMaterials(scopeId);
         const storeExists = await deps.hasStoreForScope(scopeId);
-        if (native.length === 0 && !storeExists) continue;
+        // Discovery uses scope metadata at the production adapter; bodies are read by
+        // collectUnits from its saved boundary, never as a periodic discovery scan.
+        if (!storeExists) { schedule(scopeId); continue; }
         const store = await deps.storeForScopeId(scopeId);
         if (!store) continue;
         const timestamp = now();
         const rows = await store.listOrganizerProgress();
         const hasWork = rows.some((row) => retryable(row, timestamp));
-        const hasSources = hasWork
-          || native.length > 0;
-        if (hasWork || hasSources) schedule(scopeId);
+        if (hasWork || storeExists) schedule(scopeId);
       } catch (error) {
         report(error);
       }

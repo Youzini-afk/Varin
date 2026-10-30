@@ -19,10 +19,14 @@ it('captures real Knowledge correction then forgetting at the Bot request-materi
             ownerForThread: async () => memoryOwner, associationForThread: async (threadId) => ({ threadIds: [threadId] }) });
         const knowledge = createKnowledgeContextRuntime({ getStore: async () => store,
             recallForThread: async ({ query, threadId }) => memory.search(memoryOwner, query, 8, { threadId }) });
-        const runtime = { run: async () => ({ id: 'run', thread_id: 'thread', branch_id: 'main' }), thread: async () => ({ bot_id: 'test-bot' }) };
+        const runtime = { run: async () => ({ id: 'run', thread_id: 'thread', branch_id: 'main' }), thread: async () => ({ bot_id: 'test-bot' }), historyPage: async () => ({ head: 'latest-original' }) };
+        const originalText='Continue. FORGOTTEN_CORRECTION_BODY';
+        const originalSource={kind:'history-item' as const,id:'original-user',threadId:'thread:worker',branchId:'worker-main',headId:'original-user',revision:sourceRevision(originalText),start:10,end:originalText.length};
+        const recall=vi.fn(knowledge.knowledgeForThread);
         const owner = createBotMemoryOwner({ runtime: runtime as never, memory,
-            history: { branch: async () => [{ role: 'user', text: 'continue' }] } as never,
-            prepareContext: { refresh: async () => ({}) } as never, knowledge: knowledge.knowledgeForThread });
+            history: { recent: async () => [{ role: 'environment', originalId:'original-user',text: originalText,
+                span:{...originalSource,id:'relayed-user',threadId:'thread',branchId:'branch',headId:'relayed-user',start:0} }] } as never,
+            prepareContext: { refresh: async () => ({}) } as never, knowledge: recall });
         const states: unknown[] = [];
         const sync = async () => {
             const result = await owner({ action: 'synchronize', runId: 'run', scope: { botId: 'test-bot', mode: 'bot', threadId: 'thread', projectId: null },
@@ -43,13 +47,15 @@ it('captures real Knowledge correction then forgetting at the Bot request-materi
         };
         const first = await memory.remember(memoryOwner, { content: 'OLD launch requirement', source: { kind: 'user-extracted', threadId: 'thread' } });
         await sync();
-        const updated = await memory.correct(memoryOwner, first.item.id, { content: 'FORGOTTEN_CORRECTION_BODY', source: { kind: 'user-extracted', threadId: 'thread' } });
+        const updated = await memory.correct(memoryOwner, first.item.id, { content: 'FORGOTTEN_CORRECTION_BODY', source: { kind: 'user-extracted', threadId: 'thread',spans:[originalSource] } });
         expect((await sync()).botKnowledge.corrections).toHaveLength(1);
         await memory.forget(memoryOwner, updated.id);
         const final = await sync();
         expect(final.botKnowledge.items).toEqual([]);
         expect(final.botKnowledge.invalidations).toContainEqual({ id: updated.id, scope: 'bot' });
         expect(final.botKnowledge.corrections).toEqual([]);
+        expect(recall.mock.calls.at(-1)![0].query).toContain('Continue.');
+        expect(recall.mock.calls.at(-1)![0].query).not.toContain('FORGOTTEN_CORRECTION_BODY');
     }
     finally {
         await store.close();
@@ -65,7 +71,7 @@ it('reads a committed original receipt with an aborted caller but aborts a not-y
         const memory = createMemoryService({ storeForScopeId: async () => store, userStore: async () => null, ownerForThread: async () => target });
         const text = 'Preserve the original signed deployment decision.';
         const runtime = { run: async (_id: string, signal?: AbortSignal) => { signal?.throwIfAborted(); return { id: 'run', thread_id: 'thread:bot', branch_id: 'branch', state: 'waiting' }; }, thread: async (_id: string, signal?: AbortSignal) => { signal?.throwIfAborted(); return { bot_id: 'bot' }; } };
-        const history = { branch: async () => [{ role: 'user', text, span: { kind: 'history-item', id: 'user', threadId: 'thread:bot', branchId: 'branch', headId: 'user', revision: sourceRevision(text), start: 0, end: text.length } }] };
+        const history = { recent: async () => [{ role: 'user', text, span: { kind: 'history-item', id: 'user', threadId: 'thread:bot', branchId: 'branch', headId: 'user', revision: sourceRevision(text), start: 0, end: text.length } }] };
         const prepareContext = {} as never;
         let enter!: () => void;
         const entered = new Promise<void>(resolve => { enter = resolve; });
@@ -126,12 +132,13 @@ it('keeps the latest user recall query across the original 100-item page boundar
         query: string;
     }) => ({ knowledge: [] }));
     const prepareContext = { refresh: async () => ({}) };
-    const owner = createBotMemoryOwner({ runtime: runtime as never, history, memory: {} as never, prepareContext: prepareContext as never, knowledge: knowledge as never });
+    const owner = createBotMemoryOwner({ runtime: runtime as never, history, memory: { exclusions: async () => [] } as never, prepareContext: prepareContext as never, knowledge: knowledge as never });
     const result = await owner({ action: 'synchronize', runId: 'run', scope: { botId: 'bot', mode: 'bot', threadId: 'thread:bot', projectId: null },
         checkpoint: { personalization: { mode: 'bot', threadId: 'thread:bot' } } as never }, new AbortController().signal);
     expect(result.status).toBe('ready');
     expect(knowledge).toHaveBeenCalledOnce();
-    expect(knowledge.mock.calls[0]![0]).toMatchObject({ query: 'CURRENT launch question' });
+    expect(knowledge.mock.calls[0]![0].query).toContain('CURRENT launch question');
+    expect(knowledge.mock.calls[0]![0].query).not.toContain('OLD question');
 });
 it('Sleep joins the original domain promise and only explicit pre-write evidence can clear Unknown', async () => {
     const responses: PrivateMemoryResponse[] = [];

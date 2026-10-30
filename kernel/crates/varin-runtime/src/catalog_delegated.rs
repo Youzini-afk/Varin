@@ -29,6 +29,14 @@ pub struct ChildRelation {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DelegatedTrigger {
     Dispatch,
+    WorkEvent {
+        event_cursor: u64,
+        input_id: String,
+        previous_execution_id: String,
+        previous_run_id: String,
+        previous_run_revision: u64,
+        expected_head: Option<String>,
+    },
     Followup {
         followup_id: String,
         occurrence_id: String,
@@ -381,6 +389,7 @@ impl DelegatedExecutionRead {
                 execution.trigger,
                 DelegatedTrigger::MessageRequest { .. }
                     | DelegatedTrigger::ComputerEvent { .. }
+                    | DelegatedTrigger::WorkEvent { .. }
                     | DelegatedTrigger::Followup { .. }
                     | DelegatedTrigger::Calendar { .. }
             ) {
@@ -944,6 +953,10 @@ impl Catalog {
                             expected_head: head.clone(),
                         }
                     }
+                    inputs::InputOrigin::WorkEvent { event_cursor, .. } => DelegatedTrigger::WorkEvent {
+                        event_cursor: *event_cursor, input_id: row.id.clone(), previous_execution_id: previous.execution_id.clone(),
+                        previous_run_id: run.id.clone(), previous_run_revision: run.revision, expected_head: head.clone(),
+                    },
                     inputs::InputOrigin::Message { .. } => DelegatedTrigger::MessageRequest {
                         message_id: row.id.clone(),
                         previous_execution_id: previous.execution_id.clone(),
@@ -1104,6 +1117,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             DelegatedTrigger::UserContinuation { key, .. } => Some(key.as_str()),
             DelegatedTrigger::MessageRequest { message_id, .. } => Some(message_id.as_str()),
             DelegatedTrigger::ComputerEvent { input_id, .. }
+            | DelegatedTrigger::WorkEvent { input_id, .. }
             | DelegatedTrigger::Followup { input_id, .. }
             | DelegatedTrigger::Calendar { input_id, .. } => Some(input_id.as_str()),
         };
@@ -1219,6 +1233,7 @@ impl Catalog {
             "child.report_ready",
             json!({"outcome":"failed"}),
         )?;
+        super::bot_reports::publish_pending(&tx, id, execution.revision)?;
         tx.commit()?;
         Ok(execution)
     }

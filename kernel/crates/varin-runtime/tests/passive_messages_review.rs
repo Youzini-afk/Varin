@@ -10,7 +10,7 @@ use input_admission::InputAdmission;
 use serde_json::json;
 use varin_runtime::{catalog::messages::*, execution::*, *};
 fn input(thread: &str, branch: &str, text: &str) -> MessageInput {
-    MessageInput {
+    MessageInput { after_current: None,
         source_agent: None,
             name: None,
         wait: None,
@@ -232,7 +232,7 @@ fn idle_receipt_reply_routing_pagination_and_user_queue_are_one_immutable_fact()
         .unwrap()
         .load(&|| false)
         .is_err());
-    let mut reply = MessageInput {
+    let mut reply = MessageInput { after_current: None,
         source_agent: None,
             name: None,
         wait: None,

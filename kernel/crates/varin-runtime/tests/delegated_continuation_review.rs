@@ -531,7 +531,7 @@ fn source_refresh_requests_wait_for_their_own_next_execution() {
     let code=f.db.agent_identity(&initial.parent_thread_id).unwrap()["agentId"].as_str().unwrap().to_string();
     let mut receipts=Vec::new();
     for key in ["refresh-one","refresh-two"] {
-        let preparation=f.db.prepare_user_message(key.into(),initial.parent_thread_id.clone(),initial.parent_branch_id.clone(),MessageInput {
+        let preparation=f.db.prepare_user_message(key.into(),initial.parent_thread_id.clone(),initial.parent_branch_id.clone(),MessageInput { after_current: None,
             source_agent:Some(code.clone()),name:None,wait:None,target_thread_id:Some(initial.agent_id.clone()),target_branch_id:None,reply_to:None,
             kind:MessageKind::Request,text:key.into(),
         }).unwrap().load().unwrap();
@@ -1139,7 +1139,7 @@ fn request_child(
             key.into(),
             child.parent_thread_id.clone(),
             child.parent_branch_id.clone(),
-            MessageInput {
+            MessageInput { after_current: None,
                 source_agent: None,
             name: None,
                 wait: None,

@@ -618,7 +618,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         "process_read".into(),
     ])
     .unwrap();
-    let catalog = ChildDispatchCatalog {
+    let catalog = ChildDispatchCatalog { projects:Vec::new(),
         native_capabilities: Vec::new(),
         identity: "original-settings-selection".into(),
         normal_unavailable: None,

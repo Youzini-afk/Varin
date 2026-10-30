@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 71;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 72;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -28,6 +28,10 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "source.authority.release_scope",
     "source.resource.cancel",
     "source.authority.release",
+    "runtime.bot.work.pending",
+    "runtime.bot.work.admit",
+    "runtime.bot.matters.list",
+    "runtime.bot.matters.update",
     "runtime.bot.scope.inspect",
     "runtime.bot.gate.publish",
     "runtime.bot.thread.create",
@@ -110,6 +114,10 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "source.authority.release_scope",
     "source.resource.cancel",
     "source.authority.release",
+    "runtime.bot.work.pending",
+    "runtime.bot.work.admit",
+    "runtime.bot.matters.list",
+    "runtime.bot.matters.update",
     "runtime.bot.scope.inspect",
     "runtime.bot.gate.publish",
     "runtime.bot.thread.create",
@@ -291,8 +299,31 @@ pub(crate) struct BotScopeSuspension {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotWorkPendingParams {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotWorkAdmitParams {
+    pub(crate) work: varin_runtime::catalog::bot_work::ColdBotWork,
+    pub(crate) configuration: Value,
+    pub(crate) launch: SubmitLaunch,
+    pub(crate) initial_context: InitialContext,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BotScopeParams {
     pub(crate) bot_id: String,
+    pub(crate) history_only: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotMatterUpdate {
+    pub(crate) bot_id: String,
+    pub(crate) key: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) matter: varin_runtime::catalog::bot_work::BotMatter,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1137,6 +1168,7 @@ pub(crate) struct HistoryPageParams {
     pub(crate) branch_id: String,
     pub(crate) head_id: Option<String>,
     pub(crate) before_id: Option<String>,
+    pub(crate) after_id: Option<String>,
     pub(crate) limit: i64,
 }
 
@@ -2730,9 +2762,10 @@ pub(crate) struct ChildReportReadParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ChildSourceReadyParams {
     pub(crate) execution_id: String,
-    pub(crate) pin: varin_runtime::catalog::collaboration::ChildSourcePin,
+    pub(crate) pin: RequiredNullable<varin_runtime::catalog::collaboration::ChildSourcePin>,
     pub(crate) source: LaunchSourceParams,
-    pub(crate) provenance: varin_runtime::catalog::collaboration::ChildSourceProvenance,
+    pub(crate) provenance:
+        RequiredNullable<varin_runtime::catalog::collaboration::ChildSourceProvenance>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3121,6 +3154,27 @@ pub(crate) struct ModelAdapterContribution {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SubmitLaunch {
+    pub(crate) agent: Option<varin_runtime::catalog::launches::AgentSelection>,
+    pub(crate) inherit_source: Option<bool>,
+    pub(crate) source: RequiredNullable<LaunchSourceParams>,
+    pub(crate) enabled_tools: Vec<String>,
+    pub(crate) credential_scope: Option<CredentialScope>,
+    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InitialContext {
+    pub(crate) resources: Option<varin_runtime::catalog::resources::ContextResources>,
+    pub(crate) personalization: Option<ContextPersonalization>,
+    pub(crate) effective_system_prompt: String,
+    pub(crate) instruction_sources: Vec<String>,
+    pub(crate) memory_checkpoint: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelSessionConfiguration {
     pub(crate) retry: Option<Value>,
     pub(crate) tokenizer: Option<varin_runtime::token_count::TokenizerBinding>,
@@ -3168,27 +3222,6 @@ pub(crate) struct McpInteractionErrorItem {
     pub(crate) id: String,
     pub(crate) binding: varin_runtime::catalog::mcp_interactions::McpInteractionBinding,
     pub(crate) presentation: serde_json::Value,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SubmitLaunch {
-    pub(crate) agent: Option<varin_runtime::catalog::launches::AgentSelection>,
-    pub(crate) inherit_source: Option<bool>,
-    pub(crate) source: RequiredNullable<LaunchSourceParams>,
-    pub(crate) enabled_tools: Vec<String>,
-    pub(crate) credential_scope: Option<CredentialScope>,
-    pub(crate) child_dispatch: Option<varin_runtime::catalog::dispatch::ChildDispatchCatalog>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct InitialContext {
-    pub(crate) resources: Option<varin_runtime::catalog::resources::ContextResources>,
-    pub(crate) personalization: Option<ContextPersonalization>,
-    pub(crate) effective_system_prompt: String,
-    pub(crate) instruction_sources: Vec<String>,
-    pub(crate) memory_checkpoint: RequiredNullable<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3695,6 +3728,20 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "runtime.bot.scope.remove" => serde_json::from_value::<BotScopeSuspension>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.bot.work.pending" => {
+            serde_json::from_value::<BotWorkPendingParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.bot.work.admit" => serde_json::from_value::<BotWorkAdmitParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.bot.matters.list" => serde_json::from_value::<BotScopeParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.bot.matters.update" => serde_json::from_value::<BotMatterUpdate>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.bot.scope.inspect" => serde_json::from_value::<BotScopeParams>(params.clone())

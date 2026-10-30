@@ -214,6 +214,7 @@ fn synchronize(
                 .iter()
                 .chain(&knowledge.invalidations)
                 .chain(&knowledge.corrections)
+                .chain(&knowledge.exclusions)
                 .any(|row| {
                     row["id"].as_u64().is_none_or(|id| id == 0)
                         || !matches!(row["scope"].as_str(), Some("bot" | "user" | "session"))

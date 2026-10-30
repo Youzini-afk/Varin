@@ -250,6 +250,8 @@ pub fn reconcile_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
             }
         }
         if let Err(cause) = super::retrieval::deliver_results(catalog) { failure.get_or_insert(cause); }
+        if let Err(cause) = super::bot_reports::deliver_reports(catalog) { failure.get_or_insert(cause); }
+        if let Err(cause) = super::bot_work_events::deliver(catalog) { failure.get_or_insert(cause); }
         Ok(())
     })();
     if let Some(failure) = failure {
@@ -265,6 +267,7 @@ pub struct ChildWaitPreparation {
     child: ChildTask,
     head: Option<String>,
     visible_report: Option<String>,
+    queued_report: Option<inputs::QueuedInputMetadata>,
     item_id: String,
     preview: Option<super::child_content::ChildReportRead>,
     content: crate::content::ContentStore,
@@ -277,7 +280,7 @@ pub struct PreparedChildWait {
 }
 impl ChildWaitPreparation {
     pub fn load(mut self) -> Result<PreparedChildWait> {
-        if self.visible_report.is_some() || (!self.wait.cancelled && self.op.executor.as_deref()==Some(super::retrieval::CONTROL_TOOL)) {
+        if self.visible_report.is_some() || self.queued_report.is_some() || (!self.wait.cancelled && self.op.executor.as_deref()==Some(super::retrieval::CONTROL_TOOL)) {
             return Ok(PreparedChildWait {
                 capture: self,
                 content: None,
@@ -368,11 +371,11 @@ impl Catalog {
             let head = self.head(&run.branch_id)?;
             let mut visible_report = None;
             if !wait.cancelled {
-                let observer = format!("child-report-history:{}", child.operation_id);
+                let observer = format!("child-report-history:{}", child.execution_id);
                 let mut ancestor = head.clone();
                 while let Some(id) = ancestor {
                     let delivered:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM deliveries WHERE observer=?1 AND request=?2 AND state='\"committed\"')",params![observer,id],|r|r.get(0))?;
-                    if delivered {
+                    if delivered || id == format!("message:bot-report:{}", child.execution_id) {
                         visible_report = Some(id);
                         break;
                     }
@@ -380,14 +383,17 @@ impl Catalog {
                     ancestor = item.parent;
                 }
             }
+            let queued_report = if wait.cancelled || visible_report.is_some() { None } else {
+                optional_record::<inputs::QueuedInputMetadata>(&self.db, "input_queue", &format!("message:bot-report:{}", child.execution_id))?
+                    .filter(|input| input.branch_id == run.branch_id && input.state == InputState::Queued)
+            };
             let item_id = if wait.cancelled {
                 format!("child-wait-cancel:{}", wait.id)
             } else {
-                visible_report.clone().unwrap_or_else(|| {
-                    format!("child-report:{}:{}", run.branch_id, child.operation_id)
-                })
+                visible_report.clone().or_else(|| queued_report.as_ref().map(|row| row.id.clone()))
+                    .unwrap_or_else(|| format!("child-report:{}:{}", run.branch_id, child.execution_id))
             };
-            let preview = if wait.cancelled || visible_report.is_some() {
+            let preview = if wait.cancelled || visible_report.is_some() || queued_report.is_some() {
                 None
             } else {
                 child
@@ -406,6 +412,7 @@ impl Catalog {
                 child,
                 head,
                 visible_report,
+                queued_report,
                 item_id,
                 preview,
                 content: self.content.clone(),
@@ -437,6 +444,11 @@ impl Catalog {
         let current_wait: Wait = record(&tx, "waits", &wait.id)?;
         let current_op: Operation = record(&tx, "operations", operation_id)?;
         let current_child = delegated::execution_task(&tx, &child.execution_id)?;
+        if let Some(captured) = &capture.queued_report {
+            if optional_record::<inputs::QueuedInputMetadata>(&tx, "input_queue", &captured.id)?.as_ref() != Some(captured) {
+                return Ok(None);
+            }
+        }
         let unresolved:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_calls t JOIN model_steps m ON m.id=t.request_id WHERE m.run_id=?1 AND t.committed=0)",[&run.id],|row|row.get(0))?;
         if run != capture.run
             || current_wait != wait
@@ -462,7 +474,9 @@ impl Catalog {
                 [&item_id],
                 |r| r.get::<_, bool>(0),
             )?;
-        if !delivered {
+        if let Some(input) = &capture.queued_report {
+            inputs::deliver(&tx, &run, input)?;
+        } else if !delivered {
             let history = HistoryItem {
                 run_id: run.id.clone(),
                 id: item_id.clone(),
@@ -494,11 +508,16 @@ impl Catalog {
             )?;
         }
         if !wait.cancelled && !delivered {
-            let fact_cursor:u64=tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='child.report_ready' ORDER BY cursor LIMIT 1",[&child.operation_id],|r|read_number(r,0))?;
+            let fact_cursor:u64=tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='child.report_ready' ORDER BY cursor LIMIT 1",[&child.execution_id],|r|read_number(r,0))?;
             // This observer is the durable history writer, not a provider request. Its
             // acknowledgement proves append/ancestry visibility, never model understanding.
             tx.execute("INSERT INTO deliveries(observer,fact_cursor,request,state) VALUES(?1,?2,?3,'\"committed\"')",
-                    params![format!("child-report-history:{}",child.operation_id),sql_number(fact_cursor)?,item_id])?;
+                    params![format!("child-report-history:{}",child.execution_id),sql_number(fact_cursor)?,item_id])?;
+        }
+        if !wait.cancelled && child.report.is_some() && super::bot::thread_bot(&tx, &child.child_thread_id)?.is_some() {
+            let fact_cursor: u64 = tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='child.report_ready' ORDER BY cursor LIMIT 1", [&child.execution_id], |r| read_number(r, 0))?;
+            tx.execute("INSERT OR IGNORE INTO deliveries(observer,fact_cursor,request,state) VALUES('bot-report-delivery',?1,?2,'\"committed\"')",
+                params![sql_number(fact_cursor)?, child.execution_id])?;
         }
         let mut op: Operation = record(&tx, "operations", operation_id)?;
         op.phase = OperationPhase::Terminal;

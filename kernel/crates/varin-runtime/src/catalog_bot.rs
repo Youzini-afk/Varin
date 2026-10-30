@@ -243,18 +243,26 @@ impl Catalog {
     }
     /// Product discovery uses the same relationship indexes as execution admission.
     pub fn inspect_bot_scope(&self, bot_id: &str) -> Result<Value> {
+        self.inspect_bot_scope_for(bot_id, false)
+    }
+
+    pub fn inspect_bot_scope_for(&self, bot_id: &str, history_only: bool) -> Result<Value> {
         let mut query = self.db.prepare("WITH RECURSIVE scope(thread_id) AS (
             SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1
             UNION SELECT c.child_thread_id FROM child_tasks c JOIN scope s ON json_extract(c.body,'$.parent_thread_id')=s.thread_id
-        ) SELECT thread_id FROM scope ORDER BY thread_id")?;
+        ) SELECT thread_id FROM scope s WHERE NOT ?2 OR (
+            NOT EXISTS(SELECT 1 FROM context_jobs c JOIN runs r ON r.id=c.run_id JOIN branches helper ON helper.id=r.branch_id WHERE helper.thread_id=s.thread_id)
+            AND NOT EXISTS(SELECT 1 FROM runs r JOIN branches helper ON helper.id=r.branch_id JOIN operations o ON o.run_id=r.id WHERE helper.thread_id=s.thread_id AND json_extract(o.body,'$.intent.kind')='memory_work_v1')
+        ) ORDER BY thread_id")?;
         let ids = query
-            .query_map([bot_id], |r| r.get::<_, String>(0))?
+            .query_map(params![bot_id, history_only], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let threads = ids
             .iter()
             .map(|id| self.inspect_thread(id))
             .collect::<Result<Vec<_>>>()?;
-        let runs = self.bot_scope_run_ids(bot_id)?.iter().map(|id| {
+        let run_ids = if history_only { Vec::new() } else { self.bot_scope_run_ids(bot_id)? };
+        let runs = run_ids.iter().map(|id| {
             let run = self.run(id)?;
             Ok(json!({"threadId":run.thread_id,"branchId":run.branch_id,"runId":run.id,"state":run.state,"cancelRequested":run.cancel_requested}))
         }).collect::<Result<Vec<_>>>()?;
@@ -331,6 +339,8 @@ impl Catalog {
             format!("DELETE FROM mcp_interactions WHERE operation_id {op}"),
             format!("DELETE FROM resource_occupancy WHERE operation_id {op}"),
             format!("DELETE FROM goal_children WHERE id {op}"),
+            format!("DELETE FROM commands WHERE id IN (SELECT 'bot-report:'||id FROM delegated_executions WHERE run_id {r} OR child_operation_id {op})"),
+            format!("DELETE FROM deliveries WHERE request IN (SELECT id FROM delegated_executions WHERE run_id {r} OR child_operation_id {op}) OR request {op}"),
             format!("DELETE FROM goal_runs WHERE id {r}"),
             format!("DELETE FROM goal_usage WHERE id {goals}"),
             "DELETE FROM goals WHERE thread_id IN (SELECT value FROM json_each(?2))".into(),
@@ -380,6 +390,13 @@ impl Catalog {
             };
             tx.execute(&statement, params![runs, threads])?;
         }
+        let matter_prefix = format!("bot-matter:{}:", suspension.bot_id);
+        tx.execute("DELETE FROM commands WHERE substr(id,1,length(?1))=?1", [&matter_prefix])?;
+        let matter_subject = format!("bot-work:{}", suspension.bot_id);
+        tx.execute("DELETE FROM deliveries WHERE observer IN ('bot-work-suppressed','bot-external-report') AND fact_cursor IN (SELECT cursor FROM events WHERE subject=?1 OR (subject='bot-work-pending' AND json_extract(data,'$.targetThreadId') IN (SELECT value FROM json_each(?2))))", params![matter_subject,threads])?;
+        // Other original Waits may still retain an event. Keep exactly those references;
+        // otherwise deleted Bot descriptions and pending-work markers are reclaimable.
+        tx.execute("DELETE FROM events WHERE (subject=?1 OR (subject='bot-work-pending' AND json_extract(data,'$.targetThreadId') IN (SELECT value FROM json_each(?2)))) AND NOT EXISTS(SELECT 1 FROM deliveries WHERE fact_cursor=events.cursor) AND NOT EXISTS(SELECT 1 FROM resumptions WHERE trigger_cursor=events.cursor) AND NOT EXISTS(SELECT 1 FROM waits WHERE json_extract(body,'$.trigger_cursor')=events.cursor)", params![matter_subject,threads])?;
         let retained: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)",
             [],

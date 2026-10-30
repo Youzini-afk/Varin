@@ -14,6 +14,7 @@ import { requireNativeWorkspaceBackend } from '../kernel/native-workspaces.js';
 
 export function createExternalSourceOwner(deps: {
   kernel: KernelClient;
+  prepareProjectSource?: import('../kernel/child-project-source.js').ChildProjectSourcePreparer;
   storage: KernelStorageAdapter;
   capture: StableSourcePreparationOwners & {
     documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'>;
@@ -61,6 +62,31 @@ export function createExternalSourceOwner(deps: {
   };
   const prepare = async (child: ExternalChild, signal: AbortSignal) => {
     const saved = record(child.source);
+    if (child.project_source?.kind === 'project') {
+      if (!deps.prepareProjectSource) throw new Error('Registered project source preparation is unavailable');
+      const prepared = await deps.prepareProjectSource(child.project_source.project,
+        { runtime:'agent',threadId:child.parent_thread_id,branchId:child.parent_branch_id },
+        'external-project:'+(child.dispatch_operation_id ?? child.operation_id),child.work_mode,child.project_source.source_path,signal);
+      const source=prepared.source;
+      let baseline: unknown;
+      if (child.work_mode === 'isolated_write') {
+        if (source.mode !== 'native_workspace' || !source.branchId || !prepared.provenance) throw new Error('Independent project source is incomplete');
+        const grant=await deps.kernel.issueGrant({grantId:`external-project-pin:${randomUUID()}`,threadId:child.parent_thread_id,
+          owningWorkspace:source.workspaceId,executionWorkspace:source.executionWorkspaceId,capabilities:['storage.read','storage.write','storage.maintenance'],pathScopes:['']},signal);
+        try {
+          const store=new KernelWorkingStateRootStore(await deps.storage.contextFromBranchGrant({grant,owningWorkspaceId:source.workspaceId,executionWorkspaceId:source.executionWorkspaceId}));
+          const pin=await store.pinBranchHandoff!(source.branchId,`external-project-pin:${child.dispatch_operation_id??child.operation_id}`,{revision:0,signal});
+          const selected:LaunchSource={resource_owner:source.resourceOwner,workspace_id:source.workspaceId,execution_workspace_id:source.executionWorkspaceId,
+            mode:source.mode,branch_id:source.branchId,revision:null,live_root:null};
+          baseline={source:selected,pin:{pin_id:pin.pinId,root:pin.root,source:{...selected,mode:'fixed_branch',revision:0}},provenance:prepared.provenance};
+        } finally { await deps.kernel.revokeGrant(grant.grantId); }
+      }
+      return { cwd:prepared.path,workspaceId:source.workspaceId,executionWorkspaceId:source.executionWorkspaceId,
+        kind:child.work_mode==='isolated_write'?'isolated' as const:'shared' as const,
+        ...(source.mode==='native_workspace'?{nativeSource:{resource_owner:source.resourceOwner,workspace_id:source.workspaceId,
+          execution_workspace_id:source.executionWorkspaceId,mode:source.mode,branch_id:source.branchId,revision:null,live_root:null,...(source.nativeScope?{native_scope:source.nativeScope}:{})}}:{}),
+        projectSource:source,provenance:prepared.provenance,...(baseline?{baseline}:{}) };
+    }
     const native=record(saved.nativeSource);
     const nativeView=async(source:LaunchSource,baseline?:unknown)=>{
       const owner=deps.kernel.nativeWorkspaces;if(!owner)throw new Error('Native external source is unavailable');
@@ -183,7 +209,7 @@ export function createExternalSourceOwner(deps: {
   // Retain an isolated baseline while its conversation owns the editable copy. Only the
   // original temporary handoff pin is released after execution; result/recovery uses baseline.
   const release = (child: ExternalChild, signal: AbortSignal) =>
-    withSource(child, signal, async (_store, grant) => {
+    child.project_source ? Promise.resolve() : withSource(child, signal, async (_store, grant) => {
       const root = child.handoff!.root;
       if (root.kind === 'fixed' || root.kind === 'native' || root.kind === 'derived')
         await deps.kernel
@@ -199,6 +225,23 @@ export function createExternalSourceOwner(deps: {
       if(root.kind==='native')await deps.kernel.scoped(grant).deleteBranch({operationId:`external-handoff-delete:${child.operation_id}`,branchId:root.pin.source.branch_id!},signal);
     });
   const remove = async (child: ExternalChild, unstarted = false) => {
+    if(child.project_source){
+      if(child.dispatch_operation_id)return;
+      const prepared=record(record(child.source).projectSource);
+      if(prepared.mode!=='native_workspace'||child.work_mode!=='isolated_write')return;
+      if(!deps.kernel.nativeWorkspaces)throw new Error('Native project source is unavailable');
+      const source={workspace_id:text(prepared.workspaceId),execution_workspace_id:text(prepared.executionWorkspaceId),branch_id:text(prepared.branchId)};
+      await deps.kernel.nativeWorkspaces.releaseSource(source);
+      const grant=await deps.kernel.issueGrant({grantId:'external-project-cleanup:'+randomUUID(),owningWorkspace:source.workspace_id,executionWorkspace:source.execution_workspace_id,capabilities:['storage.read','storage.write','storage.maintenance'],pathScopes:['']});
+      try{
+        const actor=deps.kernel.scoped(grant);
+        await actor.unpinBranch({operationId:`external-project-unpin:${child.operation_id}`,branchId:source.branch_id,pinId:`external-project-pin:${child.operation_id}`});
+        await actor.deleteBranch({operationId:'external-project-delete:'+child.operation_id,branchId:source.branch_id});
+      }
+      finally{await deps.kernel.revokeGrant(grant.grantId);}
+      return;
+    }
+
     const source = record(child.source);
     if (
       !child.handoff ||

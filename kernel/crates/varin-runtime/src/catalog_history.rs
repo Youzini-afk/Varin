@@ -12,6 +12,8 @@ pub struct HistoryReference {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryPage {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub boundary_reset: bool,
     pub head: Option<String>,
     pub items: Vec<HistoryReference>,
     pub previous: Option<String>,
@@ -95,6 +97,17 @@ impl HistoryPageRead {
         limit: u32,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<HistoryPage> {
+        self.load_since(head_id, before_id, None, limit, cancelled)
+    }
+
+    pub fn load_since(
+        self,
+        head_id: Option<&str>,
+        before_id: Option<&str>,
+        after_id: Option<&str>,
+        limit: u32,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<HistoryPage> {
         if cancelled() {
             return Err(RuntimeError::DispatchCancelled);
         }
@@ -139,6 +152,9 @@ impl HistoryPageRead {
                 let key = cursor.ok_or_else(|| {
                     RuntimeError::Conflict("history cursor is not on the anchored view".into())
                 })?;
+                if after_id == Some(key.as_str()) {
+                    return Err(RuntimeError::Conflict("history cursor precedes the selected incremental boundary".into()));
+                }
                 let item: HistoryItem = record(&db, "history", &key)?;
                 cursor = item.parent;
                 if key == before {
@@ -147,6 +163,7 @@ impl HistoryPageRead {
             }
         }
         let mut items = Vec::new();
+        let mut reached_after = after_id.is_none();
         while items.len() < (limit as usize) {
             if cancelled() {
                 return Err(RuntimeError::DispatchCancelled);
@@ -154,6 +171,7 @@ impl HistoryPageRead {
             let Some(key) = cursor else {
                 break;
             };
+            if after_id == Some(key.as_str()) { reached_after = true; cursor = None; break; }
             let item: HistoryItem = record(&db, "history", &key)?;
             cursor = item.parent.clone();
             let content_ref = item
@@ -172,7 +190,8 @@ impl HistoryPageRead {
             });
         }
         items.reverse();
-        let previous = if cursor.is_some() {
+        let boundary_reset = cursor.is_none() && !reached_after;
+        let previous = if cursor.is_some() && cursor.as_deref() != after_id {
             items.first().map(|item| item.id.clone())
         } else {
             None
@@ -182,6 +201,7 @@ impl HistoryPageRead {
         }
         current_history_owner(&self.database, self.epoch)?;
         Ok(HistoryPage {
+            boundary_reset,
             head,
             items,
             previous,
@@ -221,7 +241,8 @@ pub struct BotHistoryRead {
 }
 impl Catalog {
     pub fn capture_bot_history(&self, bot_id: &str, thread_id: &str, branch_id: &str, head_id: &str, item_id: &str) -> Result<BotHistoryRead> {
-        if self.bot_for_thread(thread_id)?.as_deref() != Some(bot_id) || self.branch_thread_id(branch_id)? != thread_id {
+        if (self.bot_for_thread(thread_id)?.as_deref() != Some(bot_id)
+            && !super::bot_work::linked(&self.db, &super::bot_work::entry(&self.db, bot_id)?, thread_id, Some(branch_id), false, true)?) || self.branch_thread_id(branch_id)? != thread_id {
             return Err(RuntimeError::Conflict("History source is outside this Bot".into()));
         }
         Ok(BotHistoryRead { database: self.database_path.clone(), epoch: self.epoch, content: self.content.clone(),
@@ -233,7 +254,8 @@ impl BotHistoryRead {
     pub fn load(self, cancelled: &dyn Fn() -> bool) -> Result<HistoryItem> {
         let db = current_history_owner(&self.database, self.epoch)?;
         db.execute_batch("BEGIN")?;
-        if super::bot::thread_bot(&db, &self.thread_id)?.as_deref() != Some(&self.bot_id) {
+        if super::bot::thread_bot(&db, &self.thread_id)?.as_deref() != Some(&self.bot_id)
+            && !super::bot_work::linked(&db, &super::bot_work::entry(&db, &self.bot_id)?, &self.thread_id, Some(&self.branch_id), false, true)? {
             return Err(RuntimeError::Conflict("History source Bot changed".into()));
         }
         let (thread, mut cursor): (String, Option<String>) = db.query_row("SELECT thread_id,head FROM branches WHERE id=?1", [&self.branch_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -253,7 +275,8 @@ impl BotHistoryRead {
         let result = self.content.hydrate_history(item)?;
         if cancelled() { return Err(RuntimeError::DispatchCancelled); }
         let current = current_history_owner(&self.database, self.epoch)?;
-        if super::bot::thread_bot(&current, &self.thread_id)?.as_deref() != Some(&self.bot_id) {
+        if super::bot::thread_bot(&current, &self.thread_id)?.as_deref() != Some(&self.bot_id)
+            && !super::bot_work::linked(&current, &super::bot_work::entry(&current, &self.bot_id)?, &self.thread_id, Some(&self.branch_id), false, true)? {
             return Err(RuntimeError::Conflict("History source Bot changed".into()));
         }
         Ok(result)
