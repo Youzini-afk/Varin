@@ -23,6 +23,36 @@
       "id": "reminder",
       "source": "foreground/reminder-crest.png",
       "sha256": "1cf65e8e967902253e77aedb66f94b74ffb10c68fee8945a332822fc81b860e4"
+    },
+    {
+      "id": "reminder-release",
+      "source": "foreground/reminder/release.png",
+      "sha256": "e90a98df1bc5cc0e49056cc1b9ca0a462a17a7b77f05d07a0a2c47afa826c629"
+    },
+    {
+      "id": "reminder-ascending-low",
+      "source": "foreground/reminder/ascending-low.png",
+      "sha256": "ae4cb5970cf320d9ea2c4033478a7a605a2f4bca895a0405af9a2430ed4c9fe4"
+    },
+    {
+      "id": "reminder-ascending-high",
+      "source": "foreground/reminder/ascending-high.png",
+      "sha256": "d5dcaa03b29723c03c98a517d43a5df3eb9a0a3b07c3dab8eb357d50b2d1ff3a"
+    },
+    {
+      "id": "reminder-finger-relax",
+      "source": "foreground/reminder/finger-relax.png",
+      "sha256": "5ce0a33aac1f7695637686d9d48462e66f9842e6353c028b9db2890916f43db1"
+    },
+    {
+      "id": "reminder-elbow-drop",
+      "source": "foreground/reminder/elbow-drop.png",
+      "sha256": "0afa45b1d66b07c39a459353f8048a6422e525392b67c581e8991adb9651dfc3"
+    },
+    {
+      "id": "reminder-keyboard-approach",
+      "source": "foreground/reminder/keyboard-approach.png",
+      "sha256": "26b7235b1d49376241b1e87776d890ba1030a07dd2a88fb5bdf6922b339413f9"
     }
   ]
 }

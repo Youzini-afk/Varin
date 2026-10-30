@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "id": "v5-reminder-working-phrase",
+  "action": "director-notify-attention",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "durationMs": 2180,
+  "scope": [
+    "Bot notice to user",
+    "Agent companion notice to user"
+  ],
+  "notFor": [
+    "permission",
+    "query",
+    "completion",
+    "director-intake",
+    "welcome"
+  ],
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 500,
+      "interruptionExitIds": []
+    },
+    {
+      "sourceId": "reminder-release",
+      "durationMs": 100,
+      "interruptionExitIds": [
+        "reminder-keyboard-approach",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "reminder-ascending-low",
+      "durationMs": 120,
+      "interruptionExitIds": [
+        "reminder-elbow-drop",
+        "reminder-keyboard-approach",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "reminder-ascending-high",
+      "durationMs": 140,
+      "interruptionExitIds": [
+        "reminder-finger-relax",
+        "reminder-elbow-drop",
+        "reminder-keyboard-approach",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "reminder",
+      "durationMs": 350,
+      "interruptionExitIds": [
+        "reminder-finger-relax",
+        "reminder-elbow-drop",
+        "reminder-keyboard-approach",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "reminder-finger-relax",
+      "durationMs": 150,
+      "interruptionExitIds": [
+        "reminder-elbow-drop",
+        "reminder-keyboard-approach",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "reminder-elbow-drop",
+      "durationMs": 180,
+      "interruptionExitIds": [
+        "reminder-keyboard-approach",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "reminder-keyboard-approach",
+      "durationMs": 140,
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 500,
+      "interruptionExitIds": []
+    }
+  ],
+  "integration": "Authoring order and phase exits; not installed. Non-neutral pickup counterparts and full live interruption wiring remain to be authored and verified."
+}
