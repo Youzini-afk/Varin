@@ -284,6 +284,42 @@ describe('workbench profile transition state machine', () => {
     expect(getWorkbenchProfileTransitionSnapshot().toProfileId).toBe('default');
   });
 
+  test.each(['covering', 'covered', 'revealing'] as const)('losing the scene host during %s releases its transaction', async (phase) => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'varin.ide' });
+    const controller = createWorkbenchTransitionSceneController(id);
+    const covered = waitForWorkbenchProfileTransitionCovered(id);
+    const painted = waitForWorkbenchProfileTransitionTargetPainted(id);
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    if (phase !== 'covering') markWorkbenchProfileTransitionCovered(id);
+    const revealed = phase === 'revealing' ? revealWorkbenchProfileTransition(id) : null;
+    if (phase === 'revealing') armWorkbenchProfileTransitionPhase(id, 'revealing');
+    release();
+    await Promise.resolve();
+    expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+    await expect(covered).resolves.toBe(phase !== 'covering');
+    await expect(painted).resolves.toBe(false);
+    await revealed;
+    controller.complete(id, phase === 'revealing' ? 'revealing' : 'covering');
+    vi.runAllTimers();
+    expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+  });
+
+  test('an immediate host re-registration preserves the playing scene', async () => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'varin.ide' });
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    vi.advanceTimersByTime(400);
+    release();
+    const releaseReplacement = registerWorkbenchProfileTransitionSceneHost();
+    await Promise.resolve();
+    expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({ id, phase: 'covering' });
+    vi.advanceTimersByTime(400);
+    expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({ id, phase: 'covered' });
+    releaseReplacement();
+    await Promise.resolve();
+  });
+
   test('reading a scene frame cannot consume its subscribers phase notifications', () => {
     const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'default' });
     const controller = createWorkbenchTransitionSceneController(id);
@@ -476,12 +512,13 @@ describe('scene retirement', () => {
     release();
   });
 
-  test('a host that leaves mid-retirement does not strand the transaction', () => {
+  test('a host that leaves mid-retirement does not strand the transaction', async () => {
     const release = registerWorkbenchProfileTransitionSceneHost();
     reachRevealEnd();
     expect(getWorkbenchProfileTransitionSnapshot().retiring).toBe(true);
 
     release();
+    await Promise.resolve();
     expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
   });
 

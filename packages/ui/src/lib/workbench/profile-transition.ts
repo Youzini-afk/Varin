@@ -298,16 +298,25 @@ export const revealWorkbenchProfileTransition = async (id: number): Promise<void
  * It decides who ends the transaction, and it removes the need for any timed fallback. With a host
  * registered, a finished reveal leaves pixels on screen that only that host can take away, so Core waits
  * for it. With no host — a headless caller, a test, a surface that never mounted the overlay — there is no
- * scene DOM to retire, so a finished reveal is simply the end. Neither path can hang, and neither path
- * needs a guess about how long a paint takes.
+ * scene DOM to retire, so a finished reveal is simply the end. Actual host removal also releases
+ * unfinished phases: a later mount must not replay an abandoned transaction.
  */
 export const registerWorkbenchProfileTransitionSceneHost = (): (() => void) => {
   const token = Symbol('varin.workbench.transition.host');
   sceneHosts.add(token);
   return () => {
     sceneHosts.delete(token);
-    // A host that leaves mid-retirement would otherwise strand the transaction it was going to finish.
-    if (sceneHosts.size === 0 && state.retiring) finalizeWorkbenchProfileTransition(state.id);
+    if (sceneHosts.size !== 0 || state.phase === 'idle') return;
+    const id = state.id;
+    // React may unregister/re-register layout effects in the same commit. Only cancel when the
+    // host really left, and never let a stale cleanup settle a newly started transition.
+    queueMicrotask(() => {
+      if (sceneHosts.size !== 0 || state.id !== id || state.phase === 'idle') return;
+      clearPhaseTimer();
+      phaseArmed = false;
+      resolveCoveredWaiters(false);
+      settleIdle();
+    });
   };
 };
 

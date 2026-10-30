@@ -92,3 +92,15 @@ test('delivers phases to the mounted scene and safely replaces an unfinished ret
   expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
   expect(host.querySelector('[data-varin-transition-scene]')).toBeNull();
 });
+
+test('recovering the page does not replay a transition whose scene host left', async () => {
+  await act(async () => { beginWorkbenchProfileTransition({ scene, toProfileId: 'workbench' }); });
+  await advance(10);
+  expect(host.querySelector('[data-phase]')?.getAttribute('data-phase')).toBe('covered');
+  await act(async () => root.render(null));
+  expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+  await act(async () => root.render(<WorkbenchTransitionOverlay />));
+  await advance(100);
+  expect(host.querySelector('[data-varin-transition-scene]')).toBeNull();
+  expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+});

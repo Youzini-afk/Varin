@@ -120,3 +120,54 @@ test('catalog watch restart on the same Host keeps the switch valid', async () =
   expect(state.restore).toHaveBeenCalledOnce();
   expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
 });
+
+test('repeated requests for the same pending choice share its preparation and scene', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const beforeCommit = () => gate;
+  const first = selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID, undefined, { beforeCommit });
+  // Observe both outcomes before submitting again, including the old cancellation behavior.
+  const firstResult = first.then(() => 'selected', () => 'cancelled');
+  await vi.runAllTimersAsync();
+  const second = selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID, undefined, { beforeCommit });
+  const secondResult = second.then(() => 'selected', () => 'cancelled');
+  release();
+  await vi.runAllTimersAsync();
+  expect(await Promise.all([firstResult, secondResult])).toEqual(['selected', 'selected']);
+  expect(state.prepare).toHaveBeenCalledOnce();
+  expect(state.select).toHaveBeenCalledOnce();
+  expect(state.restore).toHaveBeenCalledOnce();
+  expect(started).toEqual([VARIN_WORKBENCH_DEFAULT_PROFILE_ID]);
+  expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+});
+
+test('a conversation restore failure still reveals the committed workbench', async () => {
+  state.restore.mockImplementationOnce(() => { throw new Error('conversation restore failed'); });
+  const result = selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID)
+    .then(() => null, (error: unknown) => error);
+  await vi.runAllTimersAsync();
+  expect(await result).toMatchObject({ message: 'conversation restore failed' });
+  expect(state.snapshot.workbench.document.profileSelections.users.default).toBe(VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+  expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+});
+
+test('different conversation navigation to the same profile still supersedes the old intent', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const firstNavigation = vi.fn();
+  const nextNavigation = vi.fn();
+  const first = expect(selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID, undefined, {
+    beforeCommit: () => gate, selectOnLeavingBot: firstNavigation,
+  })).rejects.toMatchObject({ reason: 'superseded' });
+  await vi.runAllTimersAsync();
+  const next = selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID, undefined, {
+    selectOnLeavingBot: nextNavigation,
+  });
+  release();
+  await vi.runAllTimersAsync();
+  await Promise.all([first, next]);
+  expect(firstNavigation).not.toHaveBeenCalled();
+  expect(nextNavigation).toHaveBeenCalledOnce();
+  expect(state.select).toHaveBeenCalledOnce();
+  expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+});

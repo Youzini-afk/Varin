@@ -110,7 +110,15 @@ export interface WorkbenchShellTransitionDependencies {
 }
 
 let transitionQueue: Promise<void> = Promise.resolve();
-let liveProfileSelection: AbortController | null = null;
+interface LiveProfileSelection {
+  controller: AbortController;
+  profileId: string;
+  workspaceId?: string;
+  runtimeGeneration: number;
+  options: WorkbenchProfileTransitionOptions;
+  promise?: Promise<void>;
+}
+let liveProfileSelection: LiveProfileSelection | null = null;
 
 const enqueueWorkbenchShellTransition = (operation: () => Promise<void>): Promise<void> => {
   const run = transitionQueue.then(operation, operation);
@@ -423,26 +431,39 @@ const runSetWorkbenchReplacementSelection = (
 /**
  * The live switch. The transition cover is driven from here rather than from the switcher component,
  * because the switcher is rendered inside the shell being replaced and stops existing partway
- * through. `finish` runs for both outcomes: a rejected switch leaves the previous shell active and
- * still has to drop the cover.
+ * through. Identical pending choices share one transaction; different navigation callbacks retain
+ * their own intent and supersede it. Every settled outcome still has to release its own cover.
  */
-export const selectActiveWorkbenchProfile = async (
+export const selectActiveWorkbenchProfile = (
   profileId: string,
   workspaceId?: string,
   options?: WorkbenchProfileTransitionOptions,
 ): Promise<void> => {
-  const selection = new AbortController();
   const previous = liveProfileSelection;
+  const runtimeGeneration = getRuntimeEndpointGeneration();
+  if (previous?.promise
+    && previous.runtimeGeneration === runtimeGeneration
+    && previous.profileId === profileId && previous.workspaceId === workspaceId
+    && Boolean(previous.options.enableShell) === Boolean(options?.enableShell)
+    && previous.options.beforePrepare === options?.beforePrepare
+    && previous.options.beforeCommit === options?.beforeCommit
+    && previous.options.selectOnLeavingBot === options?.selectOnLeavingBot) return previous.promise;
+
+  const selection: LiveProfileSelection = {
+    controller: new AbortController(), profileId, workspaceId, runtimeGeneration, options: { ...options },
+  };
   liveProfileSelection = selection;
-  previous?.abort(new WorkbenchShellTransitionAbortedError());
-  try {
-    await performWorkbenchProfileSwitch(profileId, workspaceId, { ...options, signal: selection.signal });
+  previous?.controller.abort(new WorkbenchShellTransitionAbortedError());
+  selection.promise = performWorkbenchProfileSwitch(profileId, workspaceId, {
+    ...selection.options, signal: selection.controller.signal,
+  }).then(() => {
     // Stop the superseded caller too: it must not apply follow-up conversation navigation
     // as though its profile had become authoritative.
-    selection.signal.throwIfAborted();
-  } finally {
+    selection.controller.signal.throwIfAborted();
+  }).finally(() => {
     if (liveProfileSelection === selection) liveProfileSelection = null;
-  }
+  });
+  return selection.promise;
 };
 
 const performWorkbenchProfileSwitch = async (
@@ -535,25 +556,28 @@ const performWorkbenchProfileSwitch = async (
 
   const result = await candidate;
   if (options?.signal?.aborted) return;
-  if (!result.ok) {
-    // A preparation failure is also a settled result. If it happened while covering, reveal the
-    // previous authoritative shell at the scene's quick tempo after cover completes.
-    markWorkbenchProfileTransitionOperationPrepared(transitionId);
-  } else {
-    // Restore the ordinary conversation before the new Shell crosses its paint boundary.
-    // Restoring after it started a second content mount together with the reveal wave.
-    if (leavingBot && useThreadStore.getState().hostKey === runtimeKey) {
-      if (options?.selectOnLeavingBot) options.selectOnLeavingBot();
-      else restoreOrdinarySession();
+  try {
+    if (!result.ok) {
+      // A preparation failure is also a settled result. If it happened while covering, reveal the
+      // previous authoritative shell at the scene's quick tempo after cover completes.
+      markWorkbenchProfileTransitionOperationPrepared(transitionId);
+    } else {
+      // Restore the ordinary conversation before the new Shell crosses its paint boundary.
+      // Restoring after it started a second content mount together with the reveal wave.
+      if (leavingBot && useThreadStore.getState().hostKey === runtimeKey) {
+        if (options?.selectOnLeavingBot) options.selectOnLeavingBot();
+        else restoreOrdinarySession();
+      }
+      const targetPainted = await waitForWorkbenchProfileTransitionTargetPainted(transitionId);
+      // A newer selection owns its reveal; the ID checks in finally leave that scene alone.
+      if (!targetPainted) return;
     }
-    const targetPainted = await waitForWorkbenchProfileTransitionTargetPainted(transitionId);
-    // A newer selection can supersede this transaction after its persistence completed. Its Shell
-    // owns the next reveal, so this stale caller must not expose or complete that newer scene.
-    if (!targetPainted) return;
+  } finally {
+    // Restoring focus can fail after the Profile already committed. That error must not leave
+    // a completed switch behind an opaque cover or require another switch to release it.
+    const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);
+    if (covered) await revealWorkbenchProfileTransition(transitionId);
   }
-
-  const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);
-  if (covered) await revealWorkbenchProfileTransition(transitionId);
   if (!result.ok) throw result.error;
 };
 
