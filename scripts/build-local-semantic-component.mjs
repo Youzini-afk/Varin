@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { prepareOnnxRuntime } from '../packages/electron/scripts/prepare-onnx-runtime.mjs';
+import { BuildCache } from './build-cache.mjs';
 
 const repository = path.resolve(import.meta.dirname, '..');
 const webRoot = path.join(repository, 'packages/web');
@@ -24,6 +25,28 @@ const customModelSource = modelSourceArgument >= 0 ? path.resolve(process.argv[m
 const outputDirectory = path.resolve(outputArgument >= 0 ? process.argv[outputArgument + 1] : path.join(electronRoot, 'dist'));
 await fsp.mkdir(outputDirectory, { recursive: true });
 const artifact = path.join(outputDirectory, `Varin-local-semantic-${version}-${process.platform}-${architecture}.tar.gz`);
+const buildCache = new BuildCache(repository);
+const componentSource = await buildCache.inputs(['scripts/build-local-semantic-component.mjs', 'scripts/local-embedding-runtime',
+  'scripts/build-cache.mjs', 'packages/electron/scripts/prepare-onnx-runtime.mjs',
+  'packages/web/scripts/copy-semantic-model.mjs', 'scripts/local-embedding-worker.mjs',
+  'packages/web/application-host/lib/knowledge/semantic/local-component-manifest.ts',
+  'packages/web/application-host/lib/knowledge/semantic/runtime/bekko-embedding-v1-a8m/recipe.json',
+  'packages/web/application-host/lib/knowledge/semantic/runtime/bekko-embedding-v1-a8m/source.json']);
+const componentVersion = createHash('sha256').update(JSON.stringify({ componentSource, platform: process.platform, architecture,
+  nodeMajor: process.versions.node.split('.')[0], napi: process.versions.napi,
+  customModel: customModelSource ? await buildCache.outputs([customModelSource]) : null,
+})).digest('hex');
+const componentCache = path.join(os.homedir(), '.cache/varin-components/local-semantic', `${process.platform}-${architecture}`);
+const cachedArchive = path.join(componentCache, 'component.tar.gz');
+let cached;
+try { cached = JSON.parse(await fsp.readFile(path.join(componentCache, 'receipt.json'), 'utf8')); } catch { /* first component build */ }
+if (cached?.componentVersion === componentVersion && fs.existsSync(cachedArchive)
+  && createHash('sha256').update(await fsp.readFile(cachedArchive)).digest('hex') === cached.sha256) {
+  await fsp.copyFile(cachedArchive, artifact);
+  await fsp.writeFile(`${artifact}.sha256`, `${cached.sha256}  ${path.basename(artifact)}\n`);
+  console.log(`[local-semantic] reused verified component ${componentVersion.slice(0, 16)}: ${artifact}`);
+  process.exit(0);
+}
 const staging = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-local-semantic-build-'));
 const modules = path.join(staging, 'runtime/node_modules');
 const copied = new Map();
@@ -184,13 +207,18 @@ try {
   }
   await recordFiles(staging);
   await fsp.writeFile(path.join(staging, 'manifest.json'), JSON.stringify({
-    schemaVersion: 4, workerProtocol: 1, id: 'local-semantic', version, platform: process.platform, arch: architecture,
+    schemaVersion: 4, workerProtocol: 1, id: 'local-semantic', version: `4.1-${componentVersion.slice(0, 16)}`, platform: process.platform, arch: architecture,
     modelPath: 'model', transformersEntry, workerEntry: 'runtime/local-embedding-worker.mjs', files,
   }, null, 2) + '\n');
   await tar.c({ cwd: staging, file: `${artifact}.tmp`, gzip: true, portable: true }, ['manifest.json', 'model', 'runtime']);
   await fsp.rename(`${artifact}.tmp`, artifact);
   const bytes = await fsp.readFile(artifact);
-  await fsp.writeFile(`${artifact}.sha256`, `${createHash('sha256').update(bytes).digest('hex')}  ${path.basename(artifact)}\n`);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  await fsp.writeFile(`${artifact}.sha256`, `${sha256}  ${path.basename(artifact)}\n`);
+  await fsp.mkdir(componentCache, { recursive: true });
+  await fsp.copyFile(artifact, `${cachedArchive}.tmp-${process.pid}`);
+  await fsp.rename(`${cachedArchive}.tmp-${process.pid}`, cachedArchive);
+  await fsp.writeFile(path.join(componentCache, 'receipt.json'), JSON.stringify({ schema: 1, componentVersion, sha256 }) + '\n');
   console.log(`[local-semantic] ${artifact} (${(bytes.length / 1048576).toFixed(1)} MiB; ${Object.keys(files).length} files)`);
 } finally {
   await fsp.rm(staging, { recursive: true, force: true });

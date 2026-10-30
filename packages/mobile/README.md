@@ -33,7 +33,7 @@ snapshot references as desktop/Web, while file editing retains the mobile CodeMi
 Run these from `packages/mobile`, or use the root `mobile:*` aliases.
 
 - `bun run build`: builds the shared web client and prepares mobile web assets, without compiling the server or Rust kernel.
-- `bun run build:assets`: prepares mobile assets from an existing `packages/web/dist` build; the root workspace build uses this to avoid rebuilding web.
+- `bun run build:assets`: prepares mobile assets from the existing shared `artifacts/build/frontend` product; the root workspace build uses this to avoid rebuilding web.
 - `bun run sync`: prepares assets and runs `cap sync`.
 - `bun run add:ios`: creates the native iOS project.
 - `bun run add:android`: creates the native Android project.
@@ -79,7 +79,7 @@ Required local tools:
 ## Android release
 
 The `Release Build` workflow (`.github/workflows/desktop-release.yml`) builds Android alongside the
-desktop targets after source quality succeeds. The assembly job requires the verified APK and checksum
+desktop targets in parallel with source quality, consuming the same verified browser artifact. The assembly job requires source/native checks and the verified APK and checksum
 before uploading the complete artifact or attaching assets to an existing draft GitHub Release:
 
 - `Varin-<version>-android.apk` (one APK containing the supported Android architectures);

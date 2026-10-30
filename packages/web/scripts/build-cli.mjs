@@ -6,7 +6,8 @@ import path from 'node:path';
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
 const webRoot = path.join(repoRoot, 'packages', 'web');
-const outputDir = path.join(webRoot, 'bin');
+const outputIndex = process.argv.indexOf('--output');
+const outputDir = outputIndex >= 0 ? path.resolve(process.argv[outputIndex + 1]) : path.join(webRoot, 'bin');
 const stagingDir = path.join(webRoot, `.cli-staging-${process.pid}`);
 const backupDir = path.join(webRoot, `.cli-backup-${process.pid}`);
 
@@ -48,6 +49,7 @@ try {
 
   if (fs.existsSync(outputDir)) fs.renameSync(outputDir, backupDir);
   try {
+    fs.mkdirSync(path.dirname(outputDir), { recursive: true });
     fs.renameSync(stagingDir, outputDir);
     clean(backupDir);
   } catch (error) {

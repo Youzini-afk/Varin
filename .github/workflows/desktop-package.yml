@@ -1,0 +1,275 @@
+name: Desktop package
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      tooling_sha:
+        required: true
+        type: string
+      matrix:
+        required: true
+        type: string
+      release_ref:
+        default: ''
+        type: string
+      reuse_linux_kernel:
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  package:
+    name: Package and smoke ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      VARIN_TARGET_ARCH: ${{ matrix.architecture }}
+      VARIN_TARGET_PLATFORM: ${{ matrix.nodePlatform }}
+      VARIN_RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+      VARIN_RELEASE_TOOLING_SHA: ${{ inputs.tooling_sha }}
+      VARIN_FRONTEND_ARTIFACT: ${{ github.workspace }}/.build-input/frontend
+      VARIN_KERNEL_ARTIFACT: ${{ inputs.reuse_linux_kernel && format('{0}/.build-input/kernel', github.workspace) || '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
+
+      - name: Checkout current release automation
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tooling_sha }}
+          sparse-checkout: |
+            packages/electron
+            scripts
+            kernel/protocol
+          path: .release-automation
+
+      - name: Record packaged source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          version="$(node -p 'require("./packages/electron/package.json").version')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Require matching release tag and package version
+        if: inputs.release_ref != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.release_ref }}" = "v${{ steps.source.outputs.version }}"
+
+      - name: Select Xcode with Icon Composer support
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
+          test -n "$xcode_path"
+          export DEVELOPER_DIR="$xcode_path/Contents/Developer"
+          echo "DEVELOPER_DIR=$xcode_path/Contents/Developer" >> "$GITHUB_ENV"
+          xcrun --find actool
+
+      - name: Install Linux display dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xauth xvfb
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/electron/package.json', 'bun.lock') }}
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Attach Linux x64 VM guest runtime
+        if: matrix.platform == 'linux' && matrix.architecture == 'x64' && hashFiles('scripts/build-vm-guest-bundle.mjs') != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: varin-vm-guest-x64
+          path: packages/computer-driver/linux/guest-bundle-x64
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/varin-native/**/payload
+            ~/.cache/varin-native/**/receipt.json
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/electron/scripts/prepare-*-runtime.mjs', 'scripts/local-embedding-runtime/bun.lock') }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: varin-frontend
+          path: .build-input/frontend
+      - uses: actions/download-artifact@v8
+        if: inputs.reuse_linux_kernel
+        with:
+          name: varin-kernel-linux-x64
+          path: .build-input/kernel
+      - name: Build native desktop package
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'macos' && 'false' || '' }}
+          # The Monaco production bundle exceeds V8's ~2 GiB default heap on the macOS ARM runner.
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          set -euo pipefail
+          args=("--${{ matrix.target }}" "--${{ matrix.architecture }}" "--publish=never")
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            args+=("--varin-unsigned-mac")
+          fi
+          node packages/electron/scripts/package.mjs "${args[@]}"
+
+      - name: Smoke unpacked Windows application
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $executable = Get-ChildItem -LiteralPath packages/electron/dist -Recurse -File -Filter Varin.exe |
+            Where-Object { $_.FullName -match 'unpacked' } |
+            Select-Object -First 1
+          if (-not $executable) {
+            throw 'Packaged Varin.exe was not found under an unpacked output directory.'
+          }
+          node .release-automation/packages/electron/scripts/smoke-windows-unpacked.mjs $executable.FullName
+
+      - name: Verify and smoke Linux AppImage
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix="${{ matrix.architecture }}"
+          if [ "$suffix" = "x64" ]; then suffix=x86_64; fi
+          appimage="packages/electron/dist/Varin-${{ steps.source.outputs.version }}-linux-${suffix}.AppImage"
+          manifest="packages/electron/dist/latest-linux.yml"
+          if [ "${{ matrix.architecture }}" = "arm64" ]; then
+            manifest="packages/electron/dist/latest-linux-arm64.yml"
+          fi
+          node packages/electron/scripts/verify-update-manifest.mjs \
+            "$manifest" "$appimage" "${{ steps.source.outputs.version }}"
+          extract_root="$(mktemp -d)"
+          trap 'rm -rf "$extract_root"' EXIT
+          chmod +x "$appimage"
+          (cd "$extract_root" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
+          node --input-type=module -e '
+            import { assertElfArchitecture, verifyExtractedPayload } from "./.release-automation/packages/electron/scripts/verify-linux-appimage.mjs";
+            const targetArchitecture = process.env.VARIN_TARGET_ARCH;
+            assertElfArchitecture(process.argv[1], targetArchitecture, "AppImage");
+            verifyExtractedPayload({ root: process.argv[2], targetArchitecture });
+          ' "$appimage" "$extract_root/squashfs-root"
+          xvfb-run --auto-servernum node .release-automation/packages/electron/scripts/smoke-desktop-unpacked.mjs \
+            "$extract_root/squashfs-root/AppRun" --no-sandbox
+
+      - name: Verify and smoke macOS application
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(find packages/electron/dist -type d -name Varin.app -print -quit)"
+          test -n "$app"
+          executable="$app/Contents/MacOS/Varin"
+          expected_arch="${{ matrix.architecture }}"
+          if [ "$expected_arch" = "x64" ]; then expected_arch=x86_64; fi
+          file "$executable" | grep -q "$expected_arch"
+          native_modules="$(find "$app/Contents/Resources/app.asar.unpacked" -type f -name '*.node')"
+          test -n "$native_modules"
+          runtime_native_modules=''
+          while IFS= read -r native_module; do
+            if [[ "$native_module" == *'/prebuilds/'* ]] \
+              && [[ "$native_module" != *"/prebuilds/darwin-${{ matrix.architecture }}/"* ]] \
+              && [[ "$native_module" != *"/prebuilds/darwin-${{ matrix.architecture }}.node" ]]; then
+              continue
+            fi
+            runtime_native_modules="${runtime_native_modules}${runtime_native_modules:+$'\n'}${native_module}"
+          done <<< "$native_modules"
+          file "$app/Contents/Resources/kernel/varin-kernel" | grep -q "$expected_arch"
+          printf '%s\n' "$runtime_native_modules" | grep -q "/triviumdb.darwin-${{ matrix.architecture }}.node$"
+          for required in sherpa-onnx.node; do
+            printf '%s\n' "$runtime_native_modules" | grep -q "/$required$"
+          done
+          while IFS= read -r native_module; do
+            description="$(file "$native_module")"
+            printf '%s\n' "$description"
+            grep -q "$expected_arch" <<< "$description"
+          done <<< "$runtime_native_modules"
+          node .release-automation/packages/electron/scripts/smoke-desktop-unpacked.mjs "$executable"
+
+      - name: Stage Windows release assets
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $assets = 'packages/electron/release-assets'
+          New-Item -ItemType Directory -Path $assets -Force | Out-Null
+          Copy-Item -LiteralPath "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe" -Destination $assets
+          Copy-Item -LiteralPath "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe.blockmap" -Destination $assets
+          Copy-Item -LiteralPath 'packages/electron/dist/latest.yml' -Destination $assets
+
+      - name: Stage Linux release assets
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p packages/electron/release-assets
+          suffix="${{ matrix.architecture }}"
+          manifest=latest-linux.yml
+          if [ "$suffix" = "x64" ]; then suffix=x86_64; else manifest=latest-linux-arm64.yml; fi
+          cp "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-linux-${suffix}.AppImage" \
+            "packages/electron/dist/$manifest" packages/electron/release-assets/
+
+      - name: Stage macOS release assets
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p packages/electron/release-assets
+          cp "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.dmg" \
+            "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.zip" \
+            packages/electron/dist/latest-mac.yml packages/electron/release-assets/
+          for optional in \
+            "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.dmg.blockmap" \
+            "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.zip.blockmap"; do
+            if [ -f "$optional" ]; then cp "$optional" packages/electron/release-assets/; fi
+          done
+
+      - name: Record verified product provenance
+        shell: bash
+        run: node scripts/release-artifacts.mjs record --directory packages/electron/release-assets --kind desktop --platform '${{ matrix.nodePlatform }}' --arch '${{ matrix.architecture }}'
+
+      - name: Upload verified native package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          path: packages/electron/release-assets/*
+          retention-days: 14
+          compression-level: 0
+          overwrite: true

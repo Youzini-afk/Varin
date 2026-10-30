@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "branding:generate": "node scripts/generate-native-brand-assets.mjs",
-    "build": "bun run --cwd ../web build:client && bun run build:assets",
+    "build": "node ../../scripts/build-products.mjs frontend && bun run build:assets",
     "build:assets": "node scripts/prepare-web-assets.mjs",
     "sync": "node scripts/with-mobile-env.mjs \"bun run build && cap sync\"",
     "add:ios": "cap add ios",

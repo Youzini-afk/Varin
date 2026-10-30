@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { remapAsarUnpackedPath } from '../structure/runtime-path.js';
 import type { SpawnOptions } from 'node:child_process';
 import type pathModule from 'node:path';
 import { buildSmartSearchConfigResponse, normalizeSmartSearchPatch, redactSmartSearchPayload, redactSmartSearchSecrets, resolveSmartSearchBinary, resolveSmartSearchBinaryLabel } from './config.js';
@@ -158,7 +159,7 @@ export const createSmartSearchRuntime = (dependencies: SmartSearchRuntimeDepende
     if (typeof resolvePackageRoot === 'function') return resolvePackageRoot();
     try {
       const requireFromHere = createRequire(import.meta.url);
-      return path.dirname(requireFromHere.resolve('@konbakuyomu/smart-search/package.json'));
+      return remapAsarUnpackedPath(path.dirname(requireFromHere.resolve('@konbakuyomu/smart-search/package.json')));
     } catch {
       return '';
     }
@@ -191,7 +192,8 @@ export const createSmartSearchRuntime = (dependencies: SmartSearchRuntimeDepende
     const packageRoot = resolveInstalledPackageRoot();
     const packageWrapper = packageRoot ? path.join(packageRoot, 'npm', 'bin', 'smart-search.js') : '';
     if (packageWrapper && await hasFile(packageWrapper)) {
-      candidates.push({ label: '@konbakuyomu/smart-search package', command: process.execPath, args: [packageWrapper, ...args] });
+      candidates.push({ label: '@konbakuyomu/smart-search package', command: process.execPath, args: [packageWrapper, ...args],
+        ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {}) });
     }
 
     const sourceDir = await getConfiguredSourceDir();

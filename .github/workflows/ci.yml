@@ -78,6 +78,22 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       # Documentation checks use only Node built-ins; prose-only changes do not
       # need the workspace/native dependency installation or postinstall hooks.
       - if: needs.changes.outputs.code == 'true'
@@ -182,6 +198,22 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       - id: dependencies
         run: bun install --frozen-lockfile
       - id: prepare
@@ -236,6 +268,22 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       - name: Compile and ad-hoc sign the bundled FSKit executor
         run: |
           XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
@@ -271,6 +319,22 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       - run: bun install --frozen-lockfile
       - run: bun run build
       # Imports the built server artifact under plain Node: vitest's CJS

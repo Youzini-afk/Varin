@@ -33,7 +33,8 @@
     "build:monaco-smoke": "bun run --cwd packages/web build:monaco-smoke",
     "build:electron": "bun run --cwd packages/electron build",
     "build:mobile": "bun run --cwd packages/mobile build",
-    "build:runtime-dependencies": "bun run --cwd packages/settings-store build && bun run --cwd packages/protocol build && bun run --cwd packages/script-runtime build && bun run --cwd packages/extension-contract build && bun run --cwd packages/application-client build:raw && bun run --cwd packages/extension-surface build:raw && bun run --cwd packages/extension-sdk build:raw && bun run --cwd packages/extension-builtins build:raw && bun run --cwd packages/extension-host build:raw && bun run --cwd packages/extension-loader build:raw",
+    "build:runtime-dependencies": "node scripts/build-products.mjs runtime",
+    "build:frontend": "node scripts/build-products.mjs frontend",
     "build:type-dependencies": "bun run build:runtime-dependencies && bun run --cwd packages/web build:application-host:types",
     "type-check": "bun run build:type-dependencies && bun run type-check:prepared",
     "type-check:prepared": "bun run --filter '!@varin/web' type-check && bun run --cwd packages/web type-check:prepared",
@@ -115,7 +116,7 @@
     "test:packages": "bun run --sequential --no-exit-on-error --filter '@varin/*' test",
     "test:packages:dist": "bun run --sequential --no-exit-on-error --filter '@varin/*' test:dist",
     "check:packages": "bun run type-check && bun run test:packages",
-    "test:tooling": "node --test scripts/host-production-boundary.test.mjs scripts/cloud-runtime-layout.test.js scripts/dependabot-report.test.mjs scripts/ci-workflow.test.mjs scripts/zod-consumer-compatibility.test.mjs scripts/harness-replay.test.mjs scripts/npm-public-release.test.mjs packages/computer-driver/macos/test_build_helper.mjs packages/mobile/scripts/native-identity.test.mjs packages/mobile/scripts/android-release.test.mjs \"packages/electron/scripts/*.test.mjs\"",
+    "test:tooling": "node --test scripts/host-production-boundary.test.mjs scripts/cloud-runtime-layout.test.js scripts/dependabot-report.test.mjs scripts/ci-workflow.test.mjs scripts/build-cache.test.mjs scripts/release-artifacts.test.mjs scripts/zod-consumer-compatibility.test.mjs scripts/harness-replay.test.mjs scripts/npm-public-release.test.mjs packages/computer-driver/macos/test_build_helper.mjs packages/mobile/scripts/native-identity.test.mjs packages/mobile/scripts/android-release.test.mjs \"packages/electron/scripts/*.test.mjs\"",
     "test:packages:platform": "bun run --sequential --no-exit-on-error --filter '@varin/electron' --filter '@varin/extension-host' --filter '@varin/extension-loader' --filter '@varin/extension-cli' --filter '@varin/settings-store' --filter '@varin/script-runtime' test"
   },
   "overrides": {

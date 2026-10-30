@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { stageRuntime } from './stage-runtime.mjs';
+
+test('the production tree excludes checkout artifacts, keeps versioned Node resolution and unpacks worker dependency closures', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-stage-runtime-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const write = async (name, value) => { const file = path.join(root, name); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, value); };
+  const pkg = async (directory, name, dependencies = {}, extra = {}) => {
+    await write(`${directory}/package.json`, JSON.stringify({ name, version: '1.0.0', dependencies, ...extra }));
+    await write(`${directory}/index.js`, 'module.exports = 1;');
+  };
+  await pkg('packages/electron', '@varin/electron', { '@varin/web': 'workspace:*', '@varin/script-runtime': 'workspace:*', plain: '1.0.0', native: '1.0.0' });
+  await write('packages/electron/bootstrap.mjs', ''); await write('packages/electron/dist-bundle/main.mjs', '');
+  const modules = 'packages/electron/node_modules';
+  await pkg(`${modules}/@varin/web`, '@varin/web', { plain: '2.0.0' });
+  await pkg(`${modules}/@varin/web/node_modules/plain`, 'plain');
+  await write(`${modules}/@varin/web/.application-host-dev-123/stale.js`, 'stale');
+  await write(`${modules}/@varin/web/public/companion-assets/atlas.png`, 'art');
+  await pkg(`${modules}/@varin/script-runtime`, '@varin/script-runtime', { string_decoder: '1.0.0' });
+  await write(`${modules}/@varin/script-runtime/dist/worker.js`, '');
+  await pkg(`${modules}/string_decoder`, 'string_decoder');
+  await pkg(`${modules}/plain`, 'plain');
+  await pkg(`${modules}/native`, 'native', { helper: '1.0.0' }, { peerDependencies: { peer: '1.0.0', absent: '*' }, peerDependenciesMeta: { absent: { optional: true } } });
+  await write(`${modules}/native/native.node`, 'native fixture');
+  await pkg(`${modules}/helper`, 'helper');
+  await pkg(`${modules}/peer`, 'peer');
+  await write('host/index.js', 'production host');
+  await write('host/lib/structure/language.wasm', 'grammar');
+  const destination = path.join(root, 'product');
+  const result = await stageRuntime({ repository: root, destination, hostDirectory: path.join(root, 'host') });
+  assert.deepEqual((await fs.readdir(path.join(destination, 'node_modules/@varin/web'))).sort(), ['node_modules', 'package.json', 'server']);
+  assert.equal(await fs.readFile(path.join(destination, 'node_modules/@varin/web/server/index.js'), 'utf8'), 'production host');
+  assert.equal(await fs.readFile(path.join(destination, 'node_modules/@varin/web/node_modules/plain/index.js'), 'utf8'), 'module.exports = 1;');
+  assert.ok(result.unpackPatterns.includes('node_modules/string_decoder/**/*'));
+  assert.ok(result.unpackPatterns.includes('node_modules/helper/**/*'));
+  assert.ok(result.unpackPatterns.includes('node_modules/peer/**/*'));
+  assert.ok(!result.unpackPatterns.includes('node_modules/plain/**/*'));
+  assert.equal(JSON.parse(await fs.readFile(path.join(destination, 'package.json'), 'utf8')).dependencies['@varin/web'], '1.0.0');
+});

@@ -43,7 +43,9 @@ palette, so the application loading animation starts from the same composition.
 | Application Host `lib/connections` | Shared SSH import, connection lifecycle and forwarding; Electron delegates through its embedded Host |
 | `renderer-security-policy.ts` | Trusted-origin policy and remote-safe command gate for the preload bridge |
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
-| `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
+| `scripts/build-desktop.mjs` | Prepares the desktop product graph, production dependency tree and target runtime |
+| `scripts/build-web-assets.mjs` | Stages the shared browser product into `resources/web-dist` |
+| `scripts/stage-runtime.mjs` | Collects a closed production dependency tree and computes physical worker/native closures |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/main.mjs` for packaging |
 | `scripts/verify-native.mjs` | Runs the staged release-kernel and TriviumDB smoke under Electron's Node runtime |
 | `scripts/package.mjs` | Runs `electron-builder`; release automation can explicitly select unsigned Windows or macOS packaging |
@@ -52,7 +54,7 @@ palette, so the application loading animation starts from the same composition.
 | `scripts/build-installer-plugin.cjs` | Builds the x86 NSIS plugin and generates default-theme colors and localized copy |
 | `resources/` | Packaged web assets, icons, and macOS entitlements |
 
-The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/preload.mjs` by `scripts/bundle-main.mjs`. The `files` config in `package.json` ships only those two bundled entries — no `.ts` source, test, or loader reaches the packaged app.
+The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/preload.mjs` by `scripts/bundle-main.mjs`. Packaging stages those entries and `bootstrap.mjs` into a standalone production app; source checkouts, tests and development loaders stay outside that tree.
 
 Ordinary app/tray quit confirms background-work risk, then lets Electron close its windows and run
 `beforeunload` while the embedded Host is still available. `quit-lifecycle.ts` drains services at
@@ -121,28 +123,28 @@ From the repo root:
 bun run electron:build
 ```
 
-That runs, in order:
+`package.mjs` owns the complete preparation through `build-desktop.mjs`. It consumes the shared
+runtime, browser, platform Host and target kernel products from `scripts/build-products.mjs`, prepares
+the target native recipe once, bundles main/preload, then collects a standalone production app under
+`artifacts/build/desktop-<platform>-<arch>/app`. Collection resolves the installed dependency graph into
+ordinary directories, preserving conflicting versions and runtime assets without traversing workspace
+junctions. Desktop has no CLI payload or second frontend/kernel copy.
 
-1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
-2. `prepare:runtime` to build the shared runtime dependencies and Application Host.
-3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
-4. `verify:native` to prepare target native libraries, start the manifest-verified release kernel,
-   and perform a durable TriviumDB read/write through Electron's Node runtime. Storage and PTY no
-   longer use Electron native addons.
-5. `package.mjs` to build the target Rust kernel, stage it in `resources/kernel`, and run
-   `electron-builder`. Its `afterPack` hook verifies the kernel identity/hash, keeps only the target
-   TriviumDB binary, rejects optional transformers/ONNX dependencies and model weights in the base app,
-   rejects retired `better-sqlite3` / `node-pty` / `bun-pty` authority packages, and
-   removes the duplicate dependency copy of the already staged Web UI. It also verifies that every
-   distribution-owned Host runtime needed after lazy activation, including the TypeScript language
-   package and its `tsserver`, exists in the physical `app.asar.unpacked` tree.
+Each build stage records the actual source inputs, relevant toolchain/options and output hashes under
+`artifacts/build/cache`. A matching input key alone is insufficient: modified or missing outputs rebuild.
+Failed stages discard their receipt. These generated products and receipts can be deleted to request a
+clean build; they contain no user state. CI can import the shared browser product and Linux x64 kernel
+using `VARIN_FRONTEND_ARTIFACT` and `VARIN_KERNEL_ARTIFACT`; imports check both inputs and payload hashes.
+Other native kernels, Host outputs and libraries stay on their matching platform runners.
 
-Build output goes to `packages/electron/dist`. The embedded `@varin/web` package includes only its
-production `server`, CLI `bin` and package/license metadata. Its `public`, source checkout files and
-private Host dev/staging/backup generations are excluded at collection time, including optional artwork
-that also exists under `public`. Frontend assets live only in `resources/web-dist`; desktop uses
-`resources/kernel` rather than the duplicate Web-owned kernel. `afterPack` checks this production boundary
-instead of deleting unexpected frontend copies after they have already been collected.
+Build output remains `packages/electron/dist`. Main-process JavaScript uses ASAR; Node worker and external
+program dependency closures, native binaries and their assets remain physical. The generated builder
+configuration owns those unpack patterns. `afterPack` verifies the actual virtual main-process import
+path and physical knowledge process, managed script runtime, TypeScript libraries and PDF/Canvas runtime.
+It also verifies the kernel identity/hash and rejects optional embedding weights, retired authority
+packages and duplicate Web payload. Frontend assets live only in `resources/web-dist`; the kernel lives
+only in `resources/kernel`. Production `@varin/web` contains its compiled `server` and package/license
+metadata, excluding `public`, source and private Host development generations at collection time.
 
 ### Optional desktop companions
 
@@ -175,7 +177,8 @@ Normal chats and shared tasks do not require a filesystem component. Explicit in
 check the actual execution Host before inventory or content capture. Project settings show that Host's
 backend, platform, architecture and dependency diagnostic, with an explicit refresh action.
 
-Windows setup offers an unchecked optional WinFsp component page. `workspace-component.json` pins the
+Windows setup offers an optional WinFsp component page, selected by default when no compatible component
+is detected and unselected when the installed component can be reused. `workspace-component.json` pins the
 unmodified official **WinFsp 2026 Beta5 (2.2.26286)** MSI, SHA-256 and license. The selected preview
 contains the upstream cached-write/concurrent-rename fixes; the installer names that preview explicitly.
 `prepare-workspace-component.mjs` prepares the verified build cache through the existing Windows
@@ -297,8 +300,12 @@ Replacing a component drains its original requests, releases the old encoder and
 the previous component files. Failed validation keeps the current component active.
 The base application has no Transformers/ONNX dependency for embeddings. On macOS Intel,
 the optional builder prepares ONNX Runtime 1.30.0 from its pinned source revision when
-upstream does not provide the native binary. Desktop release jobs publish the component
-archive alongside the application; no code-index runtime is included.
+upstream does not provide the native binary. A separate release job publishes the component
+archive alongside the application; no code-index runtime is included. Its internal version derives
+from the model/runtime/build inputs rather than the application version. A verified archive is cached
+under `~/.cache/varin-components/local-semantic/<platform>-<arch>` and reused when only the app changes;
+the transport filename retains the app version for existing component discovery. Cache misses still
+run the real inference check before publication.
 
 The native preparation recipe supplies a binary absent from the pinned npm package:
 
@@ -374,6 +381,19 @@ and required by final assembly; see [mobile signing](../mobile/README.md#android
 The slow macOS Intel target is a manual opt-in on that workflow, so routine releases do not wait for
 the Intel runner. `publish_release` uploads assets to the draft; additionally setting `publish_draft`
 publishes it after the complete verified asset set has uploaded. Both options default to false.
+
+The workflow accepts the tag's exact source SHA and Android counter once, retaining that candidate in
+an artifact. Browser assets build once; the Linux x64 kernel is shared with native acceptance, VM guest
+and Linux x64 packaging. Source checks, native acceptance, platform packaging, optional inference
+components and Android run along their actual dependencies in parallel. Only Linux x64 packaging waits
+for the VM guest. The manual Windows workflow calls the same packaging workflow and product builder.
+
+Use GitHub's **Re-run failed jobs** to resume a candidate: completed product artifacts remain usable,
+and retrying preserves its source and Android version code. Final assembly requires every selected
+product, its original source/tooling identity and exact file hashes, then generates `release-source.json`
+and `SHA256SUMS`. Both upload and publication recheck the tag. If the tag has moved, the candidate's
+verified artifacts remain available but are not attached to the changed release. Start a new workflow
+run for the new source instead of mixing products from different commits.
 
 All platforms share one startup smoke: launch the unpacked packaged application with clean temporary
 data configured to use the local Host, wait for its main workspace and renderer readiness, then check

@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
 import { prepareRipgrep } from '../../../scripts/prepare-ripgrep.mjs';
+import { prepareDesktopProduct } from './build-desktop.mjs';
 
 const electronDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env };
@@ -47,7 +48,6 @@ if (process.platform === 'win32' && !env.CSC_LINK && !env.WIN_CSC_LINK) {
 
 if (unsignedMac) {
   env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
-  builderArgs.push('--config=scripts/electron-builder.unsigned-mac.cjs');
   console.log('[electron] macOS code signing and notarization disabled for this package.');
 }
 
@@ -64,23 +64,17 @@ const bunBinary = bunBinaryCandidates.find((candidate) => {
   return false;
 }) || (process.platform === 'win32' ? 'bun.exe' : 'bun');
 
-execFileSync(process.execPath, [path.join(electronDir, 'scripts', 'prepare-native-runtime.mjs')], {
-  cwd: electronDir, env, stdio: 'inherit', windowsHide: true,
-});
-
-execFileSync(process.execPath, [
-  path.resolve(electronDir, '..', '..', 'scripts', 'build-kernel.mjs'),
-  '--stage',
-  path.join(electronDir, 'resources', 'kernel'),
-  '--platform',
-  targetPlatform,
-  '--arch',
-  targetArchitecture.node,
-], {
-  cwd: electronDir,
-  env,
-  stdio: 'inherit',
-});
+const prepared = await prepareDesktopProduct({ platform: targetPlatform, architecture: targetArchitecture.node });
+const configuration = structuredClone(require('../package.json').build);
+configuration.directories.app = prepared.directory;
+configuration.asarUnpack = prepared.unpackPatterns;
+if (unsignedMac) {
+  configuration.dmg.sign = false;
+  Object.assign(configuration.mac, { hardenedRuntime: false, identity: null, notarize: false });
+}
+const configurationPath = path.join(path.dirname(prepared.directory), 'electron-builder.cjs');
+await fs.promises.writeFile(configurationPath, `module.exports = ${JSON.stringify(configuration, null, 2)};\n`);
+builderArgs.unshift(`--config=${configurationPath}`);
 
 if (targetPlatform === 'linux' && !builderArgs.some((argument) => (
   argument === '--x64' || argument === '--arm64' || argument === '--arch' || argument.startsWith('--arch=')

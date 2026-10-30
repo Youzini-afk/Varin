@@ -13,6 +13,7 @@ import { EventEmitter } from 'events';
 import { fileURLToPath } from 'url';
 
 import { applySherpaLoaderEnv } from './sherpa-loader.js';
+import { remapAsarUnpackedPath } from '../../structure/runtime-path.js';
 import type { WorkerRequest } from '../types.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
@@ -21,7 +22,7 @@ const DEFAULT_LOCAL_SAMPLE_RATE = 16000;
 const STDERR_TAIL_MAX_CHARS = 2000;
 
 const runsFromTypeScriptSource = fileURLToPath(import.meta.url).endsWith('.ts');
-const workerPath = fileURLToPath(new URL(`./worker-process.${runsFromTypeScriptSource ? 'ts' : 'js'}`, import.meta.url));
+const workerPath = remapAsarUnpackedPath(fileURLToPath(new URL(`./worker-process.${runsFromTypeScriptSource ? 'ts' : 'js'}`, import.meta.url)));
 const workerExecArgv = runsFromTypeScriptSource && !process.versions.bun
   ? ['--import', import.meta.resolve('tsx')]
   : [];

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const mobileRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const webDist = path.resolve(mobileRoot, '../web/dist');
+const webDist = path.resolve(mobileRoot, '../../artifacts/build/frontend');
 const mobileDist = path.resolve(mobileRoot, 'dist');
 const mobileHtml = path.join(mobileDist, 'mobile.html');
 const indexHtml = path.join(mobileDist, 'index.html');

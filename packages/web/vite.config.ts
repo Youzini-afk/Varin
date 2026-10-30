@@ -1,12 +1,27 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
+import { cp } from 'node:fs/promises';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
+const productUi = process.env.VARIN_PRODUCT_UI === '1';
+const productPublicAssets = (): Plugin => {
+  let destination = '';
+  return {
+    name: 'varin-product-public-assets',
+    configResolved(config) { destination = config.build.outDir; },
+    async writeBundle() {
+      const source = path.join(__dirname, 'public');
+      await cp(source, destination, { recursive: true, filter: filename =>
+        !['companion-assets', 'companion-review-director'].includes(path.relative(source, filename).split(path.sep)[0]),
+      });
+    },
+  };
+};
 const pwaDevEnabled = process.env.VARIN_DISABLE_PWA_DEV !== '1';
 const lowMemoryBuild = process.env.VARIN_LOW_MEMORY_BUILD === '1';
 const monacoSmokeEnabled = process.env.VARIN_MONACO_SMOKE === '1';
@@ -49,7 +64,9 @@ const themeJsonHmrPlugin = () => ({
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
+  publicDir: productUi ? false : 'public',
   plugins: [
+    ...(productUi ? [productPublicAssets()] : []),
     react({
       babel: {
         plugins: lowMemoryBuild ? [] : ['babel-plugin-react-compiler'],

@@ -28,9 +28,11 @@ const devOutputName = devOutputArg >= 0 ? process.argv[devOutputArg + 1] : null;
 if (devOutputArg >= 0 && (!devOutputName || !/^\.application-host-dev-\d+$/.test(devOutputName))) {
   throw new Error('--dev-output requires a private .application-host-dev-<pid> directory name');
 }
+const productOutputArg = process.argv.indexOf('--output');
+if (productOutputArg >= 0 && (!process.argv[productOutputArg + 1] || devOutputName)) throw new Error('--output requires a production directory and cannot be combined with --dev-output');
 const outputDir = devOutputName
   ? path.join(webRoot, devOutputName)
-  : path.join(webRoot, 'server');
+  : productOutputArg >= 0 ? path.resolve(process.argv[productOutputArg + 1]) : path.join(webRoot, 'server');
 
 const log = (message) => process.stdout.write(`[build:application-host] ${message}\n`);
 
@@ -210,6 +212,7 @@ try {
   }
 
   try {
+    fs.mkdirSync(path.dirname(outputDir), { recursive: true });
     fs.renameSync(stagingDir, outputDir);
     log(`Replaced ${outputDir}`);
     // Clean up backup

@@ -99,7 +99,7 @@ const packageFiles = Object.freeze({
   },
   web: {
     required: ['package.json', 'bin', 'server', 'dist', 'kernel'],
-    optional: ['public', 'README.md'],
+    optional: ['README.md'],
   },
 });
 
@@ -400,14 +400,13 @@ export const installCloudRuntimeDependencies = (
 };
 
 const buildSourcePackages = ({ json }) => {
-  run('bun', ['run', 'build:web'], {
-    env: { VARIN_LOW_MEMORY_BUILD: '1' },
+  run(process.execPath, ['scripts/build-products.mjs', 'web'], {
     json,
     label: 'Varin web and runtime dependencies build',
   });
 };
 
-const stageRuntimeTree = (outputDir) => {
+const stageRuntimeTree = (outputDir, productWeb = false) => {
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(path.join(outputDir, 'packages'), { recursive: true });
 
@@ -433,7 +432,9 @@ const stageRuntimeTree = (outputDir) => {
     const sourceRoot = path.join(repoRoot, 'packages', directory);
     const destinationRoot = path.join(outputDir, 'packages', directory);
     for (const entry of packageFiles[directory].required) {
-      copyEntry(path.join(sourceRoot, entry), path.join(destinationRoot, entry), true);
+      const productEntry = directory === 'web' && productWeb && ['server', 'dist', 'kernel', 'bin'].includes(entry)
+        ? path.join(repoRoot, 'artifacts/build/web', entry) : path.join(sourceRoot, entry);
+      copyEntry(productEntry, path.join(destinationRoot, entry), true);
     }
     for (const entry of packageFiles[directory].optional) {
       copyEntry(path.join(sourceRoot, entry), path.join(destinationRoot, entry), false);
@@ -499,7 +500,7 @@ export const buildCloudRuntime = ({
 } = {}) => {
   const resolvedOutput = path.resolve(outputDir || path.join(repoRoot, 'artifacts', 'cloud-runtime'));
   if (build) buildSourcePackages({ json });
-  const runtimeManifest = stageRuntimeTree(resolvedOutput);
+  const runtimeManifest = stageRuntimeTree(resolvedOutput, build);
 
   if (updateLock && !generateLock) {
     throw new Error('--update-lock cannot be combined with --no-lock.');

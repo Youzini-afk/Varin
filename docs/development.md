@@ -82,6 +82,7 @@ PR 中的 Docker workflow 验证实际镜像的构建、启动、身份和 nativ
 | Rust workspace 测试 | `bun run test:rust` |
 | 已核验 release kernel 的 Host 验收 | `bun run test:kernel` |
 | 工具、发布与平台配置行为 | `bun run test:tooling` |
+| 共享浏览器产物 / 完整桌面包 | `bun run build:frontend` / `bun run electron:build` |
 | 仅 Host 生产边界及 cloud layout helper | `bun run test:cloud` |
 | 文档链接 / public route 与工程文档 | `bun run docs:check` / `bun run docs:validate` |
 | 文档检查器本身 | `bun run test:docs` |
@@ -116,6 +117,17 @@ Windows 的无桌面 input targeting 回归由 `packages/computer-driver/windows
 `build:runtime-dependencies` 按依赖图准备一次共享输出；`build:type-dependencies` 再生成 Host 声明。
 根 build、Web build 和 type-check 复用这些有序输出。包级 `build` 保持独立可用；`build:raw` 仅供已经准备依赖的
 有序聚合使用。`type-check:prepared` 不重新构建。发布前仍使用相应目标的正式命令。
+
+生产构建由 `scripts/build-products.mjs` 统一准备，产物与可丢弃的构建回执在 `artifacts/build`。
+复用同时核对源码、工具链/选项及现有产物的内容摘要，输出缺失、被改写或上次构建失败时重新生成。
+浏览器产物与平台 Host、kernel、CLI 分开：移动端只消费浏览器；桌面消费浏览器、对应平台的 Host/kernel，
+再收集独立的生产依赖目录；Web/cloud 将各部分组合。桌面构建不会覆盖正在运行的 Web server generation。
+`bun run --cwd packages/web build` 仍将完成的 Web 产品发布到原有 `server`、`dist`、`kernel`、`bin` 路径。
+
+发行流程先固定候选源码和 Android 构建号，共享浏览器和 Linux x64 kernel，再按真实依赖并行检查和打包。
+只有 Linux x64 安装包等待其 VM guest；可选嵌入组件独立构建并按内容复用。最终汇总核验各产品的源码归属、
+完整集合和文件摘要后才允许上传或发布；失败时重跑失败作业，保留已成功产品。
+入口、产物布局和重试方式见 [Desktop 打包说明](../packages/electron/README.md#packaging)。
 
 Host 类型由独立 Node 工程检查，Web/CLI/跨层测试通过 `#application-host` 读取新生成声明；Vitest 使用真实 Host 源码。
 不要用旧 server/ 或旧声明验证新源码。Electron 的类型准备不需要覆盖正在运行的 server generation。

@@ -9,6 +9,9 @@ const require = createRequire(import.meta.url);
 const { defaultKernelTargetTriple, detectKernelBinaryIdentity, normalizeKernelArchitecture } = require('./kernel-binary-identity.cjs');
 
 const root = path.resolve(import.meta.dirname, '..');
+const pinnedToolchain = /^channel\s*=\s*"([^"]+)"/m.exec(fs.readFileSync(path.join(root, 'kernel/rust-toolchain.toml'), 'utf8'))?.[1];
+if (!pinnedToolchain) throw new Error('kernel/rust-toolchain.toml must declare its build toolchain');
+const rustEnvironment = { ...process.env, RUSTUP_TOOLCHAIN: process.env.RUSTUP_TOOLCHAIN || pinnedToolchain };
 const { protocolVersion } = JSON.parse(fs.readFileSync(path.join(root, 'kernel', 'protocol', 'schema.json'), 'utf8'));
 const args = process.argv.slice(2);
 const stageIndex = args.indexOf('--stage');
@@ -65,17 +68,18 @@ if (prebuilt) {
       cwd: root,
       stdio: 'inherit',
       windowsHide: true,
-      env: { ...process.env, VARIN_KERNEL_BUILD_IDENTITY: buildIdentity, VARIN_KERNEL_TARGET: targetTriple, VARIN_KERNEL_ARCH: arch },
+      env: { ...rustEnvironment, VARIN_KERNEL_BUILD_IDENTITY: buildIdentity, VARIN_KERNEL_TARGET: targetTriple, VARIN_KERNEL_ARCH: arch },
       shell: true,
     })
     : spawnSync(command, commandArgs, {
       cwd: root,
       stdio: 'inherit',
       windowsHide: true,
-      env: { ...process.env, VARIN_KERNEL_BUILD_IDENTITY: buildIdentity, VARIN_KERNEL_TARGET: targetTriple, VARIN_KERNEL_ARCH: arch },
+      env: { ...rustEnvironment, VARIN_KERNEL_BUILD_IDENTITY: buildIdentity, VARIN_KERNEL_TARGET: targetTriple, VARIN_KERNEL_ARCH: arch },
     });
   if (result.status !== 0) process.exit(result.status ?? 1);
-  source = path.join(root, 'kernel', 'target', ...(cargoTarget ? [cargoTarget] : []), 'release', executable);
+  const targetDirectory = process.env.CARGO_TARGET_DIR ? path.resolve(root, process.env.CARGO_TARGET_DIR) : path.join(root, 'kernel', 'target');
+  source = path.join(targetDirectory, ...(cargoTarget ? [cargoTarget] : []), 'release', executable);
 }
 if (!fs.existsSync(source)) throw new Error(`Rust kernel build did not produce ${source}`);
 const binaryIdentity = detectKernelBinaryIdentity(fs.readFileSync(source));

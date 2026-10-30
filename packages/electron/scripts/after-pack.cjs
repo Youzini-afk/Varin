@@ -158,13 +158,23 @@ module.exports = (context) => {
       : context.packager.appInfo.productFilename.toLowerCase());
   execFileSync(packagedExecutable, [
     path.resolve(__dirname, '../../../scripts/smoke-kernel-release.mjs'),
-    path.join(unpackedNodeModulesPath, '@varin', 'web'),
+    path.join(resourcesPath, 'app.asar', 'node_modules', '@varin', 'web'),
     path.join(resourcesPath, 'kernel'),
   ], {
     cwd: path.resolve(__dirname, '..', '..', '..'),
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'inherit',
     windowsHide: true,
+  });
+
+  execFileSync(packagedExecutable, [path.join(__dirname, 'verify-knowledge-runtime.mjs'),
+    path.join(resourcesPath, 'app.asar', 'node_modules', '@varin', 'web')], {
+    cwd: context.appOutDir, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'inherit', windowsHide: true,
+  });
+
+  // The managed REPL is a physical Node entry, with EOF closing it before any work is admitted.
+  execFileSync(packagedExecutable, [path.join(unpackedNodeModulesPath, '@varin', 'script-runtime', 'dist', 'worker.js')], {
+    input: '', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'inherit', 'inherit'], windowsHide: true,
   });
 
   execFileSync(packagedExecutable, [
