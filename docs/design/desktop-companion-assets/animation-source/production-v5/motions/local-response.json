@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "id": "v5-local-response-working-family",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "motions": {
+    "hover": {
+      "loop": false,
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 160
+        },
+        {
+          "sourceId": "local-response-l02-attention-mid-r1",
+          "durationMs": 120
+        },
+        {
+          "sourceId": "local-response-l02-hover-peak-r1",
+          "durationMs": 240
+        },
+        {
+          "sourceId": "local-response-l02-attention-mid-r1",
+          "durationMs": 120
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 200
+        }
+      ]
+    },
+    "tap": {
+      "loop": false,
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 120
+        },
+        {
+          "sourceId": "local-response-low-hands-approach-r1",
+          "durationMs": 120
+        },
+        {
+          "sourceId": "local-response-l03-contact-r1",
+          "durationMs": 160
+        },
+        {
+          "sourceId": "local-response-low-hands-release-r1",
+          "durationMs": 80
+        },
+        {
+          "sourceId": "local-response-low-hands-approach-r1",
+          "durationMs": 100
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 180
+        }
+      ]
+    },
+    "repeat": {
+      "loop": false,
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 240
+        },
+        {
+          "sourceId": "local-response-low-hands-approach-r1",
+          "durationMs": 100
+        },
+        {
+          "sourceId": "local-response-l04-unlace-r1",
+          "durationMs": 80
+        },
+        {
+          "sourceId": "local-response-l04-fingertip-overlap-r2",
+          "durationMs": 180
+        },
+        {
+          "sourceId": "local-response-l04-unlace-r1",
+          "durationMs": 100
+        },
+        {
+          "sourceId": "local-response-low-hands-approach-r1",
+          "durationMs": 80
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 180
+        }
+      ]
+    }
+  },
+  "integration": "Selected authored local attention, tap and repeated-tap sources; not a task acceptance, permission approval, or result. Actual gesture/context interruption routes are verified separately in local candidates, not installed by this authoring file."
+}

@@ -200,6 +200,114 @@
         "source": "detached/lift/return.png",
         "sha256": "f543dfea0a08735937c8f1358f1626ba31253e91f83412e71464fc3aad737ea1"
       }
+    },
+    {
+      "id": "query-entry",
+      "source": "foreground/query/entry.png",
+      "sha256": "6a429951ee9183cd9ee41435cbf9a2d95c26106d8a0b5f354b62626ec34368cb",
+      "detached": {
+        "source": "detached/query/entry.png",
+        "sha256": "5de0f6d032b90bb2023d24fcb695b19bd19cbb2c55adf9b6ff38b7b1f316d68a"
+      }
+    },
+    {
+      "id": "query-near-chest",
+      "source": "foreground/query/near-chest.png",
+      "sha256": "9cd06395a4239a2dbc0a1bc2b503a6f142fc38bf6d6a1425f1fb5290597044f3",
+      "detached": {
+        "source": "detached/query/near-chest.png",
+        "sha256": "cb5fa01f9e3dacf985834765412818545399ae50749557f962996f562e966e46"
+      }
+    },
+    {
+      "id": "query-leave-space",
+      "source": "foreground/query/leave-space.png",
+      "sha256": "87cee16e754a78e0b0789b6785343099fdea9474c80da81c73db8e34f8f99b46",
+      "detached": {
+        "source": "detached/query/leave-space.png",
+        "sha256": "244d918fc4731488a6bb174da338e25003bcbacdf043eff88b585a326e62583b"
+      }
+    },
+    {
+      "id": "query-lower",
+      "source": "foreground/query/lower.png",
+      "sha256": "05a0b00ade448c92d98e2707dc5ec3692407594cf9cdf49a462580a95f888a9c",
+      "detached": {
+        "source": "detached/query/lower.png",
+        "sha256": "df8b95e7e2d9fadf17eb20e65e46a94ecc0d5c8b4e653b3ba9a69b234679a955"
+      }
+    },
+    {
+      "id": "query-low-hand",
+      "source": "foreground/query/low-hand.png",
+      "sha256": "34e60114e8daf132d960b34da2247e9f4792da28cadb2e138df2f9161bb3c850",
+      "detached": {
+        "source": "detached/query/low-hand.png",
+        "sha256": "d66de746ce45d5ae25db43d33fd8eedf8c6ea5cd92450d25110d5c3586ee00c6"
+      }
+    },
+    {
+      "id": "local-response-l02-attention-mid-r1",
+      "source": "foreground/local-response/l02-attention-mid-r1.png",
+      "sha256": "b75f6d6591c52fa098079fc05e52616d575ad8f707f88a0daf285d4e39d7c24a",
+      "detached": {
+        "source": "detached/local-response/l02-attention-mid-r1.png",
+        "sha256": "e80422cbd34adc246729bc23a737fa8bc20c056766f3811363e5d848e3c876ff"
+      }
+    },
+    {
+      "id": "local-response-l02-hover-peak-r1",
+      "source": "foreground/local-response/l02-hover-peak-r1.png",
+      "sha256": "295809d19548c0f7ba436d89b4bc97e1bad98c98c9691a1ac1abce778f0f2d1c",
+      "detached": {
+        "source": "detached/local-response/l02-hover-peak-r1.png",
+        "sha256": "03f38486283858abf444f622040964299c601fc8a2042b6436379f0735774cbf"
+      }
+    },
+    {
+      "id": "local-response-low-hands-approach-r1",
+      "source": "foreground/local-response/low-hands-approach-r1.png",
+      "sha256": "093902c0d5a42bdf06ee9967a9673ae5dc88e71c6b6743519a85d64fdc86cbab",
+      "detached": {
+        "source": "detached/local-response/low-hands-approach-r1.png",
+        "sha256": "e77b7d9beb6a4a5618d8cb954ebd426beaef34d7a2a9e70dcaad3c6a7c8a150c"
+      }
+    },
+    {
+      "id": "local-response-l03-contact-r1",
+      "source": "foreground/local-response/l03-contact-r1.png",
+      "sha256": "5232cdb71e753877cb978951a3781d7dae517babe887e192c90771b2c2ca3a71",
+      "detached": {
+        "source": "detached/local-response/l03-contact-r1.png",
+        "sha256": "192237e44238d259cecd18303c1f200f13fb7ceddc1c0d9f8cc9c825f13149f6"
+      }
+    },
+    {
+      "id": "local-response-low-hands-release-r1",
+      "source": "foreground/local-response/low-hands-release-r1.png",
+      "sha256": "88e8d37b4e50cea2adc16c2cb092f0bfc757480d4e2d1f504e7d9666dd3703be",
+      "detached": {
+        "source": "detached/local-response/low-hands-release-r1.png",
+        "sha256": "264d561f15886c10314d10a83aaecc41d091dd7fedc4bcbfb2962fc92bf6e094"
+      }
+    },
+    {
+      "id": "local-response-l04-fingertip-overlap-r2",
+      "source": "foreground/local-response/l04-fingertip-overlap-r2.png",
+      "sha256": "882ed39e5ecea546e2b085245243b768a79eabfa23122416338661b7844c8ba9",
+      "detached": {
+        "source": "detached/local-response/l04-fingertip-overlap-r2.png",
+        "sha256": "2a27c51c4fcd1f7a9eb1a6efd9d20be01df5ebf575d3694ef1cfc3eecb417ce4"
+      }
+    },
+    {
+      "id": "local-response-l04-unlace-r1",
+      "source": "foreground/local-response/l04-unlace-r1.png",
+      "sha256": "7743440587eb397e02220e2f30f55627c8d087aec4eb5c0ec2c999c91e97db76",
+      "detached": {
+        "source": "detached/local-response/l04-unlace-r1.png",
+        "sha256": "3af00541e9a8171e48311661cadf20eb6c8e6f0b797bf98fb9325b386c05aebc"
+      }
     }
   ]
 }

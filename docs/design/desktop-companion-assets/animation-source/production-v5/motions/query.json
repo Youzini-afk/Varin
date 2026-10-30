@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "id": "v5-query-working-phrase",
+  "action": "query",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "entry": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 350,
+      "interruptionExitIds": []
+    },
+    {
+      "sourceId": "query-entry",
+      "durationMs": 150,
+      "interruptionExitIds": [
+        "query-near-chest",
+        "query-leave-space",
+        "query-lower",
+        "query-low-hand",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "query-near-chest",
+      "durationMs": 200,
+      "interruptionExitIds": [
+        "query-leave-space",
+        "query-lower",
+        "query-low-hand",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "query-leave-space",
+      "durationMs": 350,
+      "interruptionExitIds": [
+        "query-lower",
+        "query-low-hand",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "query-lower",
+      "durationMs": 200,
+      "interruptionExitIds": [
+        "query-low-hand",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "query-low-hand",
+      "durationMs": 300,
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    }
+  ],
+  "entryDurationMs": 1550,
+  "hold": {
+    "sourceId": "neutral",
+    "behavior": "Indefinite while the actual query remains pending. Repeat/expose only canonical neutral, never replay the question gesture. The study final 1800 ms is review exposure only, not a runtime timeout."
+  },
+  "return": [],
+  "returnReason": "Authored entry includes lowering and low-hand recovery, reaching canonical neutral before pending hold; do not replay recovery after reply. Mid-phrase cancellation uses phase interruptionExitIds.",
+  "scope": [
+    "Present a real pending user question, not permission or completion."
+  ],
+  "notFor": [
+    "permission",
+    "permission-allowed",
+    "permission-denied",
+    "completion",
+    "automatic-answer"
+  ],
+  "interruption": {
+    "samePoseDetached": "Each sourceId resolves the matching detached counterpart from seated-preparation.json; neutral reuses canonical.",
+    "rootDrag": "Start root motion immediately; do not stall dragging to finish the gesture.",
+    "handReturn": "Use current authored remaining phrase suffix via interruptionExitIds, then canonical neutral and existing E side/support; do not jump from high hand to support.",
+    "terminalContactIds": [
+      "lift-side",
+      "lift-support"
+    ],
+    "contactStatus": "Existing E endpoints reused; exact runtime contact timing/visual acceptance remains pending."
+  },
+  "queryState": "Only actual host reply/cancellation/state change can resolve the query. Visual phrase end, neutral return, drag, local touch and elapsed time never imply an answer, consent, work started or completion.",
+  "integration": "Authoring checkpoint of selected r3 question source, corrected 02/04 r2 FG and corrected lower D r2. Five same-pose D candidates; no runtime acceptance claimed. Local runtime candidate intentionally reduces initial neutral setup 350 to 1 ms; preserves all five authored durations and loops only canonical neutral 1000 ms exposure while pending. Same query context never replays; newer query context enters once. This authoring file retains original 350 ms setup."
+}
