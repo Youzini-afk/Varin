@@ -44,5 +44,24 @@ class PackSequenceTests(unittest.TestCase):
             self.assertEqual(json.loads((output / 'sequence.json').read_text()), result)
 
 
+    def test_invalid_late_input_produces_no_partial_atlas(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with Image.new('RGBA', (8, 8), (210, 30, 40, 255)) as source:
+                source.save(root / 'source.png')
+            for invalid_frame, loop in [({'durationMs': 0}, [0, 2]), ({'durationMs': 70}, [0, 3])]:
+                with self.subTest(invalid_frame=invalid_frame, loop=loop):
+                    manifest = root / 'source.json'
+                    manifest.write_text(json.dumps({
+                        'id': 'invalid-tail', 'canvas': [8, 8], 'loop': loop,
+                        'frames': [{'source': 'source.png', 'durationMs': 70},
+                                   {'source': 'source.png', **invalid_frame}],
+                    }))
+                    output = root / 'must-not-exist'
+                    with self.assertRaises(ValueError):
+                        pack(manifest, output, max_size=16, padding=2)
+                    self.assertFalse(output.exists())
+
+
 if __name__ == '__main__':
     unittest.main()

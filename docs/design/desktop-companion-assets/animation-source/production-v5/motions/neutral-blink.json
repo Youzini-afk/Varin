@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "targets": [
+    "v5-idle",
+    "v5-idle-closed",
+    "v5-supervise",
+    "v5-open-attention"
+  ],
+  "recipe": "../seated-preparation.json",
+  "holdMs": [
+    6400,
+    8300
+  ],
+  "blinkMs": [
+    [
+      55,
+      85,
+      70
+    ],
+    [
+      50,
+      80,
+      75
+    ]
+  ],
+  "canonicalTailMs": 200,
+  "semantics": "Sparse same-head companionship; no work/event assertion. All targets already had indefinite canonical-neutral loops.",
+  "ordinaryExit": "Current half -> canonical open eyes; shut -> half -> canonical. Never replay a future blink.",
+  "pickup": "Immediate same-eye same-pose detached body, reopen eyes through half if needed, then the existing matching canonical pickup.",
+  "release": "Immediate same-eye seated counterpart, reopen through half if needed and settle at matching original canonical. Latest intent wins.",
+  "pauseSafe": "Only canonical open-eye holds; never freeze half/shut.",
+  "runtimeApproval": false
+}
