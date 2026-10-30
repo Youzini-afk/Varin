@@ -1,11 +1,8 @@
 {
-  "decision": "selected",
-  "reviewer": "assistant",
-  "scope": "feature-branch default candidate",
-  "candidateSHA256": "de48f7493f46042823ab23a359fd83ff11ef46cf9d5175f4bc1a78b66e75bd4e",
-  "baselineSHA256": "5287049341de346d125102b550319ea0486c0b2f944021c4357ebdeb1e683d7e",
-  "buildReceiptSHA256": "199e602182629cea002c9f435bcf1fe2fed0d47aa05cbd9fc4cb73acc9241c47",
-  "rebuildReceiptSHA256": "80f40ef390443be3d93df0e12286fffb14e52639541d74512d71483d756c4132",
+  "candidateSHA256": "f01354e53d36d1596d64da99748e43b7b04c727ca439750ab25850da1ef49a34",
+  "baselineSHA256": "07e5f9b470388dd16268604fe43585f0bd8772f17d2d7e88bcd1997b4e4e863f",
+  "buildReceiptSHA256": "0aebb2e026841d89e27fd347953ac592abb0f6f30bd7baa4b7e24bdb8cbd7ed2",
+  "rebuildReceiptSHA256": "00be7bbf7684c8f5fa178e827a8040bd402e423506677466fe46298f2d18c3db",
   "newPackageIds": [
     "v5-idle",
     "v5-notice",
@@ -514,7 +511,6 @@
     "4c87093a648e9bbacf7356b97b6c13a37dbd5f42b543ca712dbf13480ae64298",
     "4d028e6cd341eb5889d6772484643ea714135ec3b676bc170645d86ac401cf5d",
     "4dec20799ecf0c36888b145474cbff7d1bd17a32c2eddd7ac5410f62bbc0354b",
-    "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
     "540b364ccfa773653691bededcb709cfad7781b4a14d91250861b77ba23b7bec",
     "5617da3fe6ad0b034e2e50f1681a66974746b8d205e9c294ec66ad40661ecac5",
     "56892c4753417ee400eeda6dfc579543e406bf60038a6c4bb6231498af85bff1",
@@ -526,6 +522,7 @@
     "5d23c035eeb97318496722c035ec8a0c7ba2519916477ca99ccaf70960ef095d",
     "5e467541b494e65aab3923a157aaaf4bc4ffe946d44c16d149fd3a87a9ce0206",
     "609bd8c4079bd449d9c94eca325686637a6dbbab417985d8c856a3f7fb3fbf07",
+    "6216cbb1ef399c9569f5298fd448349d18d54bbd304088d5b27da82d4910f36d",
     "63d101e93bafd035cbbf070982e2da5f33a8ed5b30b103fd7703f190c62afcc5",
     "67868f707dc6c5d2948e3c7280f99515c39915b23ffd19e844769d46d711760a",
     "67ce9d2647d3900292e4a67b0a6652f9999e0cd16a6ca3f4d97cf0c9b6197fcc",
@@ -580,6 +577,7 @@
     "94faa7acf7bb29a00776ef7275fd96e994eb029ffe050b445693911af7b040ac",
     "95bc55f86363e2208b4025bb6af38c06f3fd84e6181ec3b2c4c2957c0048ed18",
     "962ab277abc962299cd2cc8bda03d5450743fa7cfbcb787dca8408da2d5986c7",
+    "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
     "977b7ff9fff3a9b49f043bc7f2c5570edc974dac098c4322c2e25d268b72b6aa",
     "996f50d9a0f5b324c908b8feff84a06f014f72666746e27166675f71764ab495",
     "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
@@ -652,7 +650,6 @@
     "e851c984328d6805b3f6f7574c0f4b2b40f70dbf7b6bf474c48036ee22643091",
     "e8757c9b436df0bd0a0b5c1aaa955a477139cd4889ff99760ba246f23e0a5dac",
     "e8e65c921f3f10a74aeb9de08a93df196e91144314bebcb0491adddbeb3f233b",
-    "eb138945b6634fced7420ae45ab626e838953627ca3f1cae4ff9d0c10950043f",
     "ebc39001bdf6cb46ea7708dd7f1ddb1ac7bd9418268593524819a3b899d69700",
     "ec785be87b3fa5d2fe586fe35a2986216e4a242d9155aa69651f29ec49cb66fa",
     "ed7c8c71409378fe64c0abd0acc2005139bac5f2fc9b9c3b1ce58e78f1dfbc4a",
@@ -685,7 +682,7 @@
     "atlas-002.png": "034d9773fa07ad186be74d8e30b83de94c4b2d150893a40c716345bfb16a2202",
     "atlas-003.png": "8d9a6962dcab8f05b75c0d5d7b9fcb86055a1a987d2932625c6e0ff59d9ea1f8",
     "atlas-004.png": "24549c19241a7de9c690feabebb7519507aae028725239d30f4900027505e209",
-    "atlas-005.png": "6997f5b5ded98cb20fc39b21869835684bee197cbe83dafa2638c69c641f5054",
+    "atlas-005.png": "4241fed17df1e57fdffea240c6bc214c69deaff844dc71435d0083142bd139fa",
     "atlas-006.png": "8575e3ad3230994a561c7b27398835d92ef6fb921f025ceb98cda8af610dc047",
     "atlas-007.png": "e82bf3d061f5588e5236a01633af59fab88488e00994b4236aa9e450bd20cf44",
     "atlas-008.png": "7258b07106127349adf983b04bd10fe7353c8ee9cf8577e14e320eb466a8dfd1",
@@ -698,30 +695,23 @@
     "atlas-015.png": "da2b9485ff794e9f9d75ba5b77a6f3c731ba3a70bff96ad0a30135e6ce6f0125",
     "world-stool-b16b339dd67bbbdc.png": "b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7"
   },
+  "reviewer": "assistant",
+  "decision": "selected",
+  "scope": "feature-branch default candidate",
   "basis": [
-    "Assistant and peer selected-source ordinary/detached 360px paired visual reviews, not per-frame user approval.",
-    "Two independent selected-source preparations and packs reproduce the exact de48 bundle and 16 atlas PNGs; all 247 encoded source SHA values, RGBA crops and offsets verified.",
-    "All 422 package semantics identical to a225 except atlas references; prior exhaustive source pickup, early release/regrab, latest-context and authored interruption checks remain applicable.",
-    "Actual de48 direct-pickup dependency metrics match dry layout for all 422 packages: 23 primary action/endpoint packages improve; sleep wake-eyes landing increases 2 to 4 pages.",
-    "Earlier native candidate absolute drag/stool restoration, Bot/Agent role and pending permission/question replacement bounded observations; controlled scene renderer loss recovered once preserving current pending facts.",
-    "a225 native consecutive full-desktop tap captures show continuous visible actor; window-only screenshot blanks remain discrepant, not proven actor disappearance."
+    "User selected whole-image closed-rest candidate C on2026-10-30; paired full detached redraw inspected at512/360 with no obvious pose/identity discontinuity.",
+    "Exactly245 other source identities, their atlas crop pixels and offsets,422 package semantics/timings/routes and frozen stool are unchanged.",
+    "Two independent portable raw-source builds produce byte-identical runtime artifacts.",
+    "Production CompanionPlayback:44 affected sequences,690 grab/release,690 regrab,460 latest-intent interruptions,441 action route pairs; zero failures.",
+    "New pair material mask inspection and actual runtime pixel transformation preserve alpha, protected eyes/badge and all outside-allow pixels."
   ],
   "notClaimed": [
-    "No claim that user independently approved every frame, or complete temporal aesthetics.",
-    "Native de48 normal startup, exact drag/stool restoration and closed-laptop to open-attention transition were observed; comprehensive per-action temporal aesthetics remain unverified.",
-    "No Windows/macOS or all-platform native acceptance.",
-    "Live Host matched ask_user / allowed-permission receipt through React to Agent one-shot remains unverified; manual receipt fixtures do not establish it.",
-    "No SIG9 OOM diagnosis or universal blank-frame fix from screenshot observations.",
-    "Feature-branch default adoption is not a main-branch merge, public release or all-platform acceptance."
-  ],
-  "evidenceFiles": [
-    "v5-locality-repack-result.md",
-    "locality-repack-verification/verification.json",
-    "locality-repack-verification/actual-footprints.json",
-    "v5-recovery-native-observation.md"
+    "Full native cross-platform acceptance",
+    "User acceptance of all247 drawings",
+    "Unbounded visual continuity or exhaustive event behavior; actual normal-mode seam review remains separate from this selection."
   ],
   "geometryEpoch": "varin-canonical-v5-study",
-  "selectedBundleSha256": "076fc5a510a3e02a2c4211e874363928b2965cc0003405bc648b3b4be80a33b1",
+  "selectedBundleSha256": "3b213acef56973b5c1d0f650bd24be8afdab0bafe7c667d398e06fd957173595",
   "packageIds": [
     "v5-idle",
     "v5-notice",
@@ -1147,8 +1137,8 @@
     "v5-welcome-s-wrist-arc-end-r2-60"
   ],
   "sourceRebuild": {
-    "sourceManifestSHA256": "5287049341de346d125102b550319ea0486c0b2f944021c4357ebdeb1e683d7e",
-    "recipeSHA256": "93771f1c4f25ff77155226db0461dad42ef5d83876fa33f85b76379e80e97b48",
+    "sourceManifestSHA256": "07e5f9b470388dd16268604fe43585f0bd8772f17d2d7e88bcd1997b4e4e863f",
+    "recipeSHA256": "e500578936f4c4f557d6d15a24a52df75e826506b11d75fd1088b97002447ddb",
     "pythonVersion": "3.12.14",
     "pillowVersion": "12.3.0",
     "toolSHA256": {
@@ -1173,23 +1163,14 @@
     "historicalPreparedInputs": false
   },
   "publicInstalled": true,
-  "adoption": {
-    "target": "feature-branch default companion-assets",
-    "reviewer": "assistant",
-    "nativeObservationSha256": "857aafcf2abae32a7c0e12603df63914f351caeeb8c84ea1a845ebdf856fb76e",
-    "nativeScope": [
-      "Normal no-review selected076 startup succeeded, no review controls.",
-      "Native absolute drag root527,246 to647,166 matched delta120,-80; detached body visible with stool absent, seated stool restored on release.",
-      "Parent observed closed laptop to open attention between 11:21:49 and 11:22:04 UTC.",
-      "Final entry f3c8d4e256d2ab15b17c6498d0b7255a9685819c6b7720635be345b2dda8ab14: known-current empty overview absent; bound native menu click opened controls, absolute project/pending and close clicks opened actual empty Host panel then returned quiet."
-    ],
+  "branchDefaultAdoption": {
+    "date": "2026-10-30",
+    "scope": "Exact selected source-C/paired-detached replacement and matching material profile; offline public resource adoption.",
+    "candidateSeamReview": "14s production-player rest/open/close/grab/release,336 decoded frames; no blocker or obvious pose/style seam in reviewed contact sheet. Candidate and selected atlas bytes are identical.",
     "notClaimed": [
-      "Full temporal aesthetics and all-platform behavior.",
-      "Live Host matched receipt producer-to-React-to-Agent end-to-end.",
-      "Window-only screenshot blanks establish actor disappearance or its cause.",
-      "Initial repeated absolute menu clicks did not open while bound-window click did; input delivery/overlay cause unresolved."
-    ],
-    "quietEmptySummary": "Implemented and component-tested; final normal native smoke confirmed known-empty quiet state and explicit project-panel access."
-  },
-  "selectionReviewRecordSHA256": "a525b89d74e92080e5532a06b2c75b41c8df1df613a7b8d10498e172e193cf28"
+      "New native cross-platform acceptance",
+      "Real Host-trigger end-to-end validation",
+      "User approval of every animation frame"
+    ]
+  }
 }

@@ -6923,7 +6923,7 @@
       "exitPose": "v5:closed-neutral",
       "frames": [
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 0,
           "durationMs": 1000,
           "pose": "v5:closed-neutral",
@@ -6937,7 +6937,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -6978,7 +6978,7 @@
       "exitPose": "v5:open-neutral",
       "frames": [
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 0,
           "durationMs": 500,
           "pose": "v5:closed-neutral",
@@ -6992,7 +6992,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -7596,7 +7596,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 1485,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -7610,7 +7610,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -10131,7 +10131,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 985,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -10145,7 +10145,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -10427,7 +10427,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 875,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -10441,7 +10441,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -10700,7 +10700,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 775,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -10714,7 +10714,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -10950,7 +10950,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 675,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -10964,7 +10964,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -11177,7 +11177,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 605,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -11191,7 +11191,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -11374,7 +11374,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 540,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -11388,7 +11388,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -11548,7 +11548,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 475,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -11562,7 +11562,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -11699,7 +11699,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 405,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -11713,7 +11713,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -11827,7 +11827,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 330,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -11841,7 +11841,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -11932,7 +11932,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 240,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -11946,7 +11946,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -12014,7 +12014,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 130,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -12028,7 +12028,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -12142,7 +12142,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 360,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -12156,7 +12156,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -12293,7 +12293,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 450,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -12307,7 +12307,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -12444,7 +12444,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 540,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -12458,7 +12458,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -12595,7 +12595,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 520,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -12609,7 +12609,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -12723,7 +12723,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 350,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -12737,7 +12737,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -12828,7 +12828,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 250,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -12842,7 +12842,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -12910,7 +12910,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 140,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -12924,7 +12924,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13015,7 +13015,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 250,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -13029,7 +13029,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13120,7 +13120,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 260,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -13134,7 +13134,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13248,7 +13248,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 510,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -13262,7 +13262,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13376,7 +13376,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 490,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -13390,7 +13390,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13481,7 +13481,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 300,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -13495,7 +13495,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13563,7 +13563,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 160,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -13577,7 +13577,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13622,7 +13622,7 @@
       "exitPose": "v5:closed-neutral",
       "frames": [
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 0,
           "durationMs": 500,
           "pose": "v5:closed-neutral",
@@ -13636,7 +13636,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13806,7 +13806,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 1420,
           "durationMs": 600,
           "pose": "v5:closed-neutral",
@@ -13820,7 +13820,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -13865,7 +13865,7 @@
       "exitPose": "v5:closed-neutral",
       "frames": [
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 0,
           "durationMs": 500,
           "pose": "v5:closed-neutral",
@@ -13879,7 +13879,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14026,7 +14026,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 1390,
           "durationMs": 600,
           "pose": "v5:closed-neutral",
@@ -14040,7 +14040,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14131,7 +14131,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 220,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -14145,7 +14145,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14266,7 +14266,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 380,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -14280,7 +14280,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14401,7 +14401,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 380,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -14415,7 +14415,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14506,7 +14506,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 260,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -14520,7 +14520,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14588,7 +14588,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 120,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -14602,7 +14602,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14647,7 +14647,7 @@
       "exitPose": "v5:closed-neutral",
       "frames": [
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 0,
           "durationMs": 500,
           "pose": "v5:closed-neutral",
@@ -14661,7 +14661,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14785,7 +14785,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 2510,
           "durationMs": 750,
           "pose": "v5:closed-neutral",
@@ -14799,7 +14799,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -14897,7 +14897,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 401,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -14911,7 +14911,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -15032,7 +15032,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 541,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -15046,7 +15046,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -15190,7 +15190,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 701,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -15204,7 +15204,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -15348,7 +15348,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 701,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -15362,7 +15362,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -15483,7 +15483,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 851,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -15497,7 +15497,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -15625,7 +15625,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 851,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -15639,7 +15639,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -15744,7 +15744,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 401,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -15758,7 +15758,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -15833,7 +15833,7 @@
           ]
         },
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 1,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -15847,7 +15847,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -15892,7 +15892,7 @@
       "exitPose": "varin-canonical-v5-study:draw:4194a12312a6b9ddf3f6cc47dab79977b40c6977f30b73f35d3a41ac77cdc70c",
       "frames": [
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 0,
           "durationMs": 650,
           "pose": "v5:closed-neutral",
@@ -15906,7 +15906,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -26484,26 +26484,26 @@
       "kind": "gesture",
       "action": null,
       "sceneAction": null,
-      "entryPose": "varin-canonical-v5-study:draw:eb138945b6634fced7420ae45ab626e838953627ca3f1cae4ff9d0c10950043f",
-      "exitPose": "varin-canonical-v5-study:draw:eb138945b6634fced7420ae45ab626e838953627ca3f1cae4ff9d0c10950043f",
+      "entryPose": "varin-canonical-v5-study:draw:6216cbb1ef399c9569f5298fd448349d18d54bbd304088d5b27da82d4910f36d",
+      "exitPose": "varin-canonical-v5-study:draw:6216cbb1ef399c9569f5298fd448349d18d54bbd304088d5b27da82d4910f36d",
       "frames": [
         {
-          "sha256": "eb138945b6634fced7420ae45ab626e838953627ca3f1cae4ff9d0c10950043f",
+          "sha256": "6216cbb1ef399c9569f5298fd448349d18d54bbd304088d5b27da82d4910f36d",
           "startMs": 0,
           "durationMs": 70,
-          "pose": "varin-canonical-v5-study:draw:eb138945b6634fced7420ae45ab626e838953627ca3f1cae4ff9d0c10950043f",
+          "pose": "varin-canonical-v5-study:draw:6216cbb1ef399c9569f5298fd448349d18d54bbd304088d5b27da82d4910f36d",
           "exitTo": [],
           "pauseSafe": false,
           "phase": "act",
           "page": 0,
           "rect": [
-            1485,
+            1486,
             510,
             486,
             505
           ],
           "offset": [
-            22,
+            23,
             0
           ]
         }
@@ -26524,8 +26524,8 @@
           "v5-m01-closed-neutral-fg"
         ],
         "releaseViaFrames": true,
-        "entrySourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a"
+        "entrySourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
       },
       "pages": [
         {
@@ -26553,7 +26553,7 @@
       "exitPose": "v5:closed-neutral",
       "frames": [
         {
-          "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+          "sha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "startMs": 0,
           "durationMs": 120,
           "pose": "v5:closed-neutral",
@@ -26564,7 +26564,7 @@
           "rect": [
             997,
             510,
-            484,
+            485,
             505
           ],
           "offset": [
@@ -30575,7 +30575,7 @@
         ],
         "releaseViaFrames": true,
         "entrySourceSha256": "609bd8c4079bd449d9c94eca325686637a6dbbab417985d8c856a3f7fb3fbf07",
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a"
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
       },
       "pages": [
         {
@@ -30639,7 +30639,7 @@
         ],
         "releaseViaFrames": true,
         "grabImmediate": "v5-m01-lid-closed-side-d",
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a"
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
       },
       "pages": [
         {
@@ -30704,7 +30704,7 @@
         ],
         "releaseViaFrames": true,
         "entrySourceSha256": "4833da63c254bf3998a097511d634deed6506fd54ca557b345d38b3bce0890f5",
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a"
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
       },
       "pages": [
         {
@@ -30768,7 +30768,7 @@
         ],
         "releaseViaFrames": true,
         "grabImmediate": "v5-m01-lid-closed-secure-d",
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a"
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
       },
       "pages": [
         {
@@ -30831,7 +30831,7 @@
           "v5-m01-closed-neutral-fg"
         ],
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a"
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
       },
       "pages": [
         {
@@ -30900,7 +30900,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-hair-02-approach-r2-d"
       },
       "pages": [
@@ -30971,7 +30971,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "63d101e93bafd035cbbf070982e2da5f33a8ed5b30b103fd7703f190c62afcc5"
       },
       "pages": [
@@ -31043,7 +31043,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-hair-02b-near-lock-r3-d"
       },
       "pages": [
@@ -31116,7 +31116,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "44f48605301c4d804aed1265713fa0fd3b1d30c55e9191e401206250d399e190"
       },
       "pages": [
@@ -31188,7 +31188,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-hair-03-contact-r2-d"
       },
       "pages": [
@@ -31261,7 +31261,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "c53741f7a44fbd25584d7c09d7f384bb98b77f92a536d7bf9dd68ba15998ed6d"
       },
       "pages": [
@@ -31333,7 +31333,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-hair-04-smooth-r1-d"
       },
       "pages": [
@@ -31406,7 +31406,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "12fdc092c7640c1df041ef1876a4286a8473d643a88893b438bfedbd9eae8018"
       },
       "pages": [
@@ -31476,7 +31476,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-hair-05-release-r3-d"
       },
       "pages": [
@@ -31547,7 +31547,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "4c87093a648e9bbacf7356b97b6c13a37dbd5f42b543ca712dbf13480ae64298"
       },
       "pages": [
@@ -31615,7 +31615,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-hair-05b-lower-arm-r3-d"
       },
       "pages": [
@@ -31684,7 +31684,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "023324131992a88007993f05eac65a9229d18b677be40dbf5c6a914666483ff9"
       },
       "pages": [
@@ -31750,7 +31750,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-hair-06-return-r1-d"
       },
       "pages": [
@@ -31817,7 +31817,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "e02bae1dc070fb7c6fab04530a0e59d48835aecc4292c6c879d6f3cc010649e1"
       },
       "pages": [
@@ -31885,7 +31885,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-sleeve-01b-onset-r2-d"
       },
       "pages": [
@@ -31954,7 +31954,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "8fc01c1d704b7c8b1999c9fed33da32940070481a7e6238dc932fa0e3d2e048f"
       },
       "pages": [
@@ -32022,7 +32022,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-sleeve-02-enter-r1-d"
       },
       "pages": [
@@ -32091,7 +32091,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "7f2b794d134827ec492a4bbf8dfd958d19a2332078a40f195d6b39568f75f6ee"
       },
       "pages": [
@@ -32161,7 +32161,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-sleeve-03-contact-r2-d"
       },
       "pages": [
@@ -32232,7 +32232,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "9cfeb57403da0525b2ae5ba7f6ebf59a136b19ead69754afeabfcc052b721814"
       },
       "pages": [
@@ -32302,7 +32302,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-sleeve-04-smooth-r2-d"
       },
       "pages": [
@@ -32373,7 +32373,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "26f15d071b49939e7c5fab6a4c233762ce5b09ac01b725313896bb2216e147df"
       },
       "pages": [
@@ -32441,7 +32441,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-sleeve-05-release-r3-d"
       },
       "pages": [
@@ -32510,7 +32510,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "055fffc2fc66ec0ba32c27b7752d8caf900a8091ec10cbd0e6f487c88c40fedf"
       },
       "pages": [
@@ -32576,7 +32576,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-life-sleeve-05-release-r1-d"
       },
       "pages": [
@@ -32643,7 +32643,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "f64b640a32a9a05541e8a5eea570038deefa5fa9f7fcead50fe5cd712568fcb6"
       },
       "pages": [
@@ -32711,7 +32711,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-l09-01-release-d"
       },
       "pages": [
@@ -32780,7 +32780,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "f95303427b7962ec8b448dbd4dcd7bf0af471af1b3c12837281ab060c0db6dae"
       },
       "pages": [
@@ -32850,7 +32850,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-l09-02-rise-d"
       },
       "pages": [
@@ -32921,7 +32921,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "34be7235c303502a5abb9c85aff43fddaf2ef3d3b88ebf3d41481486e8051f62"
       },
       "pages": [
@@ -32991,7 +32991,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-l09-03-peak-r2-d"
       },
       "pages": [
@@ -33062,7 +33062,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "948836a738ff934c383e30cb2bcf9af7f6492b3a69d187c7dc6c801fd12eab60"
       },
       "pages": [
@@ -33130,7 +33130,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-l09-04-return-r3-d"
       },
       "pages": [
@@ -33199,7 +33199,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "fb6ea468745597665d76c359df7a8c5fb0c2f4ce72fbf28e32e64a612bd750f9"
       },
       "pages": [
@@ -33265,7 +33265,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-l09-05-contact-d"
       },
       "pages": [
@@ -33332,7 +33332,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "891d7c098da30d5b13385f42bacd1cc9a7fea7c496b64fb2175269269c9313fb"
       },
       "pages": [
@@ -33400,7 +33400,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-sleep-08-low-approach-r2-d"
       },
       "pages": [
@@ -33469,7 +33469,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "f240485801d032509fd8217d1ef17d07f893462618ea7bea286b5f8efa3e8914"
       },
       "pages": [
@@ -33539,7 +33539,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-sleep-07-yawn-release-r2-d"
       },
       "pages": [
@@ -33610,7 +33610,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "8f4d65c557cd4bf7a37506910118cba4488573861e2b8cb3636cad18c43120f6"
       },
       "pages": [
@@ -33682,7 +33682,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-sleep-01-yawn-approach-d"
       },
       "pages": [
@@ -33755,7 +33755,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "cb87c194ec53583c620e3b4f47c18c006034250db7a7785be3b111b4195a3e99"
       },
       "pages": [
@@ -33827,7 +33827,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-sleep-02-yawn-contact-d"
       },
       "pages": [
@@ -33900,7 +33900,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "aae9a2797089228837763cf10d07acc60b7744d05e7e19d833d3d26f3c43ea5e"
       },
       "pages": [
@@ -33970,7 +33970,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-sleep-03-return-droop-d"
       },
       "pages": [
@@ -34041,7 +34041,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "9d04b08a53472c6ae59d2ac24364cc60622e69bb687ce4468418f9ff04a4c75f"
       },
       "pages": [
@@ -34111,7 +34111,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-sleep-04-stable-sleep-r2-d"
       },
       "pages": [
@@ -34182,7 +34182,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "4194a12312a6b9ddf3f6cc47dab79977b40c6977f30b73f35d3a41ac77cdc70c"
       },
       "pages": [
@@ -34250,7 +34250,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-sleep-05-wake-eyes-d"
       },
       "pages": [
@@ -34319,7 +34319,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "d9e59fe8a31fb0ee05279fff1a490cad38ebb7ee305847179044a0a3584e4663"
       },
       "pages": [
@@ -34385,7 +34385,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "grabImmediate": "v5-sleep-06-wake-support-r2-d"
       },
       "pages": [
@@ -34452,7 +34452,7 @@
         "settled": false,
         "restoreOnRelease": false,
         "releaseViaFrames": true,
-        "restoreSourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+        "restoreSourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
         "entrySourceSha256": "828fa4a41d2696ff1dd782f97336e3e2b2507993a82dfb3b72ed8f073f89c1b5"
       },
       "pages": [
@@ -38857,7 +38857,7 @@
     },
     "closed": {
       "pose": "v5:closed-neutral",
-      "sourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a"
+      "sourceSha256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
     },
     "closedSourceSha256": [
       "023324131992a88007993f05eac65a9229d18b677be40dbf5c6a914666483ff9",
@@ -38871,7 +38871,7 @@
       "44f48605301c4d804aed1265713fa0fd3b1d30c55e9191e401206250d399e190",
       "4833da63c254bf3998a097511d634deed6506fd54ca557b345d38b3bce0890f5",
       "4c87093a648e9bbacf7356b97b6c13a37dbd5f42b543ca712dbf13480ae64298",
-      "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+      "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
       "609bd8c4079bd449d9c94eca325686637a6dbbab417985d8c856a3f7fb3fbf07",
       "63d101e93bafd035cbbf070982e2da5f33a8ed5b30b103fd7703f190c62afcc5",
       "7f2b794d134827ec492a4bbf8dfd958d19a2332078a40f195d6b39568f75f6ee",
@@ -38895,11 +38895,11 @@
     ]
   },
   "selection": {
-    "candidateSHA256": "de48f7493f46042823ab23a359fd83ff11ef46cf9d5175f4bc1a78b66e75bd4e",
-    "baselineSHA256": "5287049341de346d125102b550319ea0486c0b2f944021c4357ebdeb1e683d7e",
-    "buildReceiptSHA256": "199e602182629cea002c9f435bcf1fe2fed0d47aa05cbd9fc4cb73acc9241c47",
-    "rebuildReceiptSHA256": "80f40ef390443be3d93df0e12286fffb14e52639541d74512d71483d756c4132",
-    "reviewRecordSha256": "a525b89d74e92080e5532a06b2c75b41c8df1df613a7b8d10498e172e193cf28",
+    "candidateSHA256": "f01354e53d36d1596d64da99748e43b7b04c727ca439750ab25850da1ef49a34",
+    "baselineSHA256": "07e5f9b470388dd16268604fe43585f0bd8772f17d2d7e88bcd1997b4e4e863f",
+    "buildReceiptSHA256": "0aebb2e026841d89e27fd347953ac592abb0f6f30bd7baa4b7e24bdb8cbd7ed2",
+    "rebuildReceiptSHA256": "00be7bbf7684c8f5fa178e827a8040bd402e423506677466fe46298f2d18c3db",
+    "reviewRecordSha256": "8f2592261a6cddafae3446eeb118fb9bc6f5d4c1e4944fd107f39cb1ce574069",
     "scope": "feature-branch default candidate"
   }
 }

@@ -47,13 +47,13 @@
   "selectedSources": [
     {
       "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-neutral.png",
-      "sha256": "51ef169e2c6dfe11f594f4a941585dec41bc103a0e1784f210dc7ad4c5a60734",
-      "operation": "reuse"
+      "sha256": "decd2524ee6a93513f85f33f52d663522fb1b9d08479ae2e048396a6796431a7",
+      "operation": "selected-whole-image-redraw"
     },
     {
       "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-neutral-r1.png",
-      "sha256": "33ce18ecd03e87c9b7b30529ba9dc04cd86ffc0814594f1e944bf976b2a57119",
-      "operation": "copy-selected"
+      "sha256": "dee734aff96500792a898d21f80ae5ebad779a54c56d866b522f879cfc292535",
+      "operation": "selected-whole-image-redraw"
     },
     {
       "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-000.png",
@@ -547,5 +547,25 @@
     "Temporal consistency and native world-stool/root integration remain separate gates.",
     "Prepared display SHA and original source SHA are distinct; recompute and verify prepared outputs before compilation."
   ],
-  "rolePolicy": "Bot coordination and Agent notifier semantics unchanged; life gestures do not establish project/run completion."
+  "rolePolicy": "Bot coordination and Agent notifier semantics unchanged; life gestures do not establish project/run completion.",
+  "closedNeutralRevision": {
+    "date": "2026-10-30",
+    "selection": "User selected candidate C; same-pose complete detached redraw supplied separately.",
+    "seated": {
+      "source": "foreground/closed-neutral.png",
+      "sha256": "decd2524ee6a93513f85f33f52d663522fb1b9d08479ae2e048396a6796431a7",
+      "preparedSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
+    },
+    "detached": {
+      "source": "detached/lid-supported/closed-neutral-r1.png",
+      "sha256": "dee734aff96500792a898d21f80ae5ebad779a54c56d866b522f879cfc292535",
+      "preparedSHA256": "6216cbb1ef399c9569f5298fd448349d18d54bbd304088d5b27da82d4910f36d"
+    },
+    "method": "Whole-image redraw; full-canvas preparation on original fixed stool; no face patches, warps or per-frame bbox scaling.",
+    "priorEvidenceScope": "Other entries retain previous checkpoint evidence; prior local-review inputs and evidence do not attest this new closed-neutral pair.",
+    "notClaimed": [
+      "Full native cross-platform acceptance",
+      "New approval of other245 drawings"
+    ]
+  }
 }
