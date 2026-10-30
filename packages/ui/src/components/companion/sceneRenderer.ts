@@ -329,7 +329,7 @@ export function mountCompanionScene(root: HTMLElement) {
     if(hidden||value.descriptor.layout!=='spatial-b-v1'||!drawing){characterMask=null;hideRear();maskCache?.clear();}
     else {
       if(maskSelector!==drawing.bundle){maskCache?.dispose();maskSelector=drawing.bundle;characterMask=null;
-        maskCache=new SceneCharacterMaskCache(drawing.bundle,ready=>{characterMask=ready;if(!ready)hideRear();if(!frame)frame=requestAnimationFrame(render);});
+        maskCache=new SceneCharacterMaskCache(drawing.bundle,ready=>{characterMask=ready;hideRear();if(!frame)frame=requestAnimationFrame(render);});
       }
       void maskCache?.setDrawing(drawing);
     }

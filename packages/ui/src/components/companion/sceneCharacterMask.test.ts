@@ -24,11 +24,11 @@ it('admits only the exact bundle hash/package/frame and fixed local resource nam
  const unsafe = setup(bundle('../atlas.png')); expect(await unsafe.cache.setDrawing(drawing())).toBeNull(); expect(unsafe.decode).toHaveLength(0);
  const candidate = setup(bundle('atlas.png', true)); expect(await candidate.cache.setDrawing(drawing())).toBeNull();
 });
-it('waits for decode and reuses one page while clearing the old silhouette immediately', async () => {
+it('waits for cold decode then commits verified same-page exposure synchronously', async () => {
  const s = setup(), first = s.cache.setDrawing(drawing()); await flush(); expect(s.cache.current).toBeNull(); expect(s.decode).toHaveLength(1);
  s.decode[0]!(); expect((await first)?.rect).toEqual([1, 2, 2, 2]);
- const second = s.cache.setDrawing(drawing(1)); expect(s.cache.current).toBeNull(); expect((await second)?.rect).toEqual([2, 2, 2, 2]);
- expect(s.decode).toHaveLength(1); expect(s.requests.filter(x => x.includes('.png'))).toHaveLength(1);
+ const second = s.cache.setDrawing(drawing(1)); expect(s.cache.current?.rect).toEqual([2, 2, 2, 2]); expect((await second)?.rect).toEqual([2, 2, 2, 2]);
+ expect(s.decode).toHaveLength(1); expect(s.requests.filter(x => x.includes('.png'))).toHaveLength(2); // Current + next-page prediction only.
  s.cache.clear(); expect(s.cache.current).toBeNull(); expect(s.disposed).toHaveLength(1);
 });
 it('shares a pending page without publishing the earlier exposure', async () => {
@@ -59,7 +59,7 @@ it('uses exact atlas alpha crop and viewport registration, not a body approximat
 
 it('returning to the current atlas cancels a pending other page without disposing the displayed mask', async () => {
  const s = setup(); const first = s.cache.setDrawing(drawing()); await flush(); s.decode[0]!(); await first;
- const pending = s.cache.setDrawing(drawing(2)); await flush(); const restored = await s.cache.setDrawing(drawing(1)); expect(restored?.atlasHref).toBe('blob:atlas-0');
+ const pending = s.cache.setDrawing(drawing(2)); await flush(); const restored = await s.cache.setDrawing(drawing(0)); expect(restored?.atlasHref).toBe('blob:atlas-0');
  s.decode[1]!(); expect(await pending).toBeNull(); expect(s.cache.current).toBe(restored); expect(s.disposed).toEqual(['blob:atlas-1']); s.cache.dispose();
 });
 
@@ -76,4 +76,32 @@ it('rasterizes exact inverse alpha including translucent edges and untouched out
  const alpha = (x: number, y: number) => out[(y * 4 + x) * 4 + 3]!;
  expect(alpha(0, 0)).toBe(255); expect(alpha(1, 1)).toBe(0); expect(Math.abs(alpha(2, 1) - 127)).toBeLessThanOrEqual(1);
  expect(alpha(1, 2)).toBe(255); expect(Math.abs(alpha(2, 2) - 191)).toBeLessThanOrEqual(1); expect(alpha(3, 3)).toBe(255);
+});
+
+it('prepares only the next same-package page without changing current alpha, then commits warm drawing synchronously', async () => {
+ const value = bundle(); value.packages[0]!.frames[1]!.page = 1;
+ const s = setup(value), first = s.cache.setDrawing(drawing()); await flush(); s.decode[0]!(); const original = await first;
+ await flush(); expect(s.decode).toHaveLength(2); expect(s.cache.current).toBe(original); expect(s.disposed).toEqual([]);
+ s.decode[1]!(); await flush(); expect(s.cache.current).toBe(original); expect(s.updates.filter(Boolean)).toHaveLength(1); expect(s.disposed).toEqual([]);
+ const updateCount = s.updates.length, next = s.cache.setDrawing(drawing(1));
+ expect(s.cache.current?.key).toBe(JSON.stringify([epoch, 'selected', 1]));
+ expect(s.updates.slice(updateCount).every(Boolean)).toBe(true);
+ expect((await next)?.atlasHref).toBe('blob:atlas-1'); expect(s.disposed).toEqual(['blob:atlas-0']);
+ expect(s.decode).toHaveLength(2); s.cache.dispose(); expect(s.disposed).toEqual(['blob:atlas-0', 'blob:atlas-1']);
+});
+it('keeps at most current plus next decoded pages and discards a prepared prediction on scope change', async () => {
+ const value = bundle(); value.packages[0]!.pages.push({ file: 'atlas-002.png' });
+ value.packages[0]!.frames[1]!.page = 1; value.packages[0]!.frames[2]!.page = 2;
+ const s = setup(value), first = s.cache.setDrawing(drawing()); await flush(); s.decode[0]!(); await first;
+ await flush(); s.decode[1]!(); await flush(); expect(s.decode.length - s.disposed.length).toBe(2);
+ await s.cache.setDrawing(drawing(1)); await flush(); expect(s.disposed).toEqual(['blob:atlas-0']);
+ s.decode[2]!(); await flush(); expect(s.decode.length - s.disposed.length).toBe(2);
+ expect(await s.cache.setDrawing(drawing(2, otherEpoch))).toBeNull();
+ expect(s.disposed).toEqual(['blob:atlas-0', 'blob:atlas-2', 'blob:atlas-1']); expect(s.cache.current).toBeNull();
+});
+it('a hidden surface cancels speculative decode and never publishes its late completion', async () => {
+ const value = bundle(); value.packages[0]!.frames[1]!.page = 1;
+ const s = setup(value), first = s.cache.setDrawing(drawing()); await flush(); s.decode[0]!(); await first;
+ await flush(); s.cache.clear(); const updates = s.updates.length; s.decode[1]!(); await flush();
+ expect(s.cache.current).toBeNull(); expect(s.updates).toHaveLength(updates); expect(s.disposed).toEqual(['blob:atlas-0', 'blob:atlas-1']);
 });

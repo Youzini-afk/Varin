@@ -35,12 +35,14 @@ const validEpoch = (value: string) => /^[a-f0-9]{64}$/.test(value);
 const validPage = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.png$/.test(value) && !value.includes('..');
 interface PageJob { key: string; abort: AbortController; promise: Promise<DecodedAtlas> }
 
-/** At most one decoded current atlas and one pending atlas. No node-wide preloading or PNG re-encoding. */
+/** Current atlas plus at most one next atlas/job. Predictions never publish or replace current alpha. */
 export class SceneCharacterMaskCache {
   private generation = 0;
   private request = 0;
   private epoch: string | null = null;
   private index: Promise<Map<string, CompanionPackage>> | null = null;
+  private verifiedIndex: Map<string, CompanionPackage> | null = null;
+  private spare: { key: string; atlas: DecodedAtlas } | null = null;
   private indexAbort: AbortController | null = null;
   private page: { key: string; atlas: DecodedAtlas } | null = null;
   private pending: PageJob | null = null;
@@ -55,7 +57,8 @@ export class SceneCharacterMaskCache {
   /** Scope/drag/hide must call clear synchronously, so no old-mask frame can be rendered. */
   clear(): void {
     this.generation++; this.request++; this.publish(null); this.cancelPending();
-    this.indexAbort?.abort(); this.indexAbort = null; this.index = null; this.epoch = null;
+    this.indexAbort?.abort(); this.indexAbort = null; this.index = null; this.verifiedIndex = null; this.epoch = null;
+    this.spare?.atlas.dispose(); this.spare = null;
     this.page?.atlas.dispose(); this.page = null;
   }
   dispose(): void { this.clear(); this.disposed = true; }
@@ -77,46 +80,79 @@ export class SceneCharacterMaskCache {
       return index;
     })();
   }
+  private pageFor(epoch: string, asset: CompanionPackage, frameIndex: number): string {
+    return `${epoch}:${asset.pages[asset.frames[frameIndex]!.page]!.file}`;
+  }
+  private maskFor(key: string, asset: CompanionPackage, frameIndex: number, atlas: DecodedAtlas): SceneCharacterMask {
+    const frame = asset.frames[frameIndex]!;
+    if (frame.rect[0] + frame.rect[2] > atlas.width || frame.rect[1] + frame.rect[3] > atlas.height) throw new Error('Character mask frame escapes decoded atlas');
+    return { key, atlasHref: atlas.href, atlasWidth: atlas.width, atlasHeight: atlas.height, canvas: [...asset.canvas], rect: [...frame.rect], offset: [...frame.offset] };
+  }
+  private loadPage(epoch: string, asset: CompanionPackage, frameIndex: number): Promise<DecodedAtlas> {
+    const key = this.pageFor(epoch, asset, frameIndex);
+    if (this.page?.key === key) return Promise.resolve(this.page.atlas);
+    if (this.spare?.key === key) return Promise.resolve(this.spare.atlas);
+    if (this.pending?.key === key) return this.pending.promise;
+    this.cancelPending(); this.spare?.atlas.dispose(); this.spare = null;
+    const generation = this.generation, abort = new AbortController();
+    const job: PageJob = { key, abort, promise: Promise.resolve(null as unknown as DecodedAtlas) };
+    this.pending = job;
+    job.promise = (async () => {
+      const file = asset.pages[asset.frames[frameIndex]!.page]!.file;
+      const response = await this.environment.fetch(`${paths[this.selector]}${file}?epoch=${epoch}`, abort.signal);
+      if (!response.ok || abort.signal.aborted) throw new Error('Character mask atlas unavailable');
+      const decoded = await this.environment.decode(await response.blob(), abort.signal);
+      if (abort.signal.aborted || this.pending !== job || generation !== this.generation) { decoded.dispose(); throw new Error('Superseded character mask atlas'); }
+      this.spare = { key, atlas: decoded }; // Never dispose the displayed page merely to prefetch.
+      return decoded;
+    })().finally(() => { if (this.pending === job) this.pending = null; });
+    return job.promise;
+  }
+  private prefetch(drawing: SceneCharacterDrawing, asset: CompanionPackage): void {
+    const next = drawing.frameIndex + 1;
+    if (next >= asset.frames.length) {
+      this.cancelPending(); this.spare?.atlas.dispose(); this.spare = null; return;
+    }
+    const key = this.pageFor(drawing.epoch, asset, next);
+    if (this.pending?.key !== key) this.cancelPending();
+    if (this.spare?.key !== key) { this.spare?.atlas.dispose(); this.spare = null; }
+    // Only the next linear frame in the same verified package; no loop/gesture/branch guessing.
+    void this.loadPage(drawing.epoch, asset, next).catch(() => { /* Cold next frame remains safe-hidden if requested. */ });
+  }
   async setDrawing(drawing: SceneCharacterDrawing): Promise<SceneCharacterMask | null> {
     if (this.disposed) return null;
     if (!validEpoch(drawing.epoch) || typeof drawing.packageId !== 'string' || !drawing.packageId || !Number.isSafeInteger(drawing.frameIndex) || drawing.frameIndex < 0) { this.clear(); return null; }
     const key = JSON.stringify([drawing.epoch, drawing.packageId, drawing.frameIndex]);
     if (this.ready?.key === key) return this.ready;
-    this.publish(null); // Never retain the previous exposure's silhouette while a new one loads.
     if (this.epoch !== drawing.epoch) { this.clear(); this.epoch = drawing.epoch; this.index = this.loadIndex(drawing.epoch); }
     const generation = this.generation, request = ++this.request;
     const latest = () => !this.disposed && generation === this.generation && request === this.request;
     try {
-      const index = await this.index!;
-      if (!latest()) return null;
+      // A verified warm next frame commits synchronously, without publishing a null interlude.
+      let index = this.verifiedIndex;
+      if (!index) {
+        this.publish(null);
+        index = await this.index!;
+        if (!latest()) return null;
+        this.verifiedIndex = index;
+      }
       const asset = index.get(drawing.packageId), frame = asset?.frames[drawing.frameIndex];
       if (!asset || !frame) throw new Error('Character mask drawing is not in its bundle');
-      const file = asset.pages[frame.page]!.file, pageKey = `${drawing.epoch}:${file}`;
-      let atlas = this.page?.key === pageKey ? this.page.atlas : null;
-      if (atlas && this.pending?.key !== pageKey) this.cancelPending();
+      const pageKey = this.pageFor(drawing.epoch, asset, drawing.frameIndex);
+      let atlas = this.page?.key === pageKey ? this.page.atlas : this.spare?.key === pageKey ? this.spare.atlas : null;
       if (!atlas) {
-        if (this.pending?.key !== pageKey) {
-          this.cancelPending();
-          const abort = new AbortController();
-          const job: PageJob = { key: pageKey, abort, promise: Promise.resolve(null as unknown as DecodedAtlas) };
-          job.promise = (async () => {
-            const response = await this.environment.fetch(`${paths[this.selector]}${file}?epoch=${drawing.epoch}`, abort.signal);
-            if (!response.ok) throw new Error('Character mask atlas unavailable');
-            const decoded = await this.environment.decode(await response.blob(), abort.signal);
-            if (abort.signal.aborted || this.pending !== job || generation !== this.generation) { decoded.dispose(); throw new Error('Superseded character mask atlas'); }
-            this.page?.atlas.dispose(); this.page = { key: pageKey, atlas: decoded };
-            return decoded;
-          })();
-          this.pending = job;
-        }
-        const job = this.pending!;
-        try { atlas = await job.promise; }
-        finally { if (this.pending === job) this.pending = null; }
+        this.publish(null); // Never retain another exposure's silhouette during cold decode.
+        atlas = await this.loadPage(drawing.epoch, asset, drawing.frameIndex);
         if (!latest()) return null;
       }
-      if (frame.rect[0] + frame.rect[2] > atlas.width || frame.rect[1] + frame.rect[3] > atlas.height) throw new Error('Character mask frame escapes decoded atlas');
-      const mask: SceneCharacterMask = { key, atlasHref: atlas.href, atlasWidth: atlas.width, atlasHeight: atlas.height, canvas: [...asset.canvas], rect: [...frame.rect], offset: [...frame.offset] };
-      this.publish(mask); return mask;
+      const mask = this.maskFor(key, asset, drawing.frameIndex, atlas);
+      if (this.page?.key !== pageKey) {
+        this.page?.atlas.dispose(); this.page = { key: pageKey, atlas };
+        if (this.spare?.atlas === atlas) this.spare = null;
+      }
+      this.publish(mask);
+      if (latest()) this.prefetch(drawing, asset);
+      return latest() ? mask : null;
     } catch {
       if (latest()) this.clear();
       return null;

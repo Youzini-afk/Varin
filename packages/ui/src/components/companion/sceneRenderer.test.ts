@@ -189,3 +189,34 @@ it('B spatial layers do not receive a second parent shadow after alpha clipping'
  expect(root.innerHTML).not.toContain('clip-path="url(#outside-face)" filter="url(#paper-depth)"');
  mounted.dispose();
 });
+
+
+it('hides old rear DOM on a warm exact-frame change and repaints its prepared mask on the next RAF', async () => {
+ const epoch = 'aa'.repeat(32), decodes: Array<() => void> = [];
+ let blob = 0, hidden = false, html = '', hides = 0;
+ Object.defineProperty(root, 'innerHTML', { get: () => html, set: (value: string) => { html = value; hidden = /data-spatial-behind="true" visibility="hidden"/.test(value); } });
+ root.querySelector = (() => html.includes('data-spatial-behind') ? { setAttribute: () => { hidden = true; hides++; } } : null) as typeof root.querySelector;
+ const data = { packages: [{ id: 'mask-pair', canvas: [4, 4], geometryReference: 'review', stage: 'motion-candidate', reviewStatus: 'candidate', entryPose: 'rest', exitPose: 'rest', pages: [{ file: 'first.png' }, { file: 'next.png' }], frames: [
+  { page: 0, rect: [0, 0, 2, 2], offset: [1, 1], durationMs: 100 },
+  { page: 1, rect: [2, 2, 2, 2], offset: [1, 1], durationMs: 100 },
+ ] }] };
+ vi.stubGlobal('fetch', async (input: string) => input.endsWith('bundle.json') ? new Response(JSON.stringify(data)) : new Response('png'));
+ vi.stubGlobal('crypto', { subtle: { digest: async () => new Uint8Array(32).fill(170).buffer } });
+ vi.stubGlobal('URL', { createObjectURL: () => `blob:mask-${blob++}`, revokeObjectURL() {} });
+ vi.stubGlobal('Image', class { naturalWidth = 8; naturalHeight = 8; src = ''; removeAttribute() {} decode() { return new Promise<void>(resolve => decodes.push(resolve)); } });
+ const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+ const mounted = mountCompanionScene(root);
+ const value = scene('portfolio', { layout: 'spatial-b-v1', drawing: { epoch, packageId: 'mask-pair', frameIndex: 0, bundle: 'review' } });
+ value.layout = { ...layout, spatial: resolveCompanionSpatialLayout() };
+ mounted.update(value); tick(600); expect(hidden).toBe(true);
+ await flush(); decodes[0]!(); await flush(); tick(620);
+ expect(hidden).toBe(false); expect(html).toContain('href="blob:mask-0"');
+ await flush(); const beforePrefetch = hides; decodes[1]!(); await flush();
+ expect(hides).toBe(beforePrefetch); expect(hidden).toBe(false); expect(html).toContain('href="blob:mask-0"');
+ mounted.update({ ...value, descriptor: { ...value.descriptor, revision: 2, drawing: { ...value.descriptor.drawing!, frameIndex: 1 } } });
+ expect(hidden).toBe(true); expect(hides).toBe(beforePrefetch + 1); // Old DOM is never visible with old alpha after drawing receipt.
+ tick(640); // No awaiting another fetch/decode/microtask between update and this RAF.
+ expect(hidden).toBe(false); expect(html).toContain('href="blob:mask-1"'); expect(html).toContain('viewBox="2 2 2 2"');
+ expect(html).not.toContain('href="blob:mask-0"'); expect(decodes).toHaveLength(2);
+ mounted.dispose();
+});
