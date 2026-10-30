@@ -121,7 +121,7 @@ export function createMemoryInference(options: {
     const ids = await options.kernel.agentRuntimeRequest<string[], 'runtime.memory_work.list'>('runtime.memory_work.list', { scopeId });
     return Promise.all(ids.map(id => read<R>(id)));
   }
-  async function update<R>(work: MemoryWork<R>, action: 'claim' | 'resume' | 'decision' | 'finish' | 'reject', value: unknown = null): Promise<MemoryWork<R>> {
+  async function update<R>(work: MemoryWork<R>, action: 'claim' | 'resume' | 'decision' | 'finish' | 'reject' | 'release', value: unknown = null): Promise<MemoryWork<R>> {
     await options.kernel.agentRuntimeRequest('runtime.memory_work.update', { workId: work.workId, executionOwner: owner, expectedRevision: work.revision, action: action === 'decision' ? { kind: action, keep: value as number[] } : { kind: action } });
     return read<R>(work.workId);
   }
@@ -479,6 +479,12 @@ export function createMemoryInference(options: {
       throw new AggregateError(errors, 'Bot memory stop could not confirm every original executor drained');
   }
   return {
+    async release(workId: string, collect = true): Promise<void> {
+      const work = await read(workId);
+      if (!work.consumed) fail('memory-work-unsettled', 'Memory material is still in use');
+      await update(work, 'release');
+      if (collect) await options.kernel.agentRuntimeRequest('runtime.content.collect', {});
+    },
     settings, bind, admit, find, read, list, decide, generate, finish, reject, describeDecision,
     model: (selection: ModelSelection) => options.authority.selectedModel(selection.providerId, selection.modelId),
     suspendScope, resumeScope(scope: string) {

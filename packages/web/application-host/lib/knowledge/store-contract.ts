@@ -63,6 +63,8 @@ export interface KnowledgeSource {
   spans?: import("@varin/protocol").MemorySourceSpan[];
   /** Immutable rows used to derive this account, in this same owner store. */
   memories?: Array<{ id: NodeId; revision: string }>;
+  /** Historical inputs of a rewrite, not live dependencies. Forgetting still follows these. */
+  predecessors?: Array<{ id: NodeId; revision: string }>;
 }
 
 /** Values that identify the revision a caller opened before a mutation. */
@@ -105,6 +107,9 @@ export interface Knowledge {
   forgottenAt?: number;
   recallCount: number;
   recalledAt?: number;
+  overview?: boolean;
+  maintenanceReason?: string;
+  historyCleared?: boolean;
 }
 
 export interface KnowledgeSupersedeChain {
@@ -193,7 +198,20 @@ export interface OrganizerProgress {
   preparedSource?: KnowledgeSource;
   updatedAt: number;
   lastError?: string;
+  maintenance?: { ids: number[]; reason: string; mode: 'automatic' | 'selection'; query?: string; cancelled?: boolean; sessionOwner?: string };
 }
+
+export interface KnowledgeMaintenanceInput {
+  scope: KnowledgeScope;
+  /** Exact input revisions read by the author; unrelated edits do not invalidate this group. */
+  inputs: Array<{ id: NodeId; expected: KnowledgeExpectedRevision }>;
+  retire: NodeId[];
+  outputs: Array<{ content: string; trigger?: string; nature?: MemoryNature; sources: NodeId[]; overview?: boolean }>;
+  reason: string;
+  /** The original durable maintenance job, settled atomically with its result. */
+  progress?: { key: string; sourceKey: string };
+}
+export interface KnowledgeMaintenanceResult { created: NodeId[]; retired: NodeId[]; unchanged: boolean }
 
 export interface RecallResult {
   node: KnowledgeOrEvent;
@@ -400,8 +418,8 @@ export const terminalCommandDedupeKey = (sessionId: string, commandId: string): 
 export interface KnowledgeMutationOrigin { id: string; intent: string }
 export interface KnowledgeMutationReceipt {
   origin: KnowledgeMutationOrigin;
-  action: 'remember' | 'correct' | 'forget' | 'archive';
-  result: KnowledgeCreateIfAbsentResult | { id: NodeId; previous: Knowledge } | null;
+  action: 'remember' | 'correct' | 'forget' | 'archive' | 'maintain';
+  result: KnowledgeCreateIfAbsentResult | { id: NodeId; previous: Knowledge } | KnowledgeMaintenanceResult | null;
   changes: Knowledge[];
 }
 
@@ -429,6 +447,11 @@ export interface KnowledgeStore {
    * already exists in this scope, including dismissed and retired history.
    */
   readKnowledgeMutation(origin: KnowledgeMutationOrigin): Promise<KnowledgeMutationReceipt | null>;
+  maintainKnowledge(input: KnowledgeMaintenanceInput, origin: KnowledgeMutationOrigin): Promise<KnowledgeMaintenanceResult>;
+  /** Record only changed identities, coalescing one automatic job per seed. */
+  noteMemoryMaintenance(ids: readonly NodeId[]): Promise<void>;
+  releaseMaintenanceReceipt(origin: KnowledgeMutationOrigin): Promise<void>;
+  clearKnowledgeHistory(scope: KnowledgeScope, ids: readonly NodeId[]): Promise<{ cleared: number }>;
   createKnowledgeIfAbsent(k: KnowledgeInput, options?: { expectedRevision?: string; explicit?: boolean; origin?: KnowledgeMutationOrigin }): Promise<KnowledgeCreateIfAbsentResult>;
   updateSuggestedKnowledge(
     id: NodeId,
@@ -454,6 +477,7 @@ export interface KnowledgeStore {
     expectedScope?: KnowledgeScope,
     expected?: KnowledgeExpectedRevision,
     origin?: KnowledgeMutationOrigin,
+    restoreRetired?: boolean,
   ): Promise<{ id: NodeId; previous: Knowledge }>;
   /**
    * Hide one knowledge row from current-effective queries by setting `invalidAt`.

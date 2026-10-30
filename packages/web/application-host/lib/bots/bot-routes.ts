@@ -5,9 +5,10 @@ import type { ComputerService } from "../computer/computer-service.js";
 import { botScopeId } from "../harness/owner-scope.js";
 import { createHash } from "node:crypto";
 import type { MemoryService } from "../memory/memory-service.js";
-import type { Knowledge } from "../knowledge/store.js";
+import { KnowledgeMutationError, type Knowledge } from "../knowledge/store.js";
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import { projectBotPresence } from './bot-presence.js';
+import type { MemoryOrganizer } from '../memory/memory-organizer.js';
 
 /**
  * Bot routes (BC0): the durable Bot catalog plus entry/work resolution. These
@@ -18,6 +19,7 @@ export interface BotRoutesOptions {
   bots: BotService;
   computers?: Pick<ComputerService, "workDesktops" | "listArtifacts">;
   memory?: MemoryService;
+  organizer?: Pick<MemoryOrganizer, 'maintain' | 'maintenanceStatus' | 'cancelMaintenance'>;
   work?: Pick<AgentRuntimeClient, 'botMatters' | 'updateBotMatter' | 'botScope' | 'botActivity'>;
   requireAuth?: RequestHandler;
 }
@@ -42,6 +44,10 @@ const parseModel = (value: unknown): BotModelSelection | null | undefined => {
 };
 
 const sendError = (response: Response, error: unknown, fallback: string): void => {
+  if (error instanceof KnowledgeMutationError) {
+    response.status(error.code === 'conflict' ? 409 : error.code === 'not-found' ? 404 : 400).json({ code: error.code, error: error.message });
+    return;
+  }
   if (error instanceof HarnessServiceError) {
     const status = error.harnessCode === "invalid-params" ? 400
       : error.harnessCode === "not-found" ? 404
@@ -52,7 +58,7 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
   response.status(500).json({ error: error instanceof Error ? error.message : fallback });
 };
 
-export function registerBotRoutes(app: Express, { bots, computers, memory, work, requireAuth = noAuth }: BotRoutesOptions): void {
+export function registerBotRoutes(app: Express, { bots, computers, memory, organizer, work, requireAuth = noAuth }: BotRoutesOptions): void {
   app.post('/api/harness/bots/primary', requireAuth, async (_request: Request, response: Response) => {
     response.setHeader('Cache-Control', 'no-store');
     try { response.json({ bot: await bots.primary() }); }
@@ -212,7 +218,38 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, work,
     return id;
   };
   const memoryItem = (item: Knowledge) => ({ id: item.id, content: item.content, trigger: item.trigger,
-    createdAt: item.createdAt, sourceKind: item.source?.kind ?? null, revision: memoryRevision(item), inactive: item.invalidAt !== undefined });
+    createdAt: item.createdAt, sourceKind: item.source?.kind ?? null, revision: memoryRevision(item), inactive: item.invalidAt !== undefined,
+    ...(item.maintenanceReason ? { maintenanceReason: item.maintenanceReason } : {}), ...(item.overview ? { overview: true } : {}) });
+  app.get('/api/harness/bots/:botId/memory-maintenance', requireAuth, async (request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try { await memoryOwner(request); response.json({ jobs: await organizer?.maintenanceStatus(botScopeId(botIdOf(request))) ?? [] }); }
+    catch (error) { sendError(response, error, 'Unable to read memory maintenance'); }
+  });
+  app.post('/api/harness/bots/:botId/memory-maintenance', requireAuth, async (request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      await memoryOwner(request);
+      if (!organizer) throw new HarnessServiceError('unavailable', 'Memory maintenance unavailable');
+      const ids: unknown = request.body?.ids ?? [];
+      if (!Array.isArray(ids) || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new HarnessServiceError('invalid-params', 'ids must name existing memories');
+      response.json({ job: await organizer.maintain(botScopeId(botIdOf(request)), ids as number[], typeof request.body?.reason === 'string' ? request.body.reason : 'Review and organize existing understanding', undefined, typeof request.body?.query === 'string' ? request.body.query : undefined) });
+    } catch (error) { sendError(response, error, 'Unable to organize memory'); }
+  });
+  app.post('/api/harness/bots/:botId/memory-maintenance/cancel', requireAuth, async (request, response) => {
+    try {
+      await memoryOwner(request);
+      if (!organizer || typeof request.body?.key !== 'string') throw new HarnessServiceError('invalid-params', 'Maintenance key required');
+      await organizer.cancelMaintenance(botScopeId(botIdOf(request)), request.body.key); response.json({ ok: true });
+    } catch (error) { sendError(response, error, 'Unable to cancel maintenance'); }
+  });
+  app.post('/api/harness/bots/:botId/memory/history/clear', requireAuth, async (request, response) => {
+    try {
+      const owner = await memoryOwner(request);
+      const ids: unknown = request.body?.ids;
+      if (!Array.isArray(ids) || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new HarnessServiceError('invalid-params', 'Retired history IDs required');
+      response.json(await memory!.clearHistory(owner, ids as number[]));
+    } catch (error) { sendError(response, error, 'Unable to clear memory history'); }
+  });
   app.get("/api/harness/bots/:botId/memory", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
@@ -225,7 +262,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, work,
     response.setHeader('Cache-Control', 'no-store');
     try {
       const { item, chain } = await memory!.get(await memoryOwner(request), memoryId(request));
-      response.json({ items: (chain?.chain ?? [item]).filter(row => row.forgottenAt === undefined).map(memoryItem) });
+      response.json({ items: (chain?.chain ?? [item]).filter(row => row.forgottenAt === undefined && !row.historyCleared).map(memoryItem) });
     } catch (error) { sendError(response, error, 'Unable to read memory history'); }
   });
   app.get("/api/harness/bots/:botId/memory/:memoryId/source", requireAuth, async (request: Request, response: Response) => {
@@ -248,6 +285,14 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, work,
       }
       const expected = { content: item.content, trigger: item.trigger, status: item.status, invalidAt: item.invalidAt ?? null };
       if (request.body?.action === "forget") await memory!.forget(owner, id, expected);
+      else if (request.body?.action === 'restore') {
+        const { item: previous } = await memory!.get(owner, Number(request.body.previousId));
+        const { chain } = await memory!.get(owner, id);
+        if (!chain?.chain.some(row => row.id === previous.id) || previous.forgottenAt !== undefined || memoryRevision(previous) !== request.body.previousRevision)
+          throw new HarnessServiceError('invalid-params', 'The selected historical revision is unavailable');
+        await memory!.correct(owner, id, { content: previous.content, trigger: previous.trigger, ...(previous.nature ? { nature: previous.nature } : {}),
+          source: { kind: 'user-correction', spans: previous.source?.spans ?? [] }, expected, restoreRetired: item.invalidAt !== undefined });
+      }
       else if (request.body?.action === 'archive') await memory!.archive(owner, id, expected);
       else if (request.body?.action === "correct" && typeof request.body.content === "string" && request.body.content.trim()) {
         await memory!.correct(owner, id, { content: request.body.content.trim(), trigger: item.trigger,

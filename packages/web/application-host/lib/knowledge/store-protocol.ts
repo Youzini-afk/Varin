@@ -15,6 +15,8 @@ export const STORE_METHODS: Record<DirectStoreMethod, true> = {
   listOrganizerProgress: true, putKnowledge: true,
   readPlanCandidate: true, readPlan: true, mutatePlan: true, readPlanMutation: true, capturePlanFork: true,
   readKnowledgeMutation: true, createKnowledgeIfAbsent: true, updateSuggestedKnowledge: true,
+  maintainKnowledge: true, noteMemoryMaintenance: true,
+  releaseMaintenanceReceipt: true, clearKnowledgeHistory: true,
   updateAcceptedKnowledge: true, supersedeKnowledge: true,
   retireKnowledge: true, getKnowledge: true,
   listKnowledge: true, getSupersedeChain: true, acceptKnowledge: true,

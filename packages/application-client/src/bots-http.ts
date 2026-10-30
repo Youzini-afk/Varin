@@ -96,6 +96,19 @@ const memoryItem = (value: unknown): BotMemoryItem => {
   if (item.inactive !== undefined && typeof item.inactive !== 'boolean') invalid();
   return item as unknown as BotMemoryItem;
 };
+const maintenanceJob = (value: unknown): import('./bots.js').BotMemoryMaintenance => {
+  const job = record(value);
+  string(job.key);
+  if (!['pending', 'processing', 'prepared', 'formed', 'reviewed-empty', 'failed'].includes(String(job.status)) || typeof job.updatedAt !== 'number') invalid();
+  if (job.lastError !== undefined) string(job.lastError);
+  if (job.maintenance !== undefined) {
+    const input = record(job.maintenance);
+    if (!Array.isArray(input.ids) || input.ids.some(id => !Number.isSafeInteger(id) || id <= 0)
+      || !['automatic', 'selection'].includes(String(input.mode)) || typeof input.reason !== 'string'
+      || input.cancelled !== undefined && typeof input.cancelled !== 'boolean') invalid();
+  }
+  return job as unknown as import('./bots.js').BotMemoryMaintenance;
+};
 const sourceExcerpt = (value: unknown): MemorySourceExcerpt => {
   const source = record(value); const span = record(source.span);
   const required = span.kind === 'history-item' ? ['threadId', 'branchId', 'headId'] : null;
@@ -241,6 +254,11 @@ export function createBotsHttpAPI(): BotsAPI {
       create: async id => decodeBotSession((await request(`${path(id)}/sessions`, 'POST')).session),
     },
     memory: {
+      clearHistory: async (id, ids) => { await request(`${path(id)}/memory/history/clear`, 'POST', { ids }); },
+      organize: async (id, input) => maintenanceJob((await request(`${path(id)}/memory-maintenance`, 'POST', input)).job),
+      maintenance: async (id, signal) => array((await request(`${path(id)}/memory-maintenance`, 'GET', undefined, signal)).jobs, maintenanceJob),
+      cancelMaintenance: async (id, key) => { await request(`${path(id)}/memory-maintenance/cancel`, 'POST', { key }); },
+      restore: async (id, current, previous) => { await request(`${path(id)}/memory/${current.id}`, 'POST', { action: 'restore', previousId: previous.id, previousRevision: previous.revision, revision: current.revision }); },
       list: async (id, signal, includeInactive) => array((await request(`${path(id)}/memory${includeInactive ? '?includeInactive=true' : ''}`, 'GET', undefined, signal)).items, memoryItem),
       history: async (id, memoryId, signal) => array((await request(`${path(id)}/memory/${memoryId}/history`, 'GET', undefined, signal)).items, memoryItem),
       source: async (id, memoryId, signal) => array((await request(`${path(id)}/memory/${memoryId}/source`, 'GET', undefined, signal)).sources, sourceExcerpt),

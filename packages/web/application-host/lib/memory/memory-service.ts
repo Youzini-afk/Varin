@@ -7,6 +7,7 @@ import type {
   KnowledgeStatus,
   KnowledgeStore,
   KnowledgeSupersedeChain,
+  KnowledgeMaintenanceInput,
   MemoryNature,
   NodeId,
   RecallResult,
@@ -127,6 +128,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     // Authorization is the memory owner lookup. Only its persisted ranges are
     // readable; callers cannot substitute another Thread or request its history.
     const item = await requireRow(await storeFor(owner), owner, id);
+    if (item.forgottenAt !== undefined || item.historyCleared) throw new KnowledgeMutationError('not-found', 'Memory source is no longer available');
     return Promise.all((item.source?.spans ?? []).map(async (span: MemorySourceSpan): Promise<MemorySourceExcerpt> => {
       let text: string | undefined;
       try {
@@ -171,7 +173,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
   const correct = async (
     owner: MemoryOwner,
     id: NodeId,
-    patch: { content: string; trigger?: string; nature?: MemoryNature; source?: KnowledgeSource; expected?: KnowledgeExpectedRevision },
+    patch: { content: string; trigger?: string; nature?: MemoryNature; source?: KnowledgeSource; expected?: KnowledgeExpectedRevision; restoreRetired?: boolean },
     origin?: KnowledgeMutationOrigin,
   ): Promise<{ id: NodeId; previous: Knowledge }> => {
     const store = await storeFor(owner);
@@ -183,7 +185,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
       trigger: patch.trigger?.trim() ?? "",
       ...(patch.nature ? { nature: patch.nature } : {}),
       ...(source ? { source } : {}),
-    }, owner.scope, patch.expected, origin);
+    }, owner.scope, patch.expected, origin, patch.restoreRetired);
     notify(owner, [result.id, id]);
     return result;
   };
@@ -252,6 +254,21 @@ export function createMemoryService(deps: MemoryServiceDeps) {
   };
 
   return {
+    /** Trusted organizer access to the existing writer; never creates a second store. */
+    maintenanceStore: storeFor,
+    releaseMaintenanceReceipt: async (owner: MemoryOwner, origin: KnowledgeMutationOrigin) => (await storeFor(owner)).releaseMaintenanceReceipt(origin),
+    clearHistory: async (owner: MemoryOwner, ids: readonly number[]) => {
+      const store = await storeFor(owner);
+      const result = await store.clearKnowledgeHistory(owner.scope, ids);
+      if (result.cleared) await store.compact();
+      return result;
+    },
+    maintain: async (owner: MemoryOwner, input: Omit<KnowledgeMaintenanceInput, 'scope'>, origin: KnowledgeMutationOrigin) => {
+      const store = await storeFor(owner);
+      const result = await store.maintainKnowledge({ ...input, scope: owner.scope }, origin);
+      if (!result.unchanged) notify(owner, [...result.created, ...result.retired]);
+      return result;
+    },
     exclusions: async (owner: MemoryOwner): Promise<Knowledge[]> => {
       const store = owner.scope === 'user' ? await deps.userStore()
         : owner.scope === 'session' ? await deps.threadStoreIfPresent?.(owner.ownerId!) : await storeFor(owner);

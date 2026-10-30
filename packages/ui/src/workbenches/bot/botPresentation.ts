@@ -367,6 +367,7 @@ export function scheduleWhen(atMs: number, locale: string, now = Date.now()): st
 const MEMORY_SOURCE: Record<string, I18nKey> = {
   'agent-memory': 'bot.memory.source.agent',
   'memory-organizer': 'bot.memory.source.organizer',
+  'memory-maintenance': 'bot.memory.organized',
   'user-correction': 'bot.memory.source.correction',
   'user-extracted': 'bot.memory.source.saved',
 };

@@ -121,6 +121,49 @@ native context rebuilding follows original checkpoint/history references and exc
 ranges, inherited summaries and attributed quoted payloads. Original UI history remains unchanged.
 The same projection applies to model-facing history readers and selective task-background handoffs.
 
+## Maintenance of existing Bot memory
+
+`memory-maintenance.ts` uses the original MemoryWork/model authority for a local review of existing
+accounts. Knowledge notifications persist coalesced `maintenance:auto:<id>` progress in the same
+store; identical observed versions and a review requiring no changes settle without another model call.
+Bot and shared-user changes have separate owners. Explicit `organize` remains available when automatic
+organization is disabled; session reviews are registered under their actual Bot and Thread. Sleep and
+model-disable gates retain their original semantics.
+
+The model receives relevant accounts, versions, provenance and the reason for review. It may preserve,
+merge, split, revise, retire or create an overview. It can request further scoped memory/search/source
+reads rather than treating initial candidates as complete. Each continuation freezes its actual material
+in another original MemoryWork; completed output is reused after restart. Capacity-sized source windows
+carry continuation offsets; partially viewed accounts cannot be destructively retired before reading them.
+There is no fixed reflection workflow or iteration limit.
+
+`maintainKnowledge` validates the actual observed inputs and publishes outputs, retirements, dependency
+invalidations, lineage and its receipt in one native transaction. Unrelated mutations do not invalidate
+the group. `source.predecessors` records historical rewrite inputs and retains original passages;
+`source.memories` describes live exact-version dependencies. Normal retirement of a predecessor does not
+invalidate its replacement; forgetting follows both relationships. An overview retains its supporting
+accounts and becomes stale when they change. Multi-successor corrections reach the existing context
+projection, including split accounts. Stores remain independent; a rewrite never addresses another scope's
+numeric IDs or creates a cross-store atomic transaction.
+
+Native `memory` adds `rewrite`, `organize`, `maintenance_status` and `maintenance_cancel`. Direct rewrites
+use revisions returned by `get` and the original Operation receipt. Bot routes and the existing memory pane
+expose background review, cancellation, its result/reason, history and restoring a historical understanding
+as a new current correction. Ordinary Agent notes continue to use their separate explicit path.
+
+After downstream commit and executor drain, an explicit MemoryWork `release` drops its recipe and inference
+bodies from ContentStore roots while preserving identities, usage and terminal receipts. Unsettled work
+keeps its original material. Read continuations defer collection until their final consumer; collection
+runs on the existing independent worker. Background Knowledge receipts then drop redundant change bodies.
+Cleanup failure leaves the committed result usable and is retried from persisted progress. Original-source
+work releases its material only after all its prepared ranges settle.
+
+The history cleanup action clears selected retired bodies and compacts the original Knowledge file.
+Identity, lineage and source exclusions remain so the same evidence cannot be rediscovered as new memory.
+It does not delete original conversations or their independently owned checkpoints. User-retained revisions
+remain until explicitly cleared; native tool receipts still required by their conversation are retained.
+Text candidates use an owner-built n-gram index, backfilled on existing stores without resetting them.
+
 ## Ordinary Thread context
 
 Native conversations use this same catalog through `kernel/thread-context.ts`. A trusted

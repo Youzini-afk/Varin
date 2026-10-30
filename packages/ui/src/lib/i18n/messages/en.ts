@@ -4418,6 +4418,13 @@ export const dict = {
   "harness.overview.changed": "Modified",
   "harness.overview.noProducts": "No outputs or file changes yet.",
   "harness.overview.contextDetails": "View context details",
+  "bot.memory.organize": "Organize",
+  "bot.memory.organizing": "Organizing related memories…",
+  "bot.memory.organized": "Memory organization completed",
+  "bot.memory.unchanged": "Reviewed · no changes needed",
+  "bot.memory.cancelled": "Organization cancelled",
+  "bot.memory.restore": "Restore this understanding",
+  "bot.memory.clearHistory": "Delete this historical text",
 } as const;
 
 export type I18nKey = keyof typeof dict;

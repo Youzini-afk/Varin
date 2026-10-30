@@ -42,6 +42,8 @@ import {
 } from "../knowledge/store.js";
 import type { MemoryOwner, MemoryService } from "./memory-service.js";
 import { mergeSourceSpans, sourceIdentity, sourceRevision, uncoveredSourceSpans } from "./memory-sources.js";
+import { createMemoryMaintenance } from './memory-maintenance.js';
+import { memoryVersion } from './memory-maintenance-state.js';
 
 // ── Boundaries ─────────────────────────────────────────────────────
 
@@ -67,6 +69,7 @@ export interface MemoryOrganizerDeps {
   storeForScopeId(scopeId: string): Promise<KnowledgeStore | null>;
   /** Whether the scope's store file already exists (cheap — no store open). */
   hasStoreForScope(scopeId: string): boolean | Promise<boolean>;
+  sharedStoreIfPresent?(): Promise<KnowledgeStore | null>;
   /** Bot scopes from the durable Bot registry. */
   listScopeIds(): Promise<string[]>;
   canExecuteScope?(scopeId: string): Promise<boolean>;
@@ -438,6 +441,17 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     return botModel ? { selection: botModel, source: "bot" } : null;
   };
 
+  const maintenance = createMemoryMaintenance({
+    inference: deps.getInference, memory: deps.memory,
+    model: async scopeId => (await modelForScope(await readHarnessSettings(), scopeId))?.selection ?? null,
+    allowed: async (scopeId, automatic, owner) => {
+      const settings = await readHarnessSettings();
+      return !disposed && !suspendedScopes.has(scopeId) && !settings.disabled && (!automatic || settings.autoOrganize[owner?.scope === 'user' ? 'user' : 'bot'])
+        && (!deps.canExecuteScope || await deps.canExecuteScope(scopeId));
+    }, onError: report, reschedule: scopeId => schedule(scopeId),
+  });
+  let sharedMaintenance: Promise<void> | null = null;
+
   // ── Commit ───────────────────────────────────────────────────────
 
   const commitProposal = async (
@@ -446,7 +460,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     settings: ResolvedOrganizerSettings,
     source: KnowledgeSource,
     existingMemories: readonly Knowledge[],
-    expectedRevision: string,
   ): Promise<number | null> => {
     const owner = ownerFor(proposal.scope, scopeId);
     if (!owner) return null;
@@ -476,7 +489,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         ...(nature ? { nature } : {}),
         source: proposalSource,
         commit: "accepted",
-        expectedRevision,
       });
       return result.created || (proposalKey ? result.item.source?.proposalKey === proposalKey
         : result.item.source?.key === source.key && source.key !== undefined)
@@ -496,10 +508,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         content: proposal.content,
         ...(proposal.trigger ? { trigger: proposal.trigger } : {}),
         ...(nature ? { nature } : {}),
-        source: proposalSource,
+        source: { ...proposalSource, memories: [...(proposalSource.memories ?? []), { id: item.id, revision: memoryVersion(item) }] },
         supplements: item.id,
         commit: "accepted",
-        expectedRevision,
       });
       return result.created || (proposalKey ? result.item.source?.proposalKey === proposalKey
         : result.item.source?.key === source.key && source.key !== undefined)
@@ -602,21 +613,15 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   const commitPrepared = async (store: KnowledgeStore, scopeId: string, preparedUnits: Array<{
     unit: OrganizerUnit;
     proposals: OrganizerPreparedProposal[];
-  }>, unitChars: number, narratedRevision: string | null = null): Promise<void> => {
+  }>, unitChars: number): Promise<void> => {
     // The original MemoryService is the only writer. Re-read enable gates before commit.
     const currentSettings = await readHarnessSettings();
     if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId)))
       return;
     if (!currentSettings.autoOrganize.bot)
       return;
-    if (narratedRevision !== null && narratedRevision !== store.knowledgeRevision()) {
-      throw new KnowledgeMutationError("conflict", "Memory changed while the organizer was narrating proposals");
-    }
     const owner = ownerFor("bot", scopeId)!;
     const existing = await deps.memory.list(owner, { activeOnly: true });
-    let revision = store.knowledgeRevision();
-    const userOwner: MemoryOwner = { scope: "user", ownerId: null };
-    let userRevision = currentSettings.autoOrganize.user ? await deps.memory.revision(userOwner) : "";
     for (const { unit, proposals } of preparedUnits) {
       await assertSourceCurrent(store, scopeId, unit, unitChars);
       const produced: number[] = [];
@@ -624,16 +629,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         const currentSettings = await mutationSettings(scopeId);
         if (proposal.scope === "user" && !currentSettings.autoOrganize.user)
           continue;
-        if (revision !== store.knowledgeRevision()) {
-          throw new KnowledgeMutationError("conflict", "Memory changed while the organizer was committing proposals");
-        }
-        const id = await commitProposal(scopeId, proposal, currentSettings, unit.source, existing, proposal.scope === "user" ? userRevision : revision);
+        const id = await commitProposal(scopeId, proposal, currentSettings, unit.source, existing);
         if (id !== null)
           produced.push(id);
-        revision = store.knowledgeRevision();
-        if (proposal.scope === "user" && currentSettings.autoOrganize.user) {
-          userRevision = await deps.memory.revision(userOwner);
-        }
       }
       await putProgress(store, unit.key, produced.length > 0 ? "formed" : "reviewed-empty", {
 
@@ -645,10 +643,26 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       });
     }
   };
+  const releaseSettledSources = async (store: KnowledgeStore) => {
+    const groups = new Map<string, OrganizerProgress[]>();
+    for (const row of await store.listOrganizerProgress()) {
+      if (!row.workId || row.maintenance) continue;
+      const group = groups.get(row.workId) ?? []; group.push(row); groups.set(row.workId, group);
+    }
+    for (const [workId, rows] of groups) {
+      if (!rows.every(row => row.status === 'formed' || row.status === 'reviewed-empty')) continue;
+      const inference = deps.getInference();
+      if (!(await inference.read(workId)).consumed) continue;
+      await inference.release(workId);
+      for (const row of rows) {
+        const { workId: _released, ...progress } = row;
+        await store.putOrganizerProgress(progress);
+      }
+    }
+  };
   const prepareWork = async (store: KnowledgeStore, scopeId: string, original: MemoryWork<OrganizerRecipe>): Promise<void> => {
     // This writer-incarnation token fences only this preparation attempt.
     // Across reopen, original source/target snapshots and proposal CAS remain authoritative.
-    const narratedRevision = store.knowledgeRevision();
     const inference = deps.getInference();
     let work = original;
     const recipe = work.recipe;
@@ -762,7 +776,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     }
     // All prepared rows are durably acknowledged before releasing the original source claims.
     await inference.finish(work);
-    await commitPrepared(store, scopeId, preparedUnits, recipe.budget.unitChars, narratedRevision);
+    await commitPrepared(store, scopeId, preparedUnits, recipe.budget.unitChars);
   };
   const runScope = async (scopeId: string): Promise<void> => {
     if (disposed || !isBotScopeId(scopeId))
@@ -775,12 +789,27 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       const existingStore = await deps.hasStoreForScope(scopeId) ? await deps.storeForScopeId(scopeId) : null;
       if (existingStore)
         await settleCommittedPrepared(existingStore, scopeId);
+      if (existingStore) await releaseSettledSources(existingStore).catch(report);
+      if (existingStore) await maintenance.run(existingStore, scopeId, ownerFor('bot', scopeId)!);
+      for (const link of existingStore ? await existingStore.listOrganizerProgress() : []) {
+        if (!link.maintenance?.sessionOwner) continue;
+        const owner: MemoryOwner = { scope: 'session', ownerId: link.maintenance.sessionOwner };
+        await maintenance.run(await deps.memory.maintenanceStore(owner), scopeId, owner);
+      }
+      if (!sharedMaintenance) {
+        sharedMaintenance = (async () => {
+          const owner: MemoryOwner = { scope: 'user', ownerId: null };
+          const store = await deps.sharedStoreIfPresent?.();
+          if (store) await maintenance.run(store, scopeId, owner);
+        })();
+        try { await sharedMaintenance; } finally { sharedMaintenance = null; }
+      }
       const settings = await readHarnessSettings();
       if (!settings.autoOrganize.bot || settings.disabled)
         return;
       if (!existingStore && deps.hasNativeSources && !await deps.hasNativeSources(scopeId)) return;
       const inference = deps.getInference();
-      const pending = (await inference.list<OrganizerRecipe>(scopeId)).filter(work => work.mode === "automatic" && !work.consumed);
+      const pending = (await inference.list<OrganizerRecipe & { kind?: string }>(scopeId)).filter(work => work.recipe.kind !== 'maintenance' && work.mode === "automatic" && !work.consumed);
       const store = existingStore ?? await deps.storeForScopeId(scopeId);
       if (!store)
         return;
@@ -796,14 +825,14 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           return;
       }
       // Reservations only affect their exact source revision/range, never another Bot/source.
-      const unresolved = (await inference.list<OrganizerRecipe>(scopeId)).filter(work => work.mode === "automatic" && !work.consumed);
+      const unresolved = (await inference.list<OrganizerRecipe & { kind?: string }>(scopeId)).filter(work => work.recipe.kind !== 'maintenance' && work.mode === "automatic" && !work.consumed);
       reservedSources.set(scopeId, unresolved.flatMap(work => work.recipe.units.flatMap(unit => unit.source.spans ?? [])));
       const binding = await modelForScope(settings, scopeId);
       if (!binding)
         return;
       const promptScope: OrganizerPromptScope = { sourceScope: "bot", userMemoryEnabled: settings.autoOrganize.user };
       const budget = await resolveBudget(binding.selection, promptScope);
-      const planningMemories = await deps.memory.list(ownerFor("bot", scopeId)!, { activeOnly: true });
+      const planningMemories: Knowledge[] = [];
       let unitChars = budget.unitChars;
       let candidates: OrganizerUnit[] = [];
       let freshUnits: OrganizerUnit[] = [];
@@ -862,6 +891,11 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           if (sourceHasMore) queued.add(scopeId);
         }
         return;
+      }
+      for (const hit of await deps.memory.search(ownerFor('bot', scopeId)!, freshUnits.flatMap(unit => unit.texts).join('\n'), Math.max(1, budget.inputTokens))) {
+        if (hit.node.type !== 'knowledge') continue;
+        const row = await store.getKnowledge(hit.node.id);
+        if (row?.invalidAt === undefined && row?.status === 'accepted') planningMemories.push(row);
       }
       const selected = selectPrompt(freshUnits, planningMemories, budget.inputTokens, promptScope)!;
       const nativeBinding = await inference.bind(binding.selection, budget.maxOutputTokens);
@@ -946,6 +980,39 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   };
 
   return {
+    async noteKnowledge(scopeId: string, ids: readonly number[]): Promise<void> {
+      if (disposed || !isBotScopeId(scopeId)) return;
+      const store = await deps.storeForScopeId(scopeId);
+      if (!store) return;
+      await store.noteMemoryMaintenance(ids);
+      schedule(scopeId);
+    },
+    async noteSharedKnowledge(ids: readonly number[]): Promise<void> {
+      if (disposed) return;
+      await (await deps.memory.maintenanceStore({ scope: 'user', ownerId: null })).noteMemoryMaintenance(ids);
+      for (const scopeId of await deps.listScopeIds()) schedule(scopeId);
+    },
+    async maintain(scopeId: string, ids: number[], reason: string, key?: string, query?: string, owner?: MemoryOwner) {
+      const store = owner ? await deps.memory.maintenanceStore(owner) : await deps.storeForScopeId(scopeId);
+      if (!store || !isBotScopeId(scopeId)) throw new Error('Bot memory store unavailable');
+      const job = await maintenance.request(store, ids, reason, key, query);
+      if (owner?.scope === 'session' && owner.ownerId) {
+        const botStore = await deps.storeForScopeId(scopeId);
+        await botStore?.putOrganizerProgress({ key: `maintenance:scope:${owner.ownerId}`, status: 'reviewed-empty', updatedAt: now(),
+          maintenance: { ids: [], reason: 'Session memory work', mode: 'selection', sessionOwner: owner.ownerId } });
+      }
+      schedule(scopeId); return job;
+    },
+    async maintenanceStatus(scopeId: string, key?: string, owner?: MemoryOwner) {
+      const store = owner ? await deps.memory.maintenanceStore(owner) : await deps.storeForScopeId(scopeId);
+      if (!store) return [];
+      return (await store.listOrganizerProgress()).filter(row => row.maintenance && (key === undefined || row.key === key));
+    },
+    async cancelMaintenance(scopeId: string, key: string, owner?: MemoryOwner) {
+      const store = owner ? await deps.memory.maintenanceStore(owner) : await deps.storeForScopeId(scopeId);
+      if (!store) throw new Error('Bot memory store unavailable');
+      await maintenance.cancel(store, key);
+    },
     async suspendScope(scopeId: string): Promise<void> {
       suspendedScopes.add(scopeId);
       const timer = timers.get(scopeId);

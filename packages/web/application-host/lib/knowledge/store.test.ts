@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { terminalCommandDedupeKey, type KnowledgeStore } from "./store-contract.js";
 import { openKnowledgeStoreEngine as openWorkspaceKnowledge } from "./store-engine.js";
+import { memoryExpected, memoryVersion } from '../memory/memory-maintenance-state.js';
 
 const require = createRequire(import.meta.url);
 const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
@@ -40,6 +41,64 @@ describe("KnowledgeStore", () => {
   afterEach(async () => {
     await store.close();
     cleanup();
+  });
+
+  it('publishes joint rewrites atomically, replays receipts and follows forgetting through lineage', async () => {
+    const first = await store.putKnowledge({ scope: 'bot', status: 'accepted', content: 'Blue accents', trigger: 'theme' });
+    const second = await store.putKnowledge({ scope: 'bot', status: 'accepted', content: 'Neutral surfaces', trigger: 'theme' });
+    const rows = await Promise.all([first, second].map(id => store.getKnowledge(id)));
+    const input = { scope: 'bot' as const, inputs: rows.map(row => ({ id: row!.id, expected: memoryExpected(row!) })), retire: [first, second],
+      outputs: [{ content: 'Blue accents on neutral surfaces', sources: [first, second] }], reason: 'Combine related preferences' };
+    const origin = { id: 'joint-change', intent: JSON.stringify(input) };
+    const result = await store.maintainKnowledge(input, origin);
+    expect(await store.maintainKnowledge(input, origin)).toEqual(result);
+    const current = await store.getKnowledge(result.created[0]!);
+    expect(current?.invalidAt).toBeUndefined();
+    expect(current?.source?.predecessors?.map(row => row.id)).toEqual([first, second]);
+    expect((await store.listKnowledge({ scope: 'bot', activeOnly: true })).map(row => row.id)).toEqual(result.created);
+    await store.noteMemoryMaintenance([...result.created, first, second]);
+    expect((await store.listOrganizerProgress()).filter(row => row.status === 'pending')).toEqual([]);
+    await store.retireKnowledge(first, 'bot', undefined, undefined, 'forget');
+    expect((await store.getKnowledge(current!.id))?.forgottenAt).toBeTypeOf('number');
+  });
+
+  it('rejects stale joint inputs without partial retirement and ignores unrelated edits', async () => {
+    const id = await store.putKnowledge({ scope: 'bot', status: 'accepted', content: 'Original', trigger: '' });
+    const row = (await store.getKnowledge(id))!;
+    const input = { scope: 'bot' as const, inputs: [{ id, expected: memoryExpected(row) }], retire: [id], outputs: [{ content: 'Updated', sources: [id] }], reason: 'Revise' };
+    await store.putKnowledge({ scope: 'bot', status: 'accepted', content: 'Unrelated', trigger: '' });
+    const result = await store.maintainKnowledge(input, { id: 'valid', intent: 'valid' });
+    await expect(store.maintainKnowledge(input, { id: 'stale', intent: 'stale' })).rejects.toMatchObject({ code: 'conflict' });
+    expect((await store.getKnowledge(result.created[0]!))?.content).toBe('Updated');
+    expect((await store.listKnowledge({ scope: 'bot', activeOnly: true }))).toHaveLength(2);
+  });
+
+  it('splits an account and invalidates a dependent overview when an original source changes', async () => {
+    const id = await store.putKnowledge({ scope: 'bot', status: 'accepted', content: 'Project A and project B', trigger: '' });
+    const row = (await store.getKnowledge(id))!;
+    const result = await store.maintainKnowledge({ scope: 'bot', inputs: [{ id, expected: memoryExpected(row) }], retire: [id],
+      outputs: [{ content: 'Project A', sources: [id] }, { content: 'Project B', sources: [id] }], reason: 'Separate contexts' }, { id: 'split', intent: 'split' });
+    expect((await store.getSupersedeChain(id, 'bot'))?.successors.map(row => row.id)).toEqual(result.created);
+    const source = (await store.getKnowledge(result.created[0]!))!;
+    const overview = await store.maintainKnowledge({ scope: 'bot', inputs: [{ id: source.id, expected: memoryExpected(source) }], retire: [],
+      outputs: [{ content: 'Project A overview', sources: [source.id], overview: true }], reason: 'Overview' }, { id: 'overview', intent: 'overview' });
+    expect((await store.getKnowledge(overview.created[0]!))?.source?.memories).toEqual([{ id: source.id, revision: memoryVersion(source) }]);
+    await store.updateAcceptedKnowledge(source.id, { content: 'Project A changed', trigger: '' }, 'bot');
+    expect((await store.getKnowledge(overview.created[0]!))?.invalidAt).toBeTypeOf('number');
+    expect((await store.getKnowledge(result.created[1]!))?.invalidAt).toBeUndefined();
+  });
+
+  it('restores archived understanding as a new revision and clears only selected historical bodies', async () => {
+    const id = await store.putKnowledge({ scope: 'bot', status: 'accepted', content: 'Useful experience', trigger: '' });
+    await store.retireKnowledge(id, 'bot', undefined, undefined, 'archive');
+    const old = (await store.getKnowledge(id))!;
+    const result = await store.supersedeKnowledge(id, { scope: 'bot', status: 'accepted', content: old.content, trigger: old.trigger }, 'bot', memoryExpected(old), undefined, true);
+    expect((await store.getKnowledge(result.id))?.invalidAt).toBeUndefined();
+    await expect(store.supersedeKnowledge(id, { scope: 'bot', status: 'accepted', content: old.content, trigger: '' }, 'bot', memoryExpected(old), undefined, true)).rejects.toMatchObject({ code: 'conflict' });
+    await expect(store.clearKnowledgeHistory('bot', [result.id])).rejects.toMatchObject({ code: 'conflict' });
+    expect(await store.clearKnowledgeHistory('bot', [id])).toEqual({ cleared: 1 });
+    expect((await store.getKnowledge(id))?.content).toBe('');
+    expect((await store.listKnowledge({ scope: 'bot' })).map(row => row.id)).toEqual([result.id]);
   });
 
   it("bounds context payload reads by matched rows, not the symbol catalog", async () => {

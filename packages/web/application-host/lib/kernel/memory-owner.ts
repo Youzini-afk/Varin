@@ -10,13 +10,18 @@ export interface MemoryQuery {
   previousState?: unknown;
   origin?: string;
   arguments?: {
-    action: 'read' | 'search' | 'save' | 'delete' | 'get' | 'recall' | 'remember' | 'correct' | 'forget' | 'archive';
+    action: 'read' | 'search' | 'save' | 'delete' | 'get' | 'recall' | 'remember' | 'correct' | 'forget' | 'archive'
+      | 'rewrite' | 'organize' | 'maintenance_status' | 'maintenance_cancel';
     scope?: 'global' | 'project' | 'currentThread' | 'bot' | 'user' | 'session';
     id?: number; content?: string; query?: string; revision?: number; k?: number;
     trigger?: string; nature?: string; sourceText?: string; sourceItemId?: string; includeSource?: boolean;
     sources?: Array<{ itemId: string; quote: string }>;
     derivedFrom?: Array<{ id: number; revision: string }>;
     expected?: import('../knowledge/store.js').KnowledgeExpectedRevision;
+    ids?: number[]; key?: string; reason?: string;
+    inputs?: Array<{ id: number; revision: string }>;
+    retire?: number[];
+    outputs?: import('../knowledge/store.js').KnowledgeMaintenanceInput['outputs'];
   };
   checkpoint?: ContextCheckpoint;
 }

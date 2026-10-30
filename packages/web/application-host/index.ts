@@ -1653,6 +1653,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // native inference owner. All commits go through memoryService, so inferred output
   // keeps suggested/accepted semantics, dedupe, and correction CAS.
   const memoryOrganizer = createMemoryOrganizer({
+    sharedStoreIfPresent: async () => {
+      if (userKnowledgeStore) return userKnowledgeStore;
+      try { await fsPromises.access(path.join(VARIN_DATA_DIR, 'knowledge', hostId, 'user.tdb')); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+      return getUserKnowledgeStore();
+    },
     getInference: () => memoryInference,
     hasNativeSources: scopeId => botHistory.hasSources(botIdFromScopeId(scopeId)),
     nativeMaterials: async (scopeId, afterHeads, sourceChars) => {
@@ -2139,7 +2145,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi }));
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext,
-    bot: createBotMemoryOwner({ runtime: agentRuntime, history: botHistory, memory: memoryService, prepareContext: threadContext,
+    bot: createBotMemoryOwner({ runtime: agentRuntime, history: botHistory, memory: memoryService, organizer: memoryOrganizer, prepareContext: threadContext,
       knowledge: input => knowledgeContextRuntime.knowledgeForThread(input) }) }));
   const contextCompaction = createContextCompaction(extensionRuntime);
   const contextAgent = createContextAgent({ settings: modelsService.settings, models: modelAuthority });
@@ -2412,6 +2418,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     bots: botService,
     work: agentRuntime,
     memory: memoryService,
+    organizer: memoryOrganizer,
     computers: computerService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
@@ -2480,8 +2487,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       embedding: null, // Authority .tdb stays placeholder-dim; knowledge vectors are derived (D-196)
       onKnowledgeChanged: (ids) => {
         const store = knowledgeStores.get(storeKey);
-        if (!store || !knowledgeVectors) return;
-        knowledgeVectors.notify(store, scope, scopeId, scopeId, ids);
+        if (!store) return;
+        knowledgeVectors?.notify(store, scope, scopeId, scopeId, ids);
+        if (scope === 'bot') void memoryOrganizerRef.current?.noteKnowledge(scopeId, ids).catch(error => console.error('[Memory] Maintenance admission failed:', error));
       },
 
     }).then(async (store) => {
@@ -2509,8 +2517,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         hostId,
         embedding: null,
         onKnowledgeChanged: (ids) => {
-          if (!userKnowledgeStore || !knowledgeVectors) return;
-          knowledgeVectors.notify(userKnowledgeStore, 'user', 'user', undefined, ids);
+          if (!userKnowledgeStore) return;
+          knowledgeVectors?.notify(userKnowledgeStore, 'user', 'user', undefined, ids);
+          void memoryOrganizerRef.current?.noteSharedKnowledge(ids).catch(error => console.error('[Memory] Shared maintenance admission failed:', error));
         },
       }).then((store) => {
         userKnowledgeStore = store;

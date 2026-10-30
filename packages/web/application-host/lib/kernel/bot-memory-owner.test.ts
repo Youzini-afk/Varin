@@ -10,6 +10,26 @@ import { createBotMemoryOwner } from './bot-memory-owner.js';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
 import { MemoryBridge, type PrivateMemoryResponse } from './memory-bridge.js';
 import { sourceRevision } from '../memory/memory-sources.js';
+import { memoryVersion } from '../memory/memory-maintenance-state.js';
+
+it('routes a joint rewrite through the original Bot owner and returns the same committed receipt', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'varin-bot-rewrite-'));
+    const store = await openWorkspaceKnowledge({ dataDir, hostId: 'fixture', workspaceId: 'bot', scope: 'bot', embedding: null });
+    try {
+        const target = { scope: 'bot' as const, ownerId: 'bot' };
+        const memory = createMemoryService({ storeForScopeId: async () => store, userStore: async () => null, ownerForThread: async () => target });
+        const a = (await memory.remember(target, { content: 'Blue accents' })).item;
+        const b = (await memory.remember(target, { content: 'Neutral surfaces' })).item;
+        const owner = createBotMemoryOwner({ memory, runtime: { run: async () => ({ id: 'run', thread_id: 'thread', branch_id: 'branch' }), thread: async () => ({ bot_id: 'bot' }) } as never,
+            history: {} as never, prepareContext: {} as never, knowledge: async () => ({ knowledge: [] }) as never });
+        const query: MemoryQuery = { action: 'tool', runId: 'run', origin: 'rewrite', scope: { botId: 'bot', mode: 'bot', threadId: 'thread', projectId: null },
+            arguments: { action: 'rewrite', inputs: [a, b].map(row => ({ id: row.id, revision: memoryVersion(row) })), retire: [a.id, b.id], outputs: [{ content: 'Blue accents on neutral surfaces', sources: [a.id, b.id] }] } };
+        const result = await owner(query, new AbortController().signal);
+        expect(result.status).toBe('ready');
+        expect(await owner(query, AbortSignal.abort())).toEqual(result);
+        expect((await memory.list(target, { activeOnly: true })).map(row => row.content)).toEqual(['Blue accents on neutral surfaces']);
+    } finally { await store.close(); await rm(dataDir, { recursive: true, force: true }); }
+});
 it('captures real Knowledge correction then forgetting at the Bot request-material owner', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'varin-bot-correction-review-'));
     const store = await openWorkspaceKnowledge({ dataDir, hostId: 'test-host', workspaceId: 'bot-test', scope: 'bot', embedding: null });

@@ -9,6 +9,8 @@ import type { MemoryOwner, MemoryService } from '../memory/memory-service.js';
 import { KnowledgeMutationError, type KnowledgeExpectedRevision } from '../knowledge/store.js';
 import { botScopeId } from '../harness/owner-scope.js';
 import { sourceRevision, uncoveredSourceSpans, overlappingSource } from '../memory/memory-sources.js';
+import type { createMemoryOrganizer } from '../memory/memory-organizer.js';
+import { memoryExpected, memoryVersion } from '../memory/memory-maintenance-state.js';
 interface BotKnowledgeState {
     botId: string;
     threadId: string;
@@ -32,6 +34,7 @@ export function createBotMemoryOwner(options: {
     runtime: AgentRuntimeClient;
     history: BotHistory;
     memory: MemoryService;
+    organizer?: Pick<ReturnType<typeof createMemoryOrganizer>, 'maintain' | 'maintenanceStatus' | 'cancelMaintenance'>;
     prepareContext: ContextPreparer;
     knowledge(input: {
         threadId: string;
@@ -117,11 +120,15 @@ export function createBotMemoryOwner(options: {
                 ? args.derivedFrom.map(value => { const source = record(value); if (!Number.isSafeInteger(source.id) || Number(source.id) <= 0 || typeof source.revision !== 'string') return invalid('Invalid supporting memory'); return { id: Number(source.id), revision: source.revision }; })
                 : invalid('derivedFrom must be an array');
             const action = args.action;
-            if (!['get', 'search', 'recall', 'remember', 'correct', 'forget', 'archive'].includes(String(action)))
+            if (!['get', 'search', 'recall', 'remember', 'correct', 'forget', 'archive', 'rewrite', 'organize', 'maintenance_status', 'maintenance_cancel'].includes(String(action)))
                 invalid('Unknown Bot memory action');
             if (args.scope !== undefined && args.scope !== 'bot' && args.scope !== 'user' && args.scope !== 'session')
                 invalid('Bot memory scope must be bot, user or session');
             const owner: MemoryOwner = args.scope === 'user' ? { scope: 'user', ownerId: null } : args.scope === 'session' ? { scope: 'session', ownerId: run.thread_id } : { scope: 'bot', ownerId: botId! };
+            if (action === 'maintenance_status') {
+                if (!options.organizer) invalid('Memory maintenance is unavailable');
+                return { status: 'ready', jobs: await options.organizer!.maintenanceStatus(botScopeId(botId!), typeof args.key === 'string' ? args.key : undefined, owner) };
+            }
             const id = args.id;
             if (['get', 'correct', 'forget', 'archive'].includes(String(action)) && (!Number.isSafeInteger(id) || (id as number) <= 0))
                 invalid('Memory id must be a positive integer');
@@ -148,7 +155,38 @@ export function createBotMemoryOwner(options: {
             if ((action === 'correct' || action === 'forget' || action === 'archive') && (!expected || typeof expected.content !== 'string' || typeof expected.trigger !== 'string'
                 || !['suggested', 'accepted', 'dismissed'].includes(expected.status ?? '') || !(expected.invalidAt === null || typeof expected.invalidAt === 'number')))
                 invalid('Read the row first and supply its exact expected values');
-            if (action === 'forget' || action === 'archive') {
+            if (action === 'organize' || action === 'maintenance_cancel') {
+                if (!options.organizer) invalid('Memory organization is unavailable');
+                if (action === 'organize') {
+                    if (args.ids !== undefined && (!Array.isArray(args.ids) || args.ids.some(id => !Number.isSafeInteger(id) || id <= 0))) invalid('ids must name existing memories');
+                    const job = await options.organizer!.maintain(botScopeId(botId!), (args.ids ?? []) as number[], typeof args.reason === 'string' ? args.reason : 'Organize related understanding', origin.id, typeof args.query === 'string' ? args.query : undefined, owner);
+                    mutationStarted = true;
+                    await options.memory.maintain(owner, { inputs: [], retire: [], outputs: [], reason: `Background maintenance: ${job.key}` }, origin);
+                    return { status: 'ready', job, memoryReceipt: await options.memory.mutationReceipt(owner, origin) };
+                }
+                if (typeof args.key !== 'string') invalid('Specify the original maintenance key');
+                await options.organizer!.cancelMaintenance(botScopeId(botId!), args.key as string, owner);
+                mutationStarted = true;
+                await options.memory.maintain(owner, { inputs: [], retire: [], outputs: [], reason: `Cancel maintenance: ${args.key}` }, origin);
+            }
+            else if (action === 'rewrite') {
+                if (!Array.isArray(args.inputs) || !Array.isArray(args.retire) || !Array.isArray(args.outputs)) invalid('rewrite requires inputs, retire and outputs');
+                const inputs = await Promise.all((args.inputs as unknown[]).map(async raw => {
+                    const ref = record(raw);
+                    if (!Number.isSafeInteger(ref.id) || typeof ref.revision !== 'string') return invalid('Read exact input revisions with get');
+                    const { item } = await options.memory.get(owner, Number(ref.id));
+                    if (item.forgottenAt !== undefined || memoryVersion(item) !== ref.revision) return invalid('A rewrite input has changed');
+                    return { id: item.id, expected: memoryExpected(item) };
+                }));
+                const outputs = (args.outputs as unknown[]).map(raw => {
+                    const row = record(raw);
+                    if (typeof row.content !== 'string' || !row.content.trim() || !Array.isArray(row.sources) || row.sources.some(id => !Number.isSafeInteger(id))) return invalid('Output accounts require content and input source IDs');
+                    return { content: row.content, sources: row.sources as number[], ...(typeof row.trigger === 'string' ? { trigger: row.trigger } : {}), ...(row.overview === true ? { overview: true } : {}) };
+                });
+                signal.throwIfAborted(); mutationStarted = true;
+                await options.memory.maintain(owner, { inputs, retire: args.retire as number[], outputs, reason: typeof args.reason === 'string' ? args.reason : 'Explicit memory rewrite' }, origin);
+            }
+            else if (action === 'forget' || action === 'archive') {
                 mutationStarted = true;
                 await options.memory[action](owner, id as number, expected, origin);
             }

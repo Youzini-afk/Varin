@@ -17,6 +17,7 @@ pub enum MemoryWorkAction {
     Decision { keep: Vec<u64> },
     Finish,
     Reject,
+    Release,
 }
 pub const WORK_KIND: &str = "memory_work_v1";
 const STAGE_KIND: &str = "memory_work_stage_v1";
@@ -75,6 +76,8 @@ struct State {
     decision: Option<Vec<u64>>,
     consumed: bool,
     consumer_failed: bool,
+    #[serde(default)]
+    released: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +113,10 @@ pub struct MemoryWorkRead {
 }
 impl MemoryWorkRead {
     pub fn load(mut self) -> Result<MemoryWorkView> {
+        if self.reference.is_null() {
+            self.view.recipe = json!({"kind":"released"});
+            return Ok(self.view);
+        }
         self.view.recipe = self.content.load(&self.reference)?;
         for operation in &mut self.view.inference {
             inference::hydrate_operation(operation, &self.content)?;
@@ -289,7 +296,7 @@ impl Catalog {
             || !p.scope_id.starts_with("bot:")
             || p.scope_id.len() <= 4
             || !matches!(&p.execution_owner, ExecutorOwner::External { identity, epoch } if identity == "memory.organizer.v1" && !epoch.is_empty())
-            || p.claims.is_empty()
+            || (p.claims.is_empty() && p.recipe["kind"] != "maintenance")
             || p.claims
                 .iter()
                 .any(|claim| claim.source.is_empty() || claim.end <= claim.start)
@@ -490,7 +497,7 @@ impl Catalog {
                 inference: self.memory_work_inference(&work.run_id)?,
                 recipe: Value::Null,
             },
-            reference: i.recipe_ref,
+            reference: if s.released { Value::Null } else { i.recipe_ref },
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
         })
@@ -499,6 +506,7 @@ impl Catalog {
         let mut work = self.operation(&p.work_id)?;
         let frozen = intent(&work)?;
         let mut s = state(&work)?;
+        if matches!(p.action, MemoryWorkAction::Release) && s.released { return Ok(()); }
         // A lost ACK or another observer of the same result is not a new paid attempt.
         if work.execution_owner.as_ref() == Some(&p.execution_owner) && work.epoch == self.epoch {
             match &p.action {
@@ -531,7 +539,7 @@ impl Catalog {
                         .and_then(|v| v.get("dispatched"))
                         == Some(&Value::Bool(false)))
         });
-        if !matches!(p.action, MemoryWorkAction::Claim)
+        if !matches!(p.action, MemoryWorkAction::Claim | MemoryWorkAction::Release)
             && (work.execution_owner.as_ref() != Some(&p.execution_owner)
                 || work.epoch != self.epoch)
         {
@@ -547,8 +555,15 @@ impl Catalog {
             MemoryWorkAction::Decision { .. } => "memory.work.decision",
             MemoryWorkAction::Finish => "memory.work.finish",
             MemoryWorkAction::Reject => "memory.work.rejected",
+            MemoryWorkAction::Release => "memory.work.released",
         };
         match &p.action {
+            MemoryWorkAction::Release => {
+                if !s.consumed || !drained || !matches!(&p.execution_owner, ExecutorOwner::External { identity, epoch } if identity == "memory.organizer.v1" && !epoch.is_empty()) {
+                    return Err(invalid());
+                }
+                s.released = true;
+            }
             MemoryWorkAction::Claim => {
                 if !drained
                     || s.consumed

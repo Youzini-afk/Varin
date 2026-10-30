@@ -4416,4 +4416,11 @@ export const dict: Record<I18nKey, string> = {
   "harness.overview.changed": "已修改",
   "harness.overview.noProducts": "暂无产出或文件变更。",
   "harness.overview.contextDetails": "查看上下文详情",
+  "bot.memory.organize": "整理",
+  "bot.memory.organizing": "正在整理相关记忆…",
+  "bot.memory.organized": "记忆整理已完成",
+  "bot.memory.unchanged": "已查看 · 无需修改",
+  "bot.memory.cancelled": "已取消整理",
+  "bot.memory.restore": "恢复这份理解",
+  "bot.memory.clearHistory": "删除这份历史正文",
 };

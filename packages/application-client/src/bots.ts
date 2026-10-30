@@ -147,6 +147,13 @@ export interface BotMemoryItem {
   revision: string;
   sourceKind: string | null;
   inactive?: boolean;
+  maintenanceReason?: string;
+  overview?: boolean;
+}
+export interface BotMemoryMaintenance {
+  key: string; status: 'pending' | 'processing' | 'prepared' | 'formed' | 'reviewed-empty' | 'failed';
+  produced?: number[]; lastError?: string; updatedAt: number;
+  maintenance?: { ids: number[]; reason: string; mode: 'automatic' | 'selection'; cancelled?: boolean };
 }
 
 /** Framework-neutral product boundary. All navigation uses the returned tagged identity. */
@@ -178,5 +185,10 @@ export interface BotsAPI {
     history(botId: string, id: number, signal?: AbortSignal): Promise<BotMemoryItem[]>;
     source(botId: string, id: number, signal?: AbortSignal): Promise<MemorySourceExcerpt[]>;
     update(botId: string, item: BotMemoryItem, action: 'correct' | 'forget' | 'archive', content?: string): Promise<void>;
+    organize?(botId: string, input: { ids?: number[]; reason?: string; query?: string }): Promise<BotMemoryMaintenance>;
+    maintenance?(botId: string, signal?: AbortSignal): Promise<BotMemoryMaintenance[]>;
+    cancelMaintenance?(botId: string, key: string): Promise<void>;
+    restore?(botId: string, current: BotMemoryItem, previous: BotMemoryItem): Promise<void>;
+    clearHistory?(botId: string, ids: number[]): Promise<void>;
   };
 }

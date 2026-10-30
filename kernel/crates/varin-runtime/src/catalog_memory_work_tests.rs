@@ -276,6 +276,24 @@ fn explicit_selection_retry_requires_original_stopped_failure() {
 }
 
 #[test]
+fn maintenance_without_history_releases_only_after_consumption() {
+    let mut db = open_bot_catalog(root()).unwrap();
+    let mut p = admission("maintenance-release", MemoryWorkMode::Selection, 0);
+    p.claims.clear();
+    let body = db.prepare_inference_content().write(&p.recipe).unwrap();
+    assert!(db.admit_memory_work(&p, body).is_err());
+    p.recipe["kind"] = json!("maintenance");
+    let id = admit(&mut db, &p);
+    assert!(change(&mut db, &id, &p.execution_owner, MemoryWorkAction::Release).is_err());
+    change(&mut db, &id, &p.execution_owner, MemoryWorkAction::Finish).unwrap();
+    change(&mut db, &id, &p.execution_owner, MemoryWorkAction::Release).unwrap();
+    change(&mut db, &id, &p.execution_owner, MemoryWorkAction::Release).unwrap();
+    assert_eq!(db.capture_memory_work(&id).unwrap().load().unwrap().recipe, json!({"kind":"released"}));
+    let collection = db.prepare_content_collection(Default::default()).run();
+    assert_eq!(collection.status, crate::ContentCollectionStatus::Completed);
+}
+
+#[test]
 fn wake_resumes_only_unsent_generation_and_preserves_completed_decision_and_cancel_history() {
     use crate::catalog::inference::{
         InferenceAdmitParams, InferenceOwnerParams, InferenceSettleParams,

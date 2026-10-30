@@ -67,7 +67,13 @@ pub(crate) fn bot_schema(mutations: bool) -> ToolSchema {
     ToolSchema { requirements: None, description: "Read, recall and maintain this Bot's durable Knowledge memory. Omitted/bot scope means this Bot; user scope means shared user memory; session scope means this original Thread. Get returns exact values and a revision for updates or derived accounts. Remember/correct can cite several original passages through sources or same-scope memory revisions through derivedFrom. Archive removes an understanding from current recall while preserving its history; forget also excludes its supporting source passages from future model context. Recall includes associated work and shared memory. The original Knowledge owner commits writes; repeating an Operation returns its original receipt.".into(), output_schema: None, metadata: None,
         name: TOOL.into(), version: if mutations { "bot-2" } else { "bot-2-read" }.into(),
         schema: json!({"type":"object","properties":{
-            "action":{"type":"string","enum":if mutations { vec!["get","search","recall","remember","correct","forget","archive"] } else { vec!["get","search","recall"] }},
+            "action":{"type":"string","enum":if mutations { vec!["get","search","recall","remember","correct","forget","archive","rewrite","organize","maintenance_status","maintenance_cancel"] } else { vec!["get","search","recall","maintenance_status"] }},
+            "ids":{"type":"array","items":{"type":"integer","minimum":1},"description":"Optional existing memory scope for background organization; omit for a general review."},
+            "key":{"type":"string","description":"Original maintenance key returned by organize."},
+            "reason":{"type":"string","description":"What this organization should help with; no prescribed plan required."},
+            "inputs":{"type":"array","items":{"type":"object","properties":{"id":{"type":"integer","minimum":1},"revision":{"type":"string"}},"required":["id","revision"],"additionalProperties":false},"description":"For rewrite: exact same-scope memory revisions read with get."},
+            "retire":{"type":"array","items":{"type":"integer","minimum":1}},
+            "outputs":{"type":"array","items":{"type":"object","properties":{"content":{"type":"string"},"trigger":{"type":"string"},"sources":{"type":"array","items":{"type":"integer","minimum":1}},"overview":{"type":"boolean"}},"required":["content","sources"],"additionalProperties":false},"description":"For rewrite: replacement or overview accounts. Sources refer to inputs; retain detail by leaving it out of retire. Empty outputs can archive retired inputs."},
             "scope":{"type":"string","enum":["bot","user","session"]},"id":{"type":"integer","minimum":1},
             "content":{"type":"string"},"trigger":{"type":"string"},"nature":{"type":"string","enum":["experience","decision","preference","judgment","instruction"]},
             "sourceText":{"type":"string"},"sourceItemId":{"type":"string"},"includeSource":{"type":"boolean"},
@@ -86,8 +92,8 @@ fn bot_action(call: &ToolCall, mutations: bool) -> Result<bool, ExecutionError> 
         .get("action")
         .and_then(Value::as_str)
         .ok_or_else(|| error("Bot memory action missing"))?;
-    let read = matches!(action, "get" | "search" | "recall");
-    if !read && (!mutations || !matches!(action, "remember" | "correct" | "forget" | "archive")) {
+    let read = matches!(action, "get" | "search" | "recall" | "maintenance_status");
+    if !read && (!mutations || !matches!(action, "remember" | "correct" | "forget" | "archive" | "rewrite" | "organize" | "maintenance_cancel")) {
         return Err(error("invalid or ungranted Bot memory action"));
     }
     if value.keys().any(|key| {
@@ -106,6 +112,7 @@ fn bot_action(call: &ToolCall, mutations: bool) -> Result<bool, ExecutionError> 
             "query",
             "k",
             "expected",
+            "ids", "key", "reason", "inputs", "retire", "outputs",
         ]
         .contains(&key.as_str())
     }) || value

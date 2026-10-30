@@ -276,11 +276,10 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         const source = storeForScope(scope);
         if (!source) return [];
         const chain = await wait(source.getSupersedeChain(id, scope).catch(() => null));
-        const successor = chain?.successors
+        return (chain?.successors ?? [])
           .filter((item) => item.status === "accepted" && item.invalidAt === undefined)
-          .at(-1);
-        return successor ? [{ id: successor.id, scope, supersedes: id, title: successor.content, trigger: successor.trigger,
-          ...(successor.nature ? { nature: successor.nature } : {}), ...(successor.source ? { sourceKind: successor.source.kind } : {}) }] : [];
+          .map(successor => ({ id: successor.id, scope, supersedes: id, title: successor.content, trigger: successor.trigger,
+          ...(successor.nature ? { nature: successor.nature } : {}), ...(successor.source ? { sourceKind: successor.source.kind } : {}) }));
       })))).flat();
       if (corrections.length > 0) material.knowledgeCorrections = corrections;
     }

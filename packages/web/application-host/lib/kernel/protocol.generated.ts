@@ -749,7 +749,7 @@ export interface BotScopeResume {
 
 export type MemoryWorkMode = 'automatic' | 'selection';
 
-export type MemoryWorkAction = {kind:'claim'} | {kind:'resume'} | {kind:'decision';keep:number[]} | {kind:'finish'} | {kind:'reject'};
+export type MemoryWorkAction = {kind:'claim'} | {kind:'resume'} | {kind:'decision';keep:number[]} | {kind:'finish'} | {kind:'reject'} | {kind:'release'};
 
 export interface MemoryWorkClaim {
   source: string;

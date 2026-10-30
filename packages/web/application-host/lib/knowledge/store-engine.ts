@@ -32,6 +32,7 @@ type Vector = import("triviumdb").Vector;
 type TransactionOperation = import("triviumdb").TransactionOperation;
 
 import { mergeSourceSpans, overlappingSource, parseSourceSpans, sourceRevision } from "../memory/memory-sources.js";
+import { maintenanceVersion, memoryVersion } from '../memory/memory-maintenance-state.js';
 import {
   type EmbeddingProvider,
   type NodeId,
@@ -53,6 +54,7 @@ import {
   KnowledgeMutationError,
   type KnowledgeMutationOrigin,
   type KnowledgeMutationReceipt,
+  type KnowledgeMaintenanceResult,
   type OrganizerProgress,
   type OrganizerProgressStatus,
   type OrganizerPreparedProposal,
@@ -212,6 +214,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     db.createIndex("path");
     db.createIndex("active");
     db.createIndex("dedupeKey");
+    db.createIndex('key');
     db.createIndex("kind");
     // Symbol graph: equality lookups that used to be JS-side maps rebuilt on
     // every open (D-134 / D-139), and substring search over lowercased names and
@@ -226,6 +229,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     db.createIndex("targetName");
     db.createIndex("caller");
     db.createNgramIndex("pathLower");
+    db.createNgramIndex('memoryText');
     db.createIndex("hasAssociationCandidates");
 
     const placeholderVec = zeroVector(dim);
@@ -240,6 +244,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         return payload ? [{ id, payload }] : [];
       })
     );
+    // Additive derived index upgrade owned here, once on open. Future queries
+    // select candidates before reading bodies rather than rescanning all memory.
+    for (const row of lookup({ type: 'knowledge' })) {
+      if (typeof row.payload['memoryText'] !== 'string') db.patchPayload(row.id, { $set: {
+        memoryText: `${row.payload['content'] ?? ''} ${row.payload['trigger'] ?? ''}`.toLowerCase(),
+      } });
+    }
 
     const knowledgeSourceFromPayload = (value: unknown): KnowledgeSource | undefined => {
       if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -261,6 +272,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             throw new KnowledgeMutationError('invalid', 'Stored memory dependency is malformed');
           return { id: Number(dependency['id']), revision: dependency['revision'] };
         }) } : {}),
+        ...(Array.isArray(source['predecessors']) ? { predecessors: source['predecessors'] as NonNullable<KnowledgeSource['predecessors']> } : {}),
       };
     };
     const knowledgeFromPayload = (id: NodeId, p: Record<string, unknown>): Knowledge | null => {
@@ -284,6 +296,9 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         ...(typeof p['forgottenAt'] === 'number' ? { forgottenAt: p['forgottenAt'] } : {}),
         recallCount: (p["recallCount"] as number) ?? 0,
         ...(p["recalledAt"] !== undefined ? { recalledAt: p["recalledAt"] as number } : {}),
+        ...(p['overview'] === true ? { overview: true } : {}),
+        ...(typeof p['maintenanceReason'] === 'string' ? { maintenanceReason: p['maintenanceReason'] } : {}),
+        ...(p['historyCleared'] === true ? { historyCleared: true } : {}),
       };
     };
     const knowledgeInsertPayload = (k: KnowledgeInput, now: number): Record<string, unknown> => {
@@ -299,6 +314,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       status: k.status,
       content: k.content,
       trigger: k.trigger,
+      memoryText: `${k.content} ${k.trigger}`.toLowerCase(),
       ...(k.nature ? { nature: k.nature } : {}),
       ...(k.source ? { source: k.source } : {}),
       createdAt: now,
@@ -310,7 +326,8 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       const candidates = lookup({ type: 'knowledge' });
       for (;;) {
         const next = candidates.filter(row => !invalid.has(row.id)
-          && knowledgeSourceFromPayload(row.payload['source'])?.memories?.some(source => invalid.has(source.id)));
+          && (() => { const source = knowledgeSourceFromPayload(row.payload['source']);
+            return [...(source?.memories ?? []), ...(forgotten ? source?.predecessors ?? [] : [])].some(source => invalid.has(source.id)); })());
         if (!next.length) break;
         for (const row of next) {
           invalid.add(row.id);
@@ -404,6 +421,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         ...(Array.isArray(produced) && produced.every(Number.isSafeInteger) ? { produced: produced as number[] } : {}),
         ...(parsedProposals ? { proposals: parsedProposals as OrganizerPreparedProposal[] } : {}),
         ...(preparedSource ? { preparedSource } : {}),
+        ...(p['maintenance'] ? { maintenance: p['maintenance'] as NonNullable<OrganizerProgress['maintenance']> } : {}),
         updatedAt: p["updatedAt"],
         ...(typeof p["lastError"] === "string" && p["lastError"] ? { lastError: p["lastError"] as string } : {}),
       };
@@ -770,6 +788,11 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       persistence.commit();
       if (changes.length) { bumpKnowledgeEpoch(); notifyKnowledge(changes.map(item => item.id)); }
     };
+    const progressOperation = (progress: OrganizerProgress): TransactionOperation => {
+      const existing = lookup({ type: 'organizer', key: progress.key })[0];
+      const payload = { type: 'organizer', dedupeKey: progress.key, ...progress };
+      return existing ? { type: 'updatePayload', id: existing.id, payload } : { type: 'insert', vector: placeholderVec, payload };
+    };
     const store: KnowledgeStore = {
       ...conversationPlans,
       dim,
@@ -825,8 +848,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async getOrganizerProgress(key: string): Promise<OrganizerProgress | null> {
-        for (const { payload } of lookup({ type: "organizer" })) {
-          if (payload["key"] !== key) continue;
+        for (const { payload } of lookup({ type: "organizer", key })) {
           return organizerProgressFromPayload(payload);
         }
         return null;
@@ -846,6 +868,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             ...(progress.preparedSource !== undefined ? { preparedSource: { ...progress.preparedSource } } : {}),
             updatedAt: progress.updatedAt,
             ...(progress.lastError ? { lastError: progress.lastError } : {}),
+            ...(progress.maintenance ? { maintenance: progress.maintenance } : {}),
           };
           // Fields this row no longer carries must actually disappear — a
           // stale lastError or cursor would misreport the committed coverage.
@@ -857,7 +880,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (progress.proposals === undefined) unset.proposals = true;
           if (progress.preparedSource === undefined) unset.preparedSource = true;
           if (!progress.lastError) unset.lastError = true;
-          const existing = lookup({ type: "organizer" }).filter(({ payload: p }) => p["key"] === progress.key);
+          const existing = lookup({ type: "organizer", key: progress.key });
           const [first, ...rest] = existing;
           if (first) {
             db.patchPayload(first.id, { $set: payload, ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}) });
@@ -893,6 +916,136 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async readKnowledgeMutation(origin) { return enqueueWrite(() => mutationReceipt(origin)); },
+      async releaseMaintenanceReceipt(origin) {
+        return enqueueWrite(() => {
+          const receipt = mutationReceipt(origin);
+          if (!receipt || receipt.action !== 'maintain' || !receipt.changes.length) return;
+          const row = lookup({ type: 'knowledge_mutation', dedupeKey: origin.id })[0]!;
+          db.patchPayload(row.id, { $set: { receipt: { ...receipt, changes: [] } } });
+          persistence.commit();
+        });
+      },
+      async clearKnowledgeHistory(scope, ids) {
+        return enqueueWrite(() => {
+          const operations: TransactionOperation[] = [];
+          for (const id of new Set(ids)) {
+            const payload = db.getPayload(id) as Record<string, unknown> | null;
+            if (!payload || payload['type'] !== 'knowledge' || payload['scope'] !== scope || payload['invalidAt'] === undefined)
+              throw new KnowledgeMutationError('conflict', `Memory ${id} is not retired history`);
+            if (payload['historyCleared'] === true) continue;
+            // Keep identity, exact source exclusions and lineage. Content copies
+            // in native checkpoints remain owned by their original conversations.
+            operations.push({ type: 'updatePayload', id, payload: { ...payload, content: '', trigger: '', memoryText: '', historyCleared: true } });
+          }
+          if (operations.length) { db.commitTransaction(operations); persistence.commit(); }
+          return { cleared: operations.length };
+        });
+      },
+      async noteMemoryMaintenance(ids) {
+        return enqueueWrite(() => {
+          const operations: TransactionOperation[] = [];
+          for (const id of new Set(ids)) {
+            const payload = db.getPayload(id) as Record<string, unknown> | null;
+            const item = payload && knowledgeFromPayload(id, payload);
+            if (!item || item.forgottenAt !== undefined || item.historyCleared || item.status !== 'accepted') continue;
+            const key = `maintenance:auto:${id}`;
+            const previous = lookup({ type: 'organizer', key })[0]?.payload;
+            const version = maintenanceVersion(item);
+            if (previous?.['sourceKey'] === version) continue;
+            operations.push(progressOperation({ key, sourceKey: version, status: 'pending', updatedAt: Date.now(),
+              maintenance: { ids: [id], reason: 'Related memory changed', mode: 'automatic' } }));
+          }
+          if (operations.length) { db.commitTransaction(operations); persistence.commit(); }
+        });
+      },
+      async maintainKnowledge(input, origin) {
+        return enqueueWrite(() => {
+          const prior = mutationReceipt(origin);
+          if (prior) {
+            if (prior.action !== 'maintain') throw new KnowledgeMutationError('conflict', 'Memory mutation action changed');
+            return prior.result as KnowledgeMaintenanceResult;
+          }
+          if (recallScope === 'user' && input.scope !== 'user') throw new KnowledgeMutationError('invalid', 'User memory scope required');
+          const inputs = new Map<number, Knowledge>();
+          for (const observed of input.inputs) {
+            const payload = db.getPayload(observed.id) as Record<string, unknown> | null;
+            const item = payload && knowledgeFromPayload(observed.id, payload);
+            if (!item || item.scope !== input.scope || item.forgottenAt !== undefined) throw new KnowledgeMutationError('not-found', `Memory ${observed.id} is unavailable`);
+            if (!matchesExpectedRevision(payload!, observed.expected)) throw new KnowledgeMutationError('conflict', `Memory ${observed.id} changed during maintenance`);
+            inputs.set(item.id, item);
+          }
+          const retire = new Set(input.retire);
+          for (const id of retire) if (!inputs.has(id)) throw new KnowledgeMutationError('conflict', `Retired memory ${id} was not supplied`);
+          const at = Date.now();
+          let nextId = nextKnowledgeId();
+          const operations: TransactionOperation[] = [];
+          const changes = new Map<number, Knowledge>();
+          for (const id of retire) {
+            const original = db.getPayload(id) as Record<string, unknown>;
+            const payload = { ...original, invalidAt: original['invalidAt'] ?? at };
+            operations.push({ type: 'updatePayload', id, payload });
+            changes.set(id, knowledgeFromPayload(id, payload)!);
+            const dependents = dependentChanges(id, at);
+            operations.push(...dependents.operations);
+            for (const row of dependents.rows) changes.set(row.id, row);
+          }
+          const created: number[] = [];
+          for (const output of input.outputs) {
+            if (!output.content?.trim() || !output.sources.length) throw new KnowledgeMutationError('invalid', 'A maintained account requires content and supporting inputs');
+            const sources = output.sources.map(id => {
+              const item = inputs.get(id);
+              if (!item || item.invalidAt !== undefined) throw new KnowledgeMutationError('conflict', `Supporting memory ${id} is not current`);
+              return item;
+            });
+            if (output.nature === 'instruction' && !sources.some(row => row.nature === 'instruction')) throw new KnowledgeMutationError('invalid', 'An instruction requires an original instruction source');
+            const dependencies = new Map<number, { id: number; revision: string }>();
+            const predecessors = new Map<number, { id: number; revision: string }>();
+            for (const row of sources) {
+              for (const ref of row.source?.predecessors ?? []) predecessors.set(ref.id, ref);
+              if (retire.has(row.id)) {
+                predecessors.set(row.id, { id: row.id, revision: memoryVersion(row) });
+                for (const ref of row.source?.memories ?? []) if (!retire.has(ref.id)) dependencies.set(ref.id, ref);
+              } else dependencies.set(row.id, { id: row.id, revision: memoryVersion(row) });
+            }
+            const directlyReplaced = output.sources.filter(id => retire.has(id));
+            const replaced = directlyReplaced.length ? directlyReplaced : [...retire];
+            for (const id of replaced) {
+              const row = inputs.get(id)!;
+              predecessors.set(id, { id, revision: memoryVersion(row) });
+              for (const ref of row.source?.predecessors ?? []) predecessors.set(ref.id, ref);
+            }
+            if ([...dependencies.keys()].some(id => changes.has(id))) throw new KnowledgeMutationError('conflict', 'An output depends on an account retired by this change');
+            const source: KnowledgeSource = { kind: 'memory-maintenance', key: origin.id,
+              spans: mergeSourceSpans(sources.flatMap(row => row.source?.spans ?? [])),
+              memories: [...dependencies.values()], predecessors: [...predecessors.values()] };
+            const payload = { ...knowledgeInsertPayload({ scope: input.scope, status: 'accepted', content: output.content.trim(), trigger: output.trigger?.trim() ?? '',
+              ...(output.nature ? { nature: output.nature } : {}), source }, at), maintenanceReason: input.reason, overview: output.overview === true };
+            const id = nextId++;
+            operations.push({ type: 'insertWithId', id, vector: placeholderVec, payload });
+            for (const old of replaced) operations.push({ type: 'link', src: id, dst: old, label: 'supersedes', weight: 1 });
+            changes.set(id, knowledgeFromPayload(id, payload)!); created.push(id);
+          }
+          const result = { created, retired: [...retire], unchanged: !created.length && !retire.size };
+          // Acknowledge only the actual inputs/output versions. Invalidated overviews
+          // remain separate pending work; this rewrite cannot retrigger itself.
+          for (const row of [...inputs.values(), ...created.map(id => changes.get(id)!)]) {
+            const settled = changes.get(row.id) ?? row;
+            operations.push(progressOperation({ key: `maintenance:auto:${row.id}`, sourceKey: maintenanceVersion(settled),
+              status: 'reviewed-empty', updatedAt: at }));
+          }
+          if (input.progress) {
+            const current = lookup({ type: 'organizer', key: input.progress.key })[0];
+            if (current?.payload['sourceKey'] === input.progress.sourceKey) {
+              const seedId = input.progress.key.startsWith('maintenance:auto:') ? Number(input.progress.key.slice('maintenance:auto:'.length)) : null;
+              const seed = seedId === null ? undefined : changes.get(seedId) ?? inputs.get(seedId);
+              operations.push(progressOperation({ ...organizerProgressFromPayload(current.payload)!, ...input.progress,
+                ...(seed ? { sourceKey: maintenanceVersion(seed) } : {}), status: result.unchanged ? 'reviewed-empty' : 'formed', produced: created, updatedAt: at }));
+            }
+          }
+          commitKnowledge(operations, [...changes.values()], origin, 'maintain', result);
+          return result;
+        });
+      },
       async createKnowledgeIfAbsent(k, options) {
         return enqueueWrite(() => {
           const prior = options?.origin && mutationReceipt(options.origin);
@@ -971,7 +1124,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (p["type"] !== "knowledge") return false;
           if (filter.scope && p["scope"] !== filter.scope) return false;
           if (filter.status && p["status"] !== filter.status) return false;
-          if (filter.activeOnly && p["invalidAt"] !== undefined) return false;
+          if (p['historyCleared'] === true || filter.activeOnly && p["invalidAt"] !== undefined) return false;
           return true;
         });
 
@@ -1001,7 +1154,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             throw new KnowledgeMutationError("conflict", `Knowledge suggestion ${id} changed after it was opened`);
           }
           if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
-          db.patchPayload(id, { $set: { content: patch.content, trigger: patch.trigger } });
+          db.patchPayload(id, { $set: { content: patch.content, trigger: patch.trigger, memoryText: `${patch.content} ${patch.trigger}`.toLowerCase() } });
           persistence.commit();
           bumpKnowledgeEpoch();
           notifyKnowledge([id]);
@@ -1027,14 +1180,14 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
           }
           if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
-          const updated = { ...payload, content: patch.content, trigger: patch.trigger };
+          const updated = { ...payload, content: patch.content, trigger: patch.trigger, memoryText: `${patch.content} ${patch.trigger}`.toLowerCase() };
           const dependents = dependentChanges(id, Date.now());
           commitKnowledge([{ type: 'updatePayload', id, payload: updated }, ...dependents.operations],
             [knowledgeFromPayload(id, updated)!, ...dependents.rows]);
         });
       },
 
-      async supersedeKnowledge(id, input, expectedScope, expected, origin): Promise<{ id: NodeId; previous: Knowledge }> {
+      async supersedeKnowledge(id, input, expectedScope, expected, origin, restoreRetired = false): Promise<{ id: NodeId; previous: Knowledge }> {
         return enqueueWrite(() => {
           const prior = origin && mutationReceipt(origin);
           if (prior) {
@@ -1049,8 +1202,23 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (expectedScope && scope !== expectedScope) {
             throw new KnowledgeMutationError("not-found", `Knowledge not found in ${expectedScope} scope: ${id}`);
           }
-          if (payload["status"] !== "accepted" || payload["invalidAt"] !== undefined) {
+          if (payload["status"] !== "accepted" || payload['forgottenAt'] !== undefined || payload['historyCleared'] === true || payload["invalidAt"] !== undefined && !restoreRetired) {
             throw new KnowledgeMutationError("conflict", `Knowledge ${id} is not current accepted knowledge`);
+          }
+          if (restoreRetired && payload['invalidAt'] !== undefined) {
+            const reaches = (start: number) => {
+              const pending = [start], visited = new Set<number>();
+              while (pending.length) {
+                const next = pending.pop()!;
+                if (next === id) return true;
+                if (visited.has(next)) continue;
+                visited.add(next);
+                pending.push(...db.getEdges(next).filter(edge => edge.label === 'supersedes').map(edge => edge.targetId));
+              }
+              return false;
+            };
+            if (lookup({ type: 'knowledge', scope, status: 'accepted' }).some(row => row.payload['invalidAt'] === undefined && reaches(row.id)))
+              throw new KnowledgeMutationError('conflict', 'This history has a newer current understanding; restore against that revision');
           }
           if (expected && !matchesExpectedRevision(payload, expected)) {
             throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
@@ -1271,18 +1439,25 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async recall(query: string, k: number): Promise<RecallResult[]> {
-        const nodes = lookup({ type: "knowledge", scope: recallScope, status: "accepted" }).filter(({ payload: p }) =>
+        const queryLower = query.toLowerCase();
+        const terms = queryLower.split(/\s+/).filter(Boolean);
+        const indexed = new Set<number>();
+        for (const term of terms.filter(term => Array.from(term).length >= 3)) {
+          for (const id of db.substringLookup('memoryText', term, GRAPH_RESULT_CEILING)) indexed.add(id);
+        }
+        const candidates = terms.some(term => Array.from(term).length < 3)
+          ? lookup({ type: 'knowledge', scope: recallScope, status: 'accepted' })
+          : [...indexed].flatMap(id => { const payload = db.getPayload(id) as Record<string, unknown> | null; return payload ? [{ id, payload }] : []; });
+        const nodes = candidates.filter(({ payload: p }) =>
           p["type"] === "knowledge"
           && p["scope"] === recallScope
           && p["status"] === "accepted"
           && p["invalidAt"] === undefined,
         );
-        const queryLower = query.toLowerCase();
         const scored = nodes.map(({ id, payload }) => {
           const content = (payload["content"] as string) ?? "";
           const trigger = (payload["trigger"] as string) ?? "";
           const text = `${content} ${trigger}`.toLowerCase();
-          const terms = queryLower.split(/\s+/).filter(Boolean);
           let score = 0;
           for (const term of terms) {
             if (text.includes(term)) score += 1;

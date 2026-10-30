@@ -70,6 +70,7 @@ describe("memory organizer (BC2)", () => {
   const inference = (): MemoryInference => {
     const active = new Map<string, AbortController>();
     return {
+      async release() {},
       async settings() {
         calls.push({ method: "settings", params: {} });
         return { harness: {
@@ -218,6 +219,62 @@ describe("memory organizer (BC2)", () => {
     }
   });
 
+  it('organizes existing memories without new conversation material and settles no-change reviews', async () => {
+    const service = memory();
+    const owner: MemoryOwner = { scope: 'bot', ownerId: 'ws-1' };
+    const first = (await service.remember(owner, { content: 'Use blue accents', trigger: 'theme' })).item;
+    const second = (await service.remember(owner, { content: 'Keep neutral surfaces', trigger: 'theme' })).item;
+    organizeText = JSON.stringify({ retire: [first.id, second.id], outputs: [{ content: 'Use blue accents on neutral surfaces', sources: [first.id, second.id] }], reason: 'Related preference' });
+    const instance = organizer(service);
+    const job = await instance.maintain('bot:ws-1', [first.id, second.id], 'Make this understanding coherent', 'existing');
+    await wait(async () => (await instance.maintenanceStatus('bot:ws-1', job.key))[0]?.status === 'formed');
+    expect((await service.list(owner, { activeOnly: true })).map(row => row.content)).toEqual(['Use blue accents on neutral surfaces']);
+    expect(calls.filter(call => call.method === 'generate')).toHaveLength(1);
+    const store = stores.get('bot:ws-1')!;
+    await instance.noteKnowledge('bot:ws-1', (await service.list(owner)).map(row => row.id));
+    await vi.advanceTimersByTimeAsync(2100);
+    await wait(() => instance.pending === 0);
+    expect(calls.filter(call => call.method === 'generate')).toHaveLength(1);
+    organizeText = JSON.stringify({ retire: [], outputs: [], reason: 'Already coherent' });
+    const reviewed = await instance.maintain('bot:ws-1', [], 'Review', 'review');
+    await wait(async () => (await instance.maintenanceStatus('bot:ws-1', reviewed.key))[0]?.status === 'reviewed-empty');
+    expect((await store.listKnowledge({ activeOnly: true }))).toHaveLength(1);
+  });
+
+  it('allows explicit maintenance with automatic organization disabled and respects cancellation', async () => {
+    autoOrganize = { user: false, bot: false };
+    const service = memory();
+    const owner: MemoryOwner = { scope: 'bot', ownerId: 'ws-1' };
+    const item = (await service.remember(owner, { content: 'Existing understanding' })).item;
+    const instance = organizer(service);
+    let release!: (text: string) => void;
+    organizeText = () => new Promise<string>(resolve => { release = resolve; });
+    const job = await instance.maintain('bot:ws-1', [item.id], 'Review', 'cancel-me');
+    await wait(() => calls.some(call => call.method === 'generate'));
+    await instance.cancelMaintenance('bot:ws-1', job.key);
+    release(JSON.stringify({ retire: [item.id], outputs: [], reason: 'Never commit after cancellation' }));
+    await wait(() => instance.pending === 0);
+    expect((await service.get(owner, item.id)).item.invalidAt).toBeUndefined();
+    expect((await instance.maintenanceStatus('bot:ws-1', job.key))[0]?.maintenance?.cancelled).toBe(true);
+  });
+
+  it('lets maintenance obtain additional memory evidence before deciding its joint change', async () => {
+    const service = memory();
+    const owner: MemoryOwner = { scope: 'bot', ownerId: 'ws-1' };
+    const first = (await service.remember(owner, { content: 'Blue accents' })).item;
+    const second = (await service.remember(owner, { content: 'Neutral backgrounds' })).item;
+    let round = 0;
+    organizeText = () => ++round === 1
+      ? JSON.stringify({ read: { ids: [second.id] }, note: 'Reviewing interface preferences' })
+      : JSON.stringify({ retire: [first.id, second.id], outputs: [{ content: 'Blue accents with neutral backgrounds', sources: [first.id, second.id] }], reason: 'Combined after reading both' });
+    const instance = organizer(service);
+    const job = await instance.maintain('bot:ws-1', [first.id], 'Review interface preferences', 'read-more');
+    await wait(async () => (await instance.maintenanceStatus('bot:ws-1', job.key))[0]?.status === 'formed');
+    expect(calls.filter(call => call.method === 'generate')).toHaveLength(2);
+    expect((await service.list(owner, { activeOnly: true })).map(row => row.content)).toEqual(['Blue accents with neutral backgrounds']);
+    expect([...inferenceWorks.values()].every(work => work.consumed)).toBe(true);
+  });
+
   const material = (id: string, text: string, witness = 'head'): HistoryMemoryMaterial => ({ role: 'user', text,
     span: { kind: 'history-item', id, threadId: 'thread:bot', branchId: 'branch:bot', headId: witness,
       revision: sourceRevision(text), start: 0, end: text.length } });
@@ -264,10 +321,16 @@ describe("memory organizer (BC2)", () => {
   });
   it('does not publish stale proposals after a human memory change during generation', async () => {
     const store = await setup(); const service = memory();
-    organizeText = async () => { await service.remember(owner, { content: 'Human correction wins.' }); return proposal(materials[0]!.text); };
+    const target = (await service.remember(owner, { content: 'PostgreSQL catalog choice', trigger: 'PostgreSQL' })).item;
+    organizeText = async () => {
+      await service.correct(owner, target.id, { content: 'Human correction wins.' });
+      const value = JSON.parse(proposal(materials[0]!.text));
+      value.memories[0].action = 'correct'; value.memories[0].target = `k:${target.id}`;
+      return JSON.stringify(value);
+    };
     const org = organizer(service); org.noteScope('bot:ws-1'); await wait(() => calls.some(call => call.method === 'generate')); await wait(() => org.pending === 0);
-    expect((await store.listKnowledge({})).map(item => item.content)).toEqual(['Human correction wins.']);
-    expect((await store.listOrganizerProgress()).some(row => row.status === 'prepared' && row.lastError?.includes('Memory changed'))).toBe(true);
+    expect((await store.listKnowledge({ activeOnly: true })).map(item => item.content)).toEqual(['Human correction wins.']);
+    expect((await store.listKnowledge({})).some(item => item.content === 'Use PostgreSQL for the catalog.')).toBe(false);
   });
   it('commits distinct proposals from one original source without self-conflicting', async () => {
     const store = await setup('Use PostgreSQL. Backups run Thursday.');
