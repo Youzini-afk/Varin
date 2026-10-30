@@ -8,7 +8,11 @@
     {
       "id": "neutral",
       "source": "foreground/open-neutral.png",
-      "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+      "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+      "detached": {
+        "source": "detached/open-neutral.png",
+        "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
     },
     {
       "id": "listen",

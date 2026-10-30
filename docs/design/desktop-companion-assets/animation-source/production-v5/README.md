@@ -17,6 +17,8 @@ python tools/desktop-companion-animation/pack_sequence.py \
   /tmp/varin-v5-seated-sources --prepare-seated
 ```
 
-这里只做整幅等比缩放和固定凳底图合成，不按每帧包围框缩放，不贴脸，不做非刚性变形。输出 `prepared.json` 记录实际显示PNG的SHA；后续提起映射必须引用该SHA，不能误用原始前景SHA。当前没有提供提起counterpart，工具会保留这项缺口，不自动接入播放器。
+这里只做整幅等比缩放和固定凳底图合成，不按每帧包围框缩放，不贴脸，不做非刚性变形。输出 `prepared.json` 记录实际显示PNG的SHA；后续提起映射必须引用该SHA，不能误用原始前景SHA。中立姿态提供一张同姿完整去凳身体 `detached/open-neutral.png`，用于进入提起时的候选对照；其他姿态仍没有counterpart，工具保持缺失，不自动补图或接入播放器。
 
 已检查中立、倾听、提醒三姿态在灰/暗底上的凳面接触和遮挡。这个检查不代表完整动作已通过；升降手、回位、身体重心和真实打断还须连起来审。更多不同的身体动词及道具接触按 [v5动作语言](../../../desktop-companion-motion-language-v5.md) 和 [接触方案](../../../desktop-companion-prop-contact-v5.md) 制作。
+
+中立去凳图采用新绘制的完整后发，不用旧凳腿形状裁切后发，也不采用会留下接缝的限域underpaint组合。360px灰/暗底检查中，脸、手、膝与双靴保持同姿读取；实际提起/落座时序尚须随完整动作连接检查。
