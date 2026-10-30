@@ -126,3 +126,36 @@ With `--performance-manifest`, optional `--pickup-manifest <manifest>` supplies 
 - Drawn landing uses `releaseViaFrames: true` and a finite `releaseNext` ending at a settled node. A `restoreSourceSha256` cannot silently supersede a drawn route. Settling without `restorePreviousOnSettle` lets the player resolve the latest presentation instead of replaying a canceled phrase.
 
 Ordinary source recovery joins the first exact authored entry it reaches, before any legacy lid-closing suffix. Every source remains on the registered 512-square canvas; the compiler neither invents missing contact drawings nor proves visual continuity. Compile and inspect complete pickup, early-release, and regrab routes in the existing consumers before selecting a candidate. Diagnostic quiet bookends must not become queued live-action delays.
+
+### 显式固定凳源图准备（仅候选）
+
+`pack_sequence.py --prepare-seated source.json prepared/` 是独立于默认打包路径的显式准备模式：
+仅把作者提供的 **seated foreground** 整幅画布从1254×1254统一缩放为512×512（512输入不缩放），
+再以零偏移叠在原冻结凳上。不得使用完整去凳身体代替座姿前景：原本被凳遮住的后发会错误盖住凳。
+不抠图、不按包围框对齐、不修脸、不生成运动、不批准接触，也不修改冻结base或selector。
+默认打包行为及原画不缩放约束保持不变。
+
+```json
+{
+  "version": 1,
+  "worldStool": {"source": "/absolute/path/world-stool-grounded-v4.png", "sha256": "b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7"},
+  "frames": [{
+    "id": "neutral",
+    "source": "seated-foreground.png",
+    "sha256": "实际输入文件SHA256"
+  }]
+}
+```
+
+所有输入必须是RGBA PNG、含准确SHA；凳还必须匹配上述冻结摘要和512画布。`source` 相对于输入manifest目录解析；
+provenance保留原始字符串。若显式提供绝对路径则如实保留，不声称该manifest可跨checkout原样迁移。输出目录应专用于此次准备。
+输出 `*-ordinary.png` 和 `prepared.json` 记录实际合成PNG的 `sourceSHA256`、原FG/凳摘要、画布及Pillow版本。
+相同输入和工具版本可重建；这是源图候选，不自动声明几何通过、动作时长或视觉验收。
+
+某帧若已有作者明确提供的完整pickup身体，可另加
+`"detached": {"source": "pickup-body.png", "sha256": "实际输入SHA256"}`。
+工具只做相同整幅缩放，并在 `detached-index.json` 以 **实际ordinary输出SHA** 关联其真实detached输出SHA，
+绝不以FG输入SHA冒充显示图身份。未提供时保持 `missing-authored-counterpart` 且不造映射；
+已提供也仍为未视觉验收。后续接入必须核验每张实际显示图的恢复/提起链。
+
+Focused验证：`python tools/desktop-companion-animation/test_prepare_seated.py`。

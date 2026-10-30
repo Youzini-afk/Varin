@@ -4,6 +4,10 @@ import argparse
 import hashlib
 import json
 import math
+import io
+import re
+
+import PIL
 from pathlib import Path
 
 from PIL import Image
@@ -132,17 +136,122 @@ def pack(manifest_path, output, max_size=2048, padding=2):
     return package
 
 
+# The approved original plate remains authority; this mode does not change bundle selectors.
+FROZEN_STOOL_SHA256 = 'b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7'
+
+
+def prepare_seated(manifest_path, output):
+    """Explicit source preparation only: fixed plate below authored seated foreground.
+
+    Complete pickup bodies are separate optional inputs, never inferred from the
+    seated foreground. All identities below refer to actual encoded PNG bytes.
+    """
+    manifest_path, output = manifest_path.resolve(), output.resolve()
+    manifest_bytes = manifest_path.read_bytes()
+    spec = json.loads(manifest_bytes)
+    if spec.get('version') != 1:
+        raise ValueError('Expected seated preparation manifest version 1')
+    frames = spec.get('frames')
+    if not isinstance(frames, list) or not frames:
+        raise ValueError('Expected non-empty seated foreground frames')
+    inputs = {manifest_path}
+
+    def read_input(row):
+        path = (manifest_path.parent / row['source']).resolve()
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        if row.get('sha256') != digest:
+            raise ValueError(f'Source SHA mismatch: {path}')
+        with Image.open(io.BytesIO(data)) as opened:
+            if opened.format != 'PNG' or opened.mode != 'RGBA':
+                raise ValueError(f'Expected authored RGBA PNG: {path}')
+            if opened.size not in ((512, 512), (1254, 1254)):
+                raise ValueError(f'Expected full 512 or 1254 square canvas: {path}')
+            size = list(opened.size)
+            image = opened.copy()
+        inputs.add(path)
+        provenance = {'source': row['source'], 'sha256': digest, 'canvas': size}
+        return image, provenance
+
+    plate, plate_input = read_input(spec['worldStool'])
+    if plate_input['sha256'] != FROZEN_STOOL_SHA256 or plate.size != (512, 512):
+        raise ValueError('World stool is not the frozen original 512px plate')
+    prepared, ids = [], set()
+    for row in frames:
+        name = row['id']
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', name) or name in ids:
+            raise ValueError('Frame id must be unique and filename-safe')
+        ids.add(name)
+        foreground, foreground_input = read_input(row)
+        if foreground.size != (512, 512):
+            foreground = foreground.resize((512, 512), Image.Resampling.LANCZOS)
+        drawing = Image.alpha_composite(plate, foreground)
+        detached = None
+        if 'detached' in row:
+            body, body_input = read_input(row['detached'])
+            if body.size != (512, 512):
+                body = body.resize((512, 512), Image.Resampling.LANCZOS)
+            detached = (body, body_input)
+        prepared.append((name, drawing, foreground_input, detached))
+
+    # Validate every input before producing files, and never overwrite any source.
+    targets = {output / 'prepared.json', output / 'detached-index.json'}
+    for name, _, _, detached in prepared:
+        targets.add(output / f'{name}-ordinary.png')
+        if detached:
+            targets.add(output / f'{name}-detached.png')
+    if any(path.resolve() in inputs for path in targets):
+        raise ValueError('Preparation output would overwrite an input')
+    output.mkdir(parents=True, exist_ok=True)
+    records, entries = [], []
+
+    def write_png(name, image):
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG', optimize=False, compress_level=9)
+        data = buffer.getvalue()
+        (output / name).write_bytes(data)
+        return hashlib.sha256(data).hexdigest()
+
+    for name, drawing, foreground_input, detached in prepared:
+        filename = f'{name}-ordinary.png'
+        digest = write_png(filename, drawing)
+        record = {'id': name, 'source': filename, 'sourceSHA256': digest,
+                  'foreground': foreground_input, 'pickupStatus': 'missing-authored-counterpart'}
+        if detached:
+            body, body_input = detached
+            body_file = f'{name}-detached.png'
+            body_hash = write_png(body_file, body)
+            entries.append({'source': filename, 'sourceSHA256': digest,
+                            'detachedSource': body_file, 'detachedSHA256': body_hash})
+            record.update(pickupStatus='provided-not-visually-accepted', detachedInput=body_input)
+        records.append(record)
+    result = {'version': 1, 'stage': 'source-study-not-accepted', 'canvas': [512, 512],
+              'manifestSHA256': hashlib.sha256(manifest_bytes).hexdigest(),
+              'worldStool': plate_input, 'operation': 'whole-canvas-lanczos-512; plate-then-foreground; zero-offset',
+              'pillowVersion': PIL.__version__, 'frames': records}
+    (output / 'prepared.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
+    (output / 'detached-index.json').write_text(json.dumps({'version': 1, 'stage': result['stage'], 'entries': entries}, indent=2) + '\n')
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('manifest', type=Path)
     parser.add_argument('output', type=Path)
     parser.add_argument('--max-size', type=int, default=2048, help='Atlas page dimension; increase for larger source art')
     parser.add_argument('--padding', type=int, default=2)
+    parser.add_argument('--prepare-seated', action='store_true', help='Prepare explicit fixed-stool + seated-foreground sources only; do not pack or accept art')
     args = parser.parse_args()
     try:
-        result = pack(args.manifest, args.output, args.max_size, args.padding)
+        if args.prepare_seated:
+            result = prepare_seated(args.manifest, args.output)
+        else:
+            result = pack(args.manifest, args.output, args.max_size, args.padding)
     except (ValueError, KeyError, OSError) as error:
         parser.exit(1, f'Cannot package sequence: {error}\n')
+    if args.prepare_seated:
+        print(f"Prepared {len(result['frames'])} seated source studies; no runtime acceptance")
+        return
     print(f"{result['id']}: {len(result['frames'])} exposures / {result['uniqueImages']} unique images, {result['durationMs']} ms, {len(result['pages'])} atlas pages")
 
 
