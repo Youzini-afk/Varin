@@ -3,31 +3,65 @@ import { agentAvatarSvg, AGENT_AVATAR_ART } from '../ui/agent-avatar-art';
 import { projectLeadSvg } from './projectLeadArt';
 export interface PortfolioBeat { detail?: string; at: number }
 export const MANAGEMENT_CUES = new Set(['listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate']);
-export function managementPacketPose(cue:string,age:number,side:'left'|'right',reduced=false,leadTarget?:{x:number;y:number}){
- const dock=leadTarget??{x:side==='right'?250:42,y:128},laptop={x:166,y:147},mid={x:dock.x,y:147},front={x:166,y:132};
- if(cue==='management-receive'){const p=reduced?1:Math.max(0,Math.min(1,age/420)),u=p*p*(3-2*p),v=1-u;return {x:v*v*dock.x+2*v*u*dock.x+u*u*laptop.x,y:v*v*dock.y+2*v*u*147+u*u*147,opacity:1};}
- if(cue==='management-delegate'){
-  if(!leadTarget)return null;
-  const p=reduced?1:Math.max(0,Math.min(1,age/400)),smooth=(v:number)=>v*v*(3-2*v),hand={x:231,y:96};
-  let point:{x:number;y:number};
-  if(p<.45){const u=smooth(p/.45);point={x:(1-u)*(1-u)*laptop.x+2*(1-u)*u*245+u*u*hand.x,y:laptop.y+(hand.y-laptop.y)*u*u};}
-  else {const u=smooth((p-.45)/.55),v=1-u;
-   if(side==='right')point={x:v*v*v*hand.x+3*v*v*u*280+3*v*u*u*280+u*u*u*leadTarget.x,y:v*v*v*hand.y+3*v*v*u*hand.y+3*v*u*u*leadTarget.y+u*u*u*leadTarget.y};
-   else point={x:v*v*v*hand.x+3*v*v*u*240+3*v*u*u*10+u*u*u*leadTarget.x,y:v*v*v*hand.y+3*v*v*u*200+3*v*u*u*200+u*u*u*leadTarget.y};
+type SceneBounds = {left:number;top:number;right:number;bottom:number};
+export interface DossierDock {x:number;y:number;width:number;height:number}
+/** Virtual information has no palm/laptop attachment. Reserve a complete empty
+ * rectangle outside the actor and squads; compact or omit it at tight edges. */
+export function managementDossierDock(side:'left'|'right'|null|undefined, available:SceneBounds={left:5,top:-15,right:295,bottom:225}, occupied:SceneBounds[]=[]):DossierDock|null {
+ const actor={left:46,top:18,right:254,bottom:229};
+ const intersects=(a:SceneBounds,b:SceneBounds)=>a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;
+ for(const [width,height] of [[32,24],[20,16]]){
+  const xs=side==='left'?[available.left+width!/2+2,available.right-width!/2-2]:[available.right-width!/2-2,available.left+width!/2+2];
+  xs.push((available.left+available.right)/2);
+  const ys:number[]=[];
+  for(let y=available.top+height!/2+2;y<=available.bottom-height!/2-2;y+=8)ys.push(y);
+  ys.sort((a,b)=>Math.abs(a-135)-Math.abs(b-135));
+  for(const x of xs)for(const y of ys){
+   const box={left:x-width!/2-2,right:x+width!/2+2,top:y-height!/2-2,bottom:y+height!/2+2};
+   if(box.left<available.left||box.right>available.right||box.top<available.top||box.bottom>available.bottom)continue;
+   if(![actor,...occupied].some(r=>intersects(box,r)))return {x,y,width:width!,height:height!};
   }
-  return {...point,opacity:Math.max(0,1-Math.max(0,(p-.95)/.05))};
  }
- const stages:Record<string,{from:{x:number;y:number};to:{x:number;y:number};duration:number;fade?:boolean}>={
-  'management-receive':{from:dock,to:laptop,duration:420},
-  'gather-out':{from:dock,to:mid,duration:180},
-  'gather-in':{from:mid,to:laptop,duration:340},
-  'address-user':{from:laptop,to:front,duration:260},
-  'management-present':{from:front,to:front,duration:500},
-  'management-release':{from:front,to:laptop,duration:130,fade:true},
+ return null;
+}
+/** Each phase changes the independent dossier, never transports a physical report. */
+export function managementDossierPose(cue:string,age:number,dock:DossierDock,reduced=false){
+ const stages:Record<string,{duration:number;from:number;to:number;fade?:boolean}>={
+  'management-receive':{duration:420,from:.4,to:0},
+  'management-delegate':{duration:400,from:0,to:0,fade:true},
+  'gather-out':{duration:180,from:0,to:.35},
+  'gather-in':{duration:340,from:.35,to:.65},
+  'address-user':{duration:260,from:.65,to:1},
+  'management-present':{duration:500,from:1,to:1},
+  'management-release':{duration:180,from:1,to:0,fade:true},
  };
  const stage=stages[cue];if(!stage)return null;
- const p=reduced?1:Math.max(0,Math.min(1,age/stage.duration)),e=p*p*(3-2*p);
- return {x:stage.from.x+(stage.to.x-stage.from.x)*e,y:stage.from.y+(stage.to.y-stage.from.y)*e,opacity:stage.fade?1-p:1};
+ const p=reduced?1:Math.max(0,Math.min(1,age/stage.duration)),u=p*p*(3-2*p);
+ return {...dock,open:stage.from+(stage.to-stage.from)*u,opacity:stage.fade?1-u:1};
+}
+export function managementDossierArt(label:string,pose:NonNullable<ReturnType<typeof managementDossierPose>>):string {
+ const w=pose.width,h=pose.height,o=pose.open,compact=w<28,l=-w/2+2,r=w/2-2,t=-h/2+3,b=h/2-4;
+ // All depth stays inside the reserved rectangle. The soft shadow belongs to
+ // this virtual object, not a palm, ground plane or physical report receipt.
+ const sheet=(lift:number)=>`M${l+1} ${t+3-lift} L${r-1} ${t-lift} L${r-2} ${b-lift} L${l} ${b+2-lift} Z`;
+ return `<g data-summary-project="${label}" data-virtual-dossier="true" opacity="${pose.opacity}" transform="translate(${pose.x} ${pose.y})">`
+ +`<ellipse cx="1" cy="${b+2.7}" rx="${w*.4}" ry="1.7" fill="#52627d" opacity=".07"/><ellipse cx="1" cy="${b+2.5}" rx="${w*.32}" ry=".8" fill="#52627d" opacity=".12"/>`
+ +path(`M${l} ${t+3} L${r} ${t} L${r-1} ${b+2} L${l-1} ${b+4} Z`,'#7185a5','#a7b7cf',.65)
+ +path(`M${l-1} ${b+2} L${r-1} ${b} v2 L${l-1} ${b+4} Z`,'#8e9fba','#dbe3ee',.5)
+ +path(sheet(o*.8),'#bdc8d8','#f1f1e9',.5)
+ +path(sheet(1+o*1.6),'#a6b7cd','url(#paper)',.55)
+ +path(`M${l+1} ${t+2-o*2} L${r-5} ${t-1-o} L${r-1} ${t+2-o} L${r-2} ${b-1-o} L${l} ${b+1-o} Z`,'#7895b5','url(#paper)',.7)
+ +path(`M${r-5} ${t-1-o} l-.3 3.3 l4.3 -.3`,'#9cacc1','#e2e9f2',.5)
+ +path(`M${l+2} ${t+2-o*2} L${l+2} ${b+.5-o}`,'#8195b5','none',2)
+ +path(`M${l+4} ${t+3-o} l6 -.7 v7 l-6 .7 Z`,'#9cabc2','#dce5f0',.4)
+ +portfolioText(l+7,t+(compact?7:9)-o,label,compact?5:6)
+ +(compact?'':path(`M${l+12} ${t+4-o} l${w-18} -.8 M${l+12} ${t+7-o} l${w-20} -.6`,blue,'none',.65))
+ +(compact?'':path(`M${l+5} ${b-1-o} L${r-4} ${b-3-o}`,'#c7a56c','none',.6))+'</g>';
+}
+/** During an interpersonal beat only its subject may accent; other facts stay visible. */
+export function portfolioFocalKey(d:DesktopCompanionScene):string|null {
+ const p=d.portfolio;if(!p)return null;
+ return ['intake','result','attention'].includes(p.mode)?p.subjectKey:p.mode==='inspection'?p.inspectedKey:null;
 }
 const ink='#4c5268', gold='#c7a56c', blue='#7895b5';
 const path=(d:string,c=ink,fill='none',w=1)=>`<path d="${d}" stroke="${c}" fill="${fill}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round"/>`;
@@ -41,7 +75,6 @@ export function portfolioCaption(s:string|undefined,budget=5):string {
 export const portfolioText=(x:number,y:number,s:string,size=8)=>`<text x="${x}" y="${y}" text-anchor="middle" fill="${ink}" stroke="#fffdf6" stroke-opacity=".96" stroke-width="1.8" stroke-linejoin="round" paint-order="stroke fill" font-family="Noto Sans CJK SC,system-ui" font-size="${size}">${escapePortfolioText(s)}</text>`;
 type Project=NonNullable<DesktopCompanionScene['portfolio']>['projects'][number];
 type ProjectNotice=NonNullable<Project['notice']>;
-const noticeOf=(project:Project)=>project.notice;
 export function noticeGlyph(notice:ProjectNotice|undefined,x:number,y:number,size=1):string {
  const lock=path('M-4 -1 v7 h8 v-7 Z',gold,'#fffaf0',1)+path('M-3 -1 v-3 a3 3 0 0 1 6 0 v3',ink,'none',1.3);
  const question=portfolioText(0,5,'?',13);
@@ -65,7 +98,7 @@ export function childArt(avatar:Parameters<typeof agentAvatarSvg>[0],x:number,y:
 export function squadWorkTiming(d:DesktopCompanionScene,now:number,epoch:number){
  if(d.reducedMotion||d.suppressed||d.menuOpen||d.phase!=='active')return {animate:false,wakeIn:null as number|null};
  let animate=false,wakeIn:number|null=null;
- for(const p of d.portfolio?.projects??[]){if(p.status!=='active'||p.detail==='waiting')continue;
+ for(const p of d.portfolio?.projects??[]){if(portfolioFocalKey(d)&&p.key!==portfolioFocalKey(d))continue;if(p.status!=='active'||p.detail==='waiting')continue;
   const age=((now-epoch-['A','B','C'].indexOf(p.label)*1100)%5200+5200)%5200;
   if(age<640)animate=true;else wakeIn=Math.min(wakeIn??Infinity,5200-age);
  }return {animate,wakeIn};
@@ -85,7 +118,7 @@ export function workProp(a:Project,x:number,y:number,b:number){
  // No known tool: focus stone, never random invented typing/search.
  return path(`M${x-10} ${y+16} q10 ${3-b*2} 20 0`,blue,'none',1)+path(`M${x} ${y+10-b*2} l4 4 l-4 4 l-4 -4 Z`,gold,'#fffaf0',.8);
 }
-export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|null|undefined,now:number,cueAge:number,beats:ReadonlyMap<string,PortfolioBeat>,heldTransfer?:{cue:string;age:number},listen?:PortfolioListen|null,epoch=0):string {
+export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|null|undefined,now:number,cueAge:number,beats:ReadonlyMap<string,PortfolioBeat>,heldTransfer?:{cue:string;age:number},listen?:PortfolioListen|null,epoch=0,available?:SceneBounds):string {
  const p=d.portfolio;if(!p||!side)return '';
  const sign=side==='right'?1:-1,projects=p.projects.slice(0,3).filter(a=>Object.hasOwn(AGENT_AVATAR_ART,a.lead.avatar));
  const inspected=projects.find(a=>a.key===p.inspectedKey),subject=projects.find(a=>a.key===p.subjectKey),a=p.mode==='inspection'?inspected:['intake','result','attention'].includes(p.mode)?subject:inspected;
@@ -94,7 +127,7 @@ export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|nul
  for(const project of projects){
   const home=squadHome(project.label,side),team=['unknown','uncertain'].includes(project.status)?undefined:teams.find(t=>t.projectKey===project.key),reporting=listening?.key===project.key,travel=reporting?approach:0;
   const tucked=!!listening&&!reporting&&project.label==='B'&&approach>0,cx=home.x+(reporting?(dock.x-home.x)*travel:tucked?sign*(side==='right'?20:12)*approach:0),cy=home.y+(reporting?(dock.y-home.y)*travel:tucked?(side==='right'?12:19)*approach:0),size=tucked?40-14*approach:40;
-  const b=workAccent(project,now,epoch,d.reducedMotion),change=beats.get(project.key),accent=change&&!d.reducedMotion?Math.sin(Math.PI*Math.min(1,Math.max(0,(now-change.at)/480))):0;
+  const quiet=!!portfolioFocalKey(d)&&project.key!==portfolioFocalKey(d),b=workAccent(project,now,epoch,d.reducedMotion||quiet),change=beats.get(project.key),accent=change&&!d.reducedMotion&&!quiet?Math.sin(Math.PI*Math.min(1,Math.max(0,(now-change.at)/480))):0;
   z+=`<g data-project-slot="${project.label}" data-squad="${project.label}">`+path(`M${home.x-17} ${home.y+19} q17 8 34 0`,project.status==='needs-user'?gold:'#bac6d5','none',1)+path(`M${home.x-11} ${home.y+23} q11 3 22 0`,'#e0d7bf','none',.8);
   if(reporting&&travel>0)z+=path(`M${home.x} ${home.y+18} Q${home.x+sign*12} ${(home.y+cy)/2} ${cx} ${cy+17}`,'#b9c6d7','none',.6);
   let squadBadge='';
@@ -116,7 +149,12 @@ export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|nul
   if(!tucked)z+=portfolioText(home.x,home.y+30,portfolioCaption(project.caption),7.5);
   z+=portfolioText(tucked?cx-sign*2:home.x,tucked?cy+19:home.y+39,project.label+' · '+(tucked?(project.notice==='permission'?'授权':project.notice==='question'?'答复':status==='推进'?'推进':'待办'):reporting&&travel>0?'汇报':status),6.5)+'</g>';
  }
- // Identified small summary; no large dossier remains to hide actual hands.
- if(a&&!['unknown','uncertain'].includes(a.status)&&(MANAGEMENT_CUES.has(d.cue)||(d.cue==='transition'&&heldTransfer))){const pose=managementPacketPose(heldTransfer?.cue??d.cue,heldTransfer?.age??cueAge,side,d.reducedMotion,squadHome(a.label,side));if(pose&&pose.opacity>0)z+=`<g data-summary-project="${a.label}" opacity="${pose.opacity}" transform="translate(${pose.x} ${pose.y})">`+path('M-13 -9 h26 v18 h-26 Z',blue,'url(#paper)',.9)+portfolioText(-7,-1,a.label,7)+path('M-1 -4 h10 M-1 0 h8 M-8 5 h17',blue,'none',.8)+'</g>';}
+ // The card owns its own safe scene rectangle, never the actor's hand or laptop.
+ const occupied=projects.map(project=>{const home=squadHome(project.label,side);return {left:home.x-40,right:home.x+40,top:home.y-34,bottom:home.y+46};});
+ const dossierDock=managementDossierDock(side,available,occupied);
+ if(a&&dossierDock&&!['unknown','uncertain'].includes(a.status)&&(MANAGEMENT_CUES.has(d.cue)||(d.cue==='transition'&&heldTransfer))){
+  const pose=managementDossierPose(heldTransfer?.cue??d.cue,heldTransfer?.age??cueAge,dossierDock,d.reducedMotion);
+  if(pose&&pose.opacity>0)z+=managementDossierArt(a.label,pose);
+ }
  if(count(p.overflowCards))z+=portfolioText(side==='right'?223:69,92,'+'+count(p.overflowCards),7);return z;
 }

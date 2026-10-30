@@ -1,6 +1,6 @@
 import type { DesktopCompanionScene } from '@varin/application-client';
 import type { CompanionSpatialLayout } from '@varin/application-client/desktop';
-import { leadArt, childArt, workAccent, workProp, noticeGlyph, portfolioText as text, portfolioCaption, managementPacketPose, type PortfolioListen } from './portfolioArtwork';
+import { leadArt, childArt, workAccent, workProp, noticeGlyph, portfolioText as text, portfolioCaption, managementDossierDock, managementDossierPose, managementDossierArt, portfolioFocalKey, type PortfolioListen } from './portfolioArtwork';
 
 /** Only actual native geometry receipts enter this renderer. The rear layer is
  * separately alpha-masked by sceneRenderer against the last successful drawing. */
@@ -30,7 +30,7 @@ export function spatialArtwork(d:DesktopCompanionScene, layout:CompanionSpatialL
     x=seat.home.x;y=seat.home.y;
    }
   }
-  const size=seat.size*(yielding?1-.2*travel:1),b=workAccent(project,now,epoch,d.reducedMotion);
+  const size=seat.size*(yielding?1-.2*travel:1),b=workAccent(project,now,epoch,d.reducedMotion||!!portfolioFocalKey(d)&&project.key!==portfolioFocalKey(d));
   let z=`<g data-spatial-squad="${seat.label}"><ellipse cx="${seat.shadow.x}" cy="${seat.shadow.y}" rx="${seat.shadow.rx}" ry="${seat.shadow.ry}" fill="#52627d" opacity="${seat.shadow.opacity}"/>`;
   if(reporting&&travel>0)z+=`<path d="M${seat.home.x} ${seat.home.y} Q${x} ${seat.home.y} ${x} ${y}" fill="none" stroke="#a7b7cd" stroke-width=".65" stroke-dasharray="2 3"/>`;
   if(team){
@@ -58,10 +58,10 @@ export function spatialArtwork(d:DesktopCompanionScene, layout:CompanionSpatialL
   if(seat.layer==='behind'&&!reporting){behind+=z;front+=labels;}else front+=z+labels;
  }
  const subject=p.projects.find(a=>a.key===(p.mode==='inspection'?p.inspectedKey:p.subjectKey));
- if(subject&&side&&transfer&&!['unknown','uncertain'].includes(subject.status)){
-  const seat=layout.seats.find(s=>s.label===subject.label);
-  const pose=seat&&managementPacketPose(transfer.cue,transfer.age,side,d.reducedMotion,seat.home);
-  if(pose&&pose.opacity>0)front+=`<g data-summary-project="${subject.label}" opacity="${pose.opacity}" transform="translate(${pose.x} ${pose.y})"><rect x="-13" y="-9" width="26" height="18" rx="2" fill="url(#paper)" stroke="#7895b5" stroke-width=".8"/>`+text(-6,2,subject.label,7)+'<path d="M0 -3h9 M0 1h7 M-8 6h17" stroke="#7895b5" stroke-width=".7"/></g>';
+ const dockForDossier=managementDossierDock(side,layout.available,layout.seats.map(seat=>seat.bounds));
+ if(subject&&dockForDossier&&transfer&&!['unknown','uncertain'].includes(subject.status)){
+  const pose=managementDossierPose(transfer.cue,transfer.age,dockForDossier,d.reducedMotion);
+  if(pose&&pose.opacity>0)front+=managementDossierArt(subject.label,pose);
  }
  return {behind,front};
 }

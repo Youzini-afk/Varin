@@ -11,7 +11,7 @@ describe('authored scene cues', () => {
     expect(['PAGE_TURN_PREPARE','PAGE_TURN','PAGE_TURN_RELEASE'].map(value => sceneCue(value))).toEqual(['transition','page-turn','transition']);
     expect(['TYPE_PREPARE','TYPE_BURST','TYPE_ALTERNATE','TYPE_STOP'].map(value => sceneCue(value))).toEqual(['transition','type','type','transition']);
   });
-  it('keeps management gestures directional and project work independent', () => {
+  it('keeps legacy listening directions separate from generic management and project work', () => {
     expect(sceneCue('LISTEN', 'director-listen-left')).toBe('listen-left');
     expect(sceneCue('LISTEN', 'director-listen-right')).toBe('listen-right');
     expect(sceneCue('LISTEN', 'director-listen')).toBe('transition');
@@ -26,10 +26,14 @@ describe('authored scene cues', () => {
   });
 });
 
-it('keeps project receipt and leader handoff distinct from user presentation', () => {
+it('maps inward acceptance and independent presentation without claiming physical receipt', () => {
  expect(sceneCue('RECEIVE_PROJECT','director-intake')).toBe('management-receive');
  expect(sceneCue('HANDOFF_LEAD','director-intake')).toBe('management-delegate');
  expect(sceneCue('PRESENT','director-gather-present')).toBe('management-present');
+ expect(sceneCue('ACCEPT_INWARD','director-intake')).toBe('management-receive');
+ expect(sceneCue('ACCEPT_SETTLE','director-intake')).toBe('management-delegate');
+ expect(sceneCue('PRESENT_CLEAR','director-gather-present')).toBe('address-user');
+ expect(sceneCue('PRESENT_CLEAR','director-notify-attention')).toBe('transition');
 });
 
 it('uses the drawn subject and acknowledged native listening side, not the requested package',()=>{

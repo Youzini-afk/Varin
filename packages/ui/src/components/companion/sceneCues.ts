@@ -5,11 +5,11 @@ export function sceneCue(value?: string, drawnAction?: string): DesktopCompanion
   const v=value.toUpperCase();
   if (drawnAction?.startsWith('director-')) {
     if (['ATTEND_LEAD','LISTEN'].includes(v)) return drawnAction.endsWith('-left') ? 'listen-left' : drawnAction.endsWith('-right') ? 'listen-right' : 'transition';
-    if (v === 'RECEIVE_PROJECT') return 'management-receive';
-    if (v === 'HANDOFF_LEAD') return 'management-delegate';
+    if (drawnAction==='director-intake'&&['RECEIVE_PROJECT','ACCEPT_INWARD'].includes(v)) return 'management-receive';
+    if (drawnAction==='director-intake'&&['HANDOFF_LEAD','ACCEPT_SETTLE'].includes(v)) return 'management-delegate';
     if (v === 'GATHER_OUT') return 'gather-out';
     if (v === 'GATHER_IN') return 'gather-in';
-    if (v === 'ADDRESS_USER') return 'address-user';
+    if (drawnAction==='director-gather-present'&&['ADDRESS_USER','PRESENT_CLEAR'].includes(v)) return 'address-user';
     if (v === 'PRESENT') return 'management-present';
     if (v === 'RELEASE') return 'management-release';
     return 'transition';

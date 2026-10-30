@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {resolveCompanionSpatialLayout} from '../../../../application-client/src/companion-spatial-layout';
-import {portfolioArtwork} from './portfolioArtwork';
+import {portfolioArtwork,managementDossierDock,squadWorkTiming} from './portfolioArtwork';
 import {agentAvatarSvg} from '../ui/agent-avatar-art';
 import {spatialArtwork} from './spatialArtwork';
 import type {DesktopCompanionScene} from '@varin/application-client';
@@ -28,4 +28,26 @@ it('plain task retains its saved avatar without inventing captain clothing or ch
   expect(output).not.toContain('data-child-owner');
   expect(output).not.toContain('data-summary-project');
  }
+});
+
+it('fits virtual dossiers to free space, falls back compactly, and never covers a constrained actor',()=>{
+ const compact=managementDossierDock('right',{left:46,top:18,right:280,bottom:229});
+ expect(compact?.width).toBe(20);
+ expect(managementDossierDock('right',{left:50,top:25,right:250,bottom:225})).toBeNull();
+ for(const available of [{left:5,top:-15,right:295,bottom:285},{left:50,top:-15,right:295,bottom:225},{left:5,top:-15,right:250,bottom:225}]){
+  const layout=resolveCompanionSpatialLayout({available}),dock=managementDossierDock(null,available,layout.seats.map(s=>s.bounds));
+  if(!dock)continue;
+  expect(dock.x-dock.width/2).toBeGreaterThanOrEqual(available.left);expect(dock.x+dock.width/2).toBeLessThanOrEqual(available.right);
+  for(const seat of layout.seats)expect(dock.x+dock.width/2<=seat.bounds.left||dock.x-dock.width/2>=seat.bounds.right||dock.y+dock.height/2<=seat.bounds.top||dock.y-dock.height/2>=seat.bounds.bottom).toBe(true);
+ }
+});
+it('presents the actual subject without a listen direction and keeps nonfocal work quiet but visible',()=>{
+ const focused:DesktopCompanionScene={...d,reducedMotion:false,cue:'management-present',portfolio:{...d.portfolio!,mode:'result',subjectKey:'a',inspectedKey:null,projects:[{...d.portfolio!.projects[0]!,status:'result'},{...d.portfolio!.projects[1]!,status:'active',notice:'permission'}]}};
+ const layout=resolveCompanionSpatialLayout();
+ const first=spatialArtwork(focused,layout,null,1200,0,null,{cue:'management-present',age:0});
+ const later=spatialArtwork(focused,layout,null,1400,0,null,{cue:'management-present',age:200});
+ expect(first).toEqual(later);expect(first.front).toContain('data-summary-project="A"');expect(first.front).toContain('data-notice="permission"');
+ expect(squadWorkTiming(focused,1200,0)).toEqual({animate:false,wakeIn:null});
+ const unknown={...focused,portfolio:{...focused.portfolio!,projects:focused.portfolio!.projects.map(p=>p.key==='a'?{...p,status:'uncertain' as const}:p)}};
+ expect(spatialArtwork(unknown,layout,null,1400,0,null,{cue:'management-present',age:200}).front).not.toContain('data-summary-project');
 });

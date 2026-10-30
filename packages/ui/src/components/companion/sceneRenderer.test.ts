@@ -1,4 +1,4 @@
-import {escapePortfolioText,portfolioCaption,managementPacketPose,squadWorkTiming,squadHome} from './portfolioArtwork';
+import {escapePortfolioText,portfolioCaption,managementDossierDock,managementDossierPose,squadWorkTiming,squadHome} from './portfolioArtwork';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_AVATAR_ART } from '../ui/agent-avatar-art';
 import { mountCompanionScene, type SceneUpdate } from './sceneRenderer';
@@ -95,15 +95,13 @@ describe('review-only director portfolio',()=>{
   s.update({...v,descriptor:{...v.descriptor,revision:2,portfolio}});tick(1400);expect(root.innerHTML).not.toContain('&lt;svg/');s.dispose();
  });
 
- it.each(['left','right'] as const)('gathers the same summary to fixed laptop on %s, with continuous stage endpoints',side=>{
-  const out=managementPacketPose('gather-out',180,side)!;
-  const start=managementPacketPose('gather-in',0,side)!;
-  expect(out).toEqual(start);
-  expect(managementPacketPose('gather-in',340,side)).toMatchObject({x:166,y:147,opacity:1});
-  expect(managementPacketPose('address-user',0,side)).toMatchObject({x:166,y:147});
-  expect(managementPacketPose('management-release',130,side)?.opacity).toBe(0);
-  expect(managementPacketPose('type',0,side)).toBeNull();
-  expect(managementPacketPose('gather-in',0,side,true)).toMatchObject({x:166,y:147});
+ it.each(['left','right'] as const)('unfolds one independent dossier with continuous phase endpoints (%s)',side=>{
+  const dock=managementDossierDock(side)!;
+  expect(managementDossierPose('gather-out',180,dock)).toEqual(managementDossierPose('gather-in',0,dock));
+  expect(managementDossierPose('gather-in',340,dock)).toEqual(managementDossierPose('address-user',0,dock));
+  expect(managementDossierPose('management-release',180,dock)?.opacity).toBe(0);
+  expect(managementDossierPose('type',0,dock)).toBeNull();
+  expect(managementDossierPose('address-user',0,dock,true)?.open).toBe(1);
  });
 
  it('keeps B permission and C question distinct and removes only the resolved notice',()=>{
@@ -121,12 +119,20 @@ describe('review-only director portfolio',()=>{
   s.update({...v,descriptor:{...v.descriptor,revision:3,scope:'other',cue:'transition'}});tick(1400);expect(root.innerHTML).not.toContain('data-summary-project');s.dispose();
  });
 
- it.each(['left','right'] as const)('receives then delegates through the actual right palm without crossing the face (%s dock)',side=>{
-  expect(managementPacketPose('management-receive',420,side)).toMatchObject({x:166,y:147});
-  const lead={x:side==='right'?230:22,y:21};
-  expect(managementPacketPose('management-delegate',180,side,false,lead)).toMatchObject({x:231,y:96});
-  expect(managementPacketPose('management-delegate',400,side,false,lead)).toMatchObject({...lead,opacity:0});
-  for(let age=0;age<=400;age+=10){const point=managementPacketPose('management-delegate',age,side,false,lead)!;expect(point.x+13>=82&&point.x-13<=216&&point.y+9>=18&&point.y-9<=108).toBe(false);}
+ it('withdraws a held result when the same subject needs attention or the scene is suppressed',()=>{
+  const s=mountCompanionScene(root),v=scene('portfolio',{cue:'management-present',portfolio:{...portfolio,mode:'result',subjectKey:'opaque-a'}});v.layout={...layout,inspectionSide:'right'};
+  s.update(v);tick(700);expect(root.innerHTML).toContain('data-summary-project="A"');
+  s.update({...v,descriptor:{...v.descriptor,revision:2,cue:'transition',portfolio:{...v.descriptor.portfolio!,mode:'attention'}}});tick(1000);expect(root.innerHTML).not.toContain('data-summary-project');
+  s.update({...v,descriptor:{...v.descriptor,revision:3,suppressed:true}});tick(1300);expect(root.innerHTML).toBe('');s.dispose();
+ });
+
+ it.each(['left','right'] as const)('acceptance and result cards never attach to the actor (%s)',side=>{
+  const dock=managementDossierDock(side)!;
+  for(const cue of ['management-receive','management-delegate','gather-in','address-user','management-present'])for(let age=0;age<=500;age+=20){
+   const pose=managementDossierPose(cue,age,dock)!;
+   expect(pose.x).toBe(dock.x);expect(pose.y).toBe(dock.y);
+   expect(pose.x+pose.width/2<46||pose.x-pose.width/2>254||pose.y+pose.height/2<18||pose.y-pose.height/2>229).toBe(true);
+  }
  });
 
  it('does not reintroduce a large dossier during handoff or return',()=>{
