@@ -168,7 +168,7 @@ export function CollaborationComposer({
                           )
                         }
                       >
-                        <AgentAvatar identity={member.threadId} avatar={member.avatar} size={23} />
+                        <AgentAvatar identity={member.threadId} avatar={member.avatar} role={member.lead ? 'lead' : undefined} size={23} />
                         <span className="min-w-0 flex-1 truncate">
                           {member.name || member.agentId}
                           {(member.detail?.branches.length ?? 0) > 1

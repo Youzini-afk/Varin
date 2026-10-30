@@ -5,6 +5,7 @@ import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
+import { isLeadThread } from '@/lib/agent-runtime/threadRole';
 
 export interface SidebarConversation {
   harness?: ExternalHarness;
@@ -27,14 +28,6 @@ export interface SidebarConversation {
   botId?: string;
   /** Leads a task: a top-level task, or work a Bot conversation handed over directly. */
   lead: boolean;
-}
-type CatalogThread = { thread_id: string; parent_thread_id: string | null; bot_id: string | null };
-/** A lead is decided by who handed the work over, not by whether a parent exists: a Bot's own
- * conversation is a session, so the work it dispatched directly is a lead, like a top-level task. */
-export function isLeadThread(thread: CatalogThread, byId: ReadonlyMap<string, CatalogThread>): boolean {
-  if (!thread.parent_thread_id) return true;
-  const parent = byId.get(thread.parent_thread_id);
-  return !!parent && !!parent.bot_id && parent.bot_id === thread.bot_id && !parent.parent_thread_id;
 }
 export interface ConversationSessionAttentionState { kind: 'complete' | 'error'; updatedAt: number }
 

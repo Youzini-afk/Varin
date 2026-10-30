@@ -25,7 +25,8 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useThreadDraftStore } from "@/stores/useThreadDraftStore";
-import { threadHostKey, threadComposerKey } from "@/stores/useThreadStore";
+import { useThreadStore, threadHostKey, threadComposerKey } from "@/stores/useThreadStore";
+import { isLeadThread } from '@/lib/agent-runtime/threadRole';
 import { openThreadFromNavigation } from "@/lib/agent-runtime/threadNavigation";
 import { ChildState } from "../conversation/childPresentation";
 import {
@@ -107,11 +108,22 @@ function CollaborationRoomContent({
   navigationKey,
 }: Props & { host: number; feed: CollaborationFeed }) {
   const { t } = useI18n();
-  const state = React.useSyncExternalStore(
+  const observed = React.useSyncExternalStore(
     feed.subscribe,
     feed.getSnapshot,
     feed.getSnapshot,
   );
+  const threads = useThreadStore(value => value.threads);
+  const directoryHost = useThreadStore(value => value.hostKey);
+  const directory = React.useMemo(() => new Map(
+    (directoryHost === threadHostKey() && host === getRuntimeEndpointGeneration() ? threads : []).map(thread => [thread.thread_id, thread]),
+  ), [threads, directoryHost, host]);
+  const state = React.useMemo(() => {
+    return { ...observed, members: observed.members.map(member => {
+      const thread = directory.get(member.threadId);
+      return { ...member, lead: thread ? isLeadThread(thread, directory) : false };
+    }) };
+  }, [observed, directory]);
   const [selection, setSelection] = React.useState<Selection>();
   const selectionRequest = React.useRef(0);
   const select = (next?: Selection) => {
@@ -256,6 +268,7 @@ function CollaborationRoomContent({
       <AgentAvatar
         identity={member.threadId}
         avatar={member.avatar}
+        role={member.lead ? 'lead' : undefined}
         size={28}
       />
       <div className="min-w-0 flex-1">
@@ -362,6 +375,7 @@ function CollaborationRoomContent({
               <AgentAvatar
                 identity={selection.identity.threadId}
                 avatar={selectedMember?.avatar}
+                role={selectedMember?.lead ? 'lead' : undefined}
                 size={30}
               />
               <div className="min-w-0 flex-1">
@@ -453,6 +467,7 @@ function CollaborationRoomContent({
                     <AgentAvatar
                       identity={member.threadId}
                       avatar={member.avatar}
+                      role={member.lead ? 'lead' : undefined}
                       size={27}
                     />
                     <span className="max-w-32 truncate">

@@ -183,6 +183,20 @@ describe('review-only director portfolio',()=>{
   expect(squadWorkTiming({...d,reducedMotion:true},300,0).animate).toBe(false);
  });
 
+ it.each([false,true])('retains the lead and its artwork across working frames (spatial=%s)',spatial=>{
+  const mounted=mountCompanionScene(root),value=scene('portfolio',{portfolio,...(spatial?{layout:'spatial-b-v1' as const}:{})});
+  value.layout={...layout,inspectionSide:'right',...(spatial?{spatial:resolveCompanionSpatialLayout()}: {})};
+  mounted.update(value);tick(100);
+  const selector=spatial?'[data-lead-position="A"]':'[data-project-slot="A"]';
+  const lead=root.querySelector(selector)!,art=lead.querySelector('svg')!,before=lead.innerHTML;
+  expect(art).not.toBeNull();
+  tick(200);
+  expect(root.querySelector(selector)).toBe(lead);
+  expect(lead.querySelector('svg')).toBe(art);
+  expect(lead.innerHTML).not.toBe(before); // The existing nodes still animate.
+  mounted.dispose();
+ });
+
 });
 
 // Rear exact-alpha clipping must be final: a parent drop shadow would leak back into Varin.

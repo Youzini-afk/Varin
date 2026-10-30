@@ -71,11 +71,13 @@ const dispatch: CollaborationFeedItem = { id: 'dispatch:original', kind: 'dispat
     targetThreadId: 'worker', targetBranchId: 'original-worker-branch', acceptedCursor: 1, acceptedAtMs: 1000, task: 'Original delegated task', preset: 'worker' } };
 it('shows dispatch participants and the original task, with navigation bound to the original branches', async () => {
   const onMember = vi.fn();
-  await act(async () => root.render(<CollaborationMessage item={dispatch} members={members} expanded={false}
+  await act(async () => root.render(<CollaborationMessage item={dispatch} members={members.map(member => ({ ...member, lead: member.threadId === 'parent' }))} expanded={false}
     onExpandedChange={() => {}} onMember={onMember} onReply={() => {}} onCopy={() => {}} onExchange={() => {}} />));
   expect(container.textContent).toContain('Main AgentToLayout review');
   expect(container.textContent).toContain(dict['collaboration.dispatch']);
   expect(container.textContent).toContain('Original delegated task');
+  expect(container.querySelector('[data-agent-role="lead"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="View Layout review’s conversation"] [data-agent-role="lead"]')).toBeNull();
   const open = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === dict['collaboration.openAgent'])!;
   await act(async () => open.click());
   expect(onMember).toHaveBeenCalledWith('worker', 'original-worker-branch');

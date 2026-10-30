@@ -11,6 +11,8 @@ import type {
 
 export type CollaborationMember = MessageParticipant & {
   detail?: FamilyMember;
+  /** Presentation from the current Host's thread directory, not a new runtime role. */
+  lead?: boolean;
 };
 export type CollaborationFeedItem = {
   id: string;

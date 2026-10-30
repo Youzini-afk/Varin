@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { BotSummary, BotsAPI } from '@varin/application-client';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { companionAssociation, COMPANION_CHOICE_KEY, readCompanionChoice, type CompanionChoice } from './companionAssociation';
 
 const storedChoice = (): CompanionChoice => {
@@ -13,11 +14,20 @@ export function useCompanionAssociation(api: BotsAPI | undefined, generation: nu
   const [choice, setChoice] = useState<CompanionChoice>(storedChoice);
   useEffect(() => {
     if (!api) return;
-    const abort = new AbortController();
-    void api.list(abort.signal).then(bots => { if (!abort.signal.aborted) setCatalog({ generation, bots }); },
-      // A failed read keeps the last catalog of this Host; a new Host stays unknown.
-      () => { if (!abort.signal.aborted) setCatalog(current => current?.generation === generation ? current : null); });
-    return () => abort.abort();
+    let pending: AbortController | undefined;
+    const refresh = () => {
+      pending?.abort();
+      const request = new AbortController();
+      pending = request;
+      void api.list(request.signal).then(bots => { if (!request.signal.aborted) setCatalog({ generation, bots }); },
+        // A failed read keeps the last catalog of this Host; a new Host stays unknown.
+        () => { if (!request.signal.aborted) setCatalog(current => current?.generation === generation ? current : null); });
+    };
+    const unsubscribe = subscribeVarinEvents(event => {
+      if (event.type === 'bot-changed' || event.type === 'stream-ready') refresh();
+    });
+    refresh();
+    return () => { unsubscribe(); pending?.abort(); };
   }, [api, generation, refreshKey]);
   useEffect(() => {
     // Another window of the same origin can change the choice.

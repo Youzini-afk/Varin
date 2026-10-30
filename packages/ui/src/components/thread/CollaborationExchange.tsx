@@ -181,7 +181,7 @@ export function CollaborationExchange({
         className="flex min-w-0 items-center gap-1.5 hover:text-primary"
         onClick={() => onMember(id)}
       >
-        <AgentAvatar identity={id} avatar={item?.avatar} size={25} />
+        <AgentAvatar identity={id} avatar={item?.avatar} role={item?.lead ? 'lead' : undefined} size={25} />
         <span className="truncate">{item?.name || item?.agentId || id}</span>
       </button>
     );

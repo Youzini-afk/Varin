@@ -13,7 +13,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
-import { isLeadThread } from '@/components/conversation/sidebarCatalog';
+import { isLeadThread } from '@/lib/agent-runtime/threadRole';
 import { invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import type { ThreadSummary } from '@varin/protocol';
 import { ThreadSidebarList } from './ThreadSidebarList';

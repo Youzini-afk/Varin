@@ -1,4 +1,5 @@
 import { spatialArtwork } from './spatialArtwork';
+import { RetainedSvg } from './retainedSvg';
 import { SceneCharacterMaskCache, inverseCharacterMaskSvg, type SceneCharacterMask } from './sceneCharacterMask';
 import type { CompanionSpatialLayout } from '@varin/application-client/desktop';
 import { portfolioArtwork, managementDossierCueMatches, managementDossierPose, type DossierState, squadWorkTiming, type PortfolioListen, type PortfolioBeat } from './portfolioArtwork';
@@ -184,8 +185,8 @@ export function mountCompanionScene(root: HTMLElement) {
   root.setAttribute('aria-hidden','true');
   let resetRoster=false;
   let maskCache:SceneCharacterMaskCache|null=null, maskSelector:'selected'|'review'|null=null, characterMask:SceneCharacterMask|null=null;
-  // Hiding edits the drawn layer in place, so its next frame must be written again.
-  const hideRear=()=>{const rear=root.querySelector?.('[data-spatial-behind]');if(!rear)return;rear.setAttribute('visibility','hidden');if(nodes)written.delete(nodes.layers);};
+  // Temporary visibility override: release it only after the matching mask is painted below.
+  const hideRear=()=>{root.querySelector?.('[data-spatial-behind]')?.setAttribute('visibility','hidden');};
   let portfolioBeats=new Map<string,PortfolioBeat>();
   let portfolioCueStarted=0;
   let portfolioListen:PortfolioListen|null=null,workEpoch=performance.now();
@@ -199,7 +200,7 @@ export function mountCompanionScene(root: HTMLElement) {
   const face=geometry.protectedFace;
   const staticDefs=`<linearGradient id="paper" x1="0" y1="0" x2=".1" y2="1"><stop stop-color="#fffdf5"/><stop offset=".44" stop-color="#fbfcff"/><stop offset="1" stop-color="#dce7f1"/></linearGradient><linearGradient id="spirit-glass" x2=".3" y2="1"><stop stop-color="#fffaf4" stop-opacity=".8"/><stop offset="1" stop-color="#c3cee9" stop-opacity=".45"/></linearGradient><linearGradient id="ribbon" x2=".3" y2="1"><stop stop-color="#e9e5f5"/><stop offset=".48" stop-color="#c7c6e0"/><stop offset="1" stop-color="#a1afcb"/></linearGradient><linearGradient id="metal" x2=".8" y2="1"><stop stop-color="#fff2ca"/><stop offset=".4" stop-color="#e6ce9d"/><stop offset="1" stop-color="#b59b74"/></linearGradient><filter id="paper-depth" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#273449" flood-opacity=".13"/></filter><clipPath id="outside-face"><path d="M-100 -100H400V350H-100Z M${face.x} ${face.y}V${face.y+face.height}H${face.x+face.width}V${face.y}Z" clip-rule="evenodd"/></clipPath>`;
   let nodes:{svg:Element;mask:Element;frame:Element;clip:Element;layers:Element;team:Element}|null=null;
-  const written=new WeakMap<Element,string>();
+  const written=new WeakMap<Element,RetainedSvg>();
   const surface=()=>{
     if(nodes&&root.firstChild===nodes.svg&&root.childNodes.length===1)return nodes;
     const svg=root.ownerDocument.createElementNS(svgNS,'svg');
@@ -210,7 +211,7 @@ export function mountCompanionScene(root: HTMLElement) {
     root.replaceChildren(svg);
     return nodes;
   };
-  const write=(node:Element,markup:string)=>{if(written.get(node)!==markup){node.innerHTML=markup;written.set(node,markup);}};
+  const write=(node:Element,markup:string)=>{let layer=written.get(node);if(!layer){layer=new RetainedSvg(node);written.set(node,layer);}layer.update(markup);};
   const attribute=(node:Element,name:string,value:string|null)=>{
     if(value===null){if(node.hasAttribute(name))node.removeAttribute(name);}
     else if(node.getAttribute(name)!==value)node.setAttribute(name,value);
@@ -251,13 +252,15 @@ export function mountCompanionScene(root: HTMLElement) {
     const layers = withdraw ? `<g transform="translate(${150*withdraw*.08} ${148*withdraw*.08}) scale(${1-withdraw*.08})">${body}</g>` : body;
     // All edge compositions are authored above; anchors never move with lanes.
     // Stable surface: static defs are parsed once, the mask only when its source changes,
-    // and each changing layer is rewritten only when its markup actually differs.
+    // and existing characters/props receive attribute updates as their authored frames change.
     const s=surface();
     write(s.mask,maskDefs);
     attribute(s.frame,'transform',`translate(${tx} ${ty}) scale(${scale})`);
     attribute(s.clip,'filter',d.layout==='spatial-b-v1'?null:'url(#paper-depth)');
     attribute(s.layers,'opacity',String(opacity));
     write(s.layers,layers);write(s.team,teamLayer);
+    const rear=s.layers.querySelector('[data-spatial-behind]');
+    if(rear)attribute(rear,'visibility',characterMask?null:'hidden');
     if(terminal&&phaseAge>=end&&!hasTeam) { root.replaceChildren(); return; }
     const portfolioMoving=d.kind==='portfolio'&&[...portfolioBeats.values()].some(beat=>now-beat.at<480);
     const teamMoving=[...teamBeats.values()].some(beat=>((d.kind==='dispatch'&&beat.entering) || beat.state==='leaving') && now-beat.at<650);

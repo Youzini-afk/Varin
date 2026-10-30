@@ -78,7 +78,7 @@ export function CollaborationMessage({ item, members, original, expanded, onExpa
     className="collaboration-message-member" title={name(threadId)}
     aria-label={t('collaboration.viewMember', { name: name(threadId) })}
     onClick={() => onMember(threadId, branchId)}>
-    {avatar && <AgentAvatar identity={threadId} avatar={find(threadId)?.avatar} size={16} />}
+    {avatar && <AgentAvatar identity={threadId} avatar={find(threadId)?.avatar} role={find(threadId)?.lead ? 'lead' : undefined} size={16} />}
     <span>{name(threadId)}</span>
   </button>;
   const replyLabel = t(item.kind === 'message' ? 'chat.messages.reply' : 'collaboration.send');
@@ -88,7 +88,7 @@ export function CollaborationMessage({ item, members, original, expanded, onExpa
         {outgoing ? <span className="collaboration-message-user-avatar">{t('collaboration.you')}</span>
           : <button type="button" className="collaboration-message-avatar" onClick={() => onMember(sourceId, sourceBranch)}
             aria-label={t('collaboration.viewMember', { name: name(sourceId) })}>
-            <AgentAvatar identity={sourceId} avatar={find(sourceId)?.avatar} size={30} />
+            <AgentAvatar identity={sourceId} avatar={find(sourceId)?.avatar} role={find(sourceId)?.lead ? 'lead' : undefined} size={30} />
           </button>}
         <div className="collaboration-message-column">
           <div className="collaboration-message-route">
