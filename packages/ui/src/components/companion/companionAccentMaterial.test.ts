@@ -1,3 +1,5 @@
+import { getThemeById, themes } from '@/lib/theme/themes';
+import { resolveCompanionAccentPalette } from './companionAccentPalette';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { expect, test, vi } from 'vitest';
@@ -69,4 +71,52 @@ test('source regions reject escaped/fractional or overlapping treatment rather t
   }
   for (const invalid of [null, {}, { allow: [], protect: null }, { allow: [null], protect: [] }]) expect(validAccentSourceRegions(invalid)).toBe(false);
   for (const source of Object.values(profile.sources)) expect(validAccentSourceRegions(source)).toBe(true);
+});
+
+test('default and both Varin themes are byte-identical to the approved pre-palette material', () => {
+  // Golden from the approved material, spanning source colors, mask blending, alpha and protections.
+  for (const palette of [undefined, resolveCompanionAccentPalette(getThemeById('varin-dark')), resolveCompanionAccentPalette(getThemeById('varin-light'))]) {
+    const pixels = data(); let state = 451;
+    for (let i = 0; i < pixels.length; i++) { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; pixels[i] = i % 4 === 3 ? 240 + (state >>> 28) : state >>> 24; }
+    applyCompanionAccentPixels(pixels, 512, 512, { allow: [[0, 0, 512, 512]], protect: [[128, 128, 256, 256]] }, palette);
+    expect(createHash('sha256').update(pixels).digest('hex')).toBe('978903e87a8215c83d6f14dd517d8ed7374c30a348a0c6d8cb518ec0aea31326');
+  }
+});
+
+test('all registered palettes preserve alpha, fixed material colors and protected blue pixels', () => {
+  const original = data();
+  [[63,142,243,255], [63,142,243,255], [240,226,222,255], [80,76,84,255], [241,184,157,255], [63,142,243,239], [15,30,60,255]].forEach((rgba, x) => point(original, x, 0, rgba));
+  for (const theme of themes) {
+    const pixels = original.slice();
+    expect(applyCompanionAccentPixels(pixels, 512, 512, { allow: [[0,0,7,1]], protect: [[1,0,2,1]] }, resolveCompanionAccentPalette(theme))).toBe(1);
+    expect(at(pixels, 0, 0)[3]).toBe(255);
+    for (let x = 1; x < 7; x++) expect(at(pixels, x, 0)).toEqual(at(original, x, 0));
+  }
+});
+
+test('cache switches palettes without stale tint, reuses two exposures, and evicts the third', () => {
+  const material = new CompanionAccentMaterial();
+  const sha256 = Object.keys(profile.sources)[0]!;
+  const sequence = { canvas: [512,512], geometryReference: profile.geometryReference, frames: [{sha256}] } as CompanionPackage;
+  const source = profile.sources[sha256 as keyof typeof profile.sources];
+  let sample: [number, number] | undefined;
+  for (const area of source.allow) for (let y = area[1]; y < area[3]; y++) for (let x = area[0]; x < area[2]; x++) {
+    if (!sample && !source.protect.some(r => x >= r[0] && y >= r[1] && x < r[2] && y < r[3])) sample = [x, y];
+  }
+  expect(sample).toBeDefined();
+  const stage = { getImageData: vi.fn(() => {
+    const pixels = data(); point(pixels, sample![0], sample![1], [63,142,243,255]);
+    return {width:512,height:512,data:pixels};
+  }), putImageData: vi.fn() } as unknown as CanvasRenderingContext2D;
+  const bitmap = {} as ImageBitmap;
+  const apply = (id: string, image = bitmap) => material.apply(stage, sequence, image, 0, profile.bundleSHA256, resolveCompanionAccentPalette(getThemeById(id)));
+  apply('aura-dark'); apply('vesper-dark'); apply('aura-dark');
+  const paints = vi.mocked(stage.putImageData).mock.calls;
+  expect(at(paints[0]![0].data, ...sample!)).not.toEqual(at(paints[1]![0].data, ...sample!));
+  expect(paints[2]![0]).toBe(paints[0]![0]);
+  expect(stage.getImageData).toHaveBeenCalledTimes(2);
+  apply('mono-dark'); apply('vesper-dark');
+  expect(stage.getImageData).toHaveBeenCalledTimes(4);
+  apply('vesper-dark', {} as ImageBitmap);
+  expect(stage.getImageData).toHaveBeenCalledTimes(5);
 });
