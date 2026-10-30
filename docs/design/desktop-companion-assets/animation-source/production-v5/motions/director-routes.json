@@ -1,0 +1,791 @@
+{
+  "version": 1,
+  "sourceKind": "prepared-detached-drawing-ids",
+  "noDelayToNativeRoot": true,
+  "keepLegSupportUntilESupport": true,
+  "sourceSHA256Meaning": "Frozen prepared display PNG SHA, not original source PNG SHA. Rebuild and verify before runtime compilation.",
+  "neutralExit": {
+    "w01-b": [
+      {
+        "id": "w01-b",
+        "sourceId": "w01-b",
+        "durationMs": 90,
+        "sourceSHA256": "eeb2849eb2ebcf10419827aa6ef0acca03ecbb1a5efcdc74746c4bf33431cf6a",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-b.png",
+        "originalDetachedSHA256": "6264e57fedda783a7d675a3a6ecca8809ee34878749f3c8be9b62584d4ccc592"
+      },
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 90,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w01-c": [
+      {
+        "id": "w01-c",
+        "sourceId": "w01-c",
+        "durationMs": 90,
+        "sourceSHA256": "894f412ea4c6edfb7cd63b92a7a6498c09f069805d98e321bf98b88c5d88fbc3",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-c.png",
+        "originalDetachedSHA256": "e4c98b4f0f855f6f0fb42f97eda1141b5151eaab2de2b967a2846e00d0e3b6d0"
+      },
+      {
+        "id": "w01-r",
+        "sourceId": "w01-r",
+        "durationMs": 90,
+        "sourceSHA256": "5ab1c34238fbdd2bd25095e005aca38b88d5c9ed58da20ae0ccd51bc7682694d",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-r.png",
+        "originalDetachedSHA256": "2de94bae0a322bd885c7875c267ef60661a286bf146dffab83e100173f7f9c33"
+      },
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 90,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w01-h": [
+      {
+        "id": "w01-h",
+        "sourceId": "w01-h",
+        "durationMs": 90,
+        "sourceSHA256": "f90dc6b80adbf9bb4c8d7b783b1cbbea77e0a4b5f5941705eafe5fad89d8f84a",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-h.png",
+        "originalDetachedSHA256": "e945c823e385f05d5d2180b923d692dc58ab9b6de8cf61f4deb218f732d2acae"
+      },
+      {
+        "id": "w01-r",
+        "sourceId": "w01-r",
+        "durationMs": 90,
+        "sourceSHA256": "5ab1c34238fbdd2bd25095e005aca38b88d5c9ed58da20ae0ccd51bc7682694d",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-r.png",
+        "originalDetachedSHA256": "2de94bae0a322bd885c7875c267ef60661a286bf146dffab83e100173f7f9c33"
+      },
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 90,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w01-r": [
+      {
+        "id": "w01-r",
+        "sourceId": "w01-r",
+        "durationMs": 90,
+        "sourceSHA256": "5ab1c34238fbdd2bd25095e005aca38b88d5c9ed58da20ae0ccd51bc7682694d",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-r.png",
+        "originalDetachedSHA256": "2de94bae0a322bd885c7875c267ef60661a286bf146dffab83e100173f7f9c33"
+      },
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 90,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w01-s": [
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 90,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w07-g": [
+      {
+        "id": "w07-g",
+        "sourceId": "w07-g",
+        "durationMs": 90,
+        "sourceSHA256": "91f081306f79d3dbd6beb8068b270ea7bde584672066e2403591dc527133a2ce",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-g.png",
+        "originalDetachedSHA256": "834623aa622e0bf067fd470a49a7b7490b7ded18283a4a8ab20fc1e4ff72458b"
+      },
+      {
+        "id": "w07-s",
+        "sourceId": "w07-s",
+        "durationMs": 90,
+        "sourceSHA256": "efa2564966b1a4cac64b39dcee976202923d0c10045466d31920e0a724403888",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+        "originalDetachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w07-h": [
+      {
+        "id": "w07-h",
+        "sourceId": "w07-h",
+        "durationMs": 90,
+        "sourceSHA256": "7c8fedf4bab8725ece13633282a1d66c2660971ada52d0a1f1521a08bd84f13c",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-h.png",
+        "originalDetachedSHA256": "543e918bd25f49b5c8abbd34a3e8672f4c685bf2ae9c8a3f722e4bbf6845e9aa"
+      },
+      {
+        "id": "w07-i",
+        "sourceId": "w07-i",
+        "durationMs": 90,
+        "sourceSHA256": "36b51ee55ba889326c26484fe23c7bebf15cc3657af019d2c7d41c6f18c2b88c",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-i.png",
+        "originalDetachedSHA256": "c7495480e92e80fc6945535218d43c0e4edd5245e9049db44537e0fc68b012df"
+      },
+      {
+        "id": "w07-l",
+        "sourceId": "w07-l",
+        "durationMs": 90,
+        "sourceSHA256": "5ccdd419841d85ba49c3660deb8a7632b7f24b75e41f4339eeceba8811db25d4",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-l.png",
+        "originalDetachedSHA256": "d8f62961651b34737390602ea2f0f8a7b876497605b0dbd0dd321b357d57ac01"
+      },
+      {
+        "id": "w07-p",
+        "sourceId": "w07-p",
+        "durationMs": 90,
+        "sourceSHA256": "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+        "originalDetachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+      },
+      {
+        "id": "w07-s",
+        "sourceId": "w07-s",
+        "durationMs": 90,
+        "sourceSHA256": "efa2564966b1a4cac64b39dcee976202923d0c10045466d31920e0a724403888",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+        "originalDetachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w07-i": [
+      {
+        "id": "w07-i",
+        "sourceId": "w07-i",
+        "durationMs": 90,
+        "sourceSHA256": "36b51ee55ba889326c26484fe23c7bebf15cc3657af019d2c7d41c6f18c2b88c",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-i.png",
+        "originalDetachedSHA256": "c7495480e92e80fc6945535218d43c0e4edd5245e9049db44537e0fc68b012df"
+      },
+      {
+        "id": "w07-l",
+        "sourceId": "w07-l",
+        "durationMs": 90,
+        "sourceSHA256": "5ccdd419841d85ba49c3660deb8a7632b7f24b75e41f4339eeceba8811db25d4",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-l.png",
+        "originalDetachedSHA256": "d8f62961651b34737390602ea2f0f8a7b876497605b0dbd0dd321b357d57ac01"
+      },
+      {
+        "id": "w07-p",
+        "sourceId": "w07-p",
+        "durationMs": 90,
+        "sourceSHA256": "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+        "originalDetachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+      },
+      {
+        "id": "w07-s",
+        "sourceId": "w07-s",
+        "durationMs": 90,
+        "sourceSHA256": "efa2564966b1a4cac64b39dcee976202923d0c10045466d31920e0a724403888",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+        "originalDetachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w07-l": [
+      {
+        "id": "w07-l",
+        "sourceId": "w07-l",
+        "durationMs": 90,
+        "sourceSHA256": "5ccdd419841d85ba49c3660deb8a7632b7f24b75e41f4339eeceba8811db25d4",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-l.png",
+        "originalDetachedSHA256": "d8f62961651b34737390602ea2f0f8a7b876497605b0dbd0dd321b357d57ac01"
+      },
+      {
+        "id": "w07-p",
+        "sourceId": "w07-p",
+        "durationMs": 90,
+        "sourceSHA256": "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+        "originalDetachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+      },
+      {
+        "id": "w07-s",
+        "sourceId": "w07-s",
+        "durationMs": 90,
+        "sourceSHA256": "efa2564966b1a4cac64b39dcee976202923d0c10045466d31920e0a724403888",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+        "originalDetachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w07-p": [
+      {
+        "id": "w07-p",
+        "sourceId": "w07-p",
+        "durationMs": 90,
+        "sourceSHA256": "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+        "originalDetachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+      },
+      {
+        "id": "w07-s",
+        "sourceId": "w07-s",
+        "durationMs": 90,
+        "sourceSHA256": "efa2564966b1a4cac64b39dcee976202923d0c10045466d31920e0a724403888",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+        "originalDetachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ],
+    "w07-s": [
+      {
+        "id": "w07-s",
+        "sourceId": "w07-s",
+        "durationMs": 90,
+        "sourceSHA256": "efa2564966b1a4cac64b39dcee976202923d0c10045466d31920e0a724403888",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+        "originalDetachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 120,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      }
+    ]
+  },
+  "pickupSupport": {
+    "w01-b": [
+      {
+        "id": "w01-b",
+        "sourceId": "w01-b",
+        "durationMs": 80,
+        "sourceSHA256": "eeb2849eb2ebcf10419827aa6ef0acca03ecbb1a5efcdc74746c4bf33431cf6a",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-b.png",
+        "originalDetachedSHA256": "6264e57fedda783a7d675a3a6ecca8809ee34878749f3c8be9b62584d4ccc592"
+      },
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 80,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 80,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w01-c": [
+      {
+        "id": "w01-c",
+        "sourceId": "w01-c",
+        "durationMs": 80,
+        "sourceSHA256": "894f412ea4c6edfb7cd63b92a7a6498c09f069805d98e321bf98b88c5d88fbc3",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-c.png",
+        "originalDetachedSHA256": "e4c98b4f0f855f6f0fb42f97eda1141b5151eaab2de2b967a2846e00d0e3b6d0"
+      },
+      {
+        "id": "w01-r",
+        "sourceId": "w01-r",
+        "durationMs": 80,
+        "sourceSHA256": "5ab1c34238fbdd2bd25095e005aca38b88d5c9ed58da20ae0ccd51bc7682694d",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-r.png",
+        "originalDetachedSHA256": "2de94bae0a322bd885c7875c267ef60661a286bf146dffab83e100173f7f9c33"
+      },
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 80,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 80,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w01-h": [
+      {
+        "id": "w01-h",
+        "sourceId": "w01-h",
+        "durationMs": 80,
+        "sourceSHA256": "f90dc6b80adbf9bb4c8d7b783b1cbbea77e0a4b5f5941705eafe5fad89d8f84a",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-h.png",
+        "originalDetachedSHA256": "e945c823e385f05d5d2180b923d692dc58ab9b6de8cf61f4deb218f732d2acae"
+      },
+      {
+        "id": "w01-r",
+        "sourceId": "w01-r",
+        "durationMs": 80,
+        "sourceSHA256": "5ab1c34238fbdd2bd25095e005aca38b88d5c9ed58da20ae0ccd51bc7682694d",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-r.png",
+        "originalDetachedSHA256": "2de94bae0a322bd885c7875c267ef60661a286bf146dffab83e100173f7f9c33"
+      },
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 80,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 80,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w01-r": [
+      {
+        "id": "w01-r",
+        "sourceId": "w01-r",
+        "durationMs": 80,
+        "sourceSHA256": "5ab1c34238fbdd2bd25095e005aca38b88d5c9ed58da20ae0ccd51bc7682694d",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-r.png",
+        "originalDetachedSHA256": "2de94bae0a322bd885c7875c267ef60661a286bf146dffab83e100173f7f9c33"
+      },
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 80,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 80,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w01-s": [
+      {
+        "id": "w01-s",
+        "sourceId": "w01-s",
+        "durationMs": 80,
+        "sourceSHA256": "cc83b34580174f3d7818ec20281ae65d30ebb555d235ec02dc01c69623ddf19f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+        "originalDetachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 80,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w07-g": [
+      {
+        "id": "w07-g",
+        "sourceId": "w07-g",
+        "durationMs": 80,
+        "sourceSHA256": "91f081306f79d3dbd6beb8068b270ea7bde584672066e2403591dc527133a2ce",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-g.png",
+        "originalDetachedSHA256": "834623aa622e0bf067fd470a49a7b7490b7ded18283a4a8ab20fc1e4ff72458b"
+      },
+      {
+        "id": "w07-s",
+        "sourceId": "w07-s",
+        "durationMs": 80,
+        "sourceSHA256": "efa2564966b1a4cac64b39dcee976202923d0c10045466d31920e0a724403888",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+        "originalDetachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 80,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w07-h": [
+      {
+        "id": "w07-h",
+        "sourceId": "w07-h",
+        "durationMs": 80,
+        "sourceSHA256": "7c8fedf4bab8725ece13633282a1d66c2660971ada52d0a1f1521a08bd84f13c",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-h.png",
+        "originalDetachedSHA256": "543e918bd25f49b5c8abbd34a3e8672f4c685bf2ae9c8a3f722e4bbf6845e9aa"
+      },
+      {
+        "id": "w07-i",
+        "sourceId": "w07-i",
+        "durationMs": 80,
+        "sourceSHA256": "36b51ee55ba889326c26484fe23c7bebf15cc3657af019d2c7d41c6f18c2b88c",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-i.png",
+        "originalDetachedSHA256": "c7495480e92e80fc6945535218d43c0e4edd5245e9049db44537e0fc68b012df"
+      },
+      {
+        "id": "w07-l",
+        "sourceId": "w07-l",
+        "durationMs": 80,
+        "sourceSHA256": "5ccdd419841d85ba49c3660deb8a7632b7f24b75e41f4339eeceba8811db25d4",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-l.png",
+        "originalDetachedSHA256": "d8f62961651b34737390602ea2f0f8a7b876497605b0dbd0dd321b357d57ac01"
+      },
+      {
+        "id": "w07-p",
+        "sourceId": "w07-p",
+        "durationMs": 80,
+        "sourceSHA256": "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+        "originalDetachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w07-i": [
+      {
+        "id": "w07-i",
+        "sourceId": "w07-i",
+        "durationMs": 80,
+        "sourceSHA256": "36b51ee55ba889326c26484fe23c7bebf15cc3657af019d2c7d41c6f18c2b88c",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-i.png",
+        "originalDetachedSHA256": "c7495480e92e80fc6945535218d43c0e4edd5245e9049db44537e0fc68b012df"
+      },
+      {
+        "id": "w07-l",
+        "sourceId": "w07-l",
+        "durationMs": 80,
+        "sourceSHA256": "5ccdd419841d85ba49c3660deb8a7632b7f24b75e41f4339eeceba8811db25d4",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-l.png",
+        "originalDetachedSHA256": "d8f62961651b34737390602ea2f0f8a7b876497605b0dbd0dd321b357d57ac01"
+      },
+      {
+        "id": "w07-p",
+        "sourceId": "w07-p",
+        "durationMs": 80,
+        "sourceSHA256": "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+        "originalDetachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w07-l": [
+      {
+        "id": "w07-l",
+        "sourceId": "w07-l",
+        "durationMs": 80,
+        "sourceSHA256": "5ccdd419841d85ba49c3660deb8a7632b7f24b75e41f4339eeceba8811db25d4",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-l.png",
+        "originalDetachedSHA256": "d8f62961651b34737390602ea2f0f8a7b876497605b0dbd0dd321b357d57ac01"
+      },
+      {
+        "id": "w07-p",
+        "sourceId": "w07-p",
+        "durationMs": 80,
+        "sourceSHA256": "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+        "originalDetachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w07-p": [
+      {
+        "id": "w07-p",
+        "sourceId": "w07-p",
+        "durationMs": 80,
+        "sourceSHA256": "9a7837b4cfcc044bfdb7237151a0c37b9d90983bd392478df6155ee2d0bf98a1",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+        "originalDetachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ],
+    "w07-s": [
+      {
+        "id": "w07-s",
+        "sourceId": "w07-s",
+        "durationMs": 80,
+        "sourceSHA256": "efa2564966b1a4cac64b39dcee976202923d0c10045466d31920e0a724403888",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+        "originalDetachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+      },
+      {
+        "id": "neutral-exact",
+        "sourceId": "neutral",
+        "durationMs": 80,
+        "sourceSHA256": "0cd6573446b9569dc95e8d698ef6e2ed6587ce36c3201adc230f60935b623b2f",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "originalDetachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      },
+      {
+        "id": "e-side",
+        "sourceId": "lift-side",
+        "durationMs": 80,
+        "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+        "originalDetachedSHA256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      },
+      {
+        "id": "e-support",
+        "sourceId": "lift-support",
+        "durationMs": 120,
+        "sourceSHA256": "91c8e0cd1de1cd7bff447026cffc1660357b151d711f334fd9c2053e39b15590",
+        "originalDetachedSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+        "originalDetachedSHA256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    ]
+  }
+}

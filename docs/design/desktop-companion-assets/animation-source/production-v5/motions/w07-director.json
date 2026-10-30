@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "id": "v5-w07-working-phrase",
+  "action": "director-gather-present",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 140
+    },
+    {
+      "sourceId": "w07-g",
+      "durationMs": 180,
+      "cue": "GATHER_OUT",
+      "interruptionExitIds": [
+        "w07-g",
+        "w07-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "w07-h",
+      "durationMs": 160,
+      "cue": "GATHER_IN",
+      "interruptionExitIds": [
+        "w07-h",
+        "w07-i",
+        "w07-l",
+        "w07-p",
+        "w07-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "w07-i",
+      "durationMs": 150,
+      "cue": "PRESENT_CLEAR",
+      "interruptionExitIds": [
+        "w07-i",
+        "w07-l",
+        "w07-p",
+        "w07-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "w07-l",
+      "durationMs": 140,
+      "cue": "PRESENT_CLEAR",
+      "interruptionExitIds": [
+        "w07-l",
+        "w07-p",
+        "w07-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "w07-p",
+      "durationMs": 220,
+      "cue": "PRESENT_CLEAR",
+      "interruptionExitIds": [
+        "w07-p",
+        "w07-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "w07-s",
+      "durationMs": 210,
+      "cue": "RELEASE",
+      "interruptionExitIds": [
+        "w07-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 160
+    }
+  ],
+  "runtimeApproval": false,
+  "role": "Bot-only",
+  "semantic": "Completed scoped Bot subject only",
+  "routes": "director-routes.json",
+  "scenePolicy": {
+    "sameCueInstanceAcrossConsecutiveFrames": true,
+    "noNewSubjectCueOnRecovery": true,
+    "w01AcceptSettleDurationMs": 580,
+    "bodyPhaseOverrides": {
+      "w01-r": "lowering",
+      "w01-s": "return"
+    }
+  }
+}
