@@ -3,831 +3,600 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Varin 形象提案 · 第二版</title>
+<title>Varin 形象 · 趴窗台</title>
 <style>
-  :root { --page:#f6f5f1; --ink:#16191c; --muted:#6c7270; --faint:#9aa09d; --line:#e5e2d9; --card:#fff; }
+  :root { --bg:#111317; --panel:#181b21; --line:#2a2e37; --text:#e7e9ee; --muted:#8b919c; --accent:#8fb0ea; }
+  body.light { --bg:#f2f3f6; --panel:#ffffff; --line:#e1e4ea; --text:#1c1f26; --muted:#6b717c; }
   * { box-sizing:border-box; }
-  html { scroll-behavior:smooth; }
-  body { margin:0; background:var(--page); color:var(--ink); font:14px/1.65 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; -webkit-font-smoothing:antialiased; }
-  main { max-width:1200px; margin:0 auto; padding:0 28px 120px; }
-  .mono { font:600 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
-  header.top { display:flex; align-items:center; gap:10px; padding:22px 0 0; }
-  header.top svg { width:20px; height:20px; }
-  header.top b { font-size:14px; }
-  .intro { padding:64px 0 34px; display:grid; grid-template-columns:1.1fr .9fr; gap:40px; align-items:end; }
-  h1 { font-size:46px; line-height:1.08; letter-spacing:-.025em; margin:14px 0 0; font-weight:800; }
-  .intro p { margin:0; color:var(--muted); font-size:15px; max-width:520px; }
-  h2 { font-size:28px; letter-spacing:-.02em; margin:10px 0 8px; font-weight:800; }
-  section.block { padding-top:96px; }
-  .lede { color:var(--muted); max-width:720px; margin:0; font-size:14.5px; }
-
-  /* Hero studio */
-  .studio { display:grid; grid-template-columns:minmax(0,1fr) 340px; border:1px solid var(--line); border-radius:28px; overflow:hidden; background:var(--card); box-shadow:0 30px 80px -50px rgba(30,40,50,.35); }
-  .stage { position:relative; min-height:560px; display:grid; place-items:center; overflow:hidden; transition:background .5s;
-    background:
-      radial-gradient(60% 55% at 50% 46%, rgba(255,255,255,.95), rgba(255,255,255,0) 70%),
-      linear-gradient(45deg, rgba(20,30,40,.045) 1px, transparent 1px) 0 0/36px 36px,
-      linear-gradient(-45deg, rgba(20,30,40,.045) 1px, transparent 1px) 0 0/36px 36px,
-      #efeee8; }
-  .stage.dark { background:
-      radial-gradient(60% 55% at 50% 46%, rgba(70,90,120,.35), rgba(0,0,0,0) 70%),
-      linear-gradient(45deg, rgba(255,255,255,.045) 1px, transparent 1px) 0 0/36px 36px,
-      linear-gradient(-45deg, rgba(255,255,255,.045) 1px, transparent 1px) 0 0/36px 36px,
-      #14171b; }
-  .stage > * { position:relative; z-index:1; }
-  .stage .tag { position:absolute; left:24px; top:22px; }
-  .aurora { position:absolute !important; inset:-12%; pointer-events:none; z-index:0 !important; }
-  .aurora i { position:absolute; width:46%; aspect-ratio:1; border-radius:50%; filter:blur(52px); opacity:.85; mix-blend-mode:multiply; transition:background-color 1.2s ease; will-change:transform; animation:drift 19s ease-in-out infinite alternate; }
-  .aurora i:nth-child(1) { left:16%; top:18%; animation-duration:17s; }
-  .aurora i:nth-child(2) { left:44%; top:12%; animation-duration:22s; animation-delay:-7s; }
-  .aurora i:nth-child(3) { left:26%; top:44%; animation-duration:20s; animation-delay:-3s; }
-  .aurora i:nth-child(4) { left:50%; top:42%; animation-duration:24s; animation-delay:-11s; }
-  .stage.dark .aurora i { opacity:.42; mix-blend-mode:screen; }
-  .tile .mini > *:not(.aurora) { position:relative; z-index:1; }
-  .tile .mini .aurora i { filter:blur(34px); width:54%; opacity:.75; }
-  @keyframes drift { 0% { transform:translate(0,0) scale(1); } 50% { transform:translate(7%,-6%) scale(1.14); } 100% { transform:translate(-6%,7%) scale(.9); } }
-  @media (prefers-reduced-motion: reduce) { .aurora i { animation:none; } }
-  .stage .hint { position:absolute; right:24px; top:22px; }
-  .stage .line { position:absolute; left:0; right:0; bottom:30px; text-align:center; font-size:14px; color:var(--muted); transition:color .3s; }
-  .stage.dark .line, .stage.dark .mono { color:#8f979c; }
-  .stage .fig { cursor:pointer; }
-  .panel { border-left:1px solid var(--line); padding:24px 24px 28px; display:flex; flex-direction:column; gap:22px; background:#fcfbf8; }
-  .group-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
-  .states { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
-  .state-btn { display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px 4px 8px; border:1px solid transparent; border-radius:14px; background:transparent; font:inherit; font-size:12.5px; color:var(--muted); cursor:pointer; transition:background .18s, border-color .18s, color .18s, transform .18s; }
-  .state-btn:hover { background:#f2f0ea; transform:translateY(-1px); }
-  .state-btn[aria-pressed=true] { background:#fff; border-color:var(--line); color:var(--ink); box-shadow:0 6px 18px -12px rgba(0,0,0,.35); }
-  .moves { display:flex; flex-wrap:wrap; gap:7px; }
-  .chip { border:1px solid var(--line); background:#fff; border-radius:999px; padding:7px 13px; font:inherit; font-size:13px; color:var(--ink); cursor:pointer; transition:transform .15s, border-color .15s, box-shadow .15s; }
-  .chip:hover { transform:translateY(-1px); border-color:#cfd2d6; box-shadow:0 6px 14px -10px rgba(0,0,0,.4); }
-  .chip:active { transform:scale(.96); }
-  .swatches { display:grid; grid-template-columns:repeat(8,1fr); gap:8px; }
-  .swatch { aspect-ratio:1; border-radius:30%; border:0; cursor:pointer; box-shadow:inset 0 -3px 6px rgba(0,0,0,.12), 0 0 0 1px rgba(0,0,0,.06); transition:transform .15s, box-shadow .15s; }
-  .swatch[aria-pressed=true] { box-shadow:inset 0 -3px 6px rgba(0,0,0,.12), 0 0 0 2px #fff, 0 0 0 3.5px var(--ink); transform:translateY(-1px); }
-  .toggles { display:flex; flex-direction:column; gap:9px; color:var(--muted); font-size:13px; }
-  .toggles label { display:flex; align-items:center; gap:9px; cursor:pointer; }
-  .seg { display:inline-flex; background:#efede6; border-radius:10px; padding:3px; }
-  .seg button { border:0; background:transparent; font:inherit; font-size:12.5px; padding:5px 12px; border-radius:8px; color:var(--muted); cursor:pointer; }
-  .seg button[aria-pressed=true] { background:#fff; color:var(--ink); box-shadow:0 2px 6px -3px rgba(0,0,0,.3); }
-
-  /* Idea */
-  .idea { display:grid; grid-template-columns:repeat(4,1fr); gap:0; border:1px solid var(--line); border-radius:24px; background:#fff; margin-top:28px; overflow:hidden; }
-  .idea figure { margin:0; padding:30px 18px 22px; display:flex; flex-direction:column; align-items:center; gap:14px; border-right:1px solid var(--line); position:relative; }
-  .idea figure:last-child { border-right:0; }
-  .idea figure:not(:last-child)::after { content:''; position:absolute; right:-9px; top:44%; width:16px; height:16px; background:#fff; border-top:1px solid var(--line); border-right:1px solid var(--line); transform:rotate(45deg); z-index:1; }
-  .idea figcaption { text-align:center; font-size:13px; color:var(--muted); }
-  .idea figcaption b { display:block; color:var(--ink); font-size:14px; margin-bottom:2px; }
-  .idea-live { display:grid; grid-template-columns:320px 1fr; gap:36px; align-items:center; margin-top:20px; padding:26px 34px; border:1px solid var(--line); border-radius:24px; background:#fff; }
-  .idea-live ol { margin:0; padding-left:20px; color:var(--muted); }
-  .idea-live li { margin:8px 0; }
-  .idea-live b { color:var(--ink); }
-
-  /* Grids */
-  .grid { display:grid; gap:14px; margin-top:26px; }
-  .grid.g3 { grid-template-columns:repeat(3,1fr); }
-  .grid.g4 { grid-template-columns:repeat(4,1fr); }
-  .tile { border:1px solid var(--line); border-radius:22px; background:#fff; overflow:hidden; display:flex; flex-direction:column; }
-  .tile .mini { height:250px; display:grid; place-items:center; background:radial-gradient(70% 70% at 50% 45%, #fff, #f3f2ed); border-bottom:1px solid var(--line); position:relative; overflow:hidden; }
-  .tile .meta { padding:14px 18px 16px; }
-  .tile .meta b { font-size:15px; }
-  .tile .meta p { margin:3px 0 0; color:var(--muted); font-size:13px; }
-  .tile .meta .status { margin-top:8px; font-size:12px; color:var(--faint); }
-  .colors .mini { height:200px; }
-  .colors .meta { padding:10px 14px 12px; display:flex; justify-content:space-between; align-items:center; }
-
-  /* Product */
-  .product { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:26px; }
-  .mock { border-radius:24px; border:1px solid var(--line); background:#fff; overflow:hidden; display:grid; grid-template-columns:230px 1fr; min-height:380px; }
-  .mock.dark { background:#16191d; border-color:#262b31; color:#e1e4e6; }
-  .mock .side { background:#f4f3ef; border-right:1px solid var(--line); padding:14px 10px; display:flex; flex-direction:column; gap:2px; font-size:13px; }
-  .mock.dark .side { background:#1b1f24; border-color:#262b31; }
-  .mock .titlebar { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted); padding:2px 8px 12px; }
-  .mock .row { display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:9px; }
-  .mock .row.on { background:#e9e7e0; }
-  .mock.dark .row.on { background:#262c33; }
-  .mock .row.sub { padding-left:30px; color:var(--muted); }
-  .mock.dark .row.sub { color:#9aa3a8; }
-  .mock .head { padding:26px 22px 18px; display:flex; flex-direction:column; align-items:center; gap:4px; border-bottom:1px solid var(--line); }
-  .mock.dark .head { border-color:#262b31; }
-  .mock .head b { font-size:16px; margin-top:6px; }
-  .mock .head span { font-size:12.5px; color:var(--muted); }
-  .mock.dark .head span { color:#9aa3a8; }
-  .mock .team { padding:16px 22px; display:flex; flex-direction:column; gap:10px; font-size:13px; }
-  .mock .team .who { display:flex; align-items:center; gap:10px; }
-  .mock .team small { color:var(--faint); margin-left:auto; }
-
-  /* Rules */
-  .rules { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:26px; }
-  .rule { border:1px solid var(--line); border-radius:20px; background:#fff; padding:20px 20px 18px; }
-  .rule b { display:block; font-size:15px; margin:10px 0 4px; }
-  .rule p { margin:0; color:var(--muted); font-size:13px; }
-  .rule .curve { height:44px; }
-  @media (max-width:980px) { .studio, .intro, .idea-live, .product, .mock { grid-template-columns:1fr; } .panel { border-left:0; border-top:1px solid var(--line); } .grid.g3, .grid.g4, .rules, .idea { grid-template-columns:1fr 1fr; } }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.55 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; transition:background .3s, color .3s; }
+  main { max-width:1140px; margin:0 auto; padding:32px 24px 64px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .lead { margin:0 0 26px; color:var(--muted); }
+  .layout { display:grid; grid-template-columns:520px 1fr; gap:32px; align-items:start; }
+  .stage { width:520px; height:520px; border-radius:34px; overflow:hidden; cursor:pointer; box-shadow:0 20px 60px rgba(0,0,0,.32); touch-action:manipulation; }
+  .line { text-align:center; margin-top:14px; min-height:22px; color:var(--muted); transition:color .3s; }
+  .line.warn { color:#e3a24f; }
+  .group { margin-bottom:22px; }
+  .group h2 { font-size:12px; font-weight:600; color:var(--muted); margin:0 0 8px; letter-spacing:.06em; }
+  .buttons { display:flex; flex-wrap:wrap; gap:8px; }
+  button { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:6px 14px; cursor:pointer; transition:background .2s, border-color .2s, color .2s; }
+  button:hover { border-color:var(--accent); }
+  button.on { background:var(--accent); border-color:var(--accent); color:#10131a; }
+  .opts label { display:inline-flex; align-items:center; gap:6px; margin:0 16px 6px 0; color:var(--muted); cursor:pointer; }
+  .sizes { display:flex; gap:22px; align-items:flex-end; flex-wrap:wrap; }
+  .sizes figure { margin:0; display:flex; flex-direction:column; align-items:center; gap:6px; color:var(--muted); font-size:12px; }
+  .sizes .tile { overflow:hidden; line-height:0; }
+  .ref { display:flex; gap:12px; align-items:center; color:var(--muted); font-size:12px; }
+  .ref img { width:96px; height:96px; border-radius:18px; }
+  .notes { color:var(--muted); font-size:13px; padding-left:18px; margin:0; }
+  .notes li { margin:3px 0; }
+  .shots { display:flex; flex-wrap:wrap; gap:14px; padding:16px; }
+  .shots figure { margin:0; text-align:center; color:#8b919c; font:12px system-ui; }
+  .shots .tile { border-radius:18px; overflow:hidden; line-height:0; }
+  @media (max-width:1000px) { .layout { grid-template-columns:1fr; } .stage { width:min(520px, 100%); height:auto; aspect-ratio:1; } .stage svg { width:100%; height:100%; } }
 </style>
 </head>
 <body>
-<main>
-  <header class="top">
-    <svg viewBox="-64 -64 128 128" aria-hidden="true"><path d="M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z" fill="#20272a"/><path d="M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z" fill="#77837f"/></svg>
-    <b>Varin</b><span class="mono" style="margin-left:6px">形象提案 · 第二版</span>
-  </header>
-
-  <div class="intro">
+<main id="app">
+  <h1>Varin 形象 · 趴窗台</h1>
+  <p class="lead">Varin 的二次元形象画成正面 Q 版：大头、肩膀、两只圆球手搭在窗台上。底稿来自确认过的参考图，矢量分层，每个状态有自己的姿态和循环动作。点它会被戳一下。</p>
+  <div class="layout">
     <div>
-      <span class="mono">Bot · 默认形象</span>
-      <h1>它的脸，<br>就是 Varin 的标志。</h1>
+      <div class="stage" id="stage"></div>
+      <div class="line" id="line"></div>
     </div>
-    <p>Varin 的标志是两段折角笔画互相扣住。把两笔横收起来，剩下两笔竖就是一双眼睛。所以它醒着时是一块会眨眼、会看你的软方块；睡着时把横笔放回去，变回 App 图标。颜色交给它的团队：派出去的 Agent 都是彩色的，围着它转。</p>
-  </div>
-
-  <section class="studio" aria-label="形象工作台">
-    <div class="stage" id="stage">
-      <span class="mono tag" id="tag">Varin · 雾蓝 · 空闲</span>
-      <span class="mono hint">点它一下</span>
-      <div class="fig" id="hero"></div>
-      <span class="line" id="line">空闲</span>
-    </div>
-    <div class="panel">
-      <div><div class="group-head"><span class="mono">状态</span><span class="mono">bot-ui §5.7</span></div><div class="states" id="states"></div></div>
-      <div><div class="group-head"><span class="mono">小动作</span></div><div class="moves" id="moves"></div></div>
-      <div><div class="group-head"><span class="mono">颜色</span><span class="mono" id="color-name">雾蓝</span></div><div class="swatches" id="swatches"></div></div>
-      <div class="toggles">
-        <div style="display:flex;align-items:center;justify-content:space-between"><span>背景</span><span class="seg" id="bg-seg"><button aria-pressed="true" data-v="light">浅</button><button aria-pressed="false" data-v="dark">深</button></span></div>
-        <label><input type="checkbox" id="follow" checked> 眼睛跟随指针</label>
-        <label><input type="checkbox" id="reduced"> 减少动态</label>
+    <div>
+      <div class="group"><h2>状态（BotFigureState）</h2><div class="buttons" id="states"></div></div>
+      <div class="group"><h2>一次性动作</h2><div class="buttons" id="actions"></div></div>
+      <div class="group opts">
+        <label><input type="checkbox" id="auto"> 自动轮播</label>
+        <label><input type="checkbox" id="follow" checked> 目光跟随指针</label>
+        <label><input type="checkbox" id="reduce"> 减少动态</label>
+        <label><input type="checkbox" id="light"> 浅色页面</label>
+      </div>
+      <div class="group"><h2>尺寸（小尺寸只显示姿态）</h2><div class="sizes" id="sizes"></div></div>
+      <div class="group"><h2>原图</h2><div class="ref"><img src="reference.webp" alt="参考原图"><span>矢量按原图描出，眼睛、嘴、眉、腮红、双手、呆毛和缎带拆成独立的层，用来做表情和动作。</span></div></div>
+      <div class="group"><h2>说明</h2>
+        <ul class="notes">
+          <li>全身随弹簧轻微回弹；呆毛和缎带晚一拍跟着摆。</li>
+          <li>眼睛在睁眼、闭眼、笑眼、&gt;&lt; 之间先合上再换形，不做交叉淡化。</li>
+          <li>休息、离线时沉到窗台下面；唤醒时冒上来、揉眼、伸懒腰。</li>
+          <li>窗口不可见时暂停；“减少动态”只保留姿态之间的过渡。</li>
+        </ul>
       </div>
     </div>
-  </section>
-
-  <section class="block" id="idea">
-    <span class="mono">01 · 想法</span>
-    <h2>从标志里长出来</h2>
-    <p class="lede">不另外造一个吉祥物。标志里的两笔竖本来就在左右两边，像一双眼睛；横笔是它的“手”，需要时伸出来，收起来就是一张脸。</p>
-    <div class="idea" id="idea-strip"></div>
-    <div class="idea-live">
-      <div id="idea-live"></div>
-      <ol>
-        <li><b>身体是 App 图标那块圆角方块</b>：上窄下宽一点，站得稳；缎面质感加细颗粒，像一块软陶，而不是塑料泡泡。</li>
-        <li><b>眼睛是标志的两笔竖</b>：左笔炭黑，右笔在拼成标志时带一点鼠尾草灰，和标志一致。思考时两笔变回标志并转动，就是它的加载动画。</li>
-        <li><b>表情只用这两笔</b>：笑眼、闭眼、眯眼、眨眼都由同一对笔画变形而来，没有额外的五官，14px 也看得清。</li>
-        <li><b>颜色交给团队</b>：Varin 本身只有一种颜色；它派出去的 Agent 用产品里真实的彩色头像，工作时围着它转，有结果时撒出彩色纸片。</li>
-      </ol>
-    </div>
-  </section>
-
-  <section class="block" id="states-block">
-    <span class="mono">02 · 状态</span>
-    <h2>九个状态，一套动作系统</h2>
-    <p class="lede">对应 Bot 工作台的形象状态合同。状态之间都是连续过渡：身体用弹簧，眼睛用变形，外轮廓有果冻回弹。</p>
-    <div class="grid g3" id="state-grid"></div>
-  </section>
-
-  <section class="block" id="moves-block">
-    <span class="mono">03 · 小动作</span>
-    <h2>有性格的瞬间</h2>
-    <p class="lede">这些不是状态，是叠在状态上的一次性动作：打招呼、派发、庆祝、戳一下。派发时，一个真实的 Agent 头像从它头顶被抛出去。</p>
-    <div class="grid g3" id="move-grid"></div>
-  </section>
-
-  <section class="block" id="colors-block">
-    <span class="mono">04 · 颜色</span>
-    <h2>每个 Bot 一种颜色</h2>
-    <p class="lede">多个 Bot 时各选一种颜色，形状和表情不变。原色就是 App 图标本身。</p>
-    <div class="grid g4 colors" id="color-grid"></div>
-  </section>
-
-  <section class="block" id="product-block">
-    <span class="mono">05 · 放进产品</span>
-    <h2>在侧栏、标题栏和 Bot 区里</h2>
-    <p class="lede">40px 以下只显示姿态，不播循环：休息时就是一个小 App 图标，等你时右上角有提醒点。Agent 仍是平涂头像，Varin 是唯一有体积的那个，主次一眼分清。</p>
-    <div class="product">
-      <div class="mock" id="mock-light"></div>
-      <div class="mock dark" id="mock-dark"></div>
-    </div>
-  </section>
-
-  <section class="block" id="rules-block">
-    <span class="mono">06 · 动效规则</span>
-    <h2>丝滑来自哪里</h2>
-    <div class="rules">
-      <div class="rule"><canvas class="curve" id="c-body" width="280" height="88"></canvas><b>身体：欠阻尼弹簧</b><p>刚度 260、阻尼 16，落地有一次轻微回弹。蹲、跳、落三段都有预备和缓冲，不做匀速位移。</p></div>
-      <div class="rule"><canvas class="curve" id="c-jelly" width="280" height="88"></canvas><b>轮廓：果冻模态</b><p>外轮廓叠加 2、3、4 阶振动，落地、被戳时激发，约两秒衰减；平时只随呼吸轻微起伏。</p></div>
-      <div class="rule"><canvas class="curve" id="c-face" width="280" height="88"></canvas><b>眼睛：形变而不是切换</b><p>同一对笔画在竖眼、笑眼、闭眼和标志之间插值，接近临界阻尼，没有两种眼睛叠在一起的残影。</p></div>
-    </div>
-    <p class="lede" style="margin-top:18px">窗口不可见时暂停；“减少动态”下只保留姿态之间的平滑过渡，不放纸片、不做果冻回弹。小尺寸只画静态姿态。所有动作都由同一个参数集驱动，正式实现可以直接换成 Rive 状态机或保留 SVG。</p>
-  </section>
+  </div>
 </main>
-
+<script src="varin-art.js"></script>
 <script>
-const TEAM = [{"id":"slope-lilac","body":"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z","color":"#C7B5EF","eyes":"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z"},{"id":"notch-ochre","body":"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z","color":"#E9C16E","eyes":"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z"},{"id":"taper-sage","body":"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z","color":"#A8BD96","eyes":"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z","eyeStroke":"M40 33Q44 27 48 33"},{"id":"overlap-coral","body":"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z","color":"#EE9583","eyes":"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z","accent":{"path":"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z","color":"#C4746B"}},{"id":"capsule-sky","body":"M21 17H43Q60 17 60 34Q60 51 43 51H21Q4 51 4 34Q4 17 21 17Z","color":"#A2C7DC","eyes":"M25 33A3 3 0 1 1 19 33A3 3 0 1 1 25 33ZM45 33A3 3 0 1 1 39 33A3 3 0 1 1 45 33Z"},{"id":"lozenge-mint","body":"M27 7Q32 3 38 8L57 26Q63 32 58 39L40 57Q34 63 27 58L7 39Q1 33 7 26Z","color":"#A5CAB7","eyes":"M22 31H25Q27 31 27 33Q27 35 25 35H22Q20 35 20 33Q20 31 22 31ZM39 31H42Q44 31 44 33Q44 35 42 35H39Q37 35 37 33Q37 31 39 31Z"},{"id":"oval-rose","body":"M3 32Q3 15 29 14Q55 13 61 31Q66 48 41 53Q15 59 6 47Q3 43 3 32Z","color":"#D6A4B4","eyes":"M18 29H21Q24 29 24 32V34Q24 37 21 37H18Q15 37 15 34V32Q15 29 18 29ZM43 29H46Q49 29 49 32V34Q49 37 46 37H43Q40 37 40 34V32Q40 29 43 29Z"},{"id":"pebble-blue","body":"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z","color":"#85B3D2","eyes":"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z"},{"id":"wedge-apricot","body":"M10 31L42 10Q49 5 52 14L61 46Q63 55 53 55H14Q5 55 5 46Q5 37 10 31Z","color":"#E8B48B","eyes":"M19 33H24Q26 33 26 35Q26 37 24 37H19Q17 37 17 35Q17 33 19 33ZM41 27H44Q47 27 47 30V32Q47 35 44 35H41Q38 35 38 32V30Q38 27 41 27Z"},{"id":"squircle-periwinkle","body":"M5 30Q5 7 29 7H35Q59 7 59 30V37Q59 58 35 58H29Q5 58 5 37Z","color":"#AAB8DE","eyes":"M20 26H24Q26 26 26 28V31Q26 33 24 33H20Q18 33 18 31V28Q18 26 20 26ZM40 26H44Q46 26 46 28V31Q46 33 44 33H40Q38 33 38 31V28Q38 26 40 26Z"}];
+'use strict';
+const ART = window.VARIN_ART;
 const NS = 'http://www.w3.org/2000/svg';
 const el = (tag, attrs = {}, parent) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; };
-const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
-const B01 = (x, a, b) => x <= a || x >= b ? 0 : Math.sin(Math.PI * (x - a) / (b - a));
-const C01 = (x, a, b) => clamp((x - a) / (b - a));
-const eIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-const eOC = x => 1 - Math.pow(1 - x, 3);
-const eOB = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const bump = (x, a, b) => (x <= a || x >= b ? 0 : Math.sin(Math.PI * (x - a) / (b - a)));
+const ramp = (x, a, b) => clamp((x - a) / (b - a));
+const smooth = x => x * x * (3 - 2 * x);
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
-const mix = (a, b, t) => { const x = hex(a), y = hex(b); return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * clamp(t)).toString(16).padStart(2, '0')).join(''); };
+const mulberry = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 let reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const PAL = {
-  mist:     { name:'雾蓝',  light:'#dce8ff', base:'#94b7f3', shade:'#6d92dc', deep:'#34528f', eye:'#1b2230', tone2:'#4f6fae', blush:'#ff9db4' },
-  cream:    { name:'原色',  light:'#fffdf8', base:'#eeebe2', shade:'#d7d1c3', deep:'#8f8673', eye:'#20272a', tone2:'#77837f', blush:'#f2a596' },
-  lilac:    { name:'丁香',  light:'#efe8ff', base:'#bcaaf3', shade:'#9581de', deep:'#4f3c97', eye:'#1e1a2c', tone2:'#6a56b2', blush:'#ff9fc4' },
-  sage:     { name:'鼠尾草', light:'#eef5e6', base:'#b2c99e', shade:'#8eab78', deep:'#45622f', eye:'#1c2619', tone2:'#5b7a45', blush:'#f3a08c' },
-  butter:   { name:'奶油',  light:'#fff6d4', base:'#f3d37a', shade:'#e2b44f', deep:'#8f6410', eye:'#2a2111', tone2:'#a77b1d', blush:'#f6977a' },
-  coral:    { name:'珊瑚',  light:'#ffe5dd', base:'#f5a490', shade:'#e47e69', deep:'#93372a', eye:'#2b1713', tone2:'#ab4f3a', blush:'#ff8585' },
-  mint:     { name:'薄荷',  light:'#e3f8f1', base:'#a1d9c7', shade:'#74bfa8', deep:'#226a57', eye:'#13241e', tone2:'#2f7d68', blush:'#f59f99' },
-  graphite: { name:'石墨',  light:'#646e74', base:'#383f45', shade:'#262c30', deep:'#0b0e10', eye:'#f3efe6', tone2:'#a8b2ac', blush:'#d8837f' },
+// ---------------------------------------------------------------- geometry (reference pixel space, 1254 x 1254)
+const VIEW = { full:'34 30 1188 1192', head:'330 236 750 750' };
+const PIVOT = [628, 1100], SILL = 1100;
+const EYE = { L:[489, 706], R:[763, 706] };
+const HL = { L:[511, 651], R:[741, 651] }, HL2 = { L:[471, 716], R:[781, 716] };
+const BROW = { L:[486, 548], R:[757, 542] };
+const HAND = { L:[473, 1097], R:[767, 1097] };
+const AHOGE = [236, 462], KNOT = [1040, 492];
+const SKIN = '#fae5dd', LASH = '#2f3555';
+
+// ---------------------------------------------------------------- parameters and springs
+const P0 = { fy:0, frot:0, fsx:1, fsy:1, featX:0, featY:0, lookX:0, lookY:0, eyeS:1, eyeY:1, eyeDim:0, spark:0,
+  browL:0, browR:0, browLr:0, browRr:0, blush:1, shy:0, hLx:HAND.L[0], hLy:HAND.L[1], hRx:HAND.R[0], hRy:HAND.R[1], hLs:1, hRs:1,
+  glow:.55, gr:59, gg:76, gb:120, grey:0, droop:0 };
+const GROUP = { fy:'body', frot:'body', fsx:'body', fsy:'body', featX:'face', featY:'face', lookX:'look', lookY:'look', eyeS:'face', eyeY:'face', eyeDim:'slow', spark:'slow',
+  browL:'face', browR:'face', browLr:'face', browRr:'face', blush:'slow', shy:'slow', hLx:'hand', hLy:'hand', hRx:'hand', hRy:'hand', hLs:'hand', hRs:'hand',
+  glow:'slow', gr:'slow', gg:'slow', gb:'slow', grey:'slow', droop:'slow' };
+const SPRING = { body:[190, 15], face:[280, 29], look:[420, 38], hand:[170, 16.5], slow:[38, 11.5] };
+
+// ---------------------------------------------------------------- face parts
+const ALT = {
+  closed:cx => `M${cx - 44} 682 Q${cx} 716 ${cx + 44} 682`,
+  happy:cx => `M${cx - 44} 706 Q${cx} 650 ${cx + 44} 706`,
+  squeezeL:cx => `M${cx - 30} 662 L${cx + 26} 690 L${cx - 30} 718`,
+  squeezeR:cx => `M${cx + 30} 662 L${cx - 26} 690 L${cx + 30} 718`,
 };
-const PAL_ORDER = ['mist', 'cream', 'lilac', 'sage', 'butter', 'coral', 'mint', 'graphite'];
+const LIP = '#e7a19c', MOUTH_IN = '#e2827f', TONGUE = '#f3aaa6';
+const MOUTHS = {
+  smile:[['path', { d:'M610 755 Q627 768 644 755', fill:'none', stroke:LIP, 'stroke-width':5.5, 'stroke-linecap':'round' }]],
+  open:[['path', { d:'M609 753 Q627 757 645 753 Q643 776 627 778 Q611 776 609 753 Z', fill:MOUTH_IN }], ['ellipse', { cx:627, cy:771, rx:8, ry:4.5, fill:TONGUE }]],
+  grin:[['path', { d:'M600 750 Q627 757 654 750 Q652 788 627 790 Q602 788 600 750 Z', fill:MOUTH_IN }], ['ellipse', { cx:627, cy:780, rx:13, ry:7, fill:TONGUE }]],
+  o:[['ellipse', { cx:627, cy:766, rx:10, ry:12, fill:MOUTH_IN }]],
+  sleep:[['ellipse', { cx:627, cy:765, rx:6.5, ry:7.5, fill:'#e79a96' }]],
+  yawn:[['ellipse', { cx:627, cy:772, rx:17, ry:24, fill:'#d9777a' }], ['ellipse', { cx:627, cy:786, rx:10, ry:7, fill:'#f0a3a2' }]],
+  flat:[['path', { d:'M614 762 L640 762', fill:'none', stroke:LIP, 'stroke-width':5.5, 'stroke-linecap':'round' }]],
+  cat:[['path', { d:'M603 755 Q614 769 627 758 Q640 769 651 755', fill:'none', stroke:LIP, 'stroke-width':5.5, 'stroke-linecap':'round', 'stroke-linejoin':'round' }]],
+  pout:[['path', { d:'M611 765 Q619 756 627 763 Q635 770 643 761', fill:'none', stroke:LIP, 'stroke-width':5.5, 'stroke-linecap':'round' }]],
+};
 
-// ---- Geometry: one figure space. Body centre (CX, CY), half extents A × B, squircle exponent n. ----
-const CX = 100, CY = 108, A = 62, BH = 59, K = .78;
-const LOGO_D = ['M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z', 'M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z'];
-// Centre lines of the two logo strokes, from the upright's free end to the bar's end.
-const LOGO_L = [[-28, 19], [-28, -13], [-4.5, -36.5], [50.5, -36.5]].map(([x, y]) => [x * K, y * K]);
-const LOGO_R = [[28, -19], [28, 13], [4.5, 36.5], [-50.5, 36.5]].map(([x, y]) => [x * K, y * K]);
-const BASE = { y:0, sx:1, sy:1, rot:0, spin:0, lean:0, n:3.25, lookX:0, lookY:0, eyeH:6.4, eyeScale:1, sep:1, winkL:0,
-  wL:0, wH:0, wC:0, wF:0, faceRot:0, glow:0, badge:0, blush:0, zz:0, desat:0, dim:0, team:0 };
-const SPRING = { body:[260, 16], face:[320, 27], morph:[170, 24], fx:[90, 18] };
-const GROUP = { y:'body', sx:'body', sy:'body', rot:'body', spin:'body', lean:'body', n:'body', lookX:'face', lookY:'face', eyeH:'face', eyeScale:'face', sep:'face', winkL:'face',
-  wL:'morph', wH:'morph', wC:'morph', wF:'morph', faceRot:null, glow:'fx', badge:'fx', blush:'fx', zz:'fx', desat:'fx', dim:'fx', team:'fx' };
-
-const spinner = t => { const P = 1.25, k = Math.floor(t / P), f = t / P - k; return (k + (f < .62 ? eIO(f / .62) : 1)) * 180; };
+// ---------------------------------------------------------------- states (BotFigureState)
+// pose(t, f, L): t = seconds in state, L = 1 when loops may play, 0 for still/reduced rendering.
+const GLOW = { idle:'#3b4c78', listening:'#4b72b8', thinking:'#6b5bc0', working:'#3b8aa6', waiting:'#e3a04c', result:'#e590b6', sleeping:'#29305a', waking:'#d9b36e', offline:'#1c202b' };
+const typing = (t, rate, f) => { const burst = (t % 2.3) < 1.7; return burst ? [Math.max(0, Math.sin(t * rate)) ** 2, Math.max(0, Math.sin(t * rate + Math.PI)) ** 2] : [0, 0]; };
 const STATES = {
-  idle:      { label:'空闲',  line:'空闲', T:{}, blink:[2.2, 5.5], loop:t => { const b = Math.sin(2 * Math.PI * t / 3.8); return { sy:.012 * b, sx:-.009 * b, y:-.6 * b }; } },
-  listening: { label:'倾听',  line:'在听', T:{ eyeScale:1.15, lean:5, lookY:-.1, n:3.1 }, blink:[3, 6], loop:t => { const k = Math.abs(Math.sin(Math.PI * t * 1.9)); return { y:-1.4 * k, sy:.014 * k, rot:.9 * Math.sin(t * 2) }; } },
-  thinking:  { label:'思考',  line:'正在想…', T:{ wL:1 }, blink:null, spin:spinner, loop:t => { const b = Math.sin(2 * Math.PI * t / 2.5); return { y:-.9 * b, sy:.01 * b }; } },
-  working:   { label:'工作',  line:'2 项工作在进行 · 写作正在编辑', T:{ lookY:.85, eyeH:5, team:1 }, blink:[3, 6.5], loop:t => { const k = Math.abs(Math.sin(Math.PI * t * 1.75)); return { y:-2 * k, sy:.018 * k - .009, sx:-.011 * k, lookX:.32 * Math.sin(t * 1.3) }; } },
-  waiting:   { label:'等你',  line:'写作在等你确认', T:{ eyeScale:1.1, glow:1, badge:1, blush:.3, lookY:-.08 }, blink:[2.4, 5], enter:'hop', every:[3.6, 'knock'], loop:t => ({ y:-.7 * Math.sin(2 * Math.PI * t / 2.2) }) },
-  result:    { label:'有结果', line:'依赖调查返回了结果', T:{ wH:1, blush:.85, n:3.05 }, blink:null, enter:'press', loop:t => ({ rot:1.8 * Math.sin(t * 2.6), y:-.9 * Math.abs(Math.sin(t * 2.6)) }) },
-  sleeping:  { label:'休息',  line:'休息中 · 叫醒', T:{ wL:1, y:3, sy:.955, sx:1.035, zz:1, dim:.16 }, blink:null, enter:'sigh', loop:t => { const b = Math.sin(2 * Math.PI * t / 5.2); return { sy:.02 * b, sx:-.014 * b, y:-1.1 * b }; } },
-  waking:    { label:'唤醒中', line:'正在醒来…', T:{}, blink:null, enter:'wake', loop:t => ({ y:-.5 * Math.sin(2 * Math.PI * t / 3.8) }) },
-  offline:   { label:'离线',  line:'电脑没连上 · 只能查看', T:{ wF:1, desat:1, dim:.1, y:3, sy:.965, rot:-3.5, eyeH:4 }, blink:null, enter:'slump', loop:() => ({}) },
-};
-const STATE_ORDER = ['idle', 'listening', 'thinking', 'working', 'waiting', 'result', 'sleeping', 'waking', 'offline'];
-const STATE_TEXT = {
-  idle:'正视，偶尔眨眼、看看四周；指针靠近时目光跟随。',
-  listening:'眼睛睁大，身体前倾，跟着你打字的节奏轻轻点头。',
-  thinking:'两笔竖眼伸出横笔拼成标志，标志一顿一顿地转，就是加载。',
-  working:'低头专注，像在敲键；在跑的子任务化成彩色 Agent 绕着它转。',
-  waiting:'看着你，暖色光晕呼吸，右上角亮起提醒点；隔一会儿轻敲两下。',
-  result:'眯眼笑、压一下再弹起，撒出团队颜色的纸片。',
-  sleeping:'横笔放回去，变回 App 图标；身体沉下去，慢慢呼吸。',
-  waking:'标志松开，眨两下眼，伸个懒腰。',
-  offline:'去色，眼睛压成两道短线，身体歪着，不播放循环。',
+  idle:{ line:'空闲', blink:true, follow:true, micro:true, glow:.5,
+    pose:(t, f, L) => ({ fy:-3 * L * Math.sin(t * 1.75), fsy:1 + .006 * L * Math.sin(t * 1.75), lookX:f.glance.x, lookY:f.glance.y, featX:f.glance.x * 5 }) },
+  listening:{ line:'在听', blink:true, follow:true, glow:.62,
+    enter:f => f.kick('fy', -260),
+    pose:(t, f, L) => { const read = L ? -.55 + ((t * .32) % 1) * 1.1 : 0;
+      return { fy:-16 - 3 * L * Math.sin(t * 2), fsx:1.03, fsy:1.03, frot:1.3, eyeS:1.07, spark:1, lookX:read, lookY:.35, featX:read * 4, browL:-9, browR:-9, hLx:548, hRx:706, blush:1.1 }; },
+    tick:(t, f, L) => { if (L && t > f.mem.nextKey) { const inBurst = (t % 2.6) < 1.8; if (inBurst) f.kick('fy', 70 + f.rand() * 50); f.mem.nextKey = t + .11 + f.rand() * .16; } } },
+  thinking:{ line:'正在想…', blink:true, glow:.6, fx:{ dots:1 }, mouth:'pout',
+    pose:(t, f, L) => { const drift = .32 * L * Math.sin(t * .85); const tap = L * bump((t % 1.6) / 1.6, .55, .75);
+      return { frot:-2.8, fy:-6, lookX:-.72 + drift, lookY:-.9, featX:-7 + drift * 6, featY:-4, browL:-13, browR:2, browLr:-4, browRr:3, hRx:688, hRy:868 - 7 * tap }; } },
+  working:{ line:'写作正在编辑 · 12 分钟', blink:true, glow:.55, fx:{ bits:1 }, mouth:'flat',
+    pose:(t, f, L) => { const [a, b] = L ? typing(t, 15, f) : [0, 0];
+      return { fy:10 + 3 * L * Math.sin(t * 2.2), lookY:.95, lookX:.18 * L * Math.sin(t * .7), eyeY:.82, featY:6, browL:5, browR:5, browLr:6, browRr:-6, hLy:HAND.L[1] - 20 * a, hRy:HAND.R[1] - 20 * b, hLx:HAND.L[0] + 18, hRx:HAND.R[0] - 18 }; },
+    tick:(t, f, L) => { if (!L) return; const [a, b] = typing(t, 15, f); for (const [k, v] of [['L', a], ['R', b]]) { const was = f.mem['tap' + k] || 0; if (v > .9 && was <= .9 && f.rand() < .55) f.bit(k); f.mem['tap' + k] = v; } } },
+  waiting:{ line:'写作在等你确认', warn:true, blink:true, follow:true, glow:.78, pulse:true, fx:{ alert:1 }, mouth:'open',
+    enter:f => { f.kick('fy', -950); f.kick('fsy', 1.4); },
+    pose:(t, f, L) => { const c = t % 3.6, wave = L ? ramp(c, 0, .15) * (1 - ramp(c, 1.25, 1.45)) : 0;
+      return { fy:-14, frot:2.4, eyeS:1.04, spark:1, browL:-9, browR:-9, blush:1.15, hRx:905 + 30 * wave * Math.sin(c * 15), hRy:850 - 12 * wave * Math.abs(Math.sin(c * 15)) }; } },
+  result:{ line:'依赖调查返回了结果', glow:.7, eyes:'happy', mouth:'grin',
+    enter:f => { f.kick('fsy', -2.0); f.kick('fy', 380); f.later(.18, () => { f.kick('fy', -1100); f.burst(22); f.sheen(); }); },
+    pose:(t, f, L) => { const up = ramp(t, .15, .35), hop = L * Math.abs(Math.sin(t * 4.2)) * ramp(t, .9, 1.1);
+      return { fy:-10 - 6 * hop, browL:-8, browR:-8, blush:1.35, hLx:lerp(HAND.L[0], 338, up), hLy:lerp(HAND.L[1], 826, up) + 16 * L * Math.sin(t * 8.4), hRx:lerp(HAND.R[0], 918, up), hRy:lerp(HAND.R[1], 826, up) + 16 * L * Math.sin(t * 8.4 + Math.PI) }; } },
+  sleeping:{ line:'休息中 · 叫醒', glow:.42, fx:{ zz:1 }, eyes:'closed', mouth:'sleep', stillAt:3,
+    pose:(t, f, L) => ({ fy:150 + 5 * L * Math.sin(t * 1.35), fsy:1 + .012 * L * Math.sin(t * 1.35), frot:-3, featY:4, browL:6, browR:6, blush:.85, hLx:560, hRx:696, hLy:1092, hRy:1092, droop:1 }) },
+  waking:{ line:'正在醒来…', glow:.5, stillAt:1.0,
+    pose:(t, f, L) => {
+      const rise = ramp(t, .3, .9), rub = ramp(t, .95, 1.1) * (1 - ramp(t, 1.85, 2.05)), stretch = ramp(t, 2.0, 2.25) * (1 - ramp(t, 2.6, 2.95));
+      const q = { fy:lerp(150, -4, rise), frot:lerp(-3, 0, rise), droop:1 - ramp(t, 2.1, 2.4), featY:4 * (1 - rise), blush:1,
+        hLx:lerp(560, 506 + 16 * Math.cos(t * 13), rub), hLy:lerp(1092, 694 + 10 * Math.sin(t * 13), rub), hRx:lerp(696, HAND.R[0], rise), hRy:1094 };
+      if (stretch > 0) Object.assign(q, { hLx:lerp(q.hLx, 250, stretch), hLy:lerp(q.hLy, 330, stretch), hRx:lerp(q.hRx, 1005, stretch), hRy:lerp(q.hRy, 330, stretch), fsy:1 + .045 * stretch, fy:q.fy - 16 * stretch });
+      q.eyeL = t < .9 ? 'closed' : rub > .3 ? 'closed' : stretch > .3 ? 'squeezeL' : 'open';
+      q.eyeR = t < .9 ? 'closed' : stretch > .3 ? 'squeezeR' : 'open';
+      q.eyeY = t < 2.6 ? .45 : 1;
+      q.mouth = t > 1.05 && t < 1.8 ? 'yawn' : stretch > .3 ? 'o' : t < 1 ? 'sleep' : 'smile';
+      q.fx = t > 2.95 && t < 3.1 ? { sparkle:1 } : {};
+      return q; },
+    tick:(t, f) => { if (!f.mem.wakeBlinked && t > 3.05) { f.mem.wakeBlinked = true; f.blinkNow(true); f.sheen(); } } },
+  offline:{ line:'电脑没连上 · 只能查看', glow:0, mouth:'flat', noLoops:true,
+    pose:() => ({ fy:330, grey:1, eyeDim:1, browL:4, browR:4, blush:.5, hLy:1330, hRy:1330 }) },
 };
 
-const PULSES = {
-  hop:      { d:.74, f:x => { const a = B01(x, 0, .17), air = B01(x, .15, .66), s = B01(x, .15, .42), l = B01(x, .64, .88); return { sy:-.09 * a + .08 * s - .08 * l, sx:.07 * a - .05 * s + .07 * l, y:-15 * air }; }, at:[[.65, f => f.kick(1)]] },
-  knock:    { d:.62, f:x => ({ y:-3.2 * B01(x, 0, .3) - 2.4 * B01(x, .32, .6), sy:.03 * B01(x, 0, .3) }), at:[[.3, f => f.kick(.35)], [.6, f => f.kick(.3)]] },
-  press:    { d:.7,  f:x => ({ sy:-.15 * B01(x, 0, .34) + .06 * B01(x, .3, .64), sx:.11 * B01(x, 0, .34) - .04 * B01(x, .3, .64) }), at:[[.22, f => f.confetti(22)], [.32, f => f.kick(.85)]] },
-  celebrate:{ d:1.4, f:x => { const a = B01(x, 0, .18), air = B01(x, .17, .78), s = B01(x, .17, .4), l = B01(x, .76, .95); return { sy:-.11 * a + .1 * s - .1 * l, sx:.08 * a - .06 * s + .09 * l, y:-30 * air, spin:360 * eIO(C01(x, .2, .72)), wH:B01(x, .15, 1), blush:.6 * B01(x, .15, 1) }; }, at:[[.45, f => f.confetti(32)], [.77, f => f.kick(1.3)]] },
-  hello:    { d:1.6, f:x => { const env = Math.pow(B01(x, 0, 1), .6), ph = 2 * Math.PI * 2.3 * x; return { rot:9 * Math.sin(ph) * env, lean:-5 * Math.sin(ph - .9) * env, wH:.95 * env, y:-3 * B01(x, 0, .28), blush:.45 * env }; } },
-  wink:     { d:1.0, f:x => ({ winkL:B01(x, 0, .85), rot:4 * B01(x, 0, .85), lookX:.25 * B01(x, 0, .85), blush:.35 * B01(x, 0, .85) }), at:[[.22, f => f.sparkle()]] },
-  dispatch: { d:1.5, f:x => { const a = B01(x, 0, .24), s = B01(x, .22, .44), fol = eOC(C01(x, .28, .62)) * (1 - C01(x, .86, 1)); return { sy:-.09 * a + .09 * s, sx:.06 * a - .05 * s, y:-5 * s, lookY:-.5 * a + .35 * fol, lookX:1.1 * fol, wH:.6 * B01(x, .62, 1) }; }, at:[[.27, f => f.launch()]] },
-  logo:     { d:2.3, f:x => { const on = eIO(C01(x, 0, .22)) * (1 - eIO(C01(x, .82, 1))); return { wL:on, faceRot:x < .78 ? 180 * eOB(C01(x, .3, .7)) : 0, sy:-.06 * B01(x, .2, .36) - .05 * B01(x, .68, .82), sx:.05 * B01(x, .2, .36) + .04 * B01(x, .68, .82) }; }, at:[[.27, f => f.kick(.45)], [.72, f => f.kick(.4)]] },
-  poke:     { d:.85, f:x => ({ eyeScale:.34 * B01(x, 0, .38), wH:.85 * B01(x, .36, 1), blush:.45 * B01(x, .36, 1) }) },
-  wake:     { d:1.75, f:x => ({ sy:.12 * B01(x, .25, .7), sx:-.07 * B01(x, .25, .7), y:-3 * B01(x, .25, .7), rot:3.5 * Math.sin(2 * Math.PI * 3 * x) * B01(x, .72, 1) }), at:[[.5, f => f.blink()], [.66, f => f.blink()]] },
-  sigh:     { d:1.3, f:x => ({ sy:-.06 * B01(x, 0, 1), sx:.04 * B01(x, 0, 1), y:2 * B01(x, 0, 1) }) },
-  slump:    { d:1.0, f:x => ({ rot:-4 * B01(x, 0, 1), y:2 * B01(x, 0, 1) }), at:[[.5, f => f.kick(.3)]] },
-  peek:     { d:2.2, f:x => { const e = B01(x, 0, 1); return { lookX:-.9 * e, lean:-4 * e, rot:-2 * e }; } },
-  bounce:   { d:.6, f:x => ({ y:-6 * B01(x, .1, .55), sy:-.05 * B01(x, 0, .12) + .04 * B01(x, .1, .35) - .05 * B01(x, .52, .7) }), at:[[.53, f => f.kick(.55)]] },
+// ---------------------------------------------------------------- one-shot actions
+const ACTIONS = {
+  wave:{ label:'挥手', dur:1.9, pose:(x, t) => ({ set:{ hRx:915 + 30 * Math.sin(t * 15) * ramp(t, .25, .4), hRy:836, blush:1.2, browL:-6, browR:-6, frot:2 }, mouth:'open' }) },
+  nod:{ label:'点头', dur:1.05, pose:(x) => ({ add:{ fy:24 * (bump(x, .05, .45) + bump(x, .5, .9)), featY:8 * (bump(x, .05, .45) + bump(x, .5, .9)) }, eyes:'happy', mouth:'smile' }) },
+  shake:{ label:'摇头', dur:1.15, pose:(x) => ({ add:{ frot:3.4 * Math.sin(x * Math.PI * 6) * (1 - x), featX:-9 * Math.sin(x * Math.PI * 6) * (1 - x) }, set:{ browL:4, browR:4, browLr:5, browRr:-5 }, eyes:'squeeze', mouth:'pout' }) },
+  tilt:{ label:'疑惑', dur:1.7, start:f => f.pop('question'), pose:() => ({ set:{ frot:6, featX:9, lookX:.55, lookY:-.35, browL:-13, browR:4, browLr:-5, browRr:4 }, mouth:'pout' }) },
+  wink:{ label:'眨眼', dur:1.0, start:f => f.later(.12, () => f.pop('sparkle')), pose:() => ({ set:{ blush:1.25, frot:-1.5 }, eyeR:'happy', mouth:'cat' }) },
+  poke:{ label:'戳一下', dur:1.3, start:f => { f.kick('fsy', -2.4); f.kick('fy', 520); f.flick(-26); f.pop('heart'); },
+    pose:() => ({ set:{ blush:1.7, shy:1, browL:-6, browR:-6 }, eyes:'squeeze', mouth:'cat' }) },
+  hide:{ label:'躲起来', dur:3.5, start:f => { f.later(2.3, () => { f.kick('fy', -1300); f.flick(-20); f.sheen(); }); },
+    pose:(x, t) => {
+      const down = t < 1.45 ? 470 : t < 2.3 ? 335 : -8;
+      const look = t > 1.6 && t < 2.3 ? (t < 1.95 ? -.85 : .85) : 0;
+      return { set:{ fy:down, lookX:look, featX:look * 6, lookY:t > 1.45 && t < 2.3 ? -.2 : 0, hLy:HAND.L[1] + (t < 2.3 ? 6 : 0), hRy:HAND.R[1] + (t < 2.3 ? 6 : 0) }, eyes:t > 2.45 ? 'happy' : 'open', mouth:t > 2.45 ? 'grin' : 'o' };
+    } },
+  cheer:{ label:'欢呼', dur:1.9, start:f => { f.kick('fy', -900); f.later(.1, () => f.burst(16)); f.later(.75, () => f.kick('fy', -700)); },
+    pose:(x, t) => { const s = Math.sin(t * 9); return { set:{ hLx:330, hLy:800 + 34 * s, hRx:925, hRy:800 - 34 * s, blush:1.3, browL:-9, browR:-9 }, eyes:'happy', mouth:'grin' }; } },
+  shy:{ label:'害羞', dur:2.1, pose:(x, t) => ({ set:{ hLx:436, hLy:792, hRx:818, hRy:792, hLs:.92, hRs:.92, blush:1.75, shy:1, fy:26, browL:-4, browR:-4, browLr:-6, browRr:6 }, add:{ frot:1.8 * Math.sin(t * 6) }, eyes:'happy', mouth:'cat' }) },
+  surprise:{ label:'吃惊', dur:1.35, start:f => { f.kick('fy', -1250); f.flick(-34); f.pop('exclaim'); },
+    pose:() => ({ set:{ eyeS:1.14, lookY:-.15, browL:-20, browR:-20, fy:-12 }, mouth:'o' }) },
+  yawn:{ label:'打哈欠', dur:2.3, start:f => f.later(2.05, () => f.blinkNow(true)),
+    pose:(x, t) => { const cover = ramp(t, .25, .5) * (1 - ramp(t, 1.55, 1.85)); return { set:{ hLx:lerp(HAND.L[0], 590, cover), hLy:lerp(HAND.L[1], 808, cover), fsy:1 + .03 * bump(t, .2, 1.6), fy:-8 * bump(t, .2, 1.6), browL:-6, browR:-6 }, eyes:t > .25 && t < 1.7 ? 'squeeze' : 'open', mouth:t > .2 && t < 1.65 ? 'yawn' : 'smile' }; } },
 };
-const MOVES = [['hello', '打招呼'], ['wink', '眨眼'], ['dispatch', '派发'], ['celebrate', '庆祝'], ['logo', '标志'], ['poke', '戳一下']];
+const MICRO = ['wink', 'nod', 'tilt', 'flick', 'tap'];
 
-// Fine grain, generated once and shared by every figure (no per-frame filters).
-const GRAIN = (() => { const c = document.createElement('canvas'); c.width = c.height = 96; const g = c.getContext('2d'), img = g.createImageData(96, 96);
-  for (let i = 0; i < img.data.length; i += 4) { const v = Math.random(); const dark = v < .5; img.data[i] = img.data[i + 1] = img.data[i + 2] = dark ? 20 : 255; img.data[i + 3] = dark ? 26 * Math.random() : 22 * Math.random(); }
-  g.putImageData(img, 0, 0); return c.toDataURL(); })();
-
-const smoothPath = pts => {
-  const n = pts.length; let d = `M${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
-  for (let i = 0; i < n; i++) {
-    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
-    d += `C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(2)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(2)} ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(2)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(2)} ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`;
-  }
-  return d + 'Z';
-};
-const N = 56;
-let uid = 0;
-
+// ---------------------------------------------------------------- figure
+let seq = 0;
 class Figure {
-  constructor(host, o = {}) {
-    this.host = host; this.size = o.size ?? 220; this.still = o.still ?? this.size < 44; this.small = this.size < 44;
-    this.tight = o.tight ?? this.size < 150; this.box = o.box; this.palName = o.palette ?? 'mist'; this.pal = PAL[this.palName];
-    this.id = 'v' + (++uid); this.p = { ...BASE }; this.v = {}; this.pulses = []; this.particles = []; this.flyers = []; this.sparkles = [];
-    this.jelly = { a2:0, v2:0, a3:0, v3:0, a4:0, v4:0, d:0, vd:0, th:0 };
-    this.blinkAt = -9; this.nextBlink = 1 + Math.random() * 2; this.glance = { x:0, y:0, until:0 }; this.cursor = null;
-    this.faceRot = 0; this.flyIndex = Math.floor(Math.random() * TEAM.length); this.auto = !!o.auto; this.nextMicro = Figure.now + 5 + Math.random() * 6;
-    this.teamSize = o.team ?? 3; this.visible = true; this.overrides = o.params || null; this.onTick = null;
-    this.build(); this.setState(o.state ?? 'idle', true);
-    if (this.overrides) Object.assign(this.p, this.overrides);
-    this.render({ ...this.p, faceRot:this.p.faceRot }, Figure.now, 0);
-    if (!this.still) { Figure.live.add(this); Figure.io?.observe(this.host); }
+  constructor(host, opts = {}) {
+    this.host = host; this.still = !!opts.still; this.compact = !!opts.compact; this.size = opts.size || 520; this.view = opts.view || VIEW.full;
+    this.uid = 'vf' + (++seq); this.rand = mulberry(opts.seed ?? 11 * seq); this.t = 0;
+    this.p = { ...P0 }; this.v = {}; this.goal = { ...P0 };
+    this.sec = { a:0, va:0, r:0, vr:0 };
+    this.eyes = { L:{ cur:'open', amt:1, va:0 }, R:{ cur:'open', amt:1, va:0 } }; this.mouthS = { cur:'smile', amt:1, va:0 };
+    this.fxAmt = { alert:0, zz:0, dots:0 }; this.parts = []; this.timers = []; this.pops = [];
+    this.glance = { x:0, y:0, until:0 }; this.blinkAt = -9; this.nextBlink = 1.5; this.nextMicro = 6; this.action = null; this.sheenAt = -9; this.lastPointer = -9;
+    this.build();
+    this.setState(opts.state || 'idle');
+    if (!opts.manual) Figure.live.add(this);
+    this.visible = true;
   }
-  build() {
-    const box = this.box || (this.tight ? [27, 30, 146, 146] : [-34, -18, 268, 236]);
-    this.svg = el('svg', { viewBox:box.join(' '), width:this.size, height:Math.round(this.size * box[3] / box[2]), role:'img', 'aria-label':'Varin' }, this.host);
-    this.svg.style.overflow = 'visible'; this.svg.style.display = 'block';
-    const id = this.id, defs = el('defs', {}, this.svg);
-    const grad = (tag, attrs, stops) => { const g = el(tag, { id:id + attrs.id, ...attrs }, defs); g.removeAttribute('id'); g.setAttribute('id', id + attrs.id); return stops.map(([o, c, a = 1]) => el('stop', { offset:o, 'stop-color':c, 'stop-opacity':a }, g)); };
-    this.gBase = grad('linearGradient', { id:'b', x1:.15, y1:0, x2:.85, y2:1 }, [[0, '#fff'], [.52, '#fff'], [1, '#fff']]);
-    this.gShade = grad('radialGradient', { id:'s', cx:.74, cy:1.04, r:.86 }, [[0, '#000', .5], [.6, '#000', .12], [1, '#000', 0]]);
-    grad('radialGradient', { id:'h', cx:.3, cy:.14, r:.62 }, [[0, '#fff', .78], [.55, '#fff', .18], [1, '#fff', 0]]);
-    grad('linearGradient', { id:'t', x1:0, y1:0, x2:0, y2:1 }, [[0, '#fff', .95], [.42, '#fff', 0]]);
-    this.gBounce = grad('linearGradient', { id:'u', x1:0, y1:0, x2:0, y2:1 }, [[.62, '#fff', 0], [1, '#fff', .7]]);
-    this.iri = el('linearGradient', { id:id + 'i', x1:0, y1:0, x2:1, y2:1 }, defs);
-    ['#ffcfe4', '#fff0bf', '#c4f0de', '#c3d8ff', '#e0ccff', '#ffcfe4'].forEach((c, i) => el('stop', { offset:i / 5, 'stop-color':c }, this.iri));
-    grad('radialGradient', { id:'w', cx:.5, cy:.5, r:.5 }, [[0, '#ffb45c', .55], [.55, '#ffc98a', .22], [1, '#ffc98a', 0]]);
-    this.gDrop = grad('radialGradient', { id:'d', cx:.5, cy:.5, r:.5 }, [[0, '#0e141a', .34], [.6, '#0e141a', .11], [1, '#0e141a', 0]]);
-    // Grain stays fine at every display size: one grain tile covers about 64 screen pixels.
-    const gs = Math.max(10, 64 * 146 / this.size);
-    const pattern = el('pattern', { id:id + 'g', width:gs, height:gs, patternUnits:'userSpaceOnUse' }, defs);
-    el('image', { href:GRAIN, width:gs, height:gs }, pattern);
-    const clip = el('clipPath', { id:id + 'c' }, defs); this.clipPath = el('path', {}, clip);
+  get L() { return this.still || reduced || STATES[this.state].noLoops ? 0 : 1; }
 
-    this.gGlow = el('circle', { r:96, fill:`url(#${id}w)`, opacity:0 }, this.svg);
-    this.shadow = el('ellipse', { fill:`url(#${id}d)` }, this.svg);
-    this.back = el('g', {}, this.svg);
-    const body = el('g', {}, this.svg);
-    this.paths = [
-      el('path', { fill:`url(#${id}b)` }, body),
-      el('path', { fill:`url(#${id}s)` }, body),
-      el('path', { fill:`url(#${id}h)` }, body),
-    ];
-    if (!this.small) this.paths.push(el('path', { fill:`url(#${id}g)`, opacity:.75 }, body));
-    const inner = el('g', { 'clip-path':`url(#${id}c)` }, body);
-    if (!this.small) {
-      this.paths.push(el('path', { fill:'none', stroke:`url(#${id}t)`, 'stroke-width':3.2 }, inner));
-      this.paths.push(el('path', { fill:'none', stroke:`url(#${id}u)`, 'stroke-width':4 }, inner));
-      this.paths.push(el('path', { fill:'none', stroke:`url(#${id}i)`, 'stroke-width':3.6, opacity:.62 }, inner));
+  build() {
+    const u = this.uid, svg = el('svg', { viewBox:this.view, width:this.size, height:this.size, style:'display:block' });
+    this.svg = svg; this.host.appendChild(svg);
+    const defs = el('defs', {}, svg);
+    const glow = el('radialGradient', { id:`${u}g`, cx:.5, cy:.5, r:.5 }, defs);
+    this.glowStops = [el('stop', { offset:0, 'stop-color':'#3b4c78', 'stop-opacity':.6 }, glow), el('stop', { offset:.55, 'stop-color':'#3b4c78', 'stop-opacity':.2 }, glow), el('stop', { offset:1, 'stop-color':'#3b4c78', 'stop-opacity':0 }, glow)];
+    const sheen = el('linearGradient', { id:`${u}s`, x1:0, x2:1, y1:0, y2:0 }, defs);
+    [[0, 0], [.5, .55], [1, 0]].forEach(([o, a]) => el('stop', { offset:o, 'stop-color':'#ffffff', 'stop-opacity':a }, sheen));
+    const filter = el('filter', { id:`${u}f`, 'color-interpolation-filters':'sRGB' }, defs);
+    this.matrix = el('feColorMatrix', { type:'matrix', values:'1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0' }, filter);
+    const clip = (id, d, rule) => { const c = el('clipPath', { id:`${u}${id}` }, defs); el('path', { d, 'clip-rule':rule || 'nonzero' }, c); return `url(#${u}${id})`; };
+    const above = clip('above', `M0 0H1254V${SILL + 6}H0Z`);
+    const lower = clip('lower', 'M0 0H1254V1222H0Z');
+    const ahogeIn = clip('ai', 'M90 395 L242 395 L242 488 L200 506 L90 506 Z');
+    const ahogeOut = clip('ao', 'M0 0H1254V1254H0Z M90 395 L228 395 L228 490 L200 502 L90 502 Z', 'evenodd');
+    const paint = (name, parent) => { for (const [fill, d] of ART.layers[name] || []) el('path', { fill, d, 'fill-rule':'evenodd' }, parent); };
+
+    el('rect', { x:0, y:0, width:1254, height:1254, fill:'#1c202b' }, svg);
+    this.glowEl = el('circle', { cx:628, cy:600, r:660, fill:`url(#${u}g)` }, svg);
+    this.fxBack = el('g', {}, svg);
+    const outer = el('g', { 'clip-path':above }, svg);
+    this.fig = el('g', {}, outer);
+
+    // Body: traced coat and knit, with hand-drawn straps, collar, necklace and sleeve motifs.
+    const body = el('g', {}, this.fig); paint('body', body);
+    el('path', { fill:'#82a3e6', d:'M529 906 L529 868 Q529 842 556 841 Q608 849 660 847 Q700 840 714 849 Q724 858 724 878 L724 906 Z' }, body);
+    el('path', { d:'M588 868 V912 M664 868 V912', stroke:'#6b8bd5', 'stroke-width':8, 'stroke-linecap':'round' }, body);
+    const straps = el('g', { fill:'#2b2c33' }, body); el('path', { d:'M450 912 L493 900 L512 1040 L466 1046 Z' }, straps); el('path', { d:'M760 900 L803 912 L790 1038 L742 1034 Z' }, straps);
+    const buckles = el('g', { fill:'#5e6372' }, body); el('path', { d:'M452 948 L505 938 L509 976 L456 986 Z' }, buckles); el('path', { d:'M749 940 L800 950 L796 986 L745 976 Z' }, buckles);
+    el('path', { d:'M540 912 Q562 946 601 966 M712 908 Q690 946 651 966', fill:'none', stroke:'#a08470', 'stroke-width':4.5, 'stroke-linecap':'round' }, body);
+    el('path', { d:'M626 961 L654 989 L626 1017 L598 989 Z', fill:'none', stroke:'#f3c690', 'stroke-width':9, 'stroke-linejoin':'round' }, body);
+    const motif = el('g', { fill:'#82a3e6', stroke:'#f4f4f7', 'stroke-width':4 }, body);
+    for (const [x, r] of [[396, -40], [858, 40]]) { const m = el('g', { transform:`translate(${x} 1010) rotate(${r})` }, motif); for (const [a, b] of [[-28, -18.5], [0, -18.5], [-28, 0], [0, 0]]) el('rect', { x:a, y:b, width:28, height:18.5 }, m); }
+
+    paint('face', el('g', {}, this.fig));
+    // Face features slide a little under the bangs when the head "turns".
+    this.feat = el('g', {}, this.fig);
+    this.blushes = ['L', 'R'].map(k => {
+      const a = ART.anchors['blush' + k], g = el('g', {}, this.feat);
+      const e = el('ellipse', { cx:a.cx, cy:a.cy, rx:a.rx, ry:a.ry, fill:'#f3c4ba' }, g);
+      const lines = el('path', { d:[-18, 0, 18].map(dx => `M${a.cx + dx - 6} ${a.cy + 9} l12 -18`).join(' '), stroke:'#e48b86', 'stroke-width':4.5, 'stroke-linecap':'round', opacity:0 }, g);
+      return { g, e, lines, a };
+    });
+    this.mouthG = el('g', {}, this.feat);
+    this.mouths = {};
+    for (const [k, parts] of Object.entries(MOUTHS)) { const g = el('g', { style:'display:none' }, this.mouthG); for (const [tag, attrs] of parts) el(tag, attrs, g); this.mouths[k] = g; }
+    for (const k of ['L', 'R']) {
+      const e = this.eyes[k], wrap = el('g', {}, this.feat);
+      e.open = el('g', {}, wrap); paint('eye' + k, e.open);
+      e.hl = el('circle', { cx:HL[k][0], cy:HL[k][1], r:8.5, fill:'#fbfbfd' }, e.open);
+      e.hl2 = el('circle', { cx:HL2[k][0], cy:HL2[k][1], r:5.5, fill:'#fbfbfd', opacity:0 }, e.open);
+      e.alt = el('path', { fill:'none', stroke:LASH, 'stroke-width':13, 'stroke-linecap':'round', 'stroke-linejoin':'round', style:'display:none' }, wrap);
     }
-    this.edge = el('path', { fill:'none', 'stroke-width':this.small ? 2.2 : 1.1 }, body); this.paths.push(this.edge);
-    this.blushes = [0, 1].map(() => el('ellipse', { rx:7.5, ry:4.2, opacity:0 }, body));
-    const face = el('g', {}, this.svg);
-    this.eyes = [0, 1].map(() => el('path', { fill:'none', 'stroke-linecap':'round', 'stroke-linejoin':'round' }, face));
-    this.glints = [0, 1].map(() => el('circle', { r:this.small ? 0 : 1.9, fill:'#fff' }, face));
-    this.logo = el('g', { opacity:0 }, face);
-    this.logoPaths = LOGO_D.map(d => el('path', { d }, this.logo));
-    this.front = el('g', {}, this.svg);
-    this.fx = el('g', {}, this.svg);
-    this.badge = el('g', { opacity:0 }, this.fx);
-    this.badgeRing = el('circle', { r:8, fill:'none', stroke:'#ff9a3c', 'stroke-width':2 }, this.badge);
-    el('circle', { r:8, fill:'#ff9a3c', stroke:'#fff', 'stroke-width':2.6 }, this.badge);
-    el('circle', { r:2.2, cx:-2.3, cy:-2.4, fill:'#fff', opacity:.7 }, this.badge);
-    this.zz = [0, 1, 2].map(() => el('path', { d:'M-3 -3H3L-3 3H3', fill:'none', 'stroke-width':1.7, 'stroke-linecap':'round', 'stroke-linejoin':'round', opacity:0 }, this.fx));
-    this.members = [];
-    for (let j = 0; j < this.teamSize && !this.still; j++) {
-      const m = TEAM[(j * 3 + uid) % TEAM.length], g = this.avatar(m);
-      const gradEl = el('linearGradient', { id:`${id}r${j}`, gradientUnits:'userSpaceOnUse' }, defs);
-      el('stop', { offset:0, 'stop-color':m.color, 'stop-opacity':0 }, gradEl); el('stop', { offset:1, 'stop-color':m.color, 'stop-opacity':.85 }, gradEl);
-      const trail = el('path', { fill:'none', stroke:`url(#${id}r${j})`, 'stroke-width':3.4, 'stroke-linecap':'round', opacity:0 }, this.back);
-      g.setAttribute('opacity', 0); this.back.appendChild(g);
-      this.members.push({ m, g, trail, gradEl, hist:[], layer:'back' });
+    this.brows = ['L', 'R'].map(k => { const g = el('g', {}, this.feat); paint('brow' + k, g); return g; });
+
+    // Hair: one traced drawing, used twice so the flyaway lock can sway on its own.
+    const hair = el('g', { id:`${u}hair` }, defs); paint('hair', hair);
+    hair.firstChild.setAttribute('id', `${u}hairBase`);
+    el('use', { href:`#${u}hair`, 'clip-path':ahogeOut }, this.fig);
+    this.ahoge = el('g', {}, this.fig); el('use', { href:`#${u}hair`, 'clip-path':ahogeIn }, this.ahoge);
+    const hc = el('clipPath', { id:`${u}hc` }, defs); el('use', { href:`#${u}hairBase` }, hc);
+    this.sheenRect = el('rect', { x:-300, y:60, width:260, height:1200, fill:`url(#${u}s)`, opacity:0 }, el('g', { 'clip-path':`url(#${u}hc)` }, this.fig));
+    this.ribbon = el('g', {}, this.fig);
+    paint('ribbonDim', el('g', { opacity:.62 }, this.ribbon)); paint('ribbon', this.ribbon);
+    const clipG = el('g', {}, this.fig);
+    el('path', { fill:'#2b2c33', d:'M858 283 L932 285 L940 297 L924 322 L897 323 L862 384 L820 368 Z' }, clipG);
+    el('path', { fill:'#7f9fe4', d:'M889 325 L946 323 L966 343 L930 423 L845 423 L872 370 L880 364 L899 378 L912 355 L908 347 L887 331 Z' }, clipG);
+
+    // Window sill and the two ball hands resting on it.
+    el('rect', { x:0, y:SILL, width:1254, height:154, fill:'#282c37' }, svg);
+    el('rect', { x:0, y:SILL, width:1254, height:24, fill:'#373c49' }, svg);
+    const hands = el('g', { 'clip-path':lower }, svg);
+    this.hands = ['L', 'R'].map(() => { const g = el('g', {}, hands); const sh = el('circle', { cx:2, cy:9, r:66, fill:'#12141b', opacity:.5 }, g); el('circle', { cx:0, cy:0, r:68, fill:SKIN }, g); return { g, sh }; });
+    this.fxFront = el('g', {}, svg);
+
+    // Persistent effects.
+    this.badge = el('g', { opacity:0 }, this.fxFront);
+    this.badgeRing = el('circle', { r:44, fill:'none', stroke:'#f3b562', 'stroke-width':6 }, this.badge);
+    el('circle', { r:44, fill:'#f3b562' }, this.badge);
+    el('rect', { x:-7, y:-26, width:14, height:32, rx:7, fill:'#3a2a12' }, this.badge); el('circle', { cx:0, cy:19, r:7.5, fill:'#3a2a12' }, this.badge);
+    this.zz = [0, 1, 2].map(() => el('path', { d:'M-17 -15 H17 L-17 15 H17', fill:'none', stroke:'#c9cde0', 'stroke-width':7, 'stroke-linecap':'round', 'stroke-linejoin':'round', opacity:0 }, this.fxFront));
+    this.dots = [[236, 238, 15], [172, 176, 21], [102, 106, 28]].map(([x, y, r]) => ({ x, y, n:el('circle', { cx:x, cy:y, r, fill:'#e3e4f0', opacity:0 }, this.fxFront) }));
+    this.matrixOn = false;
+  }
+
+  // ------------------------------------------------------------ control
+  setState(name) {
+    if (!STATES[name]) return;
+    this.state = name; this.stateAt = this.t; this.mem = { nextKey:0 };
+    if (this.action) this.action = null;
+    const st = STATES[name];
+    if (st.enter && !this.still && !reduced) st.enter(this);
+    this.nextMicro = this.t + 5 + this.rand() * 5;
+    if (this.still) this.settle(st.stillAt ?? 2.2);
+  }
+  play(name) {
+    if (this.still || this.state === 'offline') return;
+    if (name === 'flick') { this.flick(-24); return; }
+    if (name === 'tap') { this.action = { def:{ dur:.9, pose:(x, t) => ({ set:{ hLy:HAND.L[1] - 22 * bump(t, 0, .2) - 22 * bump(t, .4, .6), hRy:HAND.R[1] - 22 * bump(t, .2, .4) - 22 * bump(t, .6, .8) } }) }, at:this.t }; return; }
+    const def = ACTIONS[name]; if (!def) return;
+    this.action = { def, at:this.t, name };
+    if (!reduced) def.start?.(this);
+  }
+  kick(key, dv) { if (this.still || reduced) return; this.v[key] = (this.v[key] || 0) + dv; }
+  flick(dv) { if (!this.still && !reduced) this.sec.va += dv * 6; }
+  later(dt, fn) { this.timers.push({ at:this.t + dt, fn }); }
+  blinkNow(double) { this.blinkAt = this.t; this.blinkAt2 = double ? this.t + .26 : -9; }
+  sheen() { if (!this.still && !reduced) this.sheenAt = this.t; }
+  settle(seconds) {
+    // Fast-forward the springs to the resting pose; used for still sizes and screenshots.
+    this.stateAt = this.t;
+    for (let i = 0; i < seconds * 60; i++) this.step(1 / 60, true);
+    this.render();
+  }
+
+  // ------------------------------------------------------------ simulation
+  step(dt, quiet) {
+    this.t += dt; const t = this.t, lt = t - this.stateAt, st = STATES[this.state], L = this.L;
+    for (const tm of this.timers.splice(0)) { if (tm.at <= t) tm.fn(); else this.timers.push(tm); }
+    // Glances and pointer follow.
+    const following = Figure.follow && st.follow && Figure.pointer && t - this.lastPointer < 2.5 && !this.still && !this.compact;
+    if (st.micro && t > this.glance.until && !following) {
+      const quiet2 = this.rand() < .45;
+      this.glance = { x:quiet2 ? 0 : (this.rand() - .5) * 1.5, y:quiet2 ? 0 : (this.rand() - .6) * .7, until:t + 1.6 + this.rand() * 2.8 };
     }
-    this.applyPalette();
-  }
-  avatar(m, parent) {
-    const g = el('g', {}, parent);
-    if (m.accent) el('path', { d:m.accent.path, fill:m.accent.color }, g);
-    el('path', { d:m.body, fill:m.color }, g);
-    if (m.eyes) el('path', { d:m.eyes, fill:'#202326' }, g);
-    if (m.eyeStroke) el('path', { d:m.eyeStroke, fill:'none', stroke:'#202326', 'stroke-width':4, 'stroke-linecap':'round' }, g);
-    return g;
-  }
-  setPalette(name) { this.palName = name; this.pal = PAL[name]; this.applyPalette(); if (this.still) this.render({ ...this.p }, Figure.now, 0); }
-  applyPalette() {
-    const c = this.pal;
-    [c.light, c.base, c.shade].forEach((col, i) => this.gBase[i].setAttribute('stop-color', col));
-    this.gShade.forEach(s => s.setAttribute('stop-color', c.deep));
-    this.gBounce.forEach(s => s.setAttribute('stop-color', c.light));
-    this.gDrop.forEach(s => s.setAttribute('stop-color', mix(c.deep, '#0e141a', .45)));
-    this.edge.setAttribute('stroke', c.deep); this.edge.setAttribute('stroke-opacity', this.palName === 'cream' ? .32 : .2);
-    this.blushes.forEach(b => b.setAttribute('fill', c.blush));
-    this.logoPaths[0].setAttribute('fill', c.eye); this.logoPaths[1].setAttribute('fill', c.tone2);
-    const darkEyes = hex(c.eye).reduce((a, b) => a + b) < 380;
-    this.glints.forEach(g => { g.setAttribute('fill', darkEyes ? '#fff' : '#20272a'); g.setAttribute('fill-opacity', darkEyes ? .92 : .45); });
-    this.zz.forEach(z => z.setAttribute('stroke', this.palName === 'graphite' ? '#9aa6b5' : mix(c.deep, '#8796ad', .5)));
-  }
-  setState(name, immediate = false) {
-    const st = STATES[name]; if (!st) return;
-    if (this.stateName && !immediate) { this.prevLoop = STATES[this.stateName].loop; this.prevBlend = 1; this.loopBlend = 0; }
-    else { this.prevLoop = null; this.prevBlend = 0; this.loopBlend = 1; }
-    this.stateName = name; this.stateAt = Figure.now; this.T = { ...BASE, ...st.T }; this.nextEvery = Figure.now + (st.every?.[0] ?? 0);
-    if (immediate || this.still) { Object.assign(this.p, this.T); this.v = {}; this.faceRot = 0; }
-    if (st.enter && !immediate && !this.still) this.play(st.enter);
-    this.nextBlink = Figure.now + .5 + Math.random();
-  }
-  play(name, opts = {}) {
-    if (this.still) return; const pulse = PULSES[name]; if (!pulse) return;
-    if (reduced && name !== 'logo') return;
-    this.pulses = this.pulses.filter(p => p.name !== name);
-    this.pulses.push({ name, at:Figure.now, d:pulse.d, f:pulse.f, events:(pulse.at || []).map(([x, fn]) => ({ x, fn, done:false })), ...opts });
-  }
-  kick(s) { if (reduced) return; const j = this.jelly; j.v2 += .9 * s; j.v4 += .35 * s; j.v3 += .25 * s * (Math.random() < .5 ? -1 : 1); }
-  blink() { this.blinkAt = Figure.now; }
-  poke(angle) { if (reduced) { this.play('poke'); return; } this.jelly.vd -= 4.2; this.jelly.th = angle; this.v.lean = (this.v.lean || 0) - Math.cos(angle) * 90; this.v.rot = (this.v.rot || 0) - Math.cos(angle) * 40; this.play('poke'); }
-  tf(o) {
-    // Body transform as one affine map: spin (centre) → squash (bottom) → lean → rock (bottom) → place.
-    const cs = Math.cos(o.spin * Math.PI / 180), ss = Math.sin(o.spin * Math.PI / 180), cr = Math.cos(o.rot * Math.PI / 180), sr = Math.sin(o.rot * Math.PI / 180);
-    return (x, y) => {
-      let X = x * cs - y * ss, Y = x * ss + y * cs;
-      X *= o.sx; Y = BH + (Y - BH) * o.sy;
-      X += o.lean * (BH - Y) / (2 * BH);
-      const dx = X, dy = Y - BH; X = dx * cr - dy * sr; Y = BH + dx * sr + dy * cr;
-      return [CX + X, CY + Y + o.y];
-    };
-  }
-  step(dt, t) {
-    const p = this.p, T = this.T, st = STATES[this.stateName];
-    let lookX = T.lookX, lookY = T.lookY, lean = T.lean, rot = T.rot;
-    const following = this.cursor && Figure.follow && ['idle', 'listening', 'waiting'].includes(this.stateName);
-    if (following) { lookX = this.cursor.x * 1.05; lookY = this.cursor.y * .9 + T.lookY * .3; lean = T.lean + this.cursor.x * 4; rot = T.rot + this.cursor.x * 1.6; }
-    else if (this.stateName === 'idle') {
-      if (t > this.glance.until) { const quiet = Math.random() < .45; this.glance = { x:quiet ? 0 : (Math.random() - .5) * 1.4, y:quiet ? 0 : (Math.random() - .55) * .7, until:t + 1.6 + Math.random() * 2.6 }; }
-      lookX = this.glance.x; lookY = this.glance.y;
+    if (!st.micro) this.glance = { x:0, y:0, until:0 };
+    const q = st.pose(lt, this, L) || {};
+    const goal = { ...P0 };
+    let eyeL = q.eyeL || q.eyes || st.eyes || 'open', eyeR = q.eyeR || q.eyes || st.eyes || 'open', mouth = q.mouth || st.mouth || 'smile';
+    let fx = { ...(st.fx || {}), ...(q.fx || {}) };
+    for (const k in q) if (k in goal) goal[k] = q[k];
+    if (following) {
+      const p = this.pointerLook();
+      goal.lookX = p[0]; goal.lookY = p[1] * .8 + goal.lookY * .2; goal.featX = (q.featX || 0) * .3 + p[0] * 6; goal.frot += p[0] * 1.6;
     }
-    const goal = { ...T, lookX, lookY, lean, rot };
-    // The logo is symmetric under a half turn: finish the current half turn, then release the eyes.
-    if (st.spin) this.faceRot = st.spin(t - this.stateAt);
-    else if (this.faceRot !== 0) {
-      const target = Math.ceil((this.faceRot - .5) / 180) * 180; this.faceRot += (target - this.faceRot) * clamp(dt * 7);
-      goal.wL = 1; if (Math.abs(target - this.faceRot) < .6) this.faceRot = 0;
+    // One-shot action on top of the state pose.
+    if (this.action) {
+      const a = this.action, x = (t - a.at) / a.def.dur;
+      if (x >= 1) this.action = null;
+      else {
+        const w = smooth(ramp(x, 0, .12)) * smooth(1 - ramp(x, .85, 1)), o = a.def.pose(x, t - a.at, this) || {};
+        for (const k in o.set || {}) goal[k] = lerp(goal[k], o.set[k], w);
+        for (const k in o.add || {}) goal[k] += o.add[k] * w;
+        if (w > .35) { if (o.eyes) eyeL = eyeR = o.eyes; if (o.eyeL) eyeL = o.eyeL; if (o.eyeR) eyeR = o.eyeR; if (o.mouth) mouth = o.mouth; }
+      }
     }
-    const sub = dt > 1 / 50 ? 2 : 1, h = dt / sub;
+    if (eyeL === 'squeeze') eyeL = 'squeezeL'; if (eyeR === 'squeeze') eyeR = 'squeezeR';
+    // Glow colour per state.
+    const [r, g, b] = hex(GLOW[this.state]); goal.gr = r; goal.gg = g; goal.gb = b; goal.glow = st.glow * (st.pulse && L ? .78 + .22 * Math.sin(2 * Math.PI * lt / 2.2) : 1);
+    this.goal = goal; this.eyeGoal = { L:eyeL, R:eyeR }; this.mouthGoal = mouth; this.fxGoal = fx;
+    st.tick?.(lt, this, L);
+    // Micro moves while idle.
+    if (st.micro && L && !this.action && t > this.nextMicro) { this.play(MICRO[Math.floor(this.rand() * MICRO.length)]); this.nextMicro = t + 7 + this.rand() * 7; }
+    if (st.blink && L && t > this.nextBlink) { this.blinkNow(this.rand() < .2); this.nextBlink = t + 2.2 + this.rand() * 3.2; }
+    this.integrate(dt);
+    if (!quiet) this.render();
+  }
+  integrate(dt) {
+    const p = this.p, goal = this.goal, sub = dt > 1 / 70 ? 2 : 1, h = dt / sub;
+    const prevFrot = p.frot;
     for (let s = 0; s < sub; s++) {
       for (const key in GROUP) {
-        const g = GROUP[key]; if (!g) continue;
-        const [k, c] = SPRING[g], v = this.v[key] || 0;
-        if (reduced) { p[key] += (goal[key] - p[key]) * clamp(h * 7); continue; }
-        this.v[key] = v + (k * (goal[key] - p[key]) - c * v) * h; p[key] += this.v[key] * h;
+        const [k, c] = SPRING[GROUP[key]];
+        if (reduced || this.still) { p[key] += (goal[key] - p[key]) * clamp(h * 8); this.v[key] = 0; continue; }
+        const v = this.v[key] || 0; this.v[key] = v + (k * (goal[key] - p[key]) - c * v) * h; p[key] += this.v[key] * h;
       }
-      const j = this.jelly;
-      j.v2 += (-150 * j.a2 - 5.5 * j.v2) * h; j.a2 += j.v2 * h;
-      j.v3 += (-220 * j.a3 - 7 * j.v3) * h; j.a3 += j.v3 * h;
-      j.v4 += (-300 * j.a4 - 9 * j.v4) * h; j.a4 += j.v4 * h;
-      j.vd += (-210 * j.d - 12 * j.vd) * h; j.d += j.vd * h;
+      // Eye and mouth shapes: close, swap, reopen.
+      for (const k of ['L', 'R']) this.morph(this.eyes[k], this.eyeGoal[k], h);
+      this.morph(this.mouthS, this.mouthGoal, h);
+      // Secondary motion: the flyaway lock and the ribbon trail the body.
+      const sec = this.sec, vy = this.v.fy || 0, vr = this.v.frot || 0, L = this.L;
+      const aim = L ? .012 * vy - .9 * vr + 2.2 * Math.sin(this.t * 1.9) : 0;
+      sec.va += (140 * (aim - 16 * p.droop - sec.a) - 7 * sec.va) * h; sec.a += sec.va * h;
+      const rim = L ? -1.1 * vr + 1.4 * Math.sin(this.t * 1.3 + 1) : 0;
+      sec.vr += (90 * (rim - sec.r) - 6 * sec.vr) * h; sec.r += sec.vr * h;
+      for (const k in this.fxAmt) { const want = this.fxGoal[k] ? 1 : 0; this.fxAmt[k] += (want - this.fxAmt[k]) * clamp(h * (want ? 6 : 9)); }
     }
-    // Loops crossfade between states; one-shot moves add on top of the springs.
-    this.loopBlend = clamp((this.loopBlend ?? 1) + dt / .5); this.prevBlend = clamp((this.prevBlend ?? 0) - dt / .5);
-    const out = { ...p, faceRot:this.faceRot }, add = (o, w) => { for (const k in o) if (k in out) out[k] += o[k] * w; };
-    const lt = t - this.stateAt;
-    if (!reduced) { add(st.loop(lt), this.loopBlend); if (this.prevLoop && this.prevBlend > 0) add(this.prevLoop(lt), this.prevBlend); }
-    this.pulses = this.pulses.filter(q => {
-      const x = (t - q.at) / q.d; if (x >= 1) return false;
-      add(q.f(x), 1); for (const e of q.events) if (!e.done && x >= e.x) { e.done = true; e.fn(this); }
-      return true;
-    });
-    if (st.every && t > this.nextEvery) { this.play(st.every[1]); this.nextEvery = t + st.every[0]; }
-    if (st.blink && t > this.nextBlink) { this.blinkAt = t; this.nextBlink = t + st.blink[0] + Math.random() * (st.blink[1] - st.blink[0]); if (Math.random() < .22) this.blinkAt2 = t + .27; }
-    if (this.auto && this.stateName === 'idle' && t > this.nextMicro && !this.pulses.length) {
-      const pick = ['peek', 'bounce', 'peek', 'wink', 'logo', 'hello'][Math.floor(Math.random() * 6)];
-      this.play(pick); this.nextMicro = t + 6 + Math.random() * 7;
-    }
-    this.onTick?.(t, this);
-    this.render(out, t, dt);
   }
-  render(o, t, dt) {
-    const f = this.tf(o), j = this.jelly, small = this.small;
-    // Body outline: squircle, a little wider at the base, plus jelly modes.
-    const pts = [];
-    for (let i = 0; i < N; i++) {
-      const th = 2 * Math.PI * i / N, c = Math.cos(th), s = Math.sin(th);
-      let x = A * Math.sign(c) * Math.pow(Math.abs(c), 2 / o.n), y = BH * Math.sign(s) * Math.pow(Math.abs(s), 2 / o.n);
-      x *= 1 + .07 * (y / BH);
-      let dth = th - j.th; dth = Math.atan2(Math.sin(dth), Math.cos(dth));
-      const r = j.a2 * Math.cos(2 * th) + j.a3 * Math.cos(3 * th + .4) + j.a4 * Math.cos(4 * th) + j.d * .045 * Math.exp(-(dth * dth) / (2 * .3 * .3));
-      pts.push(f(x * (1 + r), y * (1 + r)));
+  morph(m, want, h) {
+    if (this.still || reduced) { m.cur = want; m.amt = 1; return; }
+    const target = m.cur === want ? 1 : 0;
+    m.va += (900 * (target - m.amt) - 52 * m.va) * h; m.amt += m.va * h;
+    if (m.cur !== want && m.amt < .08) { m.cur = want; m.amt = .05; m.va = 0; }
+    m.amt = clamp(m.amt, 0, 1.2);
+  }
+  pointerLook() {
+    const r = this.host.getBoundingClientRect(), s = r.width / 1188;
+    const cx = r.left + (628 - 34) * s, cy = r.top + (690 - 30) * s;
+    const dx = Figure.pointer.x - cx, dy = Figure.pointer.y - cy, d = Math.hypot(dx, dy) || 1, k = Math.min(1, d / (r.width * .55));
+    return [dx / d * k, dy / d * k];
+  }
+
+  // ------------------------------------------------------------ effects
+  bit(side) {
+    if (this.still || reduced) return;
+    const x = (side === 'L' ? this.p.hLx : this.p.hRx) + (this.rand() - .5) * 60, colors = ['#8fb0ea', '#f4f4f7', '#f3c690', '#a9c2f2'];
+    const n = el('rect', { x:-9, y:-9, width:18, height:18, rx:3, fill:colors[Math.floor(this.rand() * 4)] }, this.fxFront);
+    this.parts.push({ n, x, y:1030, vx:(this.rand() - .5) * 90, vy:-260 - this.rand() * 160, g:120, r:45, vr:(this.rand() - .5) * 200, s:.7 + this.rand() * .6, life:0, max:.95 });
+  }
+  burst(count) {
+    if (this.still || reduced) return;
+    const colors = ['#ffd36e', '#8fb0ea', '#f4a9c0', '#ffffff', '#b8c9f5'];
+    for (let i = 0; i < count; i++) {
+      const star = i % 2 === 0, a = -Math.PI / 2 + (this.rand() - .5) * Math.PI * 1.5, v = 520 + this.rand() * 520;
+      const n = star ? el('path', { d:'M0 -20 Q3 -3 20 0 Q3 3 0 20 Q-3 3 -20 0 Q-3 -3 0 -20 Z', fill:colors[i % colors.length] }, this.fxFront)
+        : el('rect', { x:-9, y:-9, width:18, height:18, rx:3, fill:colors[i % colors.length] }, this.fxFront);
+      this.parts.push({ n, x:628 + (this.rand() - .5) * 120, y:360, vx:Math.cos(a) * v, vy:Math.sin(a) * v, g:1300, r:this.rand() * 90, vr:(this.rand() - .5) * 600, s:.8 + this.rand() * .9, life:0, max:1.1 + this.rand() * .5, drag:1.4 });
     }
-    const d = smoothPath(pts);
-    this.clipPath.setAttribute('d', d); for (const path of this.paths) path.setAttribute('d', d);
-    const centre = f(0, 0), lift = clamp(-o.y / 32);
-    if (this.iri) this.iri.setAttribute('gradientTransform', `rotate(${(o.rot * 3 + o.lean * 4 + o.lookX * 18 + o.spin + 12 * Math.sin(t * .45)).toFixed(1)} .5 .5)`);
-    this.gGlow.setAttribute('cx', centre[0]); this.gGlow.setAttribute('cy', centre[1]);
-    this.gGlow.setAttribute('opacity', clamp(o.glow) * (.72 + .28 * Math.sin(2 * Math.PI * t / 2.2)));
-    const foot = f(0, BH);
-    this.shadow.setAttribute('cx', foot[0]); this.shadow.setAttribute('cy', CY + BH + 3);
-    this.shadow.setAttribute('rx', A * 1.05 * o.sx * (1 - lift * .4)); this.shadow.setAttribute('ry', 8.5 * (1 - lift * .3));
-    this.shadow.setAttribute('opacity', (1 - lift * .55) * (small ? 0 : 1));
-    // Face: the same two strokes become pill eyes, happy arcs, closed arcs, flat lines or the logo.
-    const blink = Math.max(B01(t - this.blinkAt, 0, .15), this.blinkAt2 ? B01(t - this.blinkAt2, 0, .15) : 0);
-    const E = (small ? 21 : 20) * o.sep, EY = 6 + o.lookY * 4.6, LX = o.lookX * 6.2;
-    const hh = Math.max(.01, o.eyeH * o.eyeScale * (1 - .92 * blink)) * (small ? .82 : 1);
-    const baseW = (small ? 15.5 : 11.6) * (1 + (o.eyeScale - 1) * .45), squash = 1 - j.a2 * .6;
-    const rotFace = o.faceRot * Math.PI / 180, cf = Math.cos(rotFace), sf = Math.sin(rotFace);
-    const darkLeft = this.pal.eye, rightTone = mix(this.pal.eye, this.pal.tone2, clamp(o.wL));
-    let logoOpacity = clamp((o.wL - .93) / .07);
-    [-1, 1].forEach((side, i) => {
-      const cx = side * E + LX, cy = EY * squash;
-      const pill = side < 0 ? [[cx, cy + hh], [cx, cy - hh], [cx, cy - hh], [cx, cy - hh]] : [[cx, cy - hh], [cx, cy + hh], [cx, cy + hh], [cx, cy + hh]];
-      const arc = k => [[cx - 7.4, cy + 3.3 * k], [cx - 2.9, cy - 3.1 * k], [cx + 2.9, cy - 3.1 * k], [cx + 7.4, cy + 3.3 * k]];
-      const flat = [[cx - 6.8, cy], [cx - 2.2, cy], [cx + 2.2, cy], [cx + 6.8, cy]];
-      const logo = side < 0 ? LOGO_L : LOGO_R;
-      let wH = clamp(o.wH + (side < 0 ? o.winkL : 0)), wC = clamp(o.wC), wF = clamp(o.wF), wL = clamp(o.wL);
-      const sum = wH + wC + wF + wL; if (sum > 1) { wH /= sum; wC /= sum; wF /= sum; wL /= sum; }
-      const wP = Math.max(0, 1 - wH - wC - wF - wL);
-      const happy = arc(1), closed = arc(-1);
-      const P = [0, 1, 2, 3].map(k => {
-        const x = wP * pill[k][0] + wH * happy[k][0] + wC * closed[k][0] + wF * flat[k][0] + wL * logo[k][0];
-        const y = wP * pill[k][1] + wH * happy[k][1] + wC * closed[k][1] + wF * flat[k][1] + wL * logo[k][1];
-        return f(x * cf - y * sf, x * sf + y * cf);
-      });
-      const w = wP * baseW + (wH + wC) * baseW * .68 + wF * baseW * .7 + wL * 14 * K;
-      const eye = this.eyes[i];
-      eye.setAttribute('d', `M${P[0][0].toFixed(2)} ${P[0][1].toFixed(2)}L${P[1][0].toFixed(2)} ${P[1][1].toFixed(2)}L${P[2][0].toFixed(2)} ${P[2][1].toFixed(2)}L${P[3][0].toFixed(2)} ${P[3][1].toFixed(2)}`);
-      eye.setAttribute('stroke-width', w.toFixed(2)); eye.setAttribute('stroke', i ? rightTone : darkLeft);
-      eye.setAttribute('opacity', 1 - logoOpacity * .999);
-      const g = f(cx - baseW * .2, cy - hh + baseW * .1);
-      this.glints[i].setAttribute('cx', g[0]); this.glints[i].setAttribute('cy', g[1]);
-      this.glints[i].setAttribute('opacity', Math.pow(wP, 3) * (1 - blink));
-      const b = f(side * 31 + LX * .4, 19);
-      this.blushes[i].setAttribute('cx', b[0]); this.blushes[i].setAttribute('cy', b[1]); this.blushes[i].setAttribute('opacity', clamp(o.blush) * .5);
-    });
-    // Exact logo, for crisp chamfers once the strokes have assembled.
-    const o0 = f(0, 0), ox = f(1, 0), oy = f(0, 1);
-    this.logo.setAttribute('transform', `matrix(${ox[0] - o0[0]} ${ox[1] - o0[1]} ${oy[0] - o0[0]} ${oy[1] - o0[1]} ${o0[0]} ${o0[1]}) rotate(${o.faceRot}) scale(${K})`);
-    this.logo.setAttribute('opacity', logoOpacity);
-    // Notification badge: the app icon's own way of asking for you.
-    const bw = clamp(o.badge);
+  }
+  pop(kind) {
+    if (this.still || reduced) return;
+    const make = {
+      heart:() => [el('path', { d:'M0 26 C-46 -6 -34 -50 0 -26 C34 -50 46 -6 0 26 Z', fill:'#f49ab4' }, this.fxFront), 1010, 360, 0, -170],
+      question:() => { const g = el('g', {}, this.fxFront); el('path', { d:'M-20 -24 C-20 -50 22 -50 22 -22 C22 -4 0 -2 0 16', fill:'none', stroke:'#e3e4f0', 'stroke-width':13, 'stroke-linecap':'round' }, g); el('circle', { cx:0, cy:40, r:8, fill:'#e3e4f0' }, g); return [g, 220, 230, 0, -40]; },
+      sparkle:() => [el('path', { d:'M0 -30 Q4 -4 30 0 Q4 4 0 30 Q-4 4 -30 0 Q-4 -4 0 -30 Z', fill:'#ffd36e' }, this.fxFront), 850, 600, 0, -30],
+      exclaim:() => { const g = el('g', {}, this.fxFront); el('rect', { x:-9, y:-46, width:18, height:56, rx:9, fill:'#f3b562' }, g); el('circle', { cx:0, cy:30, r:10, fill:'#f3b562' }, g); return [g, 1110, 250, 0, -60]; },
+    }[kind];
+    const [n, x, y, vx, vy] = make();
+    this.pops.push({ n, x, y, vx, vy, life:0, max:kind === 'question' ? 1.5 : 1.1, kind });
+  }
+
+  // ------------------------------------------------------------ drawing
+  render() {
+    const p = this.p, t = this.t, c = this.compact;
+    const fy = c ? p.fy * .12 : p.fy, frot = c ? p.frot * .5 : p.frot;
+    const fsx = p.fsx * (1 + (1 - p.fsy) * .55);
+    this.fig.setAttribute('transform', `translate(${PIVOT[0]} ${PIVOT[1] + fy}) rotate(${frot}) scale(${fsx} ${p.fsy}) translate(${-PIVOT[0]} ${-PIVOT[1]})`);
+    this.feat.setAttribute('transform', `translate(${p.featX + p.lookX * 4} ${p.featY + p.lookY * 3})`);
+    // Eyes.
+    const blink = Math.max(bump(t - this.blinkAt, 0, .17), bump(t - (this.blinkAt2 ?? -9), 0, .17));
+    for (const k of ['L', 'R']) {
+      const e = this.eyes[k], [cx, cy] = EYE[k], amt = Math.max(.001, e.amt), lx = p.lookX * 13, ly = p.lookY * 9;
+      if (e.cur === 'open') {
+        const sy = amt * p.eyeY * (1 - .95 * blink);
+        e.open.setAttribute('transform', `translate(${cx + lx} ${cy + ly}) scale(${p.eyeS} ${p.eyeS * sy}) translate(${-cx} ${-cy})`);
+        e.open.setAttribute('opacity', 1 - .45 * p.eyeDim);
+        const tw = 1 + .14 * Math.sin(t * 2.6 + (k === 'L' ? 0 : 1.3)) * this.L;
+        e.hl.setAttribute('transform', `translate(${HL[k][0] + p.lookX * 5} ${HL[k][1] + p.lookY * 4}) scale(${tw}) translate(${-HL[k][0]} ${-HL[k][1]})`);
+        e.hl.setAttribute('opacity', 1 - p.eyeDim);
+        e.hl2.setAttribute('opacity', clamp(p.spark) * (1 - p.eyeDim));
+        e.open.style.display = ''; e.alt.style.display = 'none';
+      } else {
+        e.open.style.display = 'none'; e.alt.style.display = '';
+        e.alt.setAttribute('d', ALT[e.cur](cx));
+        e.alt.setAttribute('transform', `translate(${cx + lx * .4} ${cy}) scale(1 ${amt}) translate(${-cx} ${-cy})`);
+      }
+    }
+    // Mouth.
+    for (const k in this.mouths) this.mouths[k].style.display = k === this.mouthS.cur ? '' : 'none';
+    const ma = Math.max(.001, this.mouthS.amt), breathe = this.mouthS.cur === 'sleep' ? 1 + .18 * Math.sin(t * 1.35) * this.L : 1;
+    this.mouths[this.mouthS.cur].setAttribute('transform', `translate(627 762) scale(${Math.min(1, ma * 1.15) * breathe} ${ma * breathe}) translate(-627 -762)`);
+    // Brows, blush.
+    this.brows.forEach((g, i) => { const k = i ? 'R' : 'L', [bx, by] = BROW[k];
+      g.setAttribute('transform', `translate(0 ${p['brow' + k] + p.lookY * 3}) rotate(${p['brow' + k + 'r']} ${bx} ${by})`); });
+    for (const b of this.blushes) {
+      const s = 1 + .12 * clamp(p.blush - 1, 0, 1);
+      b.g.setAttribute('transform', `translate(${b.a.cx} ${b.a.cy}) scale(${s}) translate(${-b.a.cx} ${-b.a.cy})`);
+      b.e.setAttribute('opacity', clamp(p.blush)); b.e.setAttribute('fill', p.blush > 1 ? '#f2b3a9' : '#f3c4ba');
+      b.lines.setAttribute('opacity', clamp(p.shy));
+    }
+    // Hair accents.
+    this.ahoge.setAttribute('transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
+    this.ribbon.setAttribute('transform', `rotate(${this.sec.r} ${KNOT[0]} ${KNOT[1]})`);
+    const sx = (t - this.sheenAt) / .95;
+    if (sx >= 0 && sx < 1) { this.sheenRect.setAttribute('opacity', 1); this.sheenRect.setAttribute('transform', `rotate(-18 628 600) translate(${lerp(-200, 1500, smooth(sx))} 0)`); }
+    else this.sheenRect.setAttribute('opacity', 0);
+    // Hands.
+    const hand = (h, x, y, s) => {
+      h.g.setAttribute('transform', `translate(${x} ${y}) scale(${s})`);
+      h.g.style.display = c ? 'none' : '';
+      h.sh.setAttribute('opacity', lerp(.34, .5, clamp(1 - (HAND.L[1] - y) / 90)));
+    };
+    hand(this.hands[0], p.hLx, p.hLy, p.hLs); hand(this.hands[1], p.hRx, p.hRy, p.hRs);
+    // Glow and grey.
+    const col = `rgb(${p.gr | 0},${p.gg | 0},${p.gb | 0})`;
+    this.glowStops[0].setAttribute('stop-color', col); this.glowStops[1].setAttribute('stop-color', col); this.glowStops[2].setAttribute('stop-color', col);
+    this.glowStops[0].setAttribute('stop-opacity', clamp(p.glow)); this.glowStops[1].setAttribute('stop-opacity', clamp(p.glow) * .35);
+    const g = clamp(p.grey);
+    if (g > .01) {
+      const s = 1 - .88 * g, b = 1 - .22 * g, lr = .2126 * (1 - s), lg = .7152 * (1 - s), lb = .0722 * (1 - s);
+      this.matrix.setAttribute('values', [lr + s, lg, lb, 0, 0, lr, lg + s, lb, 0, 0, lr, lg, lb + s, 0, 0, 0, 0, 0, 1, 0].map((v, i) => (i % 5 < 3 ? v * b : v).toFixed(4)).join(' '));
+      if (!this.matrixOn) { this.fig.setAttribute('filter', `url(#${this.uid}f)`); this.matrixOn = true; }
+    } else if (this.matrixOn) { this.fig.removeAttribute('filter'); this.matrixOn = false; }
+    this.renderFx();
+  }
+  renderFx() {
+    const t = this.t, a = this.fxAmt, c = this.compact;
+    // Waiting badge.
+    const bw = a.alert;
     if (bw > .01) {
-      const bp = f(A * .74, -BH * .78), pop = bw < 1 ? eOB(bw) : 1;
-      this.badge.setAttribute('transform', `translate(${bp[0]} ${bp[1]}) scale(${(small ? 3 : 1) * pop})`); this.badge.setAttribute('opacity', clamp(bw * 1.4));
-      const ph = (t % 1.7) / 1.7; this.badgeRing.setAttribute('r', 8 + ph * 11); this.badgeRing.setAttribute('opacity', reduced || this.still ? 0 : .55 * (1 - ph));
+      const pos = c ? [1020, 300] : [1132, 142], sc = (c ? 1.7 : 1) * (bw < .999 ? 1 + .25 * Math.sin(bw * Math.PI) : 1) * bw;
+      this.badge.setAttribute('transform', `translate(${pos[0]} ${pos[1]}) scale(${sc})`); this.badge.setAttribute('opacity', clamp(bw * 1.3));
+      const ph = (t % 1.6) / 1.6; this.badgeRing.setAttribute('r', 44 + ph * 36); this.badgeRing.setAttribute('opacity', this.L ? .6 * (1 - ph) : 0);
     } else this.badge.setAttribute('opacity', 0);
-    const zw = clamp(o.zz);
+    // Sleep z's.
     this.zz.forEach((z, i) => {
-      const ph = ((t * .32) + i / 3) % 1, top = f(A * .55, -BH);
-      const x = top[0] + 8 + ph * 16 + i * 2, y = top[1] - 4 - ph * 30;
-      z.setAttribute('transform', `translate(${x} ${y}) scale(${.8 + ph * .9 + i * .15})`); z.setAttribute('opacity', zw * B01(ph, 0, 1) * (this.still ? (i === 1 ? 1 : 0) : 1));
+      const ph = this.L ? ((t * .3) + i / 3) % 1 : [.35, .62, .9][i], base = c ? [1000, 260] : [1000, 300];
+      z.setAttribute('transform', `translate(${base[0] + ph * 120 + i * 8} ${base[1] - ph * 210}) scale(${(c ? 1.6 : 1) * (.65 + ph * .8)})`);
+      z.setAttribute('opacity', a.zz * Math.sin(Math.PI * ph));
     });
-    this.svg.style.filter = o.desat > .01 || o.dim > .01 ? `saturate(${(1 - .9 * clamp(o.desat)).toFixed(3)}) brightness(${(1 - .12 * clamp(o.dim)).toFixed(3)})` : '';
-    if (!this.still) this.renderTeam(o, t, dt, f);
-    if (dt) this.renderFx(dt, t, f);
-  }
-  renderTeam(o, t, dt, f) {
-    const wT = clamp(o.team), K2 = this.members.length;
-    this.members.forEach((mem, j) => {
-      const wj = clamp(wT * 1.6 - j * .3);
-      if (wj < .005) { mem.g.setAttribute('opacity', 0); mem.trail.setAttribute('opacity', 0); mem.hist.length = 0; return; }
-      const ph = t * .85 + j * 2 * Math.PI / K2;
-      const ex = 98 * Math.cos(ph), ey = 30 * Math.sin(ph), tilt0 = -.12;
-      const x = CX + ex * Math.cos(tilt0) - ey * Math.sin(tilt0), y = CY + 10 + ex * Math.sin(tilt0) + ey * Math.cos(tilt0) + 2.6 * Math.sin(t * 3.1 + j * 1.7) + o.y * .3;
-      const depth = Math.sin(ph), s = (.8 + .2 * (depth + 1) / 2) * eOB(clamp(wj)) * 30 / 64, tilt = -Math.cos(ph) * 10;
-      const layer = depth > 0 ? 'front' : 'back';
-      if (layer !== mem.layer) { mem.layer = layer; this[layer].appendChild(mem.trail); this[layer].appendChild(mem.g); }
-      mem.g.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${tilt.toFixed(2)}) scale(${s.toFixed(3)}) translate(-32 -32)`);
-      mem.g.setAttribute('opacity', clamp(wj * 1.3) * (.82 + .18 * (depth + 1) / 2));
-      mem.hist.push([x, y]); if (mem.hist.length > 20) mem.hist.shift();
-      if (mem.hist.length > 2 && !reduced) {
-        const hs = mem.hist; let dd = `M${hs[0][0].toFixed(1)} ${hs[0][1].toFixed(1)}`; for (let k = 1; k < hs.length; k++) dd += `L${hs[k][0].toFixed(1)} ${hs[k][1].toFixed(1)}`;
-        mem.trail.setAttribute('d', dd); mem.trail.setAttribute('opacity', clamp(wj) * .9);
-        mem.gradEl.setAttribute('x1', hs[0][0]); mem.gradEl.setAttribute('y1', hs[0][1]); mem.gradEl.setAttribute('x2', x); mem.gradEl.setAttribute('y2', y);
-      } else mem.trail.setAttribute('opacity', 0);
+    // Thinking bubbles.
+    this.dots.forEach((d, i) => {
+      const pulse = this.L ? Math.max(0, Math.sin(2 * Math.PI * (t * .9 - i * .2))) : .5;
+      const show = clamp(a.dots * 3 - i * .8);
+      d.n.setAttribute('opacity', show * (.55 + .4 * pulse));
+      d.n.setAttribute('transform', `translate(${d.x} ${d.y}) scale(${(c ? 1.4 : 1) * (1 + .16 * pulse) * (.4 + .6 * show)}) translate(${-d.x} ${-d.y})`);
     });
   }
-  confetti(n) {
-    if (reduced || this.still) return;
-    const top = this.tf({ ...this.p, faceRot:0 })(0, -BH * .8);
-    const colors = [...TEAM.map(m => m.color), this.pal.base, '#ffd36e'];
-    for (let i = 0; i < n; i++) {
-      const kind = i % 3, size = 3.4 + Math.random() * 3;
-      const node = kind === 0 ? el('rect', { x:-size / 2, y:-size / 2, width:size, height:size, rx:1, transform:'rotate(45)' }, this.fx)
-        : kind === 1 ? el('rect', { x:-size / 2, y:-size * .3, width:size, height:size * .6, rx:1.2 }, this.fx) : el('circle', { r:size * .38 }, this.fx);
-      node.setAttribute('fill', colors[i % colors.length]);
-      const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.25, v = 130 + Math.random() * 150;
-      this.particles.push({ node, x:top[0] + (Math.random() - .5) * 30, y:top[1], vx:Math.cos(a) * v, vy:Math.sin(a) * v, r:Math.random() * 360, vr:(Math.random() - .5) * 720, life:0, max:1.1 + Math.random() * .5 });
-    }
-  }
-  sparkle() {
-    if (reduced || this.still) return;
-    const p = this.tf(this.p)(-21 - 12, -14);
-    const node = el('path', { d:'M0 -6C.9 -1.4 1.4 -.9 6 0C1.4 .9 .9 1.4 0 6C-.9 1.4 -1.4 .9 -6 0C-1.4 -.9 -.9 -1.4 0 -6Z', fill:'#ffd36e' }, this.fx);
-    this.sparkles.push({ node, x:p[0], y:p[1], life:0 });
-  }
-  launch() {
-    if (this.still) return;
-    const m = TEAM[this.flyIndex++ % TEAM.length], g = this.avatar(m, this.fx);
-    const gradEl = el('linearGradient', { id:`${this.id}f${this.flyIndex}`, gradientUnits:'userSpaceOnUse' }, this.svg.querySelector('defs'));
-    el('stop', { offset:0, 'stop-color':m.color, 'stop-opacity':0 }, gradEl); el('stop', { offset:1, 'stop-color':m.color, 'stop-opacity':.9 }, gradEl);
-    const trail = el('path', { fill:'none', stroke:`url(#${this.id}f${this.flyIndex})`, 'stroke-width':4, 'stroke-linecap':'round' }, this.fx);
-    this.fx.appendChild(g);
-    const from = this.tf(this.p)(0, -BH * .7);
-    this.flyers.push({ g, trail, gradEl, t0:Figure.now, from, ctrl:[CX + 62, CY - BH - 92], to:[CX + 96, CY + BH - 14], hist:[] });
-  }
-  renderFx(dt, t) {
-    this.particles = this.particles.filter(q => {
-      q.life += dt; if (q.life >= q.max) { q.node.remove(); return false; }
-      q.vy += 430 * dt; q.vx *= 1 - dt * 1.3; q.vy *= 1 - dt * .5; q.x += q.vx * dt; q.y += q.vy * dt; q.r += q.vr * dt;
-      q.node.setAttribute('transform', `translate(${q.x.toFixed(1)} ${q.y.toFixed(1)}) rotate(${q.r.toFixed(0)})`);
-      q.node.setAttribute('opacity', 1 - C01(q.life / q.max, .62, 1)); return true;
+  fxStep(dt) {
+    this.parts = this.parts.filter(q => {
+      q.life += dt; if (q.life >= q.max) { q.n.remove(); return false; }
+      q.vy += q.g * dt; if (q.drag) { q.vx *= 1 - q.drag * dt; q.vy *= 1 - q.drag * .4 * dt; }
+      q.x += q.vx * dt; q.y += q.vy * dt; q.r += q.vr * dt;
+      const fade = 1 - ramp(q.life / q.max, .6, 1), grow = Math.min(1, q.life / .12);
+      q.n.setAttribute('transform', `translate(${q.x.toFixed(1)} ${q.y.toFixed(1)}) rotate(${q.r.toFixed(0)}) scale(${(q.s * grow).toFixed(3)})`);
+      q.n.setAttribute('opacity', fade); return true;
     });
-    this.sparkles = this.sparkles.filter(s => {
-      s.life += dt; const x = s.life / .7; if (x >= 1) { s.node.remove(); return false; }
-      s.node.setAttribute('transform', `translate(${s.x} ${s.y}) rotate(${x * 90}) scale(${B01(x, 0, 1) * 1.25})`); return true;
-    });
-    this.flyers = this.flyers.filter(fl => {
-      const age = t - fl.t0, fly = .72, sit = .9, leave = .55;
-      let x, y, sc = 1, rot = 0, op = 1, sy = 1;
-      if (age < fly) {
-        const u = eIO(age / fly), a = (1 - u) * (1 - u), b = 2 * (1 - u) * u, c = u * u;
-        x = a * fl.from[0] + b * fl.ctrl[0] + c * fl.to[0]; y = a * fl.from[1] + b * fl.ctrl[1] + c * fl.to[1];
-        sc = .35 + .65 * eOB(C01(age / fly, 0, .4)); rot = 360 * eOC(age / fly);
-      } else if (age < fly + sit) {
-        const u = (age - fly) / sit; x = fl.to[0]; y = fl.to[1]; sy = 1 - .26 * B01(u, 0, .22) + .06 * B01(u, .2, .4);
-      } else if (age < fly + sit + leave) {
-        const u = (age - fly - sit) / leave; x = fl.to[0] + 50 * u; y = fl.to[1] - 18 * B01(u, 0, 1); op = 1 - u;
-      } else { fl.g.remove(); fl.trail.remove(); fl.gradEl.remove(); return false; }
-      const s = 34 / 64 * sc;
-      fl.g.setAttribute('transform', `translate(${x.toFixed(1)} ${(y + 17 * (1 - sy)).toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${s.toFixed(3)} ${(s * sy).toFixed(3)}) translate(-32 -32)`);
-      fl.g.setAttribute('opacity', op);
-      if (age < fly + .25) { fl.hist.push([x, y]); if (fl.hist.length > 16) fl.hist.shift(); } else fl.hist.shift();
-      if (fl.hist.length > 2) {
-        const hs = fl.hist; let dd = `M${hs[0][0].toFixed(1)} ${hs[0][1].toFixed(1)}`; for (let k = 1; k < hs.length; k++) dd += `L${hs[k][0].toFixed(1)} ${hs[k][1].toFixed(1)}`;
-        fl.trail.setAttribute('d', dd); fl.gradEl.setAttribute('x1', hs[0][0]); fl.gradEl.setAttribute('y1', hs[0][1]); fl.gradEl.setAttribute('x2', hs.at(-1)[0]); fl.gradEl.setAttribute('y2', hs.at(-1)[1]);
-      } else fl.trail.setAttribute('d', '');
-      return true;
+    this.pops = this.pops.filter(q => {
+      q.life += dt; const x = q.life / q.max; if (x >= 1) { q.n.remove(); return false; }
+      const pop = x < .25 ? 1 + .35 * Math.sin(x / .25 * Math.PI) * (1 - x / .25) + (x / .25 - 1) * 0 : 1;
+      const s = Math.min(1, x / .14) * pop, wob = q.kind === 'question' ? 8 * Math.sin(q.life * 7) : q.kind === 'sparkle' ? q.life * 140 : 0;
+      q.n.setAttribute('transform', `translate(${q.x + q.vx * q.life} ${q.y + q.vy * q.life}) rotate(${wob}) scale(${s})`);
+      q.n.setAttribute('opacity', 1 - ramp(x, .7, 1)); return true;
     });
   }
 }
-Figure.live = new Set(); Figure.now = performance.now() / 1000; Figure.follow = true;
-Figure.io = new IntersectionObserver(entries => { for (const e of entries) for (const f of Figure.live) if (f.host === e.target) f.visible = e.isIntersecting; }, { rootMargin:'120px' });
+Figure.live = new Set(); Figure.follow = true; Figure.pointer = null;
+const io = new IntersectionObserver(es => { for (const e of es) for (const f of Figure.live) if (f.host === e.target) f.visible = e.isIntersecting; }, { rootMargin:'100px' });
 let last = performance.now();
 const frame = now => {
-  const dt = Math.min(.05, (now - last) / 1000); last = now; Figure.now = now / 1000;
-  if (!document.hidden) for (const f of Figure.live) if (f.visible) f.step(dt, Figure.now);
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (!document.hidden) for (const f of Figure.live) if (f.visible && !f.still) { f.step(dt); f.fxStep(dt); }
   requestAnimationFrame(frame);
 };
-requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
+addEventListener('pointermove', e => { Figure.pointer = { x:e.clientX, y:e.clientY }; for (const f of Figure.live) f.lastPointer = f.t; });
 
-const AURORA = {
-  idle:['#cfe0ff', '#e4dbff', '#d3f1e6', '#fff0d2'], listening:['#c9ddff', '#d4ecff', '#e2d9ff', '#d2f0f7'],
-  thinking:['#c3d1ff', '#d9caff', '#c9e3ff', '#e6d6ff'], working:['#e3d8ff', '#ffe6b5', '#d3e9c7', '#ffd6ca'],
-  waiting:['#ffdcb0', '#ffcfbf', '#ffeec6', '#ffe1cf'], result:['#ffd2e4', '#cff1e3', '#ffeeb8', '#d8d1ff'],
-  sleeping:['#d6d2f3', '#cbd5ec', '#e0daf3', '#d2d9ec'], waking:['#ffeec6', '#d2e3ff', '#e2d9ff', '#d3f1e6'],
-  offline:['#e0e0de', '#e7e5e0', '#dcdcda', '#eae8e3'],
-};
-const AURORA_DARK = {
-  idle:['#2f5fd0', '#6a45c8', '#1f8f7a', '#a8742a'], listening:['#2c63d8', '#2a7fb8', '#5a44c0', '#1f8aa0'],
-  thinking:['#3046d8', '#7a3fd0', '#2a6fd0', '#6a3cc0'], working:['#6a45c8', '#b07a1c', '#3f8a3a', '#c0503a'],
-  waiting:['#c06a14', '#c04a30', '#b08a1c', '#c05a3a'], result:['#c0407a', '#1f9a7a', '#b0901c', '#5a46d0'],
-  sleeping:['#3a3690', '#25407a', '#4a3a8a', '#283f6a'], waking:['#b08a2a', '#2c5fc0', '#5a44c0', '#1f8f7a'],
-  offline:['#3a3c40', '#45443f', '#38393c', '#4a4844'],
-};
-const aurora = (host, state) => {
-  const a = document.createElement('div'); a.className = 'aurora'; a.setAttribute('aria-hidden', 'true');
-  for (let i = 0; i < 4; i++) a.appendChild(document.createElement('i'));
-  host.insertBefore(a, host.firstChild);
-  let current = state;
-  const set = name => { current = name; const dark = host.classList.contains('dark'); ((dark ? AURORA_DARK : AURORA)[name] || AURORA.idle).forEach((c, i) => { a.children[i].style.backgroundColor = c; }); };
-  set(state); return { set, refresh:() => set(current) };
-};
-// ---- Hero studio ----
-const stage = document.getElementById('stage');
-const heroAurora = aurora(stage, 'idle');
-const hero = new Figure(document.getElementById('hero'), { size:560, box:[-16, -4, 232, 214], auto:true, team:3 });
-let heroPalette = 'mist';
-const caption = () => {
-  document.getElementById('tag').textContent = `Varin · ${PAL[heroPalette].name} · ${STATES[hero.stateName].label}`;
-  document.getElementById('line').textContent = STATES[hero.stateName].line;
-};
-let wakeTimer;
-const setHeroState = name => {
-  hero.setState(name); heroAurora.set(name); clearTimeout(wakeTimer);
-  for (const b of document.querySelectorAll('.state-btn')) b.setAttribute('aria-pressed', b.dataset.state === name);
-  if (name === 'waking') wakeTimer = setTimeout(() => setHeroState('idle'), 1900);
-  caption();
-};
-const statesHost = document.getElementById('states'), stateIcons = [];
-for (const name of STATE_ORDER) {
-  const b = document.createElement('button'); b.className = 'state-btn'; b.dataset.state = name; b.setAttribute('aria-pressed', name === 'idle');
-  const icon = document.createElement('span'); b.appendChild(icon); b.appendChild(document.createTextNode(STATES[name].label));
-  b.onclick = () => setHeroState(name); statesHost.appendChild(b);
-  stateIcons.push(new Figure(icon, { size:34, state:name === 'waking' ? 'idle' : name, palette:heroPalette }));
-}
-const movesHost = document.getElementById('moves');
-for (const [name, label] of MOVES) {
-  const b = document.createElement('button'); b.className = 'chip'; b.textContent = label;
-  b.onclick = () => { if (name === 'poke') hero.poke(-Math.PI / 2 + .6); else hero.play(name); };
-  movesHost.appendChild(b);
-}
-const swatches = document.getElementById('swatches');
-for (const name of PAL_ORDER) {
-  const c = PAL[name], b = document.createElement('button'); b.className = 'swatch'; b.title = c.name; b.setAttribute('aria-label', c.name);
-  b.style.background = `linear-gradient(160deg, ${c.light}, ${c.base} 55%, ${c.shade})`; b.setAttribute('aria-pressed', name === heroPalette);
-  b.onclick = () => { heroPalette = name; hero.setPalette(name); ideaLive.setPalette(name); stateIcons.forEach(f => f.setPalette(name));
-    for (const s of swatches.children) s.setAttribute('aria-pressed', s === b); document.getElementById('color-name').textContent = c.name; caption(); hero.play('bounce'); };
-  swatches.appendChild(b);
-}
-document.getElementById('follow').onchange = e => { Figure.follow = e.target.checked; };
-document.getElementById('reduced').onchange = e => { reduced = e.target.checked; };
-document.querySelectorAll('#bg-seg button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('#bg-seg button').forEach(x => x.setAttribute('aria-pressed', x === b)); stage.classList.toggle('dark', b.dataset.v === 'dark'); heroAurora.refresh();
-});
-stage.addEventListener('pointermove', e => {
-  const r = hero.svg.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height * .48;
-  hero.cursor = { x:clamp((e.clientX - cx) / (r.width * .55), -1, 1), y:clamp((e.clientY - cy) / (r.height * .55), -1, 1) };
-});
-stage.addEventListener('pointerleave', () => { hero.cursor = null; });
-hero.svg.addEventListener('pointerdown', e => {
-  const r = hero.svg.getBoundingClientRect(), vb = hero.svg.viewBox.baseVal;
-  const x = vb.x + (e.clientX - r.left) / r.width * vb.width, y = vb.y + (e.clientY - r.top) / r.height * vb.height;
-  if (Math.abs(x - CX) > A * 1.1 || Math.abs(y - CY) > BH * 1.15) return;
-  hero.poke(Math.atan2(y - CY, x - CX));
-});
-caption();
-
-// ---- 01 Idea ----
-const strip = document.getElementById('idea-strip');
-[['App 图标', '两笔互扣的标志', { wL:1 }, 'cream'], ['收起横笔', '两笔竖留在左右', { wL:.45 }, 'cream'], ['一双眼睛', '同一块方块，睁开眼', {}, 'cream'], ['有了表情', '同一对笔画变形', { wH:1, blush:.8 }, 'mist']].forEach(([title, text, params, pal]) => {
-  const fig = document.createElement('figure'), host = document.createElement('div'); fig.appendChild(host);
-  const cap = document.createElement('figcaption'); cap.innerHTML = `<b>${title}</b>${text}`; fig.appendChild(cap); strip.appendChild(fig);
-  new Figure(host, { size:150, still:true, tight:true, palette:pal, params });
-});
-const ideaLive = new Figure(document.getElementById('idea-live'), { size:300, tight:true, palette:heroPalette });
-let ideaPhase = 0;
-ideaLive.onTick = t => { const ph = Math.floor(t / 2.6) % 4; if (ph !== ideaPhase) { ideaPhase = ph; ideaLive.setState(ph === 1 ? 'sleeping' : ph === 2 ? 'waking' : ph === 3 ? 'result' : 'idle'); } };
-
-// ---- 02 States ----
-const stateGrid = document.getElementById('state-grid');
-for (const name of STATE_ORDER) {
-  const tile = document.createElement('article'); tile.className = 'tile';
-  tile.innerHTML = `<div class="mini"></div><div class="meta"><b>${STATES[name].label}</b><p>${STATE_TEXT[name]}</p><div class="status">状态行：${STATES[name].line}</div></div>`;
-  stateGrid.appendChild(tile);
-  aurora(tile.querySelector('.mini'), name);
-  const f = new Figure(tile.querySelector('.mini'), { size:300, box:[-14, 8, 228, 186], state:name === 'waking' ? 'sleeping' : name, palette:'mist', team:2 });
-  if (name === 'result') f.onTick = t => { if (t - f.stateAt > 3.4) f.setState('result'); };
-  if (name === 'waking') f.onTick = t => { if (f.stateName === 'sleeping' && t - f.stateAt > 2.2) f.setState('waking'); else if (f.stateName === 'waking' && t - f.stateAt > 2.4) f.setState('sleeping'); };
-  if (name === 'waiting') f.onTick = t => { if (t - f.stateAt > 7.2) f.setState('waiting'); };
-}
-
-// ---- 03 Moves ----
-const MOVE_TEXT = { hello:'左右摇两下，眯眼笑，像在挥手。', wink:'左眼弯成笑眼，旁边闪一颗星。', dispatch:'蹲下、一弹，把一个真实的 Agent 头像抛出去，眼睛一路跟着。',
-  celebrate:'蓄力、起跳、空中转一圈，落地果冻回弹，纸片撒出来。', logo:'两笔竖伸出横笔拼成标志，转半圈，再松开变回眼睛。', poke:'被点到的地方凹下去，吓一跳，然后笑。' };
-const moveGrid = document.getElementById('move-grid');
-MOVES.forEach(([name, label], i) => {
-  const tile = document.createElement('article'); tile.className = 'tile';
-  tile.innerHTML = `<div class="mini"></div><div class="meta"><b>${label}</b><p>${MOVE_TEXT[name]}</p></div>`;
-  moveGrid.appendChild(tile);
-  aurora(tile.querySelector('.mini'), ['idle', 'result', 'working', 'result', 'thinking', 'listening'][i]);
-  const f = new Figure(tile.querySelector('.mini'), { size:300, box:[-14, 8, 228, 186], palette:PAL_ORDER[(i + 2) % PAL_ORDER.length] });
-  let next = Figure.now + .8 + i * .35;
-  f.onTick = t => { if (t > next) { if (name === 'poke') f.poke(-Math.PI / 2 + .7); else f.play(name); next = t + (name === 'dispatch' ? 3.4 : name === 'logo' ? 3.6 : 3); } };
-});
-
-// ---- 04 Colors ----
-const colorGrid = document.getElementById('color-grid');
-PAL_ORDER.forEach(name => {
-  const tile = document.createElement('article'); tile.className = 'tile';
-  tile.innerHTML = `<div class="mini"></div><div class="meta"><b>${PAL[name].name}</b><span class="mono">${PAL[name].base}</span></div>`;
-  colorGrid.appendChild(tile);
-  const f = new Figure(tile.querySelector('.mini'), { size:220, box:[0, 22, 200, 172], palette:name, auto:true });
-  f.nextMicro = Figure.now + 1.5 + Math.random() * 6;
-});
-
-// ---- 05 Product ----
-const mock = (host, dark) => {
-  const side = document.createElement('div'); side.className = 'side'; host.appendChild(side);
-  const main = document.createElement('div'); host.appendChild(main);
-  const title = document.createElement('div'); title.className = 'titlebar'; side.appendChild(title);
-  new Figure(title, { size:14, still:true, palette:'mist' }); title.appendChild(document.createTextNode('Bot · Varin'));
-  const row = (text, opts, cls = '') => { const r = document.createElement('div'); r.className = 'row ' + cls; const i = document.createElement('span'); r.appendChild(i);
-    r.appendChild(document.createTextNode(text)); side.appendChild(r); if (opts.agent) { const svg = el('svg', { viewBox:'0 0 64 64', width:20, height:20 }, i); Figure.prototype.avatar(opts.agent, svg); } else new Figure(i, { size:20, still:true, ...opts }); };
-  row('日常', { state:'idle', palette:'mist' }, 'on');
-  row('依赖调查', { agent:TEAM[3] }, 'sub');
-  row('写作', { agent:TEAM[0] }, 'sub');
-  row('周末旅行', { state:'waiting', palette:'mist' });
-  row('写作助手', { state:'sleeping', palette:'lilac' });
-  row('家里的电脑', { state:'offline', palette:'sage' });
-  const head = document.createElement('div'); head.className = 'head'; main.appendChild(head);
-  const figHost = document.createElement('div'); head.appendChild(figHost);
-  const f = new Figure(figHost, { size:118, tight:true, palette:'mist' });
-  const name = document.createElement('b'); name.textContent = 'Varin'; head.appendChild(name);
-  const status = document.createElement('span'); head.appendChild(status);
-  const cycle = ['idle', 'working', 'waiting', 'result', 'thinking']; let k = 0;
-  const statusText = { idle:'空闲', working:'2 项工作在进行', waiting:'写作在等你确认', result:'依赖调查返回了结果', thinking:'正在想…' };
-  status.textContent = statusText.idle;
-  f.onTick = t => { if (t - f.stateAt > 3.2) { k = (k + 1) % cycle.length; f.setState(cycle[k]); status.textContent = statusText[cycle[k]]; } };
-  const team = document.createElement('div'); team.className = 'team'; main.appendChild(team);
-  [[TEAM[3], '依赖调查', '返回了结果'], [TEAM[0], '写作', '正在编辑'], [TEAM[2], '验证', '排队中']].forEach(([m, who, what]) => {
-    const r = document.createElement('div'); r.className = 'who'; const svg = el('svg', { viewBox:'0 0 64 64', width:24, height:24 }, r); Figure.prototype.avatar(m, svg);
-    const b = document.createElement('span'); b.textContent = who; r.appendChild(b); const s = document.createElement('small'); s.textContent = what; r.appendChild(s); team.appendChild(r);
+// ---------------------------------------------------------------- page
+const params = new URLSearchParams(location.search);
+if (params.has('shots')) {
+  // Deterministic contact sheet for review: ?shots=state@seconds[+action@at],...&size=240
+  document.body.innerHTML = '<div class="shots" id="shots"></div>';
+  const size = +(params.get('size') || 240);
+  for (const spec of params.get('shots').split(',')) {
+    const [stPart, actPart] = spec.split('+'), [state, sec] = stPart.split('@'), fig = document.createElement('figure');
+    const tile = document.createElement('div'); tile.className = 'tile'; fig.appendChild(tile); document.getElementById('shots').appendChild(fig);
+    const f = new Figure(tile, { size, state, manual:true, seed:5 });
+    const [act, at] = actPart ? actPart.split('@') : [null, 0];
+    const total = +sec, steps = Math.round(total * 60);
+    for (let i = 0; i < steps; i++) { if (act && Math.abs(i / 60 - +at) < 1 / 120) f.play(act); f.step(1 / 60, true); f.fxStep(1 / 60); }
+    f.render();
+    const cap = document.createElement('figcaption'); cap.textContent = spec; fig.appendChild(cap);
+  }
+} else {
+  const stage = document.getElementById('stage'), line = document.getElementById('line');
+  const main = new Figure(stage, { size:520 });
+  io.observe(stage);
+  stage.addEventListener('click', () => main.play('poke'));
+  const NAMES = { idle:'空闲', listening:'倾听', thinking:'思考', working:'工作', waiting:'等你', result:'有结果', sleeping:'休息', waking:'唤醒中', offline:'离线' };
+  const sizes = [
+    ['112', { size:112 }, '112 · Bot 区'], ['64', { size:64 }, '64'], ['40', { size:40 }, '40 · 收起的 Bot 区'],
+    ['20', { size:20, view:VIEW.head, compact:true }, '20 · 侧栏'], ['14', { size:14, view:VIEW.head, compact:true }, '14 · 标题栏'],
+  ].map(([k, o, label]) => {
+    const fig = document.createElement('figure'), tile = document.createElement('div');
+    tile.className = 'tile'; tile.style.borderRadius = Math.max(3, o.size * .2) + 'px';
+    fig.appendChild(tile); const cap = document.createElement('figcaption'); cap.textContent = label; fig.appendChild(cap);
+    document.getElementById('sizes').appendChild(fig);
+    return new Figure(tile, { ...o, still:true });
   });
-};
-mock(document.getElementById('mock-light'), false); mock(document.getElementById('mock-dark'), true);
-
-// ---- 06 Curves ----
-const curve = (id, fn, color) => {
-  const c = document.getElementById(id), g = c.getContext('2d'); g.lineWidth = 2.4; g.strokeStyle = color; g.lineCap = 'round';
-  g.beginPath(); for (let i = 0; i <= 140; i++) { const x = i / 140, y = fn(x); const px = 6 + x * 268, py = 66 - y * 48; i ? g.lineTo(px, py) : g.moveTo(px, py); } g.stroke();
-  g.strokeStyle = 'rgba(0,0,0,.08)'; g.lineWidth = 1; g.beginPath(); g.moveTo(6, 66); g.lineTo(274, 66); g.moveTo(6, 18); g.lineTo(274, 18); g.stroke();
-};
-curve('c-body', x => { const t = x * 1.4, z = 16 / (2 * Math.sqrt(260)), w = Math.sqrt(260) * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * Math.sqrt(260) * t) * (Math.cos(w * t) + z / Math.sqrt(1 - z * z) * Math.sin(w * t)); }, '#6d92dc');
-curve('c-jelly', x => .5 + .5 * Math.exp(-x * 4.2) * Math.cos(x * 2 * Math.PI * 3.6), '#e47e69');
-curve('c-face', x => { const t = x * 1.1, z = 27 / (2 * Math.sqrt(320)), w0 = Math.sqrt(320), w = w0 * Math.sqrt(Math.max(1e-6, 1 - z * z)); return 1 - Math.exp(-z * w0 * t) * (Math.cos(w * t) + z / Math.sqrt(Math.max(1e-6, 1 - z * z)) * Math.sin(w * t)); }, '#5b7a45');
+  const stateButtons = {};
+  const setState = name => {
+    main.setState(name); for (const s of sizes) s.setState(name);
+    for (const k in stateButtons) stateButtons[k].classList.toggle('on', k === name);
+    line.textContent = STATES[name].line; line.classList.toggle('warn', !!STATES[name].warn);
+  };
+  for (const k of Object.keys(STATES)) { const b = document.createElement('button'); b.textContent = NAMES[k]; b.onclick = () => { auto.checked = false; setState(k); }; document.getElementById('states').appendChild(b); stateButtons[k] = b; }
+  for (const [k, a] of Object.entries(ACTIONS)) { const b = document.createElement('button'); b.textContent = a.label; b.onclick = () => { if (['offline', 'sleeping'].includes(main.state)) setState('idle'); main.play(k); }; document.getElementById('actions').appendChild(b); }
+  const auto = document.getElementById('auto');
+  const ORDER = [['idle', 6], ['listening', 4], ['thinking', 4.5], ['working', 5], ['result', 3], ['idle', 4], ['waiting', 5], ['idle', 3], ['sleeping', 5], ['waking', 4.2]];
+  let autoAt = 0, autoIdx = 0;
+  setInterval(() => { if (!auto.checked || document.hidden) return; if (performance.now() > autoAt) { const [s, d] = ORDER[autoIdx++ % ORDER.length]; setState(s); autoAt = performance.now() + d * 1000; } }, 200);
+  auto.onchange = () => { autoAt = 0; };
+  document.getElementById('follow').onchange = e => { Figure.follow = e.target.checked; };
+  document.getElementById('reduce').onchange = e => { reduced = e.target.checked; setState(main.state); };
+  document.getElementById('light').onchange = e => document.body.classList.toggle('light', e.target.checked);
+  setState('idle');
+  requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
+}
 </script>
 </body>
 </html>
