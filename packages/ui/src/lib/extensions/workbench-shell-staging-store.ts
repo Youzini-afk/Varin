@@ -59,11 +59,13 @@ export const settleWorkbenchShellPromotion = (request: WorkbenchShellStagingRequ
   request.resolvePromotion?.();
 };
 
-export const stageWorkbenchShellRender = (
+export const stageWorkbenchShellRender = async (
   contribution: SurfaceContribution,
   props: Readonly<Record<string, unknown>>,
   profileId?: string,
+  signal?: AbortSignal,
 ): Promise<WorkbenchShellRenderStagingHandle> => {
+  signal?.throwIfAborted();
   if (stagingHostCount === 0) {
     return Promise.reject(new Error('Workbench shell staging host is unavailable'));
   }
@@ -72,18 +74,28 @@ export const stageWorkbenchShellRender = (
   }
   const id = ++requestSequence;
   retryWorkbenchShellLoad(contribution.owner.extensionId);
-  return new Promise<void>((resolve, reject) => {
-    activeRequest = {
-      contribution,
-      id,
-      props,
-      profileId,
-      reject,
-      resolve,
-      settled: false,
-    };
-    publish();
-  }).then(() => ({
+  const abort = () => {
+    if (activeRequest?.id === id) settleWorkbenchShellStagingFailure(activeRequest, signal?.reason);
+  };
+  try {
+    await new Promise<void>((resolve, reject) => {
+      activeRequest = {
+        contribution,
+        id,
+        props,
+        profileId,
+        reject,
+        resolve,
+        settled: false,
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      publish();
+    });
+  } catch (error) {
+    signal?.removeEventListener('abort', abort);
+    throw error;
+  }
+  return {
     promote: () => {
       if (activeRequest?.id !== id) return Promise.reject(new Error('Workbench shell staging was superseded'));
       if (activeRequest.promoted) return Promise.resolve();
@@ -93,12 +105,13 @@ export const stageWorkbenchShellRender = (
       });
     },
     dispose: async () => {
+      signal?.removeEventListener('abort', abort);
       if (activeRequest?.id !== id) return;
       activeRequest.rejectPromotion?.(new Error('Workbench shell candidate released'));
       activeRequest = null;
       publish();
     },
-  }));
+  };
 };
 
 export const mountWorkbenchShellStagingHost = (): (() => void) => {

@@ -47,8 +47,9 @@ Shell 扩展；Profile 提交失败则回退该次启用。未指定此选项的
 extension storage 保存 Profile。读取失败或数据损坏时保留上次有效状态和诊断，不用默认值覆盖原文档。
 暂时缺失的 contribution reference 留在布局中，重新启用后可以恢复用户选择。
 
-[Shell 切换事务](../packages/ui/src/lib/extensions/workbench-shell-transition.ts) 捕获 Host、catalog
-generation 和 Profile revision，激活候选并验证 mount/render ready，之后才写入选择。
+[Shell 切换事务](../packages/ui/src/lib/extensions/workbench-shell-transition.ts) 捕获 Host、Runtime endpoint
+generation 和 Profile revision，激活候选并验证 mount/render ready，之后才写入选择。目录监听的重启不改变
+切换归属；真正的 Host 切换仍使旧候选失效。
 revision 冲突、候选失败或 Host 改变时，旧选择保持权威。候选在稳定的 Shell slot 中准备；
 选择提交后就地转为活动实例，保留组件状态，之后释放准备记录。失败时卸载候选。
 内置工作台注册延迟加载入口，实际选中或准备时才加载该工作台模块。
@@ -61,6 +62,9 @@ revision 冲突、候选失败或 Host 改变时，旧选择保持权威。候�
 [过渡控制器](../packages/ui/src/lib/workbench/profile-transition.ts) 拥有 transition identity 与
 cover/covered/reveal 阶段；scene 拥有画面和声明的时长。候选解析与 scene 准备可并行；
 重组件渲染等到完全覆盖后进行，准备成功后才提交选择；揭示新界面还要等目标实际 mount 并跨过浏览器绘制边界。迟到的阶段或 mount 信号不能推进另一事务。
+新选择立即取得事务归属并取消旧候选，尚未完成的隐藏 Shell 渲染也会释放；迟到的 scene 准备不会再启动旧过场。
+切换入口不会将正常替代弹为失败；旧调用收到取消结果，停止后续会话导航。真正的准备或提交失败则揭示仍有效的旧 Shell 后报告错误。每次事务使用独立的动画宿主，
+scene 的各订阅者分别记录已接收帧，外层读取状态不会吞掉内层动画的阶段通知。
 
 scene 缺失、停用、失败或被撤回时使用 Core 不透明 fallback。事务捕获的 scene owner 保持到交接结束，
 不会在 Profile 提交后中途重挂载。清理先保留终帧跨过 paint，再移除 canvas 和资源；减少动态效果偏好

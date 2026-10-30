@@ -14,7 +14,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useVarinExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { workbenchWorkspaceLabel } from '@/lib/extensions/workbench-profile-label';
-import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
+import { selectActiveWorkbenchProfile, WorkbenchShellTransitionAbortedError } from '@/lib/extensions/workbench-shell-transition';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { useUIStore } from '@/stores/useUIStore';
 import {
@@ -81,6 +81,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
     try {
       await selectActiveWorkbenchProfile(profileId, undefined, { enableShell: true });
     } catch (error) {
+      if (error instanceof WorkbenchShellTransitionAbortedError && error.reason === 'superseded') return;
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setPending(false);

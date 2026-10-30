@@ -181,7 +181,7 @@ const createDeps = (options: {
       loading: false,
       snapshot,
     }),
-    getCatalogWatchGeneration: () => generation,
+    getRuntimeGeneration: () => generation,
     getSurface: () => 'web',
     getSurfaceSnapshot: () => ({ ...emptySurface(), contributions }),
     refreshCatalog: async () => undefined,
@@ -338,7 +338,7 @@ test('keeps the previous profile when a render candidate fails', async () => {
   expect(harness.renders).toBe(1);
 });
 
-test('rejects a candidate after the catalog generation changes', async () => {
+test('rejects a candidate after the Application Host endpoint changes', async () => {
   let generation = 1;
   const harness = createDeps({
     entry: shellEntry(true),
@@ -347,7 +347,7 @@ test('rejects a candidate after the catalog generation changes', async () => {
       generation = 2;
     },
   });
-  harness.deps.getCatalogWatchGeneration = () => generation;
+  harness.deps.getRuntimeGeneration = () => generation;
   await expect(runSelectActiveWorkbenchProfile(harness.deps, 'studio')).rejects.toThrow(WorkbenchShellTransitionAbortedError);
   expect(harness.persistedProfiles).toEqual([]);
 });

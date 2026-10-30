@@ -284,6 +284,27 @@ describe('workbench profile transition state machine', () => {
     expect(getWorkbenchProfileTransitionSnapshot().toProfileId).toBe('default');
   });
 
+  test('reading a scene frame cannot consume its subscribers phase notifications', () => {
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'default' });
+    const controller = createWorkbenchTransitionSceneController(id);
+    // The overlay reads the frame before the mounted scene's store listener runs.
+    subscribeWorkbenchProfileTransition(() => controller.getSnapshot());
+    const first = vi.fn();
+    const second = vi.fn();
+    controller.subscribe(first);
+    controller.subscribe(second);
+    first.mockClear(); second.mockClear();
+
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    markWorkbenchProfileTransitionCovered(id);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+    void revealWorkbenchProfileTransition(id);
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(second).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot().phase).toBe('revealing');
+  });
+
   test('a newer selection releases a superseded target-paint waiter', async () => {
     const firstId = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     armWorkbenchProfileTransitionPhase(firstId, 'covering');

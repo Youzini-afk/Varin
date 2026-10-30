@@ -69,6 +69,7 @@ import {
   WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import { WorkbenchShellTransitionAbortedError } from '@/lib/extensions/workbench-shell-transition';
 import { surfaceExtensionLoader } from '@/lib/extensions/managed-runtime';
 import { workbenchExtensionDisplayName, workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import {
@@ -230,6 +231,7 @@ const WorkbenchProfileSection: React.FC = () => {
     try {
       await selectActiveWorkbenchProfile(profileId, workspaceId, { enableShell: true });
     } catch (error) {
+      if (error instanceof WorkbenchShellTransitionAbortedError && error.reason === 'superseded') return;
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setProfileBusy(false);

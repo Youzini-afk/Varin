@@ -8,7 +8,7 @@ import {
   useVarinExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
-import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
+import { selectActiveWorkbenchProfile, WorkbenchShellTransitionAbortedError } from '@/lib/extensions/workbench-shell-transition';
 import { useUIStore } from '@/stores/useUIStore';
 
 export const WorkbenchRecoveryShell: React.FC<{
@@ -27,6 +27,7 @@ export const WorkbenchRecoveryShell: React.FC<{
     try {
       await operation();
     } catch (error) {
+      if (error instanceof WorkbenchShellTransitionAbortedError && error.reason === 'superseded') return;
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);

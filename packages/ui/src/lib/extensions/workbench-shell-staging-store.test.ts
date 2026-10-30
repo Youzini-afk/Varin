@@ -63,6 +63,24 @@ test('render staging rejects a candidate that fails during render', async () => 
   unmount();
 });
 
+test('superseding a suspended candidate releases its slot without waiting for the old component', async () => {
+  const unmount = mountWorkbenchShellStagingHost();
+  const controller = new AbortController();
+  const pending = stageWorkbenchShellRender(contribution(), {}, 'old', controller.signal);
+  const stale = getWorkbenchShellStagingRequest()!;
+  const rejected = expect(pending).rejects.toThrow('superseded');
+  controller.abort(new Error('superseded'));
+  await rejected;
+  expect(getWorkbenchShellStagingRequest()).toBeNull();
+  const next = stageWorkbenchShellRender(contribution(), {}, 'new');
+  const current = getWorkbenchShellStagingRequest()!;
+  settleWorkbenchShellStagingReady(stale);
+  expect(current.settled).toBe(false);
+  settleWorkbenchShellStagingReady(current);
+  await (await next).dispose();
+  unmount();
+});
+
 test('promotion waits for the selected slot, and removal releases an outstanding promotion wait', async () => {
   const unmount = mountWorkbenchShellStagingHost();
   const first = stageWorkbenchShellRender(contribution(), {});

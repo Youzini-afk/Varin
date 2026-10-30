@@ -170,6 +170,7 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
 
   return (
     <div
+      key={renderedTransition.id}
       ref={sceneLayerRef}
       className={`fixed inset-0 z-[9998] overflow-hidden ${frame.phase === 'revealing' ? 'pointer-events-none' : 'pointer-events-auto'}`}
       role="status"

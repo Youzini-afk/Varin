@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   hostId: 'host-a',
   selectProfile: vi.fn(),
   error: vi.fn(),
+  AbortedError: class extends Error { readonly reason = 'superseded'; },
 }));
 
 vi.mock('@/lib/extensions/catalog-store', async () => {
@@ -29,7 +30,7 @@ vi.mock('@/lib/extensions/catalog-store', async () => {
     }),
   };
 });
-vi.mock('@/lib/extensions/workbench-shell-transition', () => ({ selectActiveWorkbenchProfile: state.selectProfile }));
+vi.mock('@/lib/extensions/workbench-shell-transition', () => ({ selectActiveWorkbenchProfile: state.selectProfile, WorkbenchShellTransitionAbortedError: state.AbortedError }));
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'desktop' } }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: state.error } }));
@@ -146,5 +147,16 @@ describe('independent workbench presentation controls', () => {
     await click(agentButton);
     expect(state.activeProfileId).toBe('default');
     expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('varin.research');
+  });
+
+  it('does not show a superseded choice as a failed switch and remains usable', async () => {
+    state.activeProfileId = 'varin.bot';
+    await render();
+    state.selectProfile.mockRejectedValueOnce(new state.AbortedError());
+    await click(agentButton);
+    expect(state.error).not.toHaveBeenCalled();
+    expect(state.activeProfileId).toBe('varin.bot');
+    await click(agentButton);
+    expect(state.activeProfileId).toBe('default');
   });
 });

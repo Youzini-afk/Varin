@@ -13,12 +13,12 @@ import {
   type VarinWorkbenchShellStatus,
 } from '@varin/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import type { VarinExtensionCatalogStoreState } from './catalog-store';
 import {
   getVarinExtensionCatalogState,
-  getVarinExtensionCatalogWatchGeneration,
   refreshVarinExtensionCatalog,
   setVarinExtensionEnabled,
 } from './catalog-store';
@@ -66,8 +66,10 @@ export class WorkbenchShellUnavailableError extends Error {
 }
 
 export class WorkbenchShellTransitionAbortedError extends Error {
-  constructor(message = 'Workbench shell candidate was superseded') {
-    super(message);
+  constructor(readonly reason: 'superseded' | 'host-changed' = 'superseded') {
+    super(reason === 'superseded'
+      ? 'Workbench shell candidate was superseded'
+      : 'Application Host changed during workbench switch');
     this.name = 'WorkbenchShellTransitionAbortedError';
   }
 }
@@ -84,9 +86,13 @@ export interface WorkbenchProfileTransitionOptions {
   enableShell?: boolean;
 }
 
+interface WorkbenchShellTransitionOptions extends WorkbenchProfileTransitionOptions {
+  signal?: AbortSignal;
+}
+
 export interface WorkbenchShellTransitionDependencies {
   getCatalogState(): VarinExtensionCatalogStoreState;
-  getCatalogWatchGeneration(): number;
+  getRuntimeGeneration(): number;
   getSurface(): VarinApplicationSurface;
   getSurfaceSnapshot(): SurfaceRegistrySnapshot;
   refreshCatalog(): Promise<void>;
@@ -96,6 +102,7 @@ export interface WorkbenchShellTransitionDependencies {
     contribution: SurfaceContribution,
     props: Readonly<Record<string, unknown>>,
     profileId?: string,
+    signal?: AbortSignal,
   ): Promise<WorkbenchShellRenderStagingHandle>;
   triggerActivation(contributionId: string, extensionId: string): Promise<void>;
   triggerVisible(contributions: readonly SurfaceContribution[]): Promise<void>;
@@ -103,6 +110,7 @@ export interface WorkbenchShellTransitionDependencies {
 }
 
 let transitionQueue: Promise<void> = Promise.resolve();
+let liveProfileSelection: AbortController | null = null;
 
 const enqueueWorkbenchShellTransition = (operation: () => Promise<void>): Promise<void> => {
   const run = transitionQueue.then(operation, operation);
@@ -118,7 +126,7 @@ const isDeclarativeImplementation = (value: unknown): boolean => (
 
 const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransitionDependencies => ({
   getCatalogState: getVarinExtensionCatalogState,
-  getCatalogWatchGeneration: getVarinExtensionCatalogWatchGeneration,
+  getRuntimeGeneration: getRuntimeEndpointGeneration,
   getSurface: () => varinSurfaceRuntime.surface,
   getSurfaceSnapshot: () => varinSurfaceRuntime.getSnapshot(),
   refreshCatalog: refreshVarinExtensionCatalog,
@@ -163,7 +171,7 @@ const requireAuthoritativeWorkbench = (deps: WorkbenchShellTransitionDependencie
 const captureIdentity = (deps: WorkbenchShellTransitionDependencies) => {
   const snapshot = requireAuthoritativeWorkbench(deps);
   return {
-    generation: deps.getCatalogWatchGeneration(),
+    generation: deps.getRuntimeGeneration(),
     hostId: snapshot.catalog.hostId,
     revision: snapshot.workbench.document.revision,
   };
@@ -175,7 +183,7 @@ const assertSameIdentity = (
 ): void => {
   const current = captureIdentity(deps);
   if (current.generation !== expected.generation || current.hostId !== expected.hostId) {
-    throw new WorkbenchShellTransitionAbortedError();
+    throw new WorkbenchShellTransitionAbortedError('host-changed');
   }
 };
 
@@ -192,11 +200,13 @@ const proveShellReady = async (
   deps: WorkbenchShellTransitionDependencies,
   captured: ReturnType<typeof captureIdentity>,
   profileId: string,
+  signal?: AbortSignal,
 ): Promise<WorkbenchShellRenderStagingHandle> => {
   let contribution = findContribution(deps.getSurfaceSnapshot(), contributionId);
   if (!contribution || isDeclarativeImplementation(contribution.implementation)) {
     if (extensionId) await deps.triggerActivation(contributionId, extensionId);
     else if (contribution) await deps.triggerVisible([contribution]);
+    signal?.throwIfAborted();
     assertSameIdentity(captured, deps);
     contribution = findContribution(deps.getSurfaceSnapshot(), contributionId);
   }
@@ -205,8 +215,9 @@ const proveShellReady = async (
     throw new Error(`Workbench shell contribution did not activate: ${contributionId}`);
   }
   const props = { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell };
-  const session = await deps.stageRender(contribution, props, profileId);
+  const session = await deps.stageRender(contribution, props, profileId, signal);
   try {
+    signal?.throwIfAborted();
     assertSameIdentity(captured, deps);
     return session;
   } catch (error) {
@@ -268,6 +279,7 @@ const persistReplacementSelection = async (
 const commitCandidateShell = async (
   deps: WorkbenchShellTransitionDependencies,
   input: {
+    signal?: AbortSignal;
     beforeCommit?: () => Promise<void>;
     beforePrepare?: () => Promise<void>;
     enableShell?: boolean;
@@ -292,6 +304,7 @@ const commitCandidateShell = async (
   let autoEnabledExtensionId: string | undefined;
   let committed = false;
   try {
+    input.signal?.throwIfAborted();
     let inspected = inspectShell();
     if (input.enableShell && inspected.status === 'disabled' && inspected.shellExtensionId) {
       await deps.setEnabled(inspected.shellExtensionId, true);
@@ -301,6 +314,7 @@ const commitCandidateShell = async (
     const captured = captureIdentity(deps);
     if (inspected.status === 'builtin') {
       await input.beforeCommit?.();
+      input.signal?.throwIfAborted();
       assertSameIdentity(captured, deps);
       await input.persist(captured.revision);
       committed = true;
@@ -315,6 +329,7 @@ const commitCandidateShell = async (
       });
     }
     await input.beforePrepare?.();
+    input.signal?.throwIfAborted();
     assertSameIdentity(captured, deps);
     const staging = await proveShellReady(
       inspected.shellContributionId ?? '',
@@ -322,10 +337,12 @@ const commitCandidateShell = async (
       deps,
       captured,
       input.profileId,
+      input.signal,
     );
     try {
       assertSameIdentity(captured, deps);
       await input.beforeCommit?.();
+      input.signal?.throwIfAborted();
       assertSameIdentity(captured, deps);
       await input.persist(captured.revision);
       committed = true;
@@ -349,8 +366,9 @@ export const runSelectActiveWorkbenchProfile = (
   deps: WorkbenchShellTransitionDependencies,
   profileId: string,
   workspaceId?: string,
-  options?: WorkbenchProfileTransitionOptions,
+  options?: WorkbenchShellTransitionOptions,
 ): Promise<void> => enqueueWorkbenchShellTransition(async () => {
+  options?.signal?.throwIfAborted();
   const snapshot = requireAuthoritativeWorkbench(deps);
   const layout = resolveVarinWorkbenchLayoutForProfile(snapshot.workbench.document, {
     surface: deps.getSurface(),
@@ -358,6 +376,7 @@ export const runSelectActiveWorkbenchProfile = (
     ...(workspaceId ? { workspaceId } : {}),
   }, profileId);
   await commitCandidateShell(deps, {
+    signal: options?.signal,
     ...(options?.beforePrepare ? { beforePrepare: options.beforePrepare } : {}),
     ...(options?.beforeCommit ? { beforeCommit: options.beforeCommit } : {}),
     persist: (expectedRevision) => persistProfileSelection(deps, profileId, expectedRevision),
@@ -412,6 +431,25 @@ export const selectActiveWorkbenchProfile = async (
   workspaceId?: string,
   options?: WorkbenchProfileTransitionOptions,
 ): Promise<void> => {
+  const selection = new AbortController();
+  const previous = liveProfileSelection;
+  liveProfileSelection = selection;
+  previous?.abort(new WorkbenchShellTransitionAbortedError());
+  try {
+    await performWorkbenchProfileSwitch(profileId, workspaceId, { ...options, signal: selection.signal });
+    // Stop the superseded caller too: it must not apply follow-up conversation navigation
+    // as though its profile had become authoritative.
+    selection.signal.throwIfAborted();
+  } finally {
+    if (liveProfileSelection === selection) liveProfileSelection = null;
+  }
+};
+
+const performWorkbenchProfileSwitch = async (
+  profileId: string,
+  workspaceId?: string,
+  options?: WorkbenchShellTransitionOptions,
+): Promise<void> => {
   const workbench = getVarinExtensionCatalogState().snapshot?.workbench;
   const profileIds = workbench?.document.profiles.map((profile) => profile.id) ?? [];
   const transitionContext = {
@@ -434,10 +472,17 @@ export const selectActiveWorkbenchProfile = async (
     ? resolveVarinWorkbenchLayoutForProfile(workbench.document, transitionContext, profileId)
     : null;
   const scenePreparation = prepareWorkbenchTransitionScene(targetLayout?.replacementSelections ?? {});
-  let resolveTransitionId!: (id: number) => void;
-  const transitionIdReady = new Promise<number>((resolve) => {
+  let resolveTransitionId!: (id: number | null) => void;
+  const transitionIdReady = new Promise<number | null>((resolve) => {
     resolveTransitionId = resolve;
   });
+  // Scene activation can finish out of order. A superseded request must release its queued
+  // candidate without ever starting a scene over the newer choice.
+  let cancelPreparation!: () => void;
+  const preparationCancelled = new Promise<null>((resolve) => {
+    cancelPreparation = () => { resolveTransitionId(null); resolve(null); };
+  });
+  options?.signal?.addEventListener('abort', cancelPreparation, { once: true });
   // Resolve the candidate beside scene activation. Heavy rendering waits for the opaque cover;
   // the prepared subtree is then promoted in place at the authoritative commit boundary.
   const candidate = runSelectActiveWorkbenchProfile(
@@ -447,13 +492,18 @@ export const selectActiveWorkbenchProfile = async (
     {
       ...options,
       beforePrepare: async () => {
+        options?.signal?.throwIfAborted();
         await options?.beforePrepare?.();
         const id = await transitionIdReady;
-        if (!await waitForWorkbenchProfileTransitionCovered(id)) throw new WorkbenchShellTransitionAbortedError();
+        options?.signal?.throwIfAborted();
+        if (id === null || !await waitForWorkbenchProfileTransitionCovered(id)) throw new WorkbenchShellTransitionAbortedError();
       },
       beforeCommit: async () => {
+        options?.signal?.throwIfAborted();
         await options?.beforeCommit?.();
         const transitionId = await transitionIdReady;
+        options?.signal?.throwIfAborted();
+        if (transitionId === null) throw new WorkbenchShellTransitionAbortedError();
         markWorkbenchProfileTransitionOperationPrepared(transitionId);
         const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);
         if (!covered) throw new WorkbenchShellTransitionAbortedError();
@@ -464,7 +514,13 @@ export const selectActiveWorkbenchProfile = async (
     (error: unknown) => ({ error, ok: false as const }),
   );
 
-  const preparedScene = await scenePreparation;
+  const preparedScene = await Promise.race([scenePreparation, preparationCancelled]);
+  options?.signal?.removeEventListener('abort', cancelPreparation);
+  if (!preparedScene || options?.signal?.aborted) {
+    resolveTransitionId(null);
+    await candidate;
+    return;
+  }
   if (preparedScene.status === 'failed') {
     console.error('[Varin Motion] Transition Scene preparation failed; using Core fallback:', preparedScene.error);
   }
@@ -478,6 +534,7 @@ export const selectActiveWorkbenchProfile = async (
   resolveTransitionId(transitionId);
 
   const result = await candidate;
+  if (options?.signal?.aborted) return;
   if (!result.ok) {
     // A preparation failure is also a settled result. If it happened while covering, reveal the
     // previous authoritative shell at the scene's quick tempo after cover completes.

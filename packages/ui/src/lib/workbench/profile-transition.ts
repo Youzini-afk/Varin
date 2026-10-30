@@ -412,10 +412,18 @@ export const createWorkbenchTransitionSceneController = (
       else completeWorkbenchProfileTransition(id);
     },
     getSnapshot: readFrame,
-    subscribe: (listener) => subscribeWorkbenchProfileTransition((next) => {
-      if (next.id !== id || next.phase === 'idle') return;
-      if (adopt(next)) listener();
-    }),
+    subscribe: (listener) => {
+      // Reading the shared snapshot (including from the overlay) must not consume another
+      // subscriber's notification. Each observer tracks the last frame it actually received.
+      let delivered = readFrame();
+      return subscribeWorkbenchProfileTransition((next) => {
+        if (next.id !== id || next.phase === 'idle') return;
+        const current = readFrame();
+        if (current === delivered) return;
+        delivered = current;
+        listener();
+      });
+    },
   };
 };
 
