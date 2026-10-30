@@ -225,3 +225,20 @@ bundle SHA is `a225f19fc57d683ae27e2999a18133e9ac4b6f571db98c4645d6eeea7221042f`
 A full fresh build needs about165MiB for prepared PNGs plus atlases (pool entries
 hardlink the prepared PNGs). No historical pool is required. Output stays
 `candidateOnly`; this command neither installs nor visually accepts a skin.
+
+### Isolated explicit-baseline selection
+
+`select_interaction_bundle.py` keeps the existing `--base-bundle` incremental path unchanged. For a complete independently rebuilt baseline, use the mutually exclusive opt-in:
+
+```sh
+python tools/desktop-companion-animation/select_interaction_bundle.py \
+  /tmp/candidate/bundle.json /tmp/selected-proposal \
+  --explicit-baseline docs/design/desktop-companion-assets/animation-source/production-v5/runtime-baseline.json \
+  --build-receipt /tmp/candidate/build-receipt.json \
+  --rebuild-receipt /tmp/candidate-prepared/rebuild-receipt.json \
+  --review-record /tmp/exact-artifact-review.json
+```
+
+The review record must bind `candidateSHA256`, `baselineSHA256`, `buildReceiptSHA256`, `rebuildReceiptSHA256`, the complete `newPackageIds`, `uniqueDrawingSha256` and `fileSha256` map. It must explicitly name `reviewer: "assistant"`, `decision: "selected"`, `scope: "feature-branch default candidate"`, and nonempty `basis`/`notClaimed` evidence scopes. Selection is not a claim of user approval of every frame. Source rebuilding must be standalone and retain its prepared manifest beside the rebuild receipt. The tool checks these bindings, source/package/geometry/endpoints and plate before writing a fresh output; PNGs are immutable hardlinks where supported, otherwise copied. Never modify linked textures in place.
+
+The isolated selected generation changes only acceptance metadata and records `publicInstalled: false`; it does not install public resources or adopt a branch default. Actual normal-mode loading/native review and the separate adoption decision remain separate.

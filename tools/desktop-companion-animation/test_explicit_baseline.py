@@ -121,6 +121,20 @@ assert.equal(p.gesture,null); assert.equal(p.current.id,'rest'); assert.equal(p.
         self.assertEqual(receipt['actualSources'], sorted([sh, dh]))
         self.assertFalse(receipt['sourceRebuild']['historicalPreparedInputs'])
         self.assertIn('pillowVersion', receipt['sourceRebuild'])
+        # The isolated selector binds actual compiler/preparation evidence, not an old skin.
+        # An incomplete artifact-bound review must be rejected before output.
+        candidate = self.root / 'portable-out/bundle.json'
+        review = self.root / 'review.json'
+        review.write_text(json.dumps({'candidateSHA256': sha(candidate)}))
+        selected = self.root / 'selected'
+        result = subprocess.run(['python', str(ROOT / 'tools/desktop-companion-animation/select_interaction_bundle.py'),
+                                 str(candidate), str(selected), '--explicit-baseline', str(portable),
+                                 '--build-receipt', str(candidate.parent / 'build-receipt.json'),
+                                 '--rebuild-receipt', str(self.root / 'portable-out-prepared/rebuild-receipt.json'),
+                                 '--review-record', str(review)], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('binding mismatch', result.stderr)
+        self.assertFalse(selected.exists())
         with self.assertRaisesRegex(ValueError, 'fresh output'):
             compile_explicit_baseline(portable, self.root / 'portable-out')
         recipe_path.write_text(json.dumps({**recipe, 'changed': True}))
