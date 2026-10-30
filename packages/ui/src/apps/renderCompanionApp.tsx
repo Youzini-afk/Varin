@@ -459,7 +459,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     const cue = frame.cue ? sceneCue(frame.cue, sequence.sceneAction ?? sequence.action) : 'engaged';
     const drawnContext = !manualReview && !playing && automatic.packageId === sequence.id && automatic.exposure === exposure ? automatic.context : null;
     displayedDrawing.current = { packageId: sequence.id, exposure, context: drawnContext };
-    const drawing = directorReview && bundledEpoch ? { bundle: directorReview ? 'review' as const : 'selected' as const, epoch: bundledEpoch, packageId: sequence.id, frameIndex: exposure } : undefined;
+    const drawing = directorMode && bundledEpoch ? { bundle: directorReview ? 'review' as const : 'selected' as const, epoch: bundledEpoch, packageId: sequence.id, frameIndex: exposure } : undefined;
     const drawingKey = JSON.stringify(drawing) ?? '';
     if (lastVisibleDrawingKey.current !== drawingKey) { lastVisibleDrawingKey.current = drawingKey; setVisibleDrawing(drawing); }
 
