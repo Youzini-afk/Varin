@@ -1,0 +1,677 @@
+{
+  "version": 1,
+  "status": "source-checkpoint-not-runtime-admission",
+  "recipe": "../seated-preparation.json",
+  "sharedRoutes": "lid-supported-routes.json",
+  "entryPairs": [
+    {
+      "seatedNode": "life-hair-02-approach-r2-fg",
+      "rawEntrySourceSha256": "59efdba681c03140ab37573c2f617a91034684d00eac927c7e8a404c464f2e69",
+      "detachedNode": "life-hair-02-approach-r2-d"
+    },
+    {
+      "seatedNode": "life-hair-02b-near-lock-r3-fg",
+      "rawEntrySourceSha256": "731aa0ef39ea5a53b7d21d497c68b5754455f1e0a9638686e78eb29ff507af8c",
+      "detachedNode": "life-hair-02b-near-lock-r3-d"
+    },
+    {
+      "seatedNode": "life-hair-03-contact-r2-fg",
+      "rawEntrySourceSha256": "d205110008b331d13b4fd39f1dd9ff38873f780555e5b8ea00e8a920b93db130",
+      "detachedNode": "life-hair-03-contact-r2-d"
+    },
+    {
+      "seatedNode": "life-hair-04-smooth-r1-fg",
+      "rawEntrySourceSha256": "42448e6765e3d10c3e9b1236bf47f040dec4c21ceb097c36d466263d208c8c7a",
+      "detachedNode": "life-hair-04-smooth-r1-d"
+    },
+    {
+      "seatedNode": "life-hair-05-release-r3-fg",
+      "rawEntrySourceSha256": "2d8616b4175ac7740c9761e7f5512b887d433d548dc65eff4e9d92f557b1688d",
+      "detachedNode": "life-hair-05-release-r3-d"
+    },
+    {
+      "seatedNode": "life-hair-05b-lower-arm-r3-fg",
+      "rawEntrySourceSha256": "5e817f0c8ce5424f49f3698730e2f6f97ee68de233ea13d079cf1f8598514585",
+      "detachedNode": "life-hair-05b-lower-arm-r3-d"
+    },
+    {
+      "seatedNode": "life-hair-06-return-r1-fg",
+      "rawEntrySourceSha256": "2a2fbd295ae94693e8356ec286a6883b8ada8a5319c0d87be72fde50ddb8c0df",
+      "detachedNode": "life-hair-06-return-r1-d"
+    },
+    {
+      "seatedNode": "life-sleeve-01b-onset-r2-fg",
+      "rawEntrySourceSha256": "bca0e6fb2c03b4b45fee4d9a960fc496b6bbb9f3d256a227ff3b7db0bc7cff59",
+      "detachedNode": "life-sleeve-01b-onset-r2-d"
+    },
+    {
+      "seatedNode": "life-sleeve-02-enter-r1-fg",
+      "rawEntrySourceSha256": "43a1f4bfba6625bfb2f43da816197e1e78a06f02557d7586fc6f36a0e41f0457",
+      "detachedNode": "life-sleeve-02-enter-r1-d"
+    },
+    {
+      "seatedNode": "life-sleeve-03-contact-r2-fg",
+      "rawEntrySourceSha256": "dafb9bf53417e19d2eb6b3a0e849a8f98a105ade23502b641699f42aa55ca03d",
+      "detachedNode": "life-sleeve-03-contact-r2-d"
+    },
+    {
+      "seatedNode": "life-sleeve-04-smooth-r2-fg",
+      "rawEntrySourceSha256": "49e3802f9443707f8ea6322585989c9d59d4474e091010dfcf28c48045656625",
+      "detachedNode": "life-sleeve-04-smooth-r2-d"
+    },
+    {
+      "seatedNode": "life-sleeve-05-release-r3-fg",
+      "rawEntrySourceSha256": "806dda85004e11bfdbc3c399f38c85fef2f784b74c9d380e328d6446e8f30c92",
+      "detachedNode": "life-sleeve-05-release-r3-d"
+    },
+    {
+      "seatedNode": "life-sleeve-05-release-r1-fg",
+      "rawEntrySourceSha256": "729a231b5e36716e5050c05540e75ece79ecfe2fce867ec31b3c2ee16c711e6e",
+      "detachedNode": "life-sleeve-05-release-r1-d"
+    },
+    {
+      "seatedNode": "closed-neutral-fg",
+      "rawEntrySourceSha256": "51ef169e2c6dfe11f594f4a941585dec41bc103a0e1784f210dc7ad4c5a60734",
+      "detachedNode": "closed-neutral-d"
+    }
+  ],
+  "nodes": {
+    "life-hair-02-approach-r2-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/02-approach-r2.png",
+      "rawSHA256": "59efdba681c03140ab37573c2f617a91034684d00eac927c7e8a404c464f2e69",
+      "durationMs": 110,
+      "embeddedStool": true,
+      "grabImmediate": "life-hair-02-approach-r2-d",
+      "grabNext": [
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-02-approach-r2",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/02-approach-r2.png",
+      "originalSHA256": "59efdba681c03140ab37573c2f617a91034684d00eac927c7e8a404c464f2e69"
+    },
+    "life-hair-02-approach-r2-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/02-approach-r2.png",
+      "rawSHA256": "6ed1b9891ad102620ba581a9ac76fa8a2bc82a135f8ca4ce515f02c52e7417c6",
+      "durationMs": 110,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-hair-02-approach-r2-fg",
+        "life-hair-05b-lower-arm-r3-fg",
+        "life-hair-06-return-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-02-approach-r2",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/02-approach-r2.png",
+      "originalSHA256": "6ed1b9891ad102620ba581a9ac76fa8a2bc82a135f8ca4ce515f02c52e7417c6"
+    },
+    "life-hair-02b-near-lock-r3-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/02b-near-lock-r3.png",
+      "rawSHA256": "731aa0ef39ea5a53b7d21d497c68b5754455f1e0a9638686e78eb29ff507af8c",
+      "durationMs": 100,
+      "embeddedStool": true,
+      "grabImmediate": "life-hair-02b-near-lock-r3-d",
+      "grabNext": [
+        "life-hair-05-release-r3-d",
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-02b-near-lock-r3",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/02b-near-lock-r3.png",
+      "originalSHA256": "731aa0ef39ea5a53b7d21d497c68b5754455f1e0a9638686e78eb29ff507af8c"
+    },
+    "life-hair-02b-near-lock-r3-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/02b-near-lock-r3.png",
+      "rawSHA256": "9360f77cae4a2d2b40dedb33073dbe91b91e4e3f84a58d848fbf89d1a8b682fd",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-hair-05-release-r3-d",
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-hair-02b-near-lock-r3-fg",
+        "life-hair-05-release-r3-fg",
+        "life-hair-05b-lower-arm-r3-fg",
+        "life-hair-06-return-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-02b-near-lock-r3",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/02b-near-lock-r3.png",
+      "originalSHA256": "9360f77cae4a2d2b40dedb33073dbe91b91e4e3f84a58d848fbf89d1a8b682fd"
+    },
+    "life-hair-03-contact-r2-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/03-contact-r2.png",
+      "rawSHA256": "d205110008b331d13b4fd39f1dd9ff38873f780555e5b8ea00e8a920b93db130",
+      "durationMs": 190,
+      "embeddedStool": true,
+      "grabImmediate": "life-hair-03-contact-r2-d",
+      "grabNext": [
+        "life-hair-05-release-r3-d",
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-03-contact-r2",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/03-contact-r2.png",
+      "originalSHA256": "d205110008b331d13b4fd39f1dd9ff38873f780555e5b8ea00e8a920b93db130"
+    },
+    "life-hair-03-contact-r2-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/03-contact-r2.png",
+      "rawSHA256": "16a687126bfa6fb9b1c5e22ddbbb1315f7df78382eb7a6aa2e729d80af984c9a",
+      "durationMs": 190,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-hair-05-release-r3-d",
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-hair-03-contact-r2-fg",
+        "life-hair-05-release-r3-fg",
+        "life-hair-05b-lower-arm-r3-fg",
+        "life-hair-06-return-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-03-contact-r2",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/03-contact-r2.png",
+      "originalSHA256": "16a687126bfa6fb9b1c5e22ddbbb1315f7df78382eb7a6aa2e729d80af984c9a"
+    },
+    "life-hair-04-smooth-r1-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/04-smooth-r1.png",
+      "rawSHA256": "42448e6765e3d10c3e9b1236bf47f040dec4c21ceb097c36d466263d208c8c7a",
+      "durationMs": 170,
+      "embeddedStool": true,
+      "grabImmediate": "life-hair-04-smooth-r1-d",
+      "grabNext": [
+        "life-hair-05-release-r3-d",
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-04-smooth-r1",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/04-smooth-r1.png",
+      "originalSHA256": "42448e6765e3d10c3e9b1236bf47f040dec4c21ceb097c36d466263d208c8c7a"
+    },
+    "life-hair-04-smooth-r1-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/04-smooth-r1.png",
+      "rawSHA256": "3cd63541a9e0871d5290ce2e08aa850c0deee11e330b9d30602784f569258e74",
+      "durationMs": 170,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-hair-05-release-r3-d",
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-hair-04-smooth-r1-fg",
+        "life-hair-05-release-r3-fg",
+        "life-hair-05b-lower-arm-r3-fg",
+        "life-hair-06-return-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-04-smooth-r1",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/04-smooth-r1.png",
+      "originalSHA256": "3cd63541a9e0871d5290ce2e08aa850c0deee11e330b9d30602784f569258e74"
+    },
+    "life-hair-05-release-r3-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/05-release-r3.png",
+      "rawSHA256": "2d8616b4175ac7740c9761e7f5512b887d433d548dc65eff4e9d92f557b1688d",
+      "durationMs": 100,
+      "embeddedStool": true,
+      "grabImmediate": "life-hair-05-release-r3-d",
+      "grabNext": [
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-05-release-r3",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/05-release-r3.png",
+      "originalSHA256": "2d8616b4175ac7740c9761e7f5512b887d433d548dc65eff4e9d92f557b1688d"
+    },
+    "life-hair-05-release-r3-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/05-release-r3.png",
+      "rawSHA256": "cc7dcb73560f91059c41bd1d62f556a44bb4ad1cdfa555bd32ece7400809c867",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-hair-05b-lower-arm-r3-d",
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-hair-05-release-r3-fg",
+        "life-hair-05b-lower-arm-r3-fg",
+        "life-hair-06-return-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-05-release-r3",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/05-release-r3.png",
+      "originalSHA256": "cc7dcb73560f91059c41bd1d62f556a44bb4ad1cdfa555bd32ece7400809c867"
+    },
+    "life-hair-05b-lower-arm-r3-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/05b-lower-arm-r3.png",
+      "rawSHA256": "5e817f0c8ce5424f49f3698730e2f6f97ee68de233ea13d079cf1f8598514585",
+      "durationMs": 110,
+      "embeddedStool": true,
+      "grabImmediate": "life-hair-05b-lower-arm-r3-d",
+      "grabNext": [
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-05b-lower-arm-r3",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/05b-lower-arm-r3.png",
+      "originalSHA256": "5e817f0c8ce5424f49f3698730e2f6f97ee68de233ea13d079cf1f8598514585"
+    },
+    "life-hair-05b-lower-arm-r3-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/05b-lower-arm-r3.png",
+      "rawSHA256": "07aa77eca0dee34ec693770342019f45b57a57982c702397450960d1ac5e3979",
+      "durationMs": 110,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-hair-06-return-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-hair-05b-lower-arm-r3-fg",
+        "life-hair-06-return-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-05b-lower-arm-r3",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/05b-lower-arm-r3.png",
+      "originalSHA256": "07aa77eca0dee34ec693770342019f45b57a57982c702397450960d1ac5e3979"
+    },
+    "life-hair-06-return-r1-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/06-return-r1.png",
+      "rawSHA256": "2a2fbd295ae94693e8356ec286a6883b8ada8a5319c0d87be72fde50ddb8c0df",
+      "durationMs": 140,
+      "embeddedStool": true,
+      "grabImmediate": "life-hair-06-return-r1-d",
+      "grabNext": [
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-06-return-r1",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/06-return-r1.png",
+      "originalSHA256": "2a2fbd295ae94693e8356ec286a6883b8ada8a5319c0d87be72fde50ddb8c0df"
+    },
+    "life-hair-06-return-r1-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/06-return-r1.png",
+      "rawSHA256": "8907e85246a829f432f230e91c45871696375245c4b6730b9a23b03a6ca2e883",
+      "durationMs": 140,
+      "embeddedStool": false,
+      "grabNext": [
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-hair-06-return-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-hair-06-return-r1",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/06-return-r1.png",
+      "originalSHA256": "8907e85246a829f432f230e91c45871696375245c4b6730b9a23b03a6ca2e883"
+    },
+    "life-sleeve-01b-onset-r2-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/01b-onset-r2.png",
+      "rawSHA256": "bca0e6fb2c03b4b45fee4d9a960fc496b6bbb9f3d256a227ff3b7db0bc7cff59",
+      "durationMs": 90,
+      "embeddedStool": true,
+      "grabImmediate": "life-sleeve-01b-onset-r2-d",
+      "grabNext": [
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-01b-onset-r2",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/01b-onset-r2.png",
+      "originalSHA256": "bca0e6fb2c03b4b45fee4d9a960fc496b6bbb9f3d256a227ff3b7db0bc7cff59"
+    },
+    "life-sleeve-01b-onset-r2-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/01b-onset-r2.png",
+      "rawSHA256": "37407e4e0bbf88368ed5d19339e804ebebd11cf98a944e3a46fcf5a8eee4f0b6",
+      "durationMs": 90,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-sleeve-01b-onset-r2-fg",
+        "life-sleeve-05-release-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-01b-onset-r2",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/01b-onset-r2.png",
+      "originalSHA256": "37407e4e0bbf88368ed5d19339e804ebebd11cf98a944e3a46fcf5a8eee4f0b6"
+    },
+    "life-sleeve-02-enter-r1-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/02-enter-r1.png",
+      "rawSHA256": "43a1f4bfba6625bfb2f43da816197e1e78a06f02557d7586fc6f36a0e41f0457",
+      "durationMs": 100,
+      "embeddedStool": true,
+      "grabImmediate": "life-sleeve-02-enter-r1-d",
+      "grabNext": [
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-02-enter-r1",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/02-enter-r1.png",
+      "originalSHA256": "43a1f4bfba6625bfb2f43da816197e1e78a06f02557d7586fc6f36a0e41f0457"
+    },
+    "life-sleeve-02-enter-r1-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/02-enter-r1.png",
+      "rawSHA256": "3270ef8efc8851947ce9c5e765a0175dbfe2f47f30481e788272bc581707b020",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-sleeve-02-enter-r1-fg",
+        "life-sleeve-05-release-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-02-enter-r1",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/02-enter-r1.png",
+      "originalSHA256": "3270ef8efc8851947ce9c5e765a0175dbfe2f47f30481e788272bc581707b020"
+    },
+    "life-sleeve-03-contact-r2-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/03-contact-r2.png",
+      "rawSHA256": "dafb9bf53417e19d2eb6b3a0e849a8f98a105ade23502b641699f42aa55ca03d",
+      "durationMs": 210,
+      "embeddedStool": true,
+      "grabImmediate": "life-sleeve-03-contact-r2-d",
+      "grabNext": [
+        "life-sleeve-05-release-r3-d",
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-03-contact-r2",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/03-contact-r2.png",
+      "originalSHA256": "dafb9bf53417e19d2eb6b3a0e849a8f98a105ade23502b641699f42aa55ca03d"
+    },
+    "life-sleeve-03-contact-r2-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/03-contact-r2.png",
+      "rawSHA256": "d346543c11a132761000321079df961b21277db7f0e85d62b3d6410dbbf95780",
+      "durationMs": 210,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-sleeve-05-release-r3-d",
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-sleeve-03-contact-r2-fg",
+        "life-sleeve-05-release-r3-fg",
+        "life-sleeve-05-release-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-03-contact-r2",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/03-contact-r2.png",
+      "originalSHA256": "d346543c11a132761000321079df961b21277db7f0e85d62b3d6410dbbf95780"
+    },
+    "life-sleeve-04-smooth-r2-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/04-smooth-r2.png",
+      "rawSHA256": "49e3802f9443707f8ea6322585989c9d59d4474e091010dfcf28c48045656625",
+      "durationMs": 190,
+      "embeddedStool": true,
+      "grabImmediate": "life-sleeve-04-smooth-r2-d",
+      "grabNext": [
+        "life-sleeve-05-release-r3-d",
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-04-smooth-r2",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/04-smooth-r2.png",
+      "originalSHA256": "49e3802f9443707f8ea6322585989c9d59d4474e091010dfcf28c48045656625"
+    },
+    "life-sleeve-04-smooth-r2-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/04-smooth-r2.png",
+      "rawSHA256": "e1c329376c2cc645dbff4990fd25d55a6c6cde806b39651c75a055801fa0eac9",
+      "durationMs": 190,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-sleeve-05-release-r3-d",
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-sleeve-04-smooth-r2-fg",
+        "life-sleeve-05-release-r3-fg",
+        "life-sleeve-05-release-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-04-smooth-r2",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/04-smooth-r2.png",
+      "originalSHA256": "e1c329376c2cc645dbff4990fd25d55a6c6cde806b39651c75a055801fa0eac9"
+    },
+    "life-sleeve-05-release-r3-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/05-release-r3.png",
+      "rawSHA256": "806dda85004e11bfdbc3c399f38c85fef2f784b74c9d380e328d6446e8f30c92",
+      "durationMs": 140,
+      "embeddedStool": true,
+      "grabImmediate": "life-sleeve-05-release-r3-d",
+      "grabNext": [
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-05-release-r3",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/05-release-r3.png",
+      "originalSHA256": "806dda85004e11bfdbc3c399f38c85fef2f784b74c9d380e328d6446e8f30c92"
+    },
+    "life-sleeve-05-release-r3-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/05-release-r3.png",
+      "rawSHA256": "2dd8e14ed73a85c18fd6ea76fa64f03c68a11be3f39e459510860079c4fe5372",
+      "durationMs": 140,
+      "embeddedStool": false,
+      "grabNext": [
+        "life-sleeve-05-release-r1-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-sleeve-05-release-r3-fg",
+        "life-sleeve-05-release-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-05-release-r3",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/05-release-r3.png",
+      "originalSHA256": "2dd8e14ed73a85c18fd6ea76fa64f03c68a11be3f39e459510860079c4fe5372"
+    },
+    "life-sleeve-05-release-r1-fg": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/05-release-r1.png",
+      "rawSHA256": "729a231b5e36716e5050c05540e75ece79ecfe2fce867ec31b3c2ee16c711e6e",
+      "durationMs": 160,
+      "embeddedStool": true,
+      "grabImmediate": "life-sleeve-05-release-r1-d",
+      "grabNext": [
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-05-release-r1",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/05-release-r1.png",
+      "originalSHA256": "729a231b5e36716e5050c05540e75ece79ecfe2fce867ec31b3c2ee16c711e6e"
+    },
+    "life-sleeve-05-release-r1-d": {
+      "rawSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/05-release-r1.png",
+      "rawSHA256": "734dc13b65ef10295f8e2b7d01ed57e9a8fc4c354429bd90ef42630d8f576a44",
+      "durationMs": 160,
+      "embeddedStool": false,
+      "grabNext": [
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "life-sleeve-05-release-r1-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "sourceId": "life-sleeve-05-release-r1",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/05-release-r1.png",
+      "originalSHA256": "734dc13b65ef10295f8e2b7d01ed57e9a8fc4c354429bd90ef42630d8f576a44"
+    }
+  },
+  "nativeFollow": "immediate; same-pose D immediately, no art delay"
+}

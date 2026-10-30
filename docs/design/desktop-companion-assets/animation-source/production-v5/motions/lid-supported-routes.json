@@ -1,0 +1,1818 @@
+{
+  "version": 1,
+  "status": "source-checkpoint-not-runtime-admission",
+  "recipe": "../seated-preparation.json",
+  "nativeFollow": "immediate; no delay for art",
+  "entryPairs": [
+    {
+      "seatedNode": "closed-neutral-fg",
+      "entrySourceSha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+      "detachedNode": "closed-neutral-d"
+    },
+    {
+      "seatedNode": "lid-contact-000-fg",
+      "entrySourceSha256": "7fe346899df09024996e6f17c025a4305b312dedee4cd2100c9688d93e2b24b6",
+      "detachedNode": "lid-contact-000-d"
+    },
+    {
+      "seatedNode": "lid-contact-015-fg",
+      "entrySourceSha256": "ef89e5383d51c27c6afce0db6595f860300e254f553c89d1e2aa3883ec1cb6ad",
+      "detachedNode": "lid-contact-015-d"
+    },
+    {
+      "seatedNode": "lid-contact-030-fg",
+      "entrySourceSha256": "b1c35e8781f31e5c03989c24d729eb749298e95960dd28d6e5bbc6518e312f12",
+      "detachedNode": "lid-contact-030-d"
+    },
+    {
+      "seatedNode": "lid-contact-045-fg",
+      "entrySourceSha256": "8b9c7f700492916353a3481728439b82bc37cd8bca2cdd3d17b2a5587f97fc8a",
+      "detachedNode": "lid-contact-045-d"
+    },
+    {
+      "seatedNode": "lid-contact-055-fg",
+      "entrySourceSha256": "e05c2a0d4fe68fc209fac53cb9a8ce75d2ba0c305f309dd1e83bcf8b65fc2ea0",
+      "detachedNode": "lid-contact-055-d"
+    },
+    {
+      "seatedNode": "lid-contact-070-fg",
+      "entrySourceSha256": "08e940bc4aeb677a232ae8734bae6924956f39080b45d48d81b5874752f515be",
+      "detachedNode": "lid-contact-070-d"
+    },
+    {
+      "seatedNode": "lid-contact-085-fg",
+      "entrySourceSha256": "996f50d9a0f5b324c908b8feff84a06f014f72666746e27166675f71764ab495",
+      "detachedNode": "lid-contact-085-d"
+    },
+    {
+      "seatedNode": "lid-contact-100-fg",
+      "entrySourceSha256": "cec85cee6d7318cd1f61e0cee0aa7241789cb684dd3e2730496a5efe0efb0a28",
+      "detachedNode": "lid-contact-100-d"
+    },
+    {
+      "seatedNode": "lid-release-first-fg",
+      "entrySourceSha256": "4dec20799ecf0c36888b145474cbff7d1bd17a32c2eddd7ac5410f62bbc0354b",
+      "detachedNode": "lid-release-first-d"
+    },
+    {
+      "seatedNode": "lid-release-middle-fg",
+      "entrySourceSha256": "3e3800752b8d4f946beaeb254d544a01daa90d1da18cdcf4c1e8b95cee9b6f48",
+      "detachedNode": "lid-release-middle-d"
+    },
+    {
+      "seatedNode": "lid-release-low-fg",
+      "entrySourceSha256": "aa22f11272cd648f5d9ccfd9f49f7f93c4775211377b7b43d90c8f70a5a40b1a",
+      "detachedNode": "lid-release-low-d"
+    },
+    {
+      "seatedNode": "lid-closing-lift-fg",
+      "entrySourceSha256": "ce85d108172b6a7f5da4d7c945323eb197e35c08bf9ab30a5f54a3170f551d2c",
+      "detachedNode": "lid-closing-lift-d"
+    },
+    {
+      "seatedNode": "lid-closing-approach-fg",
+      "entrySourceSha256": "c1f06c37942021d4bfb62c11a5a6862bd745821e37dea060e1bc72658353eebc",
+      "detachedNode": "lid-closing-approach-d"
+    },
+    {
+      "seatedNode": "lid-closing-settle-fg",
+      "entrySourceSha256": "065e5d9531dbff968093050ee80685b3541b7be34c887db2edccbff61c325f66",
+      "detachedNode": "lid-closing-settle-d"
+    },
+    {
+      "seatedNode": "lid-supported-000-fg",
+      "entrySourceSha256": "4490b8fd54b8aaabeeefd96aaf2183b431868ab5bf4eb29690431c7c2f98f327",
+      "detachedNode": "lid-supported-000-d"
+    },
+    {
+      "seatedNode": "lid-supported-015-fg",
+      "entrySourceSha256": "6f4c9860adc6bd556124ed3da2cd96e1f908b6592f487fb1742266d7f656a6bf",
+      "detachedNode": "lid-supported-015-d"
+    },
+    {
+      "seatedNode": "lid-supported-030-fg",
+      "entrySourceSha256": "185821d15bfb0ed3d6c986a0ef6c7b78d210f63271d0fece3cba706f66caaaeb",
+      "detachedNode": "lid-supported-030-d"
+    },
+    {
+      "seatedNode": "lid-supported-045-fg",
+      "entrySourceSha256": "4a055c21558148a7ca46d2804110768d4983fd5f5d14e5d500fee124b3534e99",
+      "detachedNode": "lid-supported-045-d"
+    },
+    {
+      "seatedNode": "lid-supported-055-fg",
+      "entrySourceSha256": "e8757c9b436df0bd0a0b5c1aaa955a477139cd4889ff99760ba246f23e0a5dac",
+      "detachedNode": "lid-supported-055-d"
+    },
+    {
+      "seatedNode": "lid-supported-070-fg",
+      "entrySourceSha256": "721506e4cefdce2561f3c874d2a6a687dee4bd943dbf9737906b301b0ec2181b",
+      "detachedNode": "lid-supported-070-d"
+    },
+    {
+      "seatedNode": "lid-supported-085-fg",
+      "entrySourceSha256": "86d98a54e5d566e6beda7a44d8924894685169277ca4f053884707626a6bb0a0",
+      "detachedNode": "lid-supported-085-d"
+    },
+    {
+      "seatedNode": "lid-supported-100-fg",
+      "entrySourceSha256": "ca94aead40bc944951a0c4d636f6bca695a9fc6698c7e1161013a5e608038330",
+      "detachedNode": "lid-supported-100-d"
+    },
+    {
+      "seatedNode": "lid-acquire-015-fg",
+      "entrySourceSha256": "7101890a84f9503c409b3ff65f6e985fd17b5a3b03a1a3c94392b7dfcfdf2ecb",
+      "detachedNode": "lid-acquire-015-d"
+    },
+    {
+      "seatedNode": "lid-acquire-045-fg",
+      "entrySourceSha256": "37c259b9d7f451503ea54c8390e49b5d42218ef02ce667fdcc476f00c98bf009",
+      "detachedNode": "lid-acquire-045-d"
+    },
+    {
+      "seatedNode": "lid-acquire-055-fg",
+      "entrySourceSha256": "e851c984328d6805b3f6f7574c0f4b2b40f70dbf7b6bf474c48036ee22643091",
+      "detachedNode": "lid-acquire-055-d"
+    },
+    {
+      "seatedNode": "lid-acquire-070-fg",
+      "entrySourceSha256": "2a8dd48bfd192e37a09b522e3fdbee532954d85d40be18d785ef2ab8c1e41467",
+      "detachedNode": "lid-acquire-070-d"
+    },
+    {
+      "seatedNode": "lid-acquire-085-fg",
+      "entrySourceSha256": "880f8c59ded2f5cd01e4ebc6147e5d3c3245a7386c2baf924b0f914b254e2adc",
+      "detachedNode": "lid-acquire-085-d"
+    },
+    {
+      "seatedNode": "lid-acquire-100-fg",
+      "entrySourceSha256": "30a45653e15c584f5fdc34fa75d38b5eb26860fc2ed2f109e51dc5e4ad736266",
+      "detachedNode": "lid-acquire-100-d"
+    },
+    {
+      "seatedNode": "lid-closed-side-fg",
+      "entrySourceSha256": "609bd8c4079bd449d9c94eca325686637a6dbbab417985d8c856a3f7fb3fbf07",
+      "detachedNode": "lid-closed-side-d"
+    },
+    {
+      "seatedNode": "lid-closed-secure-fg",
+      "entrySourceSha256": "4833da63c254bf3998a097511d634deed6506fd54ca557b345d38b3bce0890f5",
+      "detachedNode": "lid-closed-secure-d"
+    }
+  ],
+  "nodes": {
+    "closed-neutral-d": {
+      "sha256": "eb138945b6634fced7420ae45ab626e838953627ca3f1cae4ff9d0c10950043f",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/closed-neutral-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "closed-neutral",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-neutral-r1.png",
+      "originalSHA256": "33ce18ecd03e87c9b7b30529ba9dc04cd86ffc0814594f1e944bf976b2a57119"
+    },
+    "closed-neutral-fg": {
+      "sha256": "507f60f6da7091bc49e45d55ff7632424db37a4d58771c07adddf6e257b2b42a",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "closed-neutral-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/closed-neutral-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "closed-neutral",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-neutral.png",
+      "originalSHA256": "51ef169e2c6dfe11f594f4a941585dec41bc103a0e1784f210dc7ad4c5a60734"
+    },
+    "lid-contact-000-d": {
+      "sha256": "acd31ef484b0006bfaa9e0a8febc3064fa2546487e811a4080338379577dccf4",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-000-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-000-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-000-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-000",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-000-r1.png",
+      "originalSHA256": "d0fb493ac4a3a4584fdad5c3860c6f4dd921fd02fc74acfdf712850a36fb2794"
+    },
+    "lid-contact-000-fg": {
+      "sha256": "7fe346899df09024996e6f17c025a4305b312dedee4cd2100c9688d93e2b24b6",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-contact-000-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-000-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-000",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-000.png",
+      "originalSHA256": "10b74670a50ffd6cbf5ef049e9e29babef276b42d14f7af3bf6de82aa7fe6d18"
+    },
+    "lid-contact-015-d": {
+      "sha256": "efd845345cc30ba60e3010aeee7f0b5d00af3eaab1917ba7b48813c33009521f",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-acquire-015-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-015-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-015-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-015-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-015",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-015-r2.png",
+      "originalSHA256": "0533c93c2e176a0d85af47f28d749d743725f412ef91090f4109acfc798b00e7"
+    },
+    "lid-contact-015-fg": {
+      "sha256": "ef89e5383d51c27c6afce0db6595f860300e254f553c89d1e2aa3883ec1cb6ad",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-acquire-015-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-contact-015-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-015-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-015",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-015.png",
+      "originalSHA256": "d19b7204a89930ff9d1c80f7ac91e7fddbc347bbdabf3aeaf706052634a485b0"
+    },
+    "lid-contact-030-d": {
+      "sha256": "4c5a49669264072e9eb907e2db89a46b58bd9a68a1e1ec7e0807d6ea6438eec1",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-030-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-030-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-030-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-030",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-030-r1.png",
+      "originalSHA256": "02ed4914fcd57db054fa04b9ddc8c593a8ee9e6b3dcc9febce0b2a03e5a5cf73"
+    },
+    "lid-contact-030-fg": {
+      "sha256": "b1c35e8781f31e5c03989c24d729eb749298e95960dd28d6e5bbc6518e312f12",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-contact-030-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-030-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-030",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-030.png",
+      "originalSHA256": "dc658aa2b7a62c61feb5e9cba1d96b05275911fb2fd5fa85f3fd041625e0dbcd"
+    },
+    "lid-contact-045-d": {
+      "sha256": "811498bc3d70a9d234b5afb1cc9ef8417ad4c1e312139840a952aaaf326ea7a5",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-acquire-045-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-045-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-045-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-045-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-045",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-045-r1.png",
+      "originalSHA256": "f5b0ca168fc826f0eeba8ec0df3b28297108ea30a74354b1848bb7fd2dbfde84"
+    },
+    "lid-contact-045-fg": {
+      "sha256": "8b9c7f700492916353a3481728439b82bc37cd8bca2cdd3d17b2a5587f97fc8a",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-acquire-045-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-contact-045-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-045-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-045",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-045.png",
+      "originalSHA256": "10d659907e46cb92592bfa9d18323121ce7b165c0ac324c5a0db3b57d1100190"
+    },
+    "lid-contact-055-d": {
+      "sha256": "ca70a0887b4a2f6f4d0f4bada3824407131163bec29863ae4f32919faef62853",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-acquire-055-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-055-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-055-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-055-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-055",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-055-r1.png",
+      "originalSHA256": "dfbc27ea59e8bd84eb182a35baaa5c758d49900ddb4de7e69866d6bcdf469bbc"
+    },
+    "lid-contact-055-fg": {
+      "sha256": "e05c2a0d4fe68fc209fac53cb9a8ce75d2ba0c305f309dd1e83bcf8b65fc2ea0",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-acquire-055-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-contact-055-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-055-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-055",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-055.png",
+      "originalSHA256": "10e2d79fd93fd19b74dbddb15e0fe5f07ec8b40a14546b90848d328c26cf0af5"
+    },
+    "lid-contact-070-d": {
+      "sha256": "10665c9e79a6d460b5bbd617a9b52c9a5ddc52e80e0df6042c3c62f15c3c68c2",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-acquire-070-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-070-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-070-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-070-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-070",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-070-r1.png",
+      "originalSHA256": "1fd5401b2fcfb1e6b1cef91a501b3f38260269b3c9421c660bbe4277a2b98fbb"
+    },
+    "lid-contact-070-fg": {
+      "sha256": "08e940bc4aeb677a232ae8734bae6924956f39080b45d48d81b5874752f515be",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-acquire-070-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-contact-070-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-070-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-070",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-070.png",
+      "originalSHA256": "eb66b589ef5597ea44d09acb95df03d4a72aa57c3b7daf2fe51c37c56cbbc86e"
+    },
+    "lid-contact-085-d": {
+      "sha256": "ef36aa2af3d735107760508ce19b28f7af04c3a89e1f5072f877e26aeead6671",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-acquire-085-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-085-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-085-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-085-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-085",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-085-r1.png",
+      "originalSHA256": "bff78ff4eb1b11fa8581d51dcf5bc8376d217e27c0f5e8f242504ffaccd7a215"
+    },
+    "lid-contact-085-fg": {
+      "sha256": "996f50d9a0f5b324c908b8feff84a06f014f72666746e27166675f71764ab495",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-acquire-085-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-contact-085-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-085-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-085",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-085.png",
+      "originalSHA256": "5a3b9da77be1d8ee1659367db56aa8b3198cfbdfba0577bf3234672ad7284e73"
+    },
+    "lid-contact-100-d": {
+      "sha256": "addf671f525caefeca1dd67b7651410b42824fb86f2db7eed8cd0cf050897b61",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-100-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-100-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-100-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-100",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-100-r1.png",
+      "originalSHA256": "78bedc2c06c801019188d3bf4009f926a970ed44ecf88177b00ba8d337f73aaa"
+    },
+    "lid-contact-100-fg": {
+      "sha256": "cec85cee6d7318cd1f61e0cee0aa7241789cb684dd3e2730496a5efe0efb0a28",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-contact-100-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-contact-100-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-contact-100",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-100.png",
+      "originalSHA256": "80daf1cf3c420e5a8d221072c5cdc0dd9bc95e7351ff921d717b9c598b94d13b"
+    },
+    "lid-release-first-d": {
+      "sha256": "c2bae9d8df1880cfbaf747ecca557003e105f4597124338b6ee9acc6b92d7f35",
+      "durationMs": 80,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closing-approach-d",
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-release-first-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-release-first-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-release-first-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-release-first",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/release-first-r1.png",
+      "originalSHA256": "b5e50f333fc6aef5dd2b4fe5fe1d30ff9a610fe991aeb893d2072761dad185e5"
+    },
+    "lid-release-first-fg": {
+      "sha256": "4dec20799ecf0c36888b145474cbff7d1bd17a32c2eddd7ac5410f62bbc0354b",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closing-approach-d",
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-release-first-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-release-first-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-release-first",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/release-first.png",
+      "originalSHA256": "aa8fffbc5aa732e9c96749e9d12b205a9ea695339f2ea1874899940a84c30164"
+    },
+    "lid-release-middle-d": {
+      "sha256": "3cc997c246af4c7337223bbec755e89017b53d3b84d9e5ccdf6cdab644295f29",
+      "durationMs": 80,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closing-approach-d",
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-release-middle-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-release-middle-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-release-middle-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-release-middle",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/release-middle-r1.png",
+      "originalSHA256": "d0e156d7ab1a1b900e0295a65a65a512bf9e61d4c63c8882f4333e8b267be031"
+    },
+    "lid-release-middle-fg": {
+      "sha256": "3e3800752b8d4f946beaeb254d544a01daa90d1da18cdcf4c1e8b95cee9b6f48",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closing-approach-d",
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-release-middle-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-release-middle-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-release-middle",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/release-middle.png",
+      "originalSHA256": "13128ed154e8143ceae8d1b7fbd252361d6cfa0808b4a50de11afd494437b89f"
+    },
+    "lid-release-low-d": {
+      "sha256": "cd45d7c34028914f8888152c2a5a6d8ebaf4ab43ae42055533c4c1699d1beefa",
+      "durationMs": 80,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closing-lift-d",
+        "lid-closing-approach-d",
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-release-low-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-release-low-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-release-low-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-release-low",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/release-low-r1.png",
+      "originalSHA256": "e7061aa65355ccacb0f4c256b9dcb2c4fb4c6996a02e3b0b18aea5c39a013428"
+    },
+    "lid-release-low-fg": {
+      "sha256": "aa22f11272cd648f5d9ccfd9f49f7f93c4775211377b7b43d90c8f70a5a40b1a",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closing-lift-d",
+        "lid-closing-approach-d",
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-release-low-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-release-low-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-release-low",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/release-low.png",
+      "originalSHA256": "06249853bc404eb49b6fbe9adeff1c55ca077495d88692e0684ec3537edfefff"
+    },
+    "lid-closing-lift-d": {
+      "sha256": "d48dafd45bafc7e26d3274b875ac382705d404082a2f51b0218991c5dd4b580d",
+      "durationMs": 80,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closing-approach-d",
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-closing-lift-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-closing-lift-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closing-lift-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closing-lift",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closing-lift-r1.png",
+      "originalSHA256": "6697564220f4bd4987c2d2d0caad360abbda2e8ca6c2213503964dbc9f5ae656"
+    },
+    "lid-closing-lift-fg": {
+      "sha256": "ce85d108172b6a7f5da4d7c945323eb197e35c08bf9ab30a5f54a3170f551d2c",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closing-approach-d",
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-closing-lift-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closing-lift-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closing-lift",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/closing-lift.png",
+      "originalSHA256": "c326dedf46a2b056e7c125ced13e384bc9bf903c056726a1a9bf70783ecbdba2"
+    },
+    "lid-closing-approach-d": {
+      "sha256": "b26724276a8dcad24193f15e6294f49e361ea7ef2494962d1346b9ee7092b3e5",
+      "durationMs": 80,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-closing-approach-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-closing-approach-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closing-approach-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closing-approach",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closing-approach-r1.png",
+      "originalSHA256": "39e0f542c80b150f43fb54e663d73e77843d52ddf14ee64659e93f4b291dada3"
+    },
+    "lid-closing-approach-fg": {
+      "sha256": "c1f06c37942021d4bfb62c11a5a6862bd745821e37dea060e1bc72658353eebc",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-contact-100-d",
+        "lid-acquire-100-d",
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-closing-approach-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closing-approach-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closing-approach",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/closing-approach.png",
+      "originalSHA256": "f4225dc3c3caf7570d7508c844ddcf4d6da4e81cad62bddc15e8e09dce1afa49"
+    },
+    "lid-closing-settle-d": {
+      "sha256": "f447cce35a976895cc8159ca2c5c4d48152df62d798648fdcb31ce21e62a46f1",
+      "durationMs": 70,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-closing-settle-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-closing-settle-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closing-settle-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closing-settle",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closing-settle-r1.png",
+      "originalSHA256": "78d797a61d09b2ca0bc03040c629d15eaac1f5c3aa14b0cc6fcca77a7b861088"
+    },
+    "lid-closing-settle-fg": {
+      "sha256": "065e5d9531dbff968093050ee80685b3541b7be34c887db2edccbff61c325f66",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [],
+      "grabImmediate": "lid-closing-settle-d",
+      "settled": true,
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closing-settle-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closing-settle",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/closing-settle.png",
+      "originalSHA256": "915e3bc1b9290b69c85b4041246a41419c894df9f4eb203080623c9ff2fd5006"
+    },
+    "lid-supported-000-d": {
+      "sha256": "1d6d16566652fc46086c27de249d047b63dab9413dfe7235217a227619f2265e",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-supported-000-fg",
+        "lid-contact-000-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-000-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-000-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-000",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-000-d-r1.png",
+      "originalSHA256": "d81c6b796044beceab9e908275e2da538c33723307c43a05f59f0b18ebeb3cb0"
+    },
+    "lid-supported-000-fg": {
+      "sha256": "4490b8fd54b8aaabeeefd96aaf2183b431868ab5bf4eb29690431c7c2f98f327",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-000-fg"
+      ],
+      "grabImmediate": "lid-supported-000-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-000-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-000-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-000",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-000-fg-r1.png",
+      "originalSHA256": "6db2dce263ec522628aab718d0306a790baefa65a8ee245da2d3a097c935caa1"
+    },
+    "lid-supported-015-d": {
+      "sha256": "69237ae7e1360097b5d86058a0f1471822698eae1df6fde7fddfcad22840996d",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-supported-015-fg",
+        "lid-acquire-015-fg",
+        "lid-contact-015-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-015-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-015-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-015",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-015-d-r1.png",
+      "originalSHA256": "886f833d2bef40fda1b1d2fd0690b13b83f03efa03cf516392149915264a8ad0"
+    },
+    "lid-supported-015-fg": {
+      "sha256": "6f4c9860adc6bd556124ed3da2cd96e1f908b6592f487fb1742266d7f656a6bf",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-015-fg",
+        "lid-contact-015-fg"
+      ],
+      "grabImmediate": "lid-supported-015-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-015-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-015-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-015",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-015-fg-r1.png",
+      "originalSHA256": "432e50a4d4b165dab2bf7bcfacae06aba3e53a2a9fff4c458151ab4877bc57c2"
+    },
+    "lid-supported-030-d": {
+      "sha256": "1bab2f48e2ddd75dffdd496e1d385b57450e6288d22b10a2a64fde6de4e84764",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-supported-030-fg",
+        "lid-contact-030-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-030-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-030-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-030",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-030-d-r1.png",
+      "originalSHA256": "b5f546d723680a4426ab3471d687a611a34f78160e14e533aab4f8be64611806"
+    },
+    "lid-supported-030-fg": {
+      "sha256": "185821d15bfb0ed3d6c986a0ef6c7b78d210f63271d0fece3cba706f66caaaeb",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-030-fg"
+      ],
+      "grabImmediate": "lid-supported-030-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-030-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-030-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-030",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-030-fg-r1.png",
+      "originalSHA256": "a2919b5845945761764cb68bb5383397812d25c185db5c2fc1473d7cc3dbed7e"
+    },
+    "lid-supported-045-d": {
+      "sha256": "be39b97d5ae0cf1944aa1b72be560506a6250bd83939633f5908e49674cac916",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-supported-045-fg",
+        "lid-acquire-045-fg",
+        "lid-contact-045-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-045-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-045-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-045",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-045-d-r1.png",
+      "originalSHA256": "a09ac3dfebd0c8ab95b22452cbd3bc34ca2166a0161a6a3fd66363b957230325"
+    },
+    "lid-supported-045-fg": {
+      "sha256": "4a055c21558148a7ca46d2804110768d4983fd5f5d14e5d500fee124b3534e99",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-045-fg",
+        "lid-contact-045-fg"
+      ],
+      "grabImmediate": "lid-supported-045-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-045-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-045-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-045",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-045-fg-r1.png",
+      "originalSHA256": "a9873dbfda3e4b94a944f20da3654402f6a698707c7721bfe3e905de6d441254"
+    },
+    "lid-supported-055-d": {
+      "sha256": "ab9985818f8550cc47d379b14fd402eb7298ae4b6fa9428af2f6e9f2f546376c",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-supported-055-fg",
+        "lid-acquire-055-fg",
+        "lid-contact-055-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-055-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-055-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-055",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-055-d-r1.png",
+      "originalSHA256": "6547aa7deeec3055403a1174a5790af628009198e5ce1a8712ddf0eb236485b4"
+    },
+    "lid-supported-055-fg": {
+      "sha256": "e8757c9b436df0bd0a0b5c1aaa955a477139cd4889ff99760ba246f23e0a5dac",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-055-fg",
+        "lid-contact-055-fg"
+      ],
+      "grabImmediate": "lid-supported-055-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-055-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-055-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-055",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-055-fg-r1.png",
+      "originalSHA256": "a8c001bfd96dd1016c0a287a60f896268b60a43784a74b67719284220430c9b3"
+    },
+    "lid-supported-070-d": {
+      "sha256": "a9a7552f93794c37e9c48720fbe86303fc1729e6854c0a35a59cb15fa59053d5",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-supported-070-fg",
+        "lid-acquire-070-fg",
+        "lid-contact-070-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-070-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-070-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-070",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-070-d-r1.png",
+      "originalSHA256": "ef78ec1ca2d4c0b5089381c70f9056257e0330c5c02200c11f2e116b13b66513"
+    },
+    "lid-supported-070-fg": {
+      "sha256": "721506e4cefdce2561f3c874d2a6a687dee4bd943dbf9737906b301b0ec2181b",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-070-fg",
+        "lid-contact-070-fg"
+      ],
+      "grabImmediate": "lid-supported-070-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-070-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-070-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-070",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-070-fg-r1.png",
+      "originalSHA256": "3792798e7e7b81a80c8e4391f9aa4d75dbd3997013af159471ef5738dc9f453d"
+    },
+    "lid-supported-085-d": {
+      "sha256": "0481d312e264f4312051b821c187043fbcb73586e8415c3965e0f2fd0bff9e60",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-supported-085-fg",
+        "lid-acquire-085-fg",
+        "lid-contact-085-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-085-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-085-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-085",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-085-d-r1.png",
+      "originalSHA256": "cf1aab1e75c287893ee86de2472ffaa3dbbc211bdc572d12e42945ad898e863f"
+    },
+    "lid-supported-085-fg": {
+      "sha256": "86d98a54e5d566e6beda7a44d8924894685169277ca4f053884707626a6bb0a0",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-085-fg",
+        "lid-contact-085-fg"
+      ],
+      "grabImmediate": "lid-supported-085-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-085-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-085-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-085",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-085-fg-r1.png",
+      "originalSHA256": "dd0dc4ca66ab1dd5c215eee06d4ad8d0ce7e67a319026017470dc65708b50c0f"
+    },
+    "lid-supported-100-d": {
+      "sha256": "9c8b44ddc3fad23758514324ca2083880f8f0c7ed11c0dacfb80707d71465ddb",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-supported-100-fg",
+        "lid-acquire-100-fg",
+        "lid-contact-100-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-100-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-100-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-100",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-100-d-r1.png",
+      "originalSHA256": "892a4782e86dbf897a597727b70136c49f26ebb7c4e39f40f41e544057a97528"
+    },
+    "lid-supported-100-fg": {
+      "sha256": "ca94aead40bc944951a0c4d636f6bca695a9fc6698c7e1161013a5e608038330",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-100-fg",
+        "lid-contact-100-fg"
+      ],
+      "grabImmediate": "lid-supported-100-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-100-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-supported-100-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-supported-100",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-100-fg-r1.png",
+      "originalSHA256": "ee31d1734a209e4043efc52cd723dd40e27a273b279c99dd4d1e9edf2fb80627"
+    },
+    "lid-acquire-015-d": {
+      "sha256": "2d124075a9877a4b0f7bb84f85f4246298a763712c2a77f7297c9f8b14bf4b57",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-015-fg",
+        "lid-contact-015-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-015-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-015-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-015",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-015-d-r1.png",
+      "originalSHA256": "3a5ca2b345853a2c0dad88aa286bdf12c8ee52bd8f427d6651b94d4fe76c4462"
+    },
+    "lid-acquire-015-fg": {
+      "sha256": "7101890a84f9503c409b3ff65f6e985fd17b5a3b03a1a3c94392b7dfcfdf2ecb",
+      "durationMs": 110,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-015-fg"
+      ],
+      "grabImmediate": "lid-acquire-015-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-015-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-015-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-015",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-015-fg-r1.png",
+      "originalSHA256": "403d6009accfa03980bd655140eb2c5cc6cfa1a49727b64b24a612b53b72e035"
+    },
+    "lid-acquire-045-d": {
+      "sha256": "5b4b481f06741006f49d3f933d81d9e67aa4c4c17537cf4b05b413b812feea30",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-045-fg",
+        "lid-contact-045-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-045-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-045-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-045",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-045-d-r1.png",
+      "originalSHA256": "439b229e707013ca8a72956d4579893a83bd3976bbf0416fd7a87e1ddf693e57"
+    },
+    "lid-acquire-045-fg": {
+      "sha256": "37c259b9d7f451503ea54c8390e49b5d42218ef02ce667fdcc476f00c98bf009",
+      "durationMs": 110,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-045-fg"
+      ],
+      "grabImmediate": "lid-acquire-045-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-045-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-045-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-045",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-045-fg-r1.png",
+      "originalSHA256": "8cdeb48d57d35822e8d368775e49e249a7aedb6e169022d1e59d5ab70b5975cd"
+    },
+    "lid-acquire-055-d": {
+      "sha256": "470ace8c473a796bb4692cf0632aa0ddd65f844bccf9eb80499544c1b062be16",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-055-fg",
+        "lid-contact-055-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-055-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-055-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-055",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-055-d-r1.png",
+      "originalSHA256": "a4572a1d95f54211b33b7008b8f959f512f886ed9eeb449dd874d77ce7f6986f"
+    },
+    "lid-acquire-055-fg": {
+      "sha256": "e851c984328d6805b3f6f7574c0f4b2b40f70dbf7b6bf474c48036ee22643091",
+      "durationMs": 110,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-055-fg"
+      ],
+      "grabImmediate": "lid-acquire-055-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-055-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-055-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-055",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-055-fg-r1.png",
+      "originalSHA256": "ebe4f93fc1b805e6c2be75865161be1c39d5b0b1e81378092a93512ecd698c33"
+    },
+    "lid-acquire-070-d": {
+      "sha256": "ec785be87b3fa5d2fe586fe35a2986216e4a242d9155aa69651f29ec49cb66fa",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-070-fg",
+        "lid-contact-070-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-070-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-070-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-070",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-070-d-r1.png",
+      "originalSHA256": "3815009cf9f8e61b4b761d490f26bf4abfc722ae5dbb92ca4d90f148b70cb99a"
+    },
+    "lid-acquire-070-fg": {
+      "sha256": "2a8dd48bfd192e37a09b522e3fdbee532954d85d40be18d785ef2ab8c1e41467",
+      "durationMs": 110,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-070-fg"
+      ],
+      "grabImmediate": "lid-acquire-070-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-070-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-070-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-070",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-070-fg-r1.png",
+      "originalSHA256": "1d2bfbb9a60a9bc6b75521d5f2f6f18ed028f2b04f92320f047312754a04f04e"
+    },
+    "lid-acquire-085-d": {
+      "sha256": "a1953170a226145457477800073b421d498356940b002d73fb0449d08d026172",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-085-fg",
+        "lid-contact-085-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-085-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-085-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-085",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-085-d-r1.png",
+      "originalSHA256": "7950fc05981efa82e57e10f022deeb3a9ae0078c6ae1da45fbac9904f8d8811c"
+    },
+    "lid-acquire-085-fg": {
+      "sha256": "880f8c59ded2f5cd01e4ebc6147e5d3c3245a7386c2baf924b0f914b254e2adc",
+      "durationMs": 110,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-085-fg"
+      ],
+      "grabImmediate": "lid-acquire-085-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-085-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-085-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-085",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-085-fg-r1.png",
+      "originalSHA256": "03efb8fcf5e53ba3430511e776fb999e14b7d14da92ffeb48d72ee4f5b92f9c4"
+    },
+    "lid-acquire-100-d": {
+      "sha256": "5698f9a7779e3dcf42c96b0bd7c93237f6cfcaf7368cb80bbf6be43abb391984",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-acquire-100-fg",
+        "lid-contact-100-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-100-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-100-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-100",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-100-d-r1.png",
+      "originalSHA256": "3a0d13baf18399a0276b068990de59c88eb0a17123c04d9030b45581ae047a6a"
+    },
+    "lid-acquire-100-fg": {
+      "sha256": "30a45653e15c584f5fdc34fa75d38b5eb26860fc2ed2f109e51dc5e4ad736266",
+      "durationMs": 110,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-supported-100-d",
+        "lid-supported-085-d",
+        "lid-supported-070-d",
+        "lid-supported-055-d",
+        "lid-supported-045-d",
+        "lid-supported-030-d",
+        "lid-supported-015-d",
+        "lid-supported-000-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-contact-100-fg"
+      ],
+      "grabImmediate": "lid-acquire-100-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "lid-contact-100-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-acquire-100-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-acquire-100",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-100-fg-r1.png",
+      "originalSHA256": "6871b19715b9e1fcf29e159a71c96f2654833600986218660dc6ad23e0c3fda0"
+    },
+    "lid-closed-side-d": {
+      "sha256": "a0ee5583aecff55c9813ee23a15c9e1d872f144a4ccdc2d07ad402d6e1154091",
+      "durationMs": 130,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-closed-side-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closed-side-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closed-side",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-side-canonical-d-r7.png",
+      "originalSHA256": "e37f3e6c98ceeba14d339d3f5adffb64a468c3568ead69f03888f453983d7b94"
+    },
+    "lid-closed-side-fg": {
+      "sha256": "609bd8c4079bd449d9c94eca325686637a6dbbab417985d8c856a3f7fb3fbf07",
+      "durationMs": 130,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "closed-neutral-fg"
+      ],
+      "grabImmediate": "lid-closed-side-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closed-side-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closed-side",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/closed-side-canonical-fg-r7.png",
+      "originalSHA256": "c1efb3d77ed48071926274990549b336978d182f0c8d95cc6fa225e5e2483931"
+    },
+    "lid-closed-secure-d": {
+      "sha256": "74b81e99fdfaa3acc864288fbbddec688fd2d1f774092285fff802ab90108d9d",
+      "durationMs": 150,
+      "embeddedStool": false,
+      "grabNext": [
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-closed-secure-fg",
+        "lid-closed-side-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closed-secure-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closed-secure",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-secure-canonical-d-r7.png",
+      "originalSHA256": "d129fd8d2b46f5a3df25bcfd988103ebffd754a0eb4b5fac5cf7d24e27828d98"
+    },
+    "lid-closed-secure-fg": {
+      "sha256": "4833da63c254bf3998a097511d634deed6506fd54ca557b345d38b3bce0890f5",
+      "durationMs": 160,
+      "embeddedStool": true,
+      "grabNext": [
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "lid-closed-side-fg",
+        "closed-neutral-fg"
+      ],
+      "grabImmediate": "lid-closed-secure-d",
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/lid-closed-secure-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "lid-closed-secure",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/closed-secure-canonical-fg-r7.png",
+      "originalSHA256": "d3060b6d14a0cf07fcf48f16338d1d62e72219851dfb254c376c5e1b976899a3"
+    },
+    "lid-closed-relax-d": {
+      "sha256": "94faa7acf7bb29a00776ef7275fd96e994eb029ffe050b445693911af7b040ac",
+      "durationMs": 160,
+      "embeddedStool": false,
+      "grabNext": [],
+      "releaseNext": [
+        "lid-closed-secure-d",
+        "lid-closed-secure-fg",
+        "lid-closed-side-fg",
+        "closed-neutral-fg"
+      ],
+      "heldUntilRelease": true,
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/lid-v5-supported-carry/prepared-r7/closed-carry-relax.png",
+      "sourceKind": "prepared-display-png",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-relax-canonical-d-r7.png",
+      "originalSHA256": "98ec7f72e66fc23e5c128807d67d08ef3d3a07925cc3289524c2ee46713da313"
+    }
+  },
+  "notes": [
+    "grabNext/releaseNext are full flat ordered continuations excluding current node",
+    "heldUntilRelease is intent annotation, compiler should implement current held-node convention",
+    "Current angle early drop lands at corresponding G/AF/contact; never forces full-open or full-close",
+    "Original neutral is not duplicated; existing E-open carry route remains separate",
+    "Native drop alignment is external host responsibility; this study changes no player code"
+  ],
+  "shaPolicy": "entrySourceSha256 and node sha256 identify prepared display bytes, not original PNGs."
+}

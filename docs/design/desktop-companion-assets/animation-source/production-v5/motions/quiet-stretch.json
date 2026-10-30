@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "id": "v5-quiet-stretch-working-phrase",
+  "action": "quiet-stretch",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 500
+    },
+    {
+      "sourceId": "l09-01-release",
+      "durationMs": 280
+    },
+    {
+      "sourceId": "l09-02-rise",
+      "durationMs": 350
+    },
+    {
+      "sourceId": "l09-03-peak-r2",
+      "durationMs": 650
+    },
+    {
+      "sourceId": "l09-04-return-r3",
+      "durationMs": 380
+    },
+    {
+      "sourceId": "l09-05-contact",
+      "durationMs": 350
+    },
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 750
+    }
+  ],
+  "routes": "stretch-routes.json",
+  "runtimeApproval": false,
+  "semantic": "Local life gesture only; no execution, approval, answer or completion claim."
+}

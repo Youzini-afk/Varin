@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "id": "v5-quiet-hair-smooth-working-phrase",
+  "action": "quiet-hair-smooth",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 500
+    },
+    {
+      "sourceId": "life-hair-02-approach-r2",
+      "durationMs": 110
+    },
+    {
+      "sourceId": "life-hair-02b-near-lock-r3",
+      "durationMs": 100
+    },
+    {
+      "sourceId": "life-hair-03-contact-r2",
+      "durationMs": 190
+    },
+    {
+      "sourceId": "life-hair-04-smooth-r1",
+      "durationMs": 170
+    },
+    {
+      "sourceId": "life-hair-05-release-r3",
+      "durationMs": 100
+    },
+    {
+      "sourceId": "life-hair-05b-lower-arm-r3",
+      "durationMs": 110
+    },
+    {
+      "sourceId": "life-hair-06-return-r1",
+      "durationMs": 140
+    },
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 600
+    }
+  ],
+  "routes": "closed-life-routes.json",
+  "runtimeApproval": false,
+  "semantic": "Local life gesture only; no execution, approval, answer or completion claim."
+}
