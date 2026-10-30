@@ -1,10 +1,10 @@
 import type { DesktopCompanionScene } from '@varin/application-client';
 import type { CompanionSpatialLayout } from '@varin/application-client/desktop';
-import { leadArt, childArt, workAccent, workProp, noticeGlyph, portfolioText as text, portfolioCaption, managementDossierDock, managementDossierCueMatches, managementDossierPose, managementDossierArt, portfolioFocalKey, type PortfolioListen } from './portfolioArtwork';
+import { leadArt, childArt, workAccent, workProp, noticeGlyph, portfolioText as text, portfolioCaption, managementDossierDock, managementDossierCueMatches, managementDossierPose, managementDossierArt, portfolioFocalKey, type PortfolioListen, type DossierTransfer } from './portfolioArtwork';
 
 /** Only actual native geometry receipts enter this renderer. The rear layer is
  * separately alpha-masked by sceneRenderer against the last successful drawing. */
-export function spatialArtwork(d:DesktopCompanionScene, layout:CompanionSpatialLayout, side:'left'|'right'|null|undefined, now:number, epoch:number, listen:PortfolioListen|null, transfer?:{cue:string;age:number}) {
+export function spatialArtwork(d:DesktopCompanionScene, layout:CompanionSpatialLayout, side:'left'|'right'|null|undefined, now:number, epoch:number, listen:PortfolioListen|null, transfer?:DossierTransfer) {
  const p=d.portfolio;if(!p)return {behind:'',front:''};
  let behind='',front='';
  const progress=listen?(d.reducedMotion?1:Math.min(1,Math.max(0,(now-listen.started)/160))):0;
@@ -60,7 +60,7 @@ export function spatialArtwork(d:DesktopCompanionScene, layout:CompanionSpatialL
  const subject=p.projects.find(a=>a.key===(p.mode==='inspection'?p.inspectedKey:p.subjectKey));
  const dockForDossier=managementDossierDock(side,layout.available,layout.seats.map(seat=>seat.bounds));
  if(subject&&dockForDossier&&transfer&&managementDossierCueMatches(p.mode,transfer.cue)&&!['unknown','uncertain'].includes(subject.status)){
-  const pose=managementDossierPose(transfer.cue,transfer.age,dockForDossier,d.reducedMotion);
+  const pose=managementDossierPose(transfer.cue,transfer.age,dockForDossier,d.reducedMotion,transfer.from);
   if(pose&&pose.opacity>0)front+=managementDossierArt(subject.label,pose);
  }
  return {behind,front};

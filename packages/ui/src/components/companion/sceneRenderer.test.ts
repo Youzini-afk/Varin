@@ -1,3 +1,4 @@
+import {resolveCompanionSpatialLayout} from '../../../../application-client/src/companion-spatial-layout';
 import {escapePortfolioText,portfolioCaption,managementDossierDock,managementDossierPose,squadWorkTiming,squadHome} from './portfolioArtwork';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_AVATAR_ART } from '../ui/agent-avatar-art';
@@ -102,6 +103,21 @@ describe('review-only director portfolio',()=>{
   expect(managementDossierPose('management-release',180,dock)?.opacity).toBe(0);
   expect(managementDossierPose('type',0,dock)).toBeNull();
   expect(managementDossierPose('address-user',0,dock,true)?.open).toBe(1);
+ });
+
+ it.each([false,true])('continues a short gather phase from its actual visible shape (spatial=%s)',spatial=>{
+  const s=mountCompanionScene(root),v=scene('portfolio',{cue:'transition',portfolio:{...portfolio,mode:'result',subjectKey:'opaque-a'}});
+  v.layout={...layout,inspectionSide:'right',...(spatial?{spatial:resolveCompanionSpatialLayout()}:{} )};
+  if(spatial)v.descriptor.layout='spatial-b-v1';
+  const set=(cue:SceneUpdate['descriptor']['cue'],revision:number)=>s.update({...v,descriptor:{...v.descriptor,cue,revision}});
+  const card=()=>root.innerHTML.match(/<g data-summary-project="A"[\s\S]*?<\/g>/)?.[0];
+  set('transition',1);tick(700);set('gather-out',2);tick(880);set('gather-in',3);tick(1040);
+  const before=card();expect(before).toBeDefined();
+  set('address-user',4);tick(1040);expect(card()).toBe(before);
+  tick(1300);expect(card()).not.toBe(before);
+  // Current attention still clears the carried pose, even with stale body cues.
+  s.update({...v,descriptor:{...v.descriptor,revision:5,cue:'address-user',portfolio:{...v.descriptor.portfolio!,mode:'attention'}}});
+  tick(1400);expect(card()).toBeUndefined();s.dispose();
  });
 
  it('keeps B permission and C question distinct and removes only the resolved notice',()=>{

@@ -1,7 +1,7 @@
 import { spatialArtwork } from './spatialArtwork';
 import { SceneCharacterMaskCache, inverseCharacterMaskSvg, type SceneCharacterMask } from './sceneCharacterMask';
 import type { CompanionSpatialLayout } from '@varin/application-client/desktop';
-import { portfolioArtwork, managementDossierCueMatches, squadWorkTiming, type PortfolioListen, type PortfolioBeat } from './portfolioArtwork';
+import { portfolioArtwork, managementDossierCueMatches, managementDossierPose, type DossierState, squadWorkTiming, type PortfolioListen, type PortfolioBeat } from './portfolioArtwork';
 import type { DesktopCompanionScene } from '@varin/application-client';
 import { COMPANION_SCENE_GEOMETRY as geometry, COMPANION_TEAM_VISIBLE_LIMIT } from './sceneGeometry';
 import { AGENT_AVATAR_ART, agentAvatarSvg } from '../ui/agent-avatar-art';
@@ -190,6 +190,7 @@ export function mountCompanionScene(root: HTMLElement) {
   let portfolioListen:PortfolioListen|null=null,workEpoch=performance.now();
   let workTimer:ReturnType<typeof setTimeout>|undefined;
   let portfolioPacketCue:string|null=null,portfolioPacketStarted=0;
+  let portfolioPacketFrom:DossierState|undefined;
   let teamBeats = new Map<string, TeamBeat>();
   const departing = new Map<string,{ member: TeamMember; at: number }>();
   let current: SceneUpdate | null=null, previous: SceneUpdate|null=null, started=0, previousAt=0, lastRevision=-1, frame=0, phaseStarted=0, previousElapsed=0, cueStarted=0;
@@ -213,10 +214,10 @@ export function mountCompanionScene(root: HTMLElement) {
     const opacity=terminal?1-clamp((phaseAge-(d.phase==='resolve'?500:0))/(d.phase==='resolve'?400:600)):d.reducedMotion?1:ease(elapsed/220);
     const edge=leftCrop&&!rightCrop?'left':rightCrop&&!leftCrop?'right':null;
     const hasTeam=!!d.team?.members.length;
-    let body=d.kind==='portfolio'?lane(portfolioArtwork(d,l.inspectionSide,now,now-portfolioCueStarted,portfolioBeats,portfolioPacketCue?{cue:portfolioPacketCue,age:now-portfolioPacketStarted}:undefined,portfolioListen,workEpoch,{left:leftEdge,right:rightEdge,top:(l.visible.y*h-ty)/scale,bottom:((l.visible.y+l.visible.height)*h-ty)/scale})):d.kind==='dispatch'?'':lane(artwork({...d,team:undefined,count:d.team?null:d.count},elapsed,now-cueStarted,leftCrop&&!rightCrop,edge,teamBeats,now));
+    let body=d.kind==='portfolio'?lane(portfolioArtwork(d,l.inspectionSide,now,now-portfolioCueStarted,portfolioBeats,portfolioPacketCue?{cue:portfolioPacketCue,age:now-portfolioPacketStarted,from:portfolioPacketFrom}:undefined,portfolioListen,workEpoch,{left:leftEdge,right:rightEdge,top:(l.visible.y*h-ty)/scale,bottom:((l.visible.y+l.visible.height)*h-ty)/scale})):d.kind==='dispatch'?'':lane(artwork({...d,team:undefined,count:d.team?null:d.count},elapsed,now-cueStarted,leftCrop&&!rightCrop,edge,teamBeats,now));
     let maskDefs='';
     if(d.kind==='portfolio'&&d.layout==='spatial-b-v1'&&l.spatial){
-      const spatial=spatialArtwork(d,l.spatial,l.inspectionSide,now,workEpoch,portfolioListen,portfolioPacketCue?{cue:portfolioPacketCue,age:now-portfolioPacketStarted}:undefined);
+      const spatial=spatialArtwork(d,l.spatial,l.inspectionSide,now,workEpoch,portfolioListen,portfolioPacketCue?{cue:portfolioPacketCue,age:now-portfolioPacketStarted,from:portfolioPacketFrom}:undefined);
       const bounds=l.spatial.available;
       if(characterMask)maskDefs=inverseCharacterMaskSvg('drawn-character',characterMask,geometry.character,{x:bounds.left,y:bounds.top,width:bounds.right-bounds.left,height:bounds.bottom-bounds.top});
       body=`<g data-spatial-behind="true" ${characterMask?'mask="url(#drawn-character)"':'visibility="hidden"'}>${spatial.behind}</g>${spatial.front}`;
@@ -296,11 +297,17 @@ export function mountCompanionScene(root: HTMLElement) {
     const packetSubject=portfolio?.projects.find(project=>project.key===(portfolio.mode==='inspection'?portfolio.inspectedKey:portfolio.subjectKey));
     const packetUnavailable=!packetSubject||packetSubject.status==='unknown'||packetSubject.status==='uncertain';
     const packetReset=hidden||packetUnavailable||current?.descriptor.scope!==value.descriptor.scope||current?.descriptor.portfolio?.subjectKey!==portfolio?.subjectKey||current?.descriptor.portfolio?.mode!==portfolio?.mode||!portfolio;
-    if(packetReset)portfolioPacketCue=null;
+    if(packetReset){portfolioPacketCue=null;portfolioPacketFrom=undefined;}
     const incomingCue=value.descriptor.cue;
     if(!hidden&&!packetUnavailable&&managementDossierCueMatches(portfolio?.mode,incomingCue)){
-      if(portfolioPacketCue!==incomingCue){portfolioPacketCue=incomingCue;portfolioPacketStarted=performance.now()-(packetReset?1000:0);}
-    }else if(incomingCue!=='transition'||!managementDossierCueMatches(portfolio?.mode,portfolioPacketCue)){portfolioPacketCue=null;portfolioPacketStarted=0;}
+      if(portfolioPacketCue!==incomingCue){
+        // Drawn phases can finish before the virtual card reaches its nominal
+        // endpoint. Continue from its current shape instead of jumping there.
+        const now=performance.now();
+        portfolioPacketFrom=portfolioPacketCue?managementDossierPose(portfolioPacketCue,now-portfolioPacketStarted,{x:0,y:0,width:0,height:0},!!current?.descriptor.reducedMotion,portfolioPacketFrom)??undefined:undefined;
+        portfolioPacketCue=incomingCue;portfolioPacketStarted=now-(packetReset?1000:0);
+      }
+    }else if(incomingCue!=='transition'||!managementDossierCueMatches(portfolio?.mode,portfolioPacketCue)){portfolioPacketCue=null;portfolioPacketStarted=0;portfolioPacketFrom=undefined;}
     // Brief preparation drawings may map to transition. Hold the same summary
     // through those authored gaps; only its real next transfer cue moves it.
 

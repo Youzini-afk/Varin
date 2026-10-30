@@ -10,6 +10,8 @@ export function managementDossierCueMatches(mode:NonNullable<DesktopCompanionSce
 }
 type SceneBounds = {left:number;top:number;right:number;bottom:number};
 export interface DossierDock {x:number;y:number;width:number;height:number}
+export interface DossierState {open:number;opacity:number}
+export interface DossierTransfer {cue:string;age:number;from?:DossierState}
 /** Virtual information has no palm/laptop attachment. Reserve a complete empty
  * rectangle outside the actor and squads; compact or omit it at tight edges. */
 export function managementDossierDock(side:'left'|'right'|null|undefined, available:SceneBounds={left:5,top:-15,right:295,bottom:225}, occupied:SceneBounds[]=[]):DossierDock|null {
@@ -30,7 +32,7 @@ export function managementDossierDock(side:'left'|'right'|null|undefined, availa
  return null;
 }
 /** Each phase changes the independent dossier, never transports a physical report. */
-export function managementDossierPose(cue:string,age:number,dock:DossierDock,reduced=false){
+export function managementDossierPose(cue:string,age:number,dock:DossierDock,reduced=false,from?:DossierState){
  const stages:Record<string,{duration:number;from:number;to:number;fade?:boolean}>={
   'management-receive':{duration:420,from:.4,to:0},
   'management-delegate':{duration:400,from:0,to:0,fade:true},
@@ -42,7 +44,8 @@ export function managementDossierPose(cue:string,age:number,dock:DossierDock,red
  };
  const stage=stages[cue];if(!stage)return null;
  const p=reduced?1:Math.max(0,Math.min(1,age/stage.duration)),u=p*p*(3-2*p);
- return {...dock,open:stage.from+(stage.to-stage.from)*u,opacity:stage.fade?1-u:1};
+ const initial=from??{open:stage.from,opacity:1},opacity=stage.fade?0:1;
+ return {...dock,open:initial.open+(stage.to-initial.open)*u,opacity:initial.opacity+(opacity-initial.opacity)*u};
 }
 export function managementDossierArt(label:string,pose:NonNullable<ReturnType<typeof managementDossierPose>>):string {
  const w=pose.width,h=pose.height,o=pose.open,compact=w<28,l=-w/2+2,r=w/2-2,t=-h/2+3,b=h/2-4;
@@ -123,7 +126,7 @@ export function workProp(a:Project,x:number,y:number,b:number){
  // No known tool: focus stone, never random invented typing/search.
  return path(`M${x-10} ${y+16} q10 ${3-b*2} 20 0`,blue,'none',1)+path(`M${x} ${y+10-b*2} l4 4 l-4 4 l-4 -4 Z`,gold,'#fffaf0',.8);
 }
-export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|null|undefined,now:number,cueAge:number,beats:ReadonlyMap<string,PortfolioBeat>,heldTransfer?:{cue:string;age:number},listen?:PortfolioListen|null,epoch=0,available?:SceneBounds):string {
+export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|null|undefined,now:number,cueAge:number,beats:ReadonlyMap<string,PortfolioBeat>,heldTransfer?:DossierTransfer,listen?:PortfolioListen|null,epoch=0,available?:SceneBounds):string {
  const p=d.portfolio;if(!p||!side)return '';
  const sign=side==='right'?1:-1,projects=p.projects.slice(0,3).filter(a=>Object.hasOwn(AGENT_AVATAR_ART,a.lead.avatar));
  const inspected=projects.find(a=>a.key===p.inspectedKey),subject=projects.find(a=>a.key===p.subjectKey),a=p.mode==='inspection'?inspected:['intake','result','attention'].includes(p.mode)?subject:inspected;
@@ -159,7 +162,7 @@ export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|nul
  const dossierDock=managementDossierDock(side,available,occupied);
  const dossierCue=d.cue==='transition'?heldTransfer?.cue:d.cue;
  if(a&&dossierDock&&!['unknown','uncertain'].includes(a.status)&&managementDossierCueMatches(p.mode,dossierCue)){
-  const pose=managementDossierPose(dossierCue!,heldTransfer?.cue===dossierCue?heldTransfer.age:cueAge,dossierDock,d.reducedMotion);
+  const pose=managementDossierPose(dossierCue!,heldTransfer?.cue===dossierCue?heldTransfer.age:cueAge,dossierDock,d.reducedMotion,heldTransfer?.cue===dossierCue?heldTransfer.from:undefined);
   if(pose&&pose.opacity>0)z+=managementDossierArt(a.label,pose);
  }
  if(count(p.overflowCards))z+=portfolioText(side==='right'?223:69,92,'+'+count(p.overflowCards),7);return z;
