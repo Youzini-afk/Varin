@@ -17,6 +17,7 @@ export interface CompanionSceneWindow {
   isDestroyed(): boolean; close(): void; hide(): void; showInactive(): void;
   setBounds(bounds: Bounds): void; setAlwaysOnTop(value: boolean): void;
   publish(value: CompanionScenePayload): Promise<void>; onReady(callback: () => void): void;
+  onRendererGone(callback: () => void): void;
 }
 export interface CompanionScenePayload {
   descriptor: CompanionSceneDescriptor;
@@ -111,7 +112,7 @@ function preferredSceneSide(descriptor: CompanionSceneDescriptor): 'left' | 'rig
 
 type SceneEntry = {
   owner: CompanionSceneOwner; window: CompanionSceneWindow; descriptor: CompanionSceneDescriptor;
-  viewport: CompanionSceneViewport; receivedAt: number; ready: boolean; blocked: boolean; publishing: boolean; dirty: boolean; lastPayload?: string; teamRetiresAt?: number; retirementTimer?: ReturnType<typeof setTimeout>;
+  viewport: CompanionSceneViewport; receivedAt: number; recoveryUsed: boolean; failed: boolean; recovering: boolean; ready: boolean; blocked: boolean; publishing: boolean; dirty: boolean; lastPayload?: string; teamRetiresAt?: number; retirementTimer?: ReturnType<typeof setTimeout>;
 };
 /** One inert surface per companion. Its owner is the only presentation source. */
 export class CompanionSceneWindows {
@@ -124,18 +125,21 @@ export class CompanionSceneWindows {
     if (owner.isDestroyed()) { this.clear(owner.id); return; }
     const geometry = companionSceneLayout(owner.getContentBounds(), viewport, this.workArea(owner.getContentBounds()), descriptor.layout === 'spatial-b-v1', preferredSceneSide(descriptor));
     let entry = this.entries.get(owner.id);
-    if (entry?.window.isDestroyed()) { this.clear(owner.id); entry = undefined; }
+    if (entry?.window.isDestroyed() && !entry.failed) { this.unavailable(entry); entry = this.entries.get(owner.id); }
     if (entry && descriptor.revision <= entry.descriptor.revision) return;
     if (!entry) {
       if (descriptor.kind === null && !descriptor.team?.members.length) return;
-      entry = { owner, window: this.create(geometry.bounds, owner), descriptor, viewport: { ...viewport }, receivedAt: Date.now(), ready: false, blocked: false, publishing: false, dirty: false };
+      entry = { owner, window: this.create(geometry.bounds, owner), descriptor, viewport: { ...viewport }, receivedAt: Date.now(), recoveryUsed: false, failed: false, recovering: false, ready: false, blocked: false, publishing: false, dirty: false };
       this.entries.set(owner.id, entry);
-      const created = entry;
-      entry.window.onReady(() => {
-        if (this.entries.get(owner.id) !== created) return;
-        created.ready = true; this.refresh(owner.id);
-      });
+      this.listen(entry);
     } else {
+      const newScope = entry.descriptor.scope !== descriptor.scope;
+      if (newScope) entry.recoveryUsed = false;
+      // Drawing/geometry revisions are not a new event. Only a new semantic
+      // primary or cue instance can rearm a performance after renderer recovery.
+      if (newScope || entry.descriptor.kind !== descriptor.kind || entry.descriptor.phase !== descriptor.phase
+        || entry.descriptor.outcome !== descriptor.outcome || entry.descriptor.cue !== descriptor.cue
+        || entry.descriptor.cueInstance !== descriptor.cueInstance) entry.recovering = false;
       const retiring = entry.descriptor.scope === descriptor.scope && !descriptor.suppressed && !descriptor.menuOpen
         && !!entry.descriptor.team?.members.length && !descriptor.team?.members.length;
       if (retiring) {
@@ -148,15 +152,50 @@ export class CompanionSceneWindows {
       }
       if (entry.descriptor.scope !== descriptor.scope || entry.descriptor.kind !== descriptor.kind || entry.descriptor.phase !== descriptor.phase || entry.descriptor.outcome !== descriptor.outcome) entry.receivedAt = Date.now();
       entry.descriptor = descriptor; entry.viewport = { ...viewport };
+      if (newScope && entry.failed) this.replace(entry);
     }
     this.refresh(owner.id);
+  }
+
+  private listen(entry: SceneEntry): void {
+    entry.window.onRendererGone(() => this.unavailable(entry));
+    entry.window.onReady(() => {
+      if (this.entries.get(entry.owner.id) !== entry || entry.failed) return;
+      entry.ready = true; this.refresh(entry.owner.id);
+    });
+  }
+
+  private replace(entry: SceneEntry): void {
+    const owner = entry.owner;
+    if (owner.isDestroyed()) { this.clear(owner.id); return; }
+    const { bounds } = companionSceneLayout(owner.getContentBounds(), entry.viewport, this.workArea(owner.getContentBounds()), entry.descriptor.layout === 'spatial-b-v1', preferredSceneSide(entry.descriptor));
+    try {
+      const replacement: SceneEntry = { ...entry, window: this.create(bounds, owner), ready: false, failed: false, recovering: true,
+        publishing: false, dirty: false, lastPayload: undefined, retirementTimer: undefined };
+      this.entries.set(owner.id, replacement);
+      const terminalAt = replacement.descriptor.phase === 'active' ? undefined : replacement.receivedAt + (replacement.descriptor.phase === 'resolve' ? 900 : 600);
+      const deadline = [replacement.teamRetiresAt, terminalAt].filter((at): at is number => at !== undefined && at > Date.now()).sort((a, b) => a - b)[0];
+      if (deadline !== undefined)
+        replacement.retirementTimer = setTimeout(() => { if (this.entries.get(owner.id) === replacement) this.refresh(owner.id); }, deadline - Date.now());
+      this.listen(replacement);
+    } catch { /* Keep the failed entry and current facts; no autonomous retry loop. */ }
+  }
+
+  private unavailable(entry: SceneEntry): void {
+    if (this.entries.get(entry.owner.id) !== entry || entry.failed) return;
+    entry.failed = true; entry.ready = false; entry.dirty = false;
+    clearTimeout(entry.retirementTimer); delete entry.retirementTimer;
+    if (!entry.window.isDestroyed()) { entry.window.hide(); entry.window.close(); }
+    // A persistent renderer fault must not create a crash/restart loop. A new
+    // owner scope or explicit clear can rearm; ordinary drawing revisions cannot.
+    if (!entry.recoveryUsed) { entry.recoveryUsed = true; this.replace(entry); }
   }
 
   inspectionReceipt(ownerId: number) {
     const entry = this.entries.get(ownerId);
     if (!entry || entry.descriptor.kind !== 'portfolio') return null;
     const { descriptor } = entry;
-    const inspectionSide = entry.blocked || descriptor.suppressed || descriptor.menuOpen || !entry.owner.isVisible()
+    const inspectionSide = entry.failed || entry.blocked || descriptor.suppressed || descriptor.menuOpen || !entry.owner.isVisible()
       ? null : companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()), descriptor.layout === 'spatial-b-v1', preferredSceneSide(descriptor)).layout.inspectionSide;
     return { scope: descriptor.scope, revision: descriptor.revision, inspectionSide };
   }
@@ -170,7 +209,9 @@ export class CompanionSceneWindows {
 
   refresh(ownerId: number): void {
     const entry = this.entries.get(ownerId); if (!entry) return;
-    if (entry.owner.isDestroyed() || entry.window.isDestroyed()) { this.clear(ownerId); return; }
+    if (entry.owner.isDestroyed()) { this.clear(ownerId); return; }
+    if (entry.failed) return;
+    if (entry.window.isDestroyed()) { this.unavailable(entry); return; }
     if (!entry.owner.isVisible() || entry.owner.isMinimized()) { clearTimeout(entry.retirementTimer); delete entry.retirementTimer; delete entry.teamRetiresAt; }
     // Native input suppression happens synchronously, before queued renderer work.
     if (!this.visible(entry)) entry.window.hide();
@@ -188,7 +229,12 @@ export class CompanionSceneWindows {
         if (!this.visible(entry)) entry.window.hide();
         const { bounds, layout } = companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()), entry.descriptor.layout === 'spatial-b-v1', preferredSceneSide(entry.descriptor));
         entry.window.setBounds(bounds); entry.window.setAlwaysOnTop(entry.owner.isAlwaysOnTop());
-        const descriptor = { ...entry.descriptor, suppressed: !this.visible(entry) };
+        // A recovered document has no history. Keep current roster/status, not
+        // a restarted acknowledgement or withdrawn primary. Owner facts/age stay intact.
+        const discardTail = entry.recovering && entry.descriptor.phase !== 'active'
+          && entry.descriptor.kind !== 'portfolio' && entry.descriptor.kind !== 'status';
+        const descriptor = { ...entry.descriptor, ...(entry.recovering ? { cue: 'transition' as const } : {}),
+          ...(discardTail ? { kind: null, phase: 'active' as const, outcome: null, count: null } : {}), suppressed: !this.visible(entry) };
         const payload = { descriptor, layout }, key = JSON.stringify(payload);
         if (entry.lastPayload !== key) {
           await entry.window.publish(payload);
@@ -200,11 +246,13 @@ export class CompanionSceneWindows {
         if (!entry.dirty && this.visible(entry) && entry.descriptor.revision === descriptor.revision) entry.window.showInactive();
         else entry.window.hide();
       }
-    }).catch(() => { if (this.entries.get(ownerId) === entry) this.clear(ownerId); })
+    }).catch(() => this.unavailable(entry))
       .finally(() => { entry.publishing = false; if (entry.dirty && this.entries.get(ownerId) === entry) this.refresh(ownerId); });
   }
 
   private visible(entry: SceneEntry): boolean {
+    if (entry.recovering && entry.descriptor.phase !== 'active' && entry.descriptor.kind !== 'portfolio'
+      && entry.descriptor.kind !== 'status' && !entry.descriptor.team?.members.length) return false;
     const age = Date.now() - entry.receivedAt;
     const expired = entry.descriptor.phase === 'withdraw' ? age >= 600 : entry.descriptor.phase === 'resolve' && age >= 900;
     const hasTeam = !!entry.descriptor.team?.members.length || Date.now() < (entry.teamRetiresAt ?? 0);

@@ -2911,6 +2911,7 @@ const companionScenes = new CompanionSceneWindows((bounds, owner) => {
     showInactive: () => { if (!window.isVisible()) window.showInactive(); }, setBounds: (value) => window.setBounds(value),
     setAlwaysOnTop: (value) => { if (window.isAlwaysOnTop() !== value) window.setAlwaysOnTop(value); },
     publish: async (value) => { await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('varin-companion-scene',{detail:${JSON.stringify(value)}}))`); },
+    onRendererGone: (callback) => { window.webContents.on('render-process-gone', callback); },
     onReady: (callback) => {
       let ready = false, loaded = false, started = false;
       const start = () => {

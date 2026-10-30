@@ -8,7 +8,7 @@ function fixture() {
   const owner = { id: 7, closed: false, visible: true, minimized: false, pinned: false, bounds: { x: 100, y: 80, width: 360, height: 480 },
     isDestroyed() { return this.closed; }, isVisible() { return this.visible; }, isMinimized() { return this.minimized; },
     isAlwaysOnTop() { return this.pinned; }, getContentBounds() { return this.bounds; } };
-  const windows: { closed: boolean; visible: boolean; pinned: boolean; bounds: typeof area; boundsUpdates: number; ready?: () => void; payloads: CompanionScenePayload[] }[] = [];
+  const windows: { closed: boolean; visible: boolean; pinned: boolean; bounds: typeof area; boundsUpdates: number; ready?: () => void; gone?: () => void; payloads: CompanionScenePayload[] }[] = [];
   let release: (() => void) | undefined;
   const manager = new CompanionSceneWindows((bounds, sceneOwner) => {
     expect(sceneOwner).toBe(owner);
@@ -16,6 +16,7 @@ function fixture() {
     return { isDestroyed: () => win.closed, close: () => { win.closed = true; win.visible = false; }, hide: () => { win.visible = false; },
       showInactive: () => { win.visible = true; }, setBounds: value => { win.bounds = value; win.boundsUpdates++; }, setAlwaysOnTop: value => { win.pinned = value; },
       onReady: cb => { (win as typeof windows[number]).ready = cb; },
+      onRendererGone: cb => { (win as typeof windows[number]).gone = cb; },
       publish: async payload => { win.payloads.push(payload); if (release === undefined) return; await new Promise<void>(resolve => { release = resolve; }); },
     };
   }, () => area);
@@ -221,5 +222,66 @@ it('cannot revive or close a replacement scene when a cleared publication settle
   expect(f.windows[1]?.closed).toBe(false);
   expect(f.windows[1]?.visible).toBe(true);
   expect(f.windows[1]?.payloads.at(-1)?.descriptor.revision).toBe(1);
+  f.manager.clearAll();
+});
+
+it('replaces a lost renderer from current facts without replaying its old cue or trusting late callbacks', async () => {
+  const f = fixture(); f.manager.update(f.owner, descriptor(1), viewport);
+  const old = f.windows[0]!; old.ready?.(); await flush();
+  f.stall(); f.manager.update(f.owner, descriptor(2, { cue: 'acknowledge', cueInstance: 7 }), viewport); await flush();
+  f.manager.block(f.owner.id, true); old.gone?.();
+  expect(old.closed).toBe(true); expect(f.windows).toHaveLength(2);
+  f.release(); old.ready?.(); old.gone?.(); await flush();
+  const replacement = f.windows[1]!; expect(replacement.closed).toBe(false);
+  replacement.ready?.(); await flush();
+  expect(replacement.payloads.at(-1)?.descriptor).toMatchObject({ revision: 2, cue: 'transition', suppressed: true });
+  expect(replacement.visible).toBe(false);
+  f.manager.block(f.owner.id, false); await flush(); expect(replacement.visible).toBe(true);
+  f.manager.update(f.owner, descriptor(3, { cue: 'acknowledge', cueInstance: 7 }), { ...viewport, x: 1, width: 359 }); await flush();
+  expect(replacement.payloads.at(-1)?.descriptor).toMatchObject({ revision: 3, cue: 'transition' });
+  f.manager.update(f.owner, descriptor(4, { cue: 'acknowledge', cueInstance: 8 }), viewport); await flush();
+  expect(replacement.payloads.at(-1)?.descriptor.cue).toBe('acknowledge');
+  f.manager.update(f.owner, descriptor(5, { kind: 'question', cue: 'ask' }), viewport); await flush();
+  expect(replacement.payloads.at(-1)?.descriptor).toMatchObject({ revision: 5, kind: 'question', cue: 'ask' });
+  f.manager.clearAll();
+});
+
+it('bounds repeated renderer failures within a scope while a new scope can create a fresh scene', async () => {
+  const f = fixture(); f.manager.update(f.owner, descriptor(1), viewport);
+  f.windows[0]!.gone?.(); f.windows[1]!.gone?.();
+  expect(f.windows).toHaveLength(2);
+  f.manager.update(f.owner, descriptor(2), viewport); f.manager.refresh(f.owner.id); await flush();
+  expect(f.windows).toHaveLength(2); expect(f.windows.every(w => w.closed)).toBe(true);
+  f.manager.update(f.owner, descriptor(3, { scope: 'new-observation' }), viewport);
+  expect(f.windows).toHaveLength(3); f.windows[2]!.ready?.(); await flush();
+  expect(f.windows[2]!.visible).toBe(true);
+  f.manager.clearAll();
+});
+
+it('retains terminal age and uses the latest descriptor if facts change while recovery mounts', async () => {
+  const clock = vi.spyOn(Date, 'now'); let now = 1000; clock.mockImplementation(() => now);
+  try {
+    const f = fixture(); f.manager.update(f.owner, descriptor(1, { phase: 'withdraw' }), viewport);
+    f.windows[0]!.ready?.(); await flush(); now += 700; f.windows[0]!.gone?.();
+    f.windows[1]!.ready?.(); await flush(); expect(f.windows[1]!.visible).toBe(false);
+    f.manager.clearAll();
+    f.manager.update(f.owner, descriptor(1), viewport); f.windows[2]!.gone?.();
+    f.manager.update(f.owner, descriptor(2, { kind: 'permission', cue: 'offer' }), viewport);
+    f.windows[3]!.ready?.(); await flush();
+    expect(f.windows[3]!.payloads.at(-1)?.descriptor).toMatchObject({ revision: 2, kind: 'permission', cue: 'offer' });
+    f.manager.clearAll();
+  } finally { clock.mockRestore(); }
+});
+
+it('drops only recovered terminal primary performance, retaining roster and genuinely new pending facts', async () => {
+  const f = fixture(), team = { members: [{ key: 'running-child', avatar: 'slope-lilac' as const, state: 'running' as const }], overflowCount: 0 };
+  f.manager.update(f.owner, descriptor(1, { kind: 'permission', phase: 'resolve', outcome: 'allowed', cue: 'acknowledge', cueInstance: 5, team }), viewport);
+  f.windows[0]!.gone?.(); f.windows[1]!.ready?.(); await flush();
+  expect(f.windows[1]!.payloads.at(-1)?.descriptor).toMatchObject({ kind: null, outcome: null, phase: 'active', team });
+  expect(f.windows[1]!.visible).toBe(true);
+  f.manager.update(f.owner, descriptor(2, { kind: 'permission', phase: 'resolve', outcome: 'allowed', cue: 'acknowledge', cueInstance: 5, team }), viewport); await flush();
+  expect(f.windows[1]!.payloads.at(-1)?.descriptor.kind).toBeNull();
+  f.manager.update(f.owner, descriptor(3, { kind: 'permission', phase: 'active', cue: 'ask', team }), viewport); await flush();
+  expect(f.windows[1]!.payloads.at(-1)?.descriptor).toMatchObject({ kind: 'permission', phase: 'active', outcome: null, team });
   f.manager.clearAll();
 });
