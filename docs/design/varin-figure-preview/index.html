@@ -89,7 +89,7 @@ const EYE = { L:[489, 706], R:[763, 706] };
 const HL = { L:[511, 651], R:[741, 651] }, HL2 = { L:[471, 716], R:[781, 716] };
 const BROW = { L:[486, 548], R:[757, 542] };
 const HAND = { L:[473, 1097], R:[767, 1097] };
-const AHOGE = [236, 462], KNOT = [1036, 532];
+const AHOGE = [236, 462], KNOT = [1028, 548];
 const SKIN = '#fae5dd', LASH = '#2f3555';
 
 // ---------------------------------------------------------------- parameters and springs
@@ -248,8 +248,9 @@ class Figure {
     el('path', { fill:'#7495dc', d:'M537 914 Q626 934 715 914 L715 930 Q626 944 537 930 Z' }, body);
     el('path', { fill:'#82a3e6', d:'M529 910 L529 884 Q529 864 548 860 Q588 876 626 879 Q664 876 704 860 Q723 864 723 884 L723 910 Q723 918 714 919 Q626 926 538 919 Q529 918 529 910 Z' }, body);
     el('path', { d:'M588 890 V910 M664 890 V910', fill:'none', stroke:'#6b8bd5', 'stroke-width':7, 'stroke-linecap':'round' }, body);
-    el('path', { fill:'#82a3e6', d:'M541 1032 L402 1032 C378 1034 352 1056 333 1078 C324 1089 318 1097 314 1104 L302 1300 L541 1300 Z M711 1032 L850 1032 C874 1034 900 1056 919 1078 C928 1089 934 1097 938 1104 L950 1300 L711 1300 Z' }, body);
-    el('path', { d:'M402 1032 C378 1034 352 1056 333 1078 M850 1032 C874 1034 900 1056 919 1078', fill:'none', stroke:'#9cb6ec', 'stroke-width':5, 'stroke-linecap':'round' }, body);
+    el('path', { fill:'#82a3e6', d:'M306 1104 C322 1068 360 1042 410 1035 C448 1030 480 1032 502 1042 L506 1300 L300 1300 Z M946 1104 C930 1068 892 1042 842 1035 C804 1030 772 1032 750 1042 L746 1300 L952 1300 Z' }, body);
+    el('path', { fill:'#6f90d8', d:'M537 1060 L547 1060 L574 1106 L537 1106 Z M715 1060 L705 1060 L678 1106 L715 1106 Z' }, body);
+    el('path', { d:'M318 1080 C340 1056 372 1042 410 1037 M934 1080 C912 1056 880 1042 842 1037', fill:'none', stroke:'#9cb6ec', 'stroke-width':5, 'stroke-linecap':'round' }, body);
     const straps = el('g', { fill:'#2b2c33' }, body);
     el('path', { d:'M452 914 Q470 902 492 901 L512 1040 L466 1046 Z' }, straps); el('path', { d:'M761 901 Q783 902 801 914 L787 1046 L742 1040 Z' }, straps);
     const buckles = el('g', { fill:'#5e6372' }, body);
@@ -287,13 +288,17 @@ class Figure {
     this.ahoge = el('g', {}, this.fig); el('use', { href:`#${u}hair`, 'clip-path':ahogeIn }, this.ahoge);
     const hc = el('clipPath', { id:`${u}hc` }, defs); el('use', { href:`#${u}hairBase` }, hc);
     this.sheenRect = el('rect', { x:-300, y:60, width:260, height:1200, fill:`url(#${u}s)`, opacity:0 }, el('g', { 'clip-path':`url(#${u}hc)` }, this.fig));
-    // Black ribbon wrapped under the bun; the two tails sway from the band.
+    // Hair tie under the bun, as in the original: band and knot, a tail hanging down-left
+    // and a loop out to the right in front of the lock. Tail and loop sway from the knot.
     this.ribbon = el('g', {}, this.fig);
-    this.tailR = el('path', { fill:'#26272d', d:'M1050 530 L1076 522 Q1092 604 1124 676 L1106 669 L1094 690 Q1068 606 1050 530 Z' }, this.ribbon);
-    el('path', { fill:'#2a2b32', d:'M998 540 L1046 536 Q1046 620 1056 708 L1025 692 L996 716 Q989 622 998 540 Z' }, this.ribbon);
-    el('path', { d:'M1036 548 Q1036 616 1043 690', fill:'none', stroke:'#35363e', 'stroke-width':5, 'stroke-linecap':'round' }, this.ribbon);
-    el('path', { fill:'#2a2b32', d:'M1000 474 Q1040 477 1081 490 L1075 525 Q1034 534 993 549 Z' }, this.fig);
-    el('path', { d:'M1005 479 Q1040 482 1076 494', fill:'none', stroke:'#474954', 'stroke-width':4, 'stroke-linecap':'round' }, this.fig);
+    this.tailR = el('g', {}, this.fig);
+    el('path', { fill:'#303139', d:'M1060 520 L1150 570 Q1140 602 1116 626 L1066 584 Z' }, this.tailR);
+    el('path', { d:'M1072 534 L1136 574', fill:'none', stroke:'#25262c', 'stroke-width':6, 'stroke-linecap':'round' }, this.tailR);
+    el('path', { fill:'#2b2c33', d:'M1012 544 L1044 544 L1087 698 L1030 681 L1010 689 Q1006 616 1012 544 Z' }, this.ribbon);
+    el('path', { d:'M1022 556 Q1020 616 1022 676', fill:'none', stroke:'#383a43', 'stroke-width':5, 'stroke-linecap':'round' }, this.ribbon);
+    el('path', { fill:'#2b2c33', d:'M1003 473 L1079 490 L1075 525 Q1052 536 1044 549 L990 549 Z' }, this.fig);
+    el('path', { d:'M1007 478 L1074 493', fill:'none', stroke:'#474954', 'stroke-width':4, 'stroke-linecap':'round' }, this.fig);
+    el('path', { d:'M1012 549 L1044 549', fill:'none', stroke:'#1f2026', 'stroke-width':4 }, this.fig);
     const clipG = el('g', {}, this.fig);
     el('path', { fill:'#2b2c33', d:'M858 283 L932 285 L940 297 L924 322 L897 323 L862 384 L820 368 Z' }, clipG);
     el('path', { fill:'#7f9fe4', d:'M889 325 L946 323 L966 343 L930 423 L845 423 L872 370 L880 364 L899 378 L912 355 L908 347 L887 331 Z' }, clipG);
@@ -302,7 +307,13 @@ class Figure {
     el('rect', { x:0, y:SILL, width:1254, height:154, fill:'#282c37' }, svg);
     el('rect', { x:0, y:SILL, width:1254, height:24, fill:'#373c49' }, svg);
     const hands = el('g', { 'clip-path':lower }, svg);
-    this.hands = ['L', 'R'].map(() => { const g = el('g', {}, hands); const sh = el('circle', { cx:2, cy:9, r:66, fill:'#12141b', opacity:.5 }, g); el('circle', { cx:0, cy:0, r:68, fill:SKIN }, g); return { g, sh }; });
+    this.hands = [-1, 1].map(side => {
+      const g = el('g', {}, hands), sh = el('ellipse', { cx:0, cy:14, rx:66, ry:64, fill:'#0d0f17', opacity:.45 }, g);
+      el('circle', { cx:0, cy:0, r:68, fill:'#efc3b7' }, g);
+      el('circle', { cx:-side * 7, cy:-8, r:61, fill:SKIN }, g);
+      el('ellipse', { cx:-side * 16, cy:-34, rx:20, ry:11, fill:'#fff6f2', opacity:.85, transform:`rotate(${side * 18} ${-side * 16} -34)` }, g);
+      return { g, sh };
+    });
     this.fxFront = el('g', {}, svg);
 
     // Persistent effects.
@@ -493,7 +504,7 @@ class Figure {
     // Hair accents.
     this.ahoge.setAttribute('transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
     this.ribbon.setAttribute('transform', `rotate(${this.sec.r} ${KNOT[0]} ${KNOT[1]})`);
-    this.tailR.setAttribute('transform', `rotate(${this.sec.r * .6 + 1.2 * Math.sin(this.t * 1.7) * this.L} 1062 526)`);
+    this.tailR.setAttribute('transform', `rotate(${-this.sec.r * .5 + 1.4 * Math.sin(this.t * 1.7) * this.L} 1064 526)`);
     const sx = (t - this.sheenAt) / .95;
     if (sx >= 0 && sx < 1) { this.sheenRect.setAttribute('opacity', 1); this.sheenRect.setAttribute('transform', `rotate(-18 628 600) translate(${lerp(-200, 1500, smooth(sx))} 0)`); }
     else this.sheenRect.setAttribute('opacity', 0);
@@ -501,7 +512,7 @@ class Figure {
     const hand = (h, x, y, s) => {
       h.g.setAttribute('transform', `translate(${x} ${y}) scale(${s})`);
       h.g.style.display = c ? 'none' : '';
-      h.sh.setAttribute('opacity', lerp(.34, .5, clamp(1 - (HAND.L[1] - y) / 90)));
+      h.sh.setAttribute('opacity', lerp(.28, .45, clamp(1 - (HAND.L[1] - y) / 90)));
     };
     hand(this.hands[0], p.hLx, p.hLy, p.hLs); hand(this.hands[1], p.hRx, p.hRy, p.hRs);
     // Glow and grey.
