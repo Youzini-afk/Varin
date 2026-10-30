@@ -21,7 +21,7 @@ import { BotSchedulePane } from './BotSchedulePane';
 import { BotProfilePage, type BotProfileGuard } from './BotProfilePage';
 
 const TAB_LABEL: Record<BotPanelTab, I18nKey> = { overview: 'bot.tab.overview', activity: 'bot.tab.activity', memory: 'bot.tab.memory', schedule: 'bot.tab.schedule' };
-const TAB_ICON: Record<BotPanelTab, IconName> = { overview: 'list-unordered', activity: 'history', memory: 'fingerprint', schedule: 'calendar-schedule' };
+const TAB_ICON: Record<BotPanelTab, IconName> = { overview: 'list-unordered', activity: 'history', memory: 'bot-memory', schedule: 'calendar-schedule' };
 const PANE: Record<BotPanelTab, React.FC> = { overview: BotOverviewPane, activity: BotActivityPane, memory: BotMemoryPane, schedule: BotSchedulePane };
 const EXIT_MS = 110;
 

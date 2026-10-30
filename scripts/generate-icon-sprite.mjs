@@ -38,6 +38,13 @@ const customIconData = new Map([
     "workspace-research",
     `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.2 15.2 5.3 5.3M8 9h5m-5 3h3"/></g>`,
   ],
+  // Bot memory: what the Bot kept from your conversations, a speech bubble holding a bookmark.
+  // It sits beside Remix line icons in the tab bar, so it takes their 2px weight and full extent;
+  // the bookmark is solid so it stays legible inside the bubble at the 18px tab size.
+  [
+    "bot-memory",
+    `<path d="M7.25 3.5h9.5a4.5 4.5 0 0 1 4.5 4.5v4.5a4.5 4.5 0 0 1-4.5 4.5h-6.6l-3.9 3.35a.6.6 0 0 1-1-.46V16.8a4.5 4.5 0 0 1-2.5-4.3V8a4.5 4.5 0 0 1 4.5-4.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 7.5c0-.5.4-.9.9-.9h4.2c.5 0 .9.4.9.9V14l-3-2.1L9 14Z" fill="currentColor"/>`,
+  ],
   // Session work focuses have independent silhouettes, readable at 14–16px.
   [
     "focus-general",

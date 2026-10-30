@@ -48,6 +48,10 @@ Session work focus uses its own four glyphs: `focus-general` (open rounded frame
 They use the same 24px grid and 1.8px rounded stroke, with silhouettes tuned for the composer's
 14px trigger and 16px menu. The selected trigger and menu use the same exhaustive focus mapping.
 
+The Bot panel's memory tab uses `bot-memory`: a speech bubble holding a solid bookmark, for what the
+Bot kept from conversations. It sits among Remix line icons at 18px, so it takes their 2px weight and
+full extent instead of the 1.8px navigation stroke.
+
 ## Sizing
 
 The `Icon` component does not have a `size` prop. Use Tailwind classes instead:
