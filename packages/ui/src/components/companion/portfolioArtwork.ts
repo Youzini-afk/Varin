@@ -2,7 +2,12 @@ import type { DesktopCompanionScene } from '@varin/application-client';
 import { agentAvatarSvg, AGENT_AVATAR_ART } from '../ui/agent-avatar-art';
 import { projectLeadSvg } from './projectLeadArt';
 export interface PortfolioBeat { detail?: string; at: number }
-export const MANAGEMENT_CUES = new Set(['listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate']);
+/** Drawn body cues may lag current facts. A dossier requires both its current
+ * factual presentation mode and the matching authored cue family. */
+export function managementDossierCueMatches(mode:NonNullable<DesktopCompanionScene['portfolio']>['mode']|undefined,cue:string|null|undefined):boolean {
+ return mode==='intake'?['management-receive','management-delegate'].includes(cue??'')
+  :mode==='result'?['gather-out','gather-in','address-user','management-present','management-release'].includes(cue??''):false;
+}
 type SceneBounds = {left:number;top:number;right:number;bottom:number};
 export interface DossierDock {x:number;y:number;width:number;height:number}
 /** Virtual information has no palm/laptop attachment. Reserve a complete empty
@@ -152,8 +157,9 @@ export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|nul
  // The card owns its own safe scene rectangle, never the actor's hand or laptop.
  const occupied=projects.map(project=>{const home=squadHome(project.label,side);return {left:home.x-40,right:home.x+40,top:home.y-34,bottom:home.y+46};});
  const dossierDock=managementDossierDock(side,available,occupied);
- if(a&&dossierDock&&!['unknown','uncertain'].includes(a.status)&&(MANAGEMENT_CUES.has(d.cue)||(d.cue==='transition'&&heldTransfer))){
-  const pose=managementDossierPose(heldTransfer?.cue??d.cue,heldTransfer?.age??cueAge,dossierDock,d.reducedMotion);
+ const dossierCue=d.cue==='transition'?heldTransfer?.cue:d.cue;
+ if(a&&dossierDock&&!['unknown','uncertain'].includes(a.status)&&managementDossierCueMatches(p.mode,dossierCue)){
+  const pose=managementDossierPose(dossierCue!,heldTransfer?.cue===dossierCue?heldTransfer.age:cueAge,dossierDock,d.reducedMotion);
   if(pose&&pose.opacity>0)z+=managementDossierArt(a.label,pose);
  }
  if(count(p.overflowCards))z+=portfolioText(side==='right'?223:69,92,'+'+count(p.overflowCards),7);return z;

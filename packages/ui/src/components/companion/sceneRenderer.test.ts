@@ -119,11 +119,16 @@ describe('review-only director portfolio',()=>{
   s.update({...v,descriptor:{...v.descriptor,revision:3,scope:'other',cue:'transition'}});tick(1400);expect(root.innerHTML).not.toContain('data-summary-project');s.dispose();
  });
 
- it('withdraws a held result when the same subject needs attention or the scene is suppressed',()=>{
+ it.each(['transition','management-present','address-user'] as const)('current attention suppresses the same subject result despite lagging %s body cue',cue=>{
   const s=mountCompanionScene(root),v=scene('portfolio',{cue:'management-present',portfolio:{...portfolio,mode:'result',subjectKey:'opaque-a'}});v.layout={...layout,inspectionSide:'right'};
   s.update(v);tick(700);expect(root.innerHTML).toContain('data-summary-project="A"');
-  s.update({...v,descriptor:{...v.descriptor,revision:2,cue:'transition',portfolio:{...v.descriptor.portfolio!,mode:'attention'}}});tick(1000);expect(root.innerHTML).not.toContain('data-summary-project');
+  s.update({...v,descriptor:{...v.descriptor,revision:2,cue,portfolio:{...v.descriptor.portfolio!,mode:'attention'}}});tick(1000);expect(root.innerHTML).not.toContain('data-summary-project');
   s.update({...v,descriptor:{...v.descriptor,revision:3,suppressed:true}});tick(1300);expect(root.innerHTML).toBe('');s.dispose();
+ });
+
+ it.each(['overview','inspection','result'] as const)('does not borrow a stale intake drawing for current %s facts',mode=>{
+  const s=mountCompanionScene(root),v=scene('portfolio',{cue:'management-receive',portfolio:{...portfolio,mode,subjectKey:'opaque-a'}});v.layout={...layout,inspectionSide:'right'};
+  s.update(v);tick(700);expect(root.innerHTML).not.toContain('data-summary-project');expect(root.innerHTML).toContain('data-project-slot="A"');s.dispose();
  });
 
  it.each(['left','right'] as const)('acceptance and result cards never attach to the actor (%s)',side=>{

@@ -1,7 +1,7 @@
 import { spatialArtwork } from './spatialArtwork';
 import { SceneCharacterMaskCache, inverseCharacterMaskSvg, type SceneCharacterMask } from './sceneCharacterMask';
 import type { CompanionSpatialLayout } from '@varin/application-client/desktop';
-import { portfolioArtwork, squadWorkTiming, type PortfolioListen, type PortfolioBeat } from './portfolioArtwork';
+import { portfolioArtwork, managementDossierCueMatches, squadWorkTiming, type PortfolioListen, type PortfolioBeat } from './portfolioArtwork';
 import type { DesktopCompanionScene } from '@varin/application-client';
 import { COMPANION_SCENE_GEOMETRY as geometry, COMPANION_TEAM_VISIBLE_LIMIT } from './sceneGeometry';
 import { AGENT_AVATAR_ART, agentAvatarSvg } from '../ui/agent-avatar-art';
@@ -294,13 +294,13 @@ export function mountCompanionScene(root: HTMLElement) {
 
     if(current?.descriptor.scope!==value.descriptor.scope || current?.descriptor.cue!==value.descriptor.cue || current?.descriptor.portfolio?.subjectKey!==portfolio?.subjectKey || hidden)portfolioCueStarted=performance.now();
     const packetSubject=portfolio?.projects.find(project=>project.key===(portfolio.mode==='inspection'?portfolio.inspectedKey:portfolio.subjectKey));
-    const packetUnavailable=packetSubject?.status==='unknown'||packetSubject?.status==='uncertain';
+    const packetUnavailable=!packetSubject||packetSubject.status==='unknown'||packetSubject.status==='uncertain';
     const packetReset=hidden||packetUnavailable||current?.descriptor.scope!==value.descriptor.scope||current?.descriptor.portfolio?.subjectKey!==portfolio?.subjectKey||current?.descriptor.portfolio?.mode!==portfolio?.mode||!portfolio;
     if(packetReset)portfolioPacketCue=null;
     const incomingCue=value.descriptor.cue;
-    if(!hidden&&!packetUnavailable&&['gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate'].includes(incomingCue)){
+    if(!hidden&&!packetUnavailable&&managementDossierCueMatches(portfolio?.mode,incomingCue)){
       if(portfolioPacketCue!==incomingCue){portfolioPacketCue=incomingCue;portfolioPacketStarted=performance.now()-(packetReset?1000:0);}
-    }else if(incomingCue!=='transition')portfolioPacketCue=null;
+    }else if(incomingCue!=='transition'||!managementDossierCueMatches(portfolio?.mode,portfolioPacketCue)){portfolioPacketCue=null;portfolioPacketStarted=0;}
     // Brief preparation drawings may map to transition. Hold the same summary
     // through those authored gaps; only its real next transfer cue moves it.
 

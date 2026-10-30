@@ -51,3 +51,9 @@ it('presents the actual subject without a listen direction and keeps nonfocal wo
  const unknown={...focused,portfolio:{...focused.portfolio!,projects:focused.portfolio!.projects.map(p=>p.key==='a'?{...p,status:'uncertain' as const}:p)}};
  expect(spatialArtwork(unknown,layout,null,1400,0,null,{cue:'management-present',age:200}).front).not.toContain('data-summary-project');
 });
+
+it('spatial facts reject a lagging result transfer under attention, without hiding its notice',()=>{
+ const current:DesktopCompanionScene={...d,cue:'management-present',portfolio:{...d.portfolio!,mode:'attention',subjectKey:'a',projects:[{...d.portfolio!.projects[0]!,status:'needs-user',notice:'permission'}]}};
+ const art=spatialArtwork(current,resolveCompanionSpatialLayout(),null,1000,0,null,{cue:'management-present',age:100});
+ expect(art.front).not.toContain('data-summary-project');expect(art.front+art.behind).toContain('data-notice="permission"');
+});
