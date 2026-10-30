@@ -139,11 +139,11 @@ In management mode the real current-Host attention projection drives the portfol
 
 Local attention and global idle eligibility use this same management mode. A cold welcome is permitted only on the current, available portfolio; work supersedes rather than queues it. Hover/tap, hidden/drag cleanup, scope-bound recovery and the accepted source pickup graph retain the same single body controller. The decorative window remains inert and cannot approve or execute project work. This section records implementation, not an additional normal-entry native acceptance claim.
 
-## 当前部署开发产物与验证边界（2026-10-29）
+## 当前功能分支产物与验证边界（2026-10-30）
 
-当前公共 selected bundle 为 `1303a69840be467335a6400d9d8ebbd73d94b7a0fcd5cebebb22b44a9588bc18`，对应候选 `5729`；它替换此前的 `ed683`，目前仍部署用于开发。**用户最新反馈明确否定整体动作联动与运动一致性；selected/accepted 技术标记不代表当前视觉质量获认可，不能视作最终成品验收。** B 2.5D 小队用于正常 director 入口；开盖 hover、开/闭盖连续轻点的有限变化、安静顺侧发均已纳入已选资源及各自事实/姿态准入，不再统称 review-only。原选择与验证 JSON、冻结源目录中的 README/manifest 均保持原样，记录各自制作或审核当时的状态；其中 candidate-only/未切 selected 字样是历史归档说明，当前选用状态以本节为准，不改归档 inventory 哈希。
+当前公共 selected bundle 为 `076fc5a510a3e02a2c4211e874363928b2965cc0003405bc648b3b4be80a33b1`，对应v5候选 `de48f7493f46042823ab23a359fd83ff11ef46cf9d5175f4bc1a78b66e75bd4e`，替换旧1303运行包。247张真实准备图与422个包经过独立可移植重复构建、RGBA/注册偏移和原有路线语义校核；图集按作者动作及直接提起依赖排布，不改变动作时长或事实触发。原始选择记录保持冻结，当前acceptance.json注明助手审核、正常入口有限原生观察及未验证事项。**资源选择不是用户逐帧认可或最终完整视觉验收。** 开盖轻点使用已选短暂愉快眨眼；闭盖hover沿真实开盖路径进入注意，闭盖连续轻点没有独立动作时不伪装已覆盖。安静看护复用中立，不把后台工具状态凑成新身体动作。
 
-既有有限 Linux 功能 QA 未发现阻塞；这不抵消用户对视觉效果的否定。原生 hair/hover 连续捕获仍未得到充分结论，不能因资源已选就声称所有动态均已验收。没有 Windows/macOS 或所有中间帧认证。拖动时小队隐藏、落座后按最新事实恢复，当前没有小队动画避让。权限/问题保持精确项目归属；本地查看、hover 或轻点不是批准或回答。
+有限Linux正常入口已观察无需review控件加载、绝对坐标拖动精确跟随、悬空去凳/落座恢复与闭盖转开盖注意。既有候选还验证了权限/问题更新和单次装饰场景渲染进程丢失后恢复；拖动时小队隐藏，落座按最新事实恢复。所有动作完整时序、Windows/macOS及真实Host匹配回执到Agent动作端到端尚未证明；窗口截图偶发空白与全桌面连续可见样本存在差异，不能据此前者定性实际人物消失。查看、hover和轻点从不代替批准或回答。
 
 ### Product role binding: Bot versus Agent (2026-10-29)
 
