@@ -104,3 +104,194 @@ def compile_pickup(root, inventory, core, *, extra_detached=None, extra_recovery
    if i==0 and source not in coreEntries:props['entrySourceSha256']=source
    node(ids[i][3:],dh,min(f['durationMs'],160),**props)
  return nodes,sources
+
+
+def compile_explicit_baseline(manifest_path, output):
+    """Compile only declared source-keyed art for the existing player; never load legacy art.
+
+    Every displayed seated source needs an explicit same-pose counterpart and
+    entry. This proves source/graph integrity, not anatomical or visual acceptance.
+    """
+    import math
+    import os
+    import shutil
+    from pathlib import Path
+    from PIL import Image
+    from pack_sequence import pack, FROZEN_STOOL_SHA256
+
+    manifest_path, output = Path(manifest_path).resolve(), Path(output).resolve()
+    raw = manifest_path.read_bytes()
+    spec = json.loads(raw)
+    if spec.get('version') != 1 or spec.get('canvas') != [512, 512]:
+        raise ValueError('Explicit baseline requires version 1 and registered 512px canvas')
+    geometry = spec.get('geometryReference')
+    if not isinstance(geometry, str) or not geometry or geometry == 'varin-upright-v2':
+        raise ValueError('Explicit baseline needs its own geometry identity, not the legacy identity')
+    sources = {}
+
+    def read_image(row):
+        path = (manifest_path.parent / row['source']).resolve()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != row.get('sourceSHA256'):
+            raise ValueError('Actual source SHA mismatch: ' + str(path))
+        with Image.open(path) as image:
+            if image.format != 'PNG' or image.mode != 'RGBA' or image.size != (512, 512) or not image.getchannel('A').getbbox():
+                raise ValueError('Expected nonempty prepared RGBA PNG on actual 512px canvas: ' + str(path))
+        sources[digest] = path
+        return digest
+
+    stool = spec['worldStool']
+    stool_hash = read_image(stool)
+    if stool_hash != FROZEN_STOOL_SHA256:
+        raise ValueError('Explicit baseline must preserve the frozen world stool')
+    stool_path = sources.pop(stool_hash)
+    canonical = spec.get('canonicalSources')
+    if not isinstance(canonical, dict) or not canonical or any(not isinstance(v, str) or not v for v in canonical.values()) or len(set(canonical.values())) != len(canonical):
+        raise ValueError('Canonical sources must explicitly identify actual prepared source hashes')
+    rows = spec.get('sequences', [])
+    nodes = spec.get('nodes', [])
+    if not rows or not nodes:
+        raise ValueError('Explicit baseline needs sequences and pickup nodes')
+    packages, ids = [], set()
+    for is_node, row in [(False, r) for r in rows] + [(True, r) for r in nodes]:
+        name = row.get('id')
+        if not isinstance(name, str) or not name or name in ids:
+            raise ValueError('Duplicate or missing package ID')
+        ids.add(name)
+        gesture = row.get('gesture')
+        kind = 'gesture' if is_node else row.get('kind')
+        if kind not in ('gesture', 'action', 'bridge') or is_node != (gesture is not None):
+            raise ValueError('Explicit package kind/gesture mismatch')
+        if kind == 'action' and not row.get('action') or kind != 'action' and row.get('action'):
+            raise ValueError('Only authored actions may bind a presentation action')
+        frames, time = [], 0
+        for frame in ([row] if is_node else row.get('frames', [])):
+            duration = frame.get('durationMs')
+            if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
+                raise ValueError('Exposure must be finite and positive')
+            h = read_image(frame)
+            pose = canonical.get(h, geometry + ':draw:' + h)
+            frames.append({'sha256': h, 'startMs': time, 'durationMs': duration, 'pose': pose,
+                           'exitTo': [pose] if frame.get('exitSafe', False) else [],
+                           'pauseSafe': bool(frame.get('pauseSafe', False)), 'phase': frame.get('phase', 'act')})
+            time += duration
+        if not frames:
+            raise ValueError('Empty authored sequence')
+        loop = row.get('loop')
+        if loop is not None and (not isinstance(loop, list) or len(loop) != 2 or any(type(i) is not int for i in loop) or not 0 <= loop[0] < loop[1] <= len(frames)):
+            raise ValueError('Loop must be an authored [start,endExclusive] frame range')
+        p = {'id': name, 'canvas': [512, 512], 'geometryReference': geometry,
+             'reviewStatus': 'candidate', 'stage': 'motion-candidate', 'kind': kind,
+             'action': row.get('action'), 'sceneAction': row.get('sceneAction', row.get('action')),
+             'entryPose': frames[0]['pose'], 'exitPose': frames[-1]['pose'],
+             'frames': frames, 'durationMs': time, 'loop': loop,
+             'warning': 'Explicit source candidate; graph validity is not visual acceptance.'}
+        if gesture is not None:
+            p['gesture'] = dict(gesture)
+        packages.append(p)
+    by_id = {p['id']: p for p in packages}
+    seated = {f['sha256'] for p in packages if not p.get('gesture') or p['gesture'].get('embeddedStool') for f in p['frames']}
+    if not set(canonical) <= seated:
+        raise ValueError('Canonical source is not an actual displayed seated drawing')
+    pairs = {}
+    for pair in spec.get('counterparts', []):
+        h, d = pair['sourceSHA256'], pair['detachedSHA256']
+        if h in pairs or h not in seated or d not in sources or h == d:
+            raise ValueError('Duplicate, missing or invalid actual counterpart')
+        pairs[h] = d
+    if set(pairs) != seated:
+        raise ValueError('Missing authored counterparts for displayed sources: ' + str(sorted(seated - set(pairs))))
+    entries = {}
+    allowed = {'grabNext', 'releaseNext', 'embeddedStool', 'settled', 'restoreOnRelease', 'releaseViaFrames',
+               'restorePreviousOnSettle', 'grabImmediate', 'entrySourceSha256', 'restoreSourceSha256'}
+    for p in packages:
+        g = p.get('gesture')
+        if g is None:
+            continue
+        if not isinstance(g, dict) or set(g) - allowed:
+            raise ValueError('Unknown explicit gesture fields')
+        for key in ('embeddedStool', 'settled', 'restoreOnRelease'):
+            if type(g.get(key)) is not bool:
+                raise ValueError('Explicit gesture booleans required: ' + key)
+        for key in ('releaseViaFrames', 'restorePreviousOnSettle'):
+            if key in g and type(g[key]) is not bool:
+                raise ValueError('Optional gesture flag must be boolean: ' + key)
+        for key in ('grabNext', 'releaseNext'):
+            path = g.get(key)
+            if not isinstance(path, list) or any(not isinstance(i, str) or i not in by_id or not by_id[i].get('gesture') for i in path):
+                raise ValueError('Dangling/non-gesture continuation: ' + p['id'])
+        if any(by_id[i]['gesture'].get('embeddedStool') for i in g['grabNext']):
+            raise ValueError('Native drag continuation cannot carry an embedded stool: ' + p['id'])
+        entry = g.get('entrySourceSha256')
+        if entry:
+            if entry in entries or entry not in pairs or g['embeddedStool'] or p['frames'][0]['sha256'] != pairs[entry]:
+                raise ValueError('Ambiguous or non-matching same-exposure pickup entry: ' + p['id'])
+            entries[entry] = p['id']
+        immediate = g.get('grabImmediate')
+        if g['embeddedStool']:
+            target = by_id.get(immediate)
+            if not target or not target.get('gesture') or target['gesture'].get('embeddedStool') or target['frames'][0]['sha256'] != pairs[p['frames'][0]['sha256']]:
+                raise ValueError('Seated regrab needs its actual immediate detached counterpart: ' + p['id'])
+        elif immediate is not None:
+            raise ValueError('Only seated nodes declare an immediate counterpart')
+        restore = g.get('restoreSourceSha256')
+        if g['restoreOnRelease'] and not restore:
+            raise ValueError('Direct release restoration requires an explicit actual source')
+        if restore and restore not in seated:
+            raise ValueError('Restore has no actual seated drawing')
+        if restore and g['releaseNext'] and not g.get('releaseViaFrames'):
+            raise ValueError('Drawn release must not be superseded by direct restore')
+        lands = bool(g['releaseNext']) and by_id[g['releaseNext'][-1]]['gesture'].get('settled') is True
+        restores = g['restoreOnRelease'] and bool(restore) and not g.get('releaseViaFrames')
+        if g['settled'] and not g['embeddedStool']:
+            raise ValueError('Settled node must actually be seated')
+        if not (g['settled'] or lands or restores) or g.get('releaseViaFrames') and not lands:
+            raise ValueError('Release must terminate at a seated settled node or exact restore: ' + p['id'])
+    if set(entries) != seated:
+        raise ValueError('Missing exact pickup entry for actual displayed sources: ' + str(sorted(seated - set(entries))))
+    if any(path.is_relative_to(output) for path in [manifest_path, stool_path, *sources.values()]):
+        raise ValueError('Baseline output must not contain or overwrite its source inputs')
+    # All semantic validation above precedes any output. Pool uses hardlinks when
+    # possible; atlas packing reads originals without rewriting them.
+    pool = output / 'pool'
+    pool.mkdir(parents=True, exist_ok=True)
+    for h, source in sources.items():
+        dest = pool / (h + '.png')
+        if dest.exists():
+            if hashlib.sha256(dest.read_bytes()).hexdigest() != h:
+                raise ValueError('Stale pool source differs from its hash')
+        else:
+            try:
+                os.link(source, dest)
+            except OSError:
+                shutil.copyfile(source, dest)
+    source_manifest = {'id': 'explicit-baseline-pool', 'canvas': [512, 512],
+                       'frames': [{'source': h + '.png', 'durationMs': 1} for h in sorted(sources)]}
+    (pool / 'source.json').write_text(json.dumps(source_manifest))
+    atlas = pack(pool / 'source.json', output)
+    placements = {f['sha256']: f for f in atlas['frames']}
+    for p in packages:
+        pages, page_map = [], {}
+        for f in p['frames']:
+            placement = placements[f['sha256']]
+            page = placement['page']
+            if page not in page_map:
+                page_map[page] = len(pages)
+                pages.append(atlas['pages'][page])
+            f.update(page=page_map[page], rect=placement['rect'], offset=placement['offset'])
+        p['pages'] = pages
+    if manifest_path.read_bytes() != raw or hashlib.sha256(stool_path.read_bytes()).hexdigest() != stool_hash or any(hashlib.sha256(path.read_bytes()).hexdigest() != h for h, path in sources.items()):
+        raise ValueError('Source changed during compilation; freeze inputs and retry')
+    stool_file = 'world-stool-' + stool_hash[:16] + '.png'
+    shutil.copyfile(stool_path, output / stool_file)
+    bundle = {'version': 1, 'candidateOnly': True, 'geometryEpoch': geometry, 'packages': packages,
+              'worldStool': {'file': stool_file, 'sha256': stool_hash, 'canvas': [512, 512]}}
+    (output / 'bundle.json').write_text(json.dumps(bundle, indent=2) + '\n')
+    receipt = {'candidateSHA256': hashlib.sha256((output / 'bundle.json').read_bytes()).hexdigest(),
+               'manifestSHA256': hashlib.sha256(raw).hexdigest(), 'geometryReference': geometry,
+               'packageCount': len(packages), 'actualSources': sorted(sources), 'pickupEntrySources': sorted(entries),
+               'actions': sorted({p['action'] for p in packages if p['action']}),
+               'excludedScope': spec.get('excludedScope', []), 'legacyAssetsCopied': False,
+               'productionInstalled': False, 'reviewStatus': 'candidate'}
+    (output / 'build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    return receipt

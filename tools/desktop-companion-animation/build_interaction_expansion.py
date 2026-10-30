@@ -2,19 +2,27 @@
 import argparse,copy,hashlib,importlib.util,json,math,shutil
 from pathlib import Path
 from PIL import Image
-from compile_upright_pickup import compile_pickup
+from compile_upright_pickup import compile_pickup, compile_explicit_baseline
 
 parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--root',type=Path,required=True,help='production-v3 source root')
-parser.add_argument('--base-source',type=Path,required=True,help='reproducible production-v2 source root')
-parser.add_argument('--base-bundle',type=Path,required=True,help='immutable selected v2 bundle.json; may be rebuilt from source')
+parser.add_argument('--root',type=Path,help='production-v3 source root')
+parser.add_argument('--base-source',type=Path,help='reproducible production-v2 source root')
+parser.add_argument('--base-bundle',type=Path,help='immutable selected v2 bundle.json; may be rebuilt from source')
 parser.add_argument('--output',type=Path,required=True)
 parser.add_argument('--director-manifest',type=Path,help='Optional explicit authored management sequences; review-only, not a production selection')
 parser.add_argument('--local-interaction-manifest',type=Path,action='append',help='Optional exact local hover/repeat source contract; candidate only')
 parser.add_argument('--performance-manifest',type=Path,help='Explicit replacement performances and actual-source recovery; excludes legacy v3 display plans, keeps mechanical base; candidate only')
 parser.add_argument('--pickup-manifest',type=Path,help='Optional explicit source-keyed pickup/landing graph for replacement performances; candidate only')
-parser.add_argument('--detached-index',type=Path,required=True,help='explicit immutable new-source no-stool index')
-a=parser.parse_args();R=a.root.resolve();B=a.base_source.resolve();OUT=a.output.resolve();OUT.mkdir(parents=True,exist_ok=True)
+parser.add_argument('--detached-index',type=Path,help='explicit immutable new-source no-stool index')
+parser.add_argument('--baseline-manifest',type=Path,help='Explicit clean candidate baseline; excludes all legacy base/art inputs')
+a=parser.parse_args()
+if a.baseline_manifest:
+ if any((a.root,a.base_source,a.base_bundle,a.detached_index,a.director_manifest,a.local_interaction_manifest,a.performance_manifest,a.pickup_manifest)):
+  parser.error('--baseline-manifest cannot mix with legacy/expansion inputs')
+ print(json.dumps(compile_explicit_baseline(a.baseline_manifest,a.output),indent=2));raise SystemExit(0)
+if not all((a.root,a.base_source,a.base_bundle,a.detached_index)):
+ parser.error('Expansion requires --root, --base-source, --base-bundle and --detached-index')
+R=a.root.resolve();B=a.base_source.resolve();OUT=a.output.resolve();OUT.mkdir(parents=True,exist_ok=True)
 if a.performance_manifest and (a.director_manifest or a.local_interaction_manifest):
  parser.error('--performance-manifest cannot mix with legacy director/local manifests')
 if a.pickup_manifest and not a.performance_manifest:

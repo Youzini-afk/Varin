@@ -159,3 +159,34 @@ provenance保留原始字符串。若显式提供绝对路径则如实保留，�
 已提供也仍为未视觉验收。后续接入必须核验每张实际显示图的恢复/提起链。
 
 Focused验证：`python tools/desktop-companion-animation/test_prepare_seated.py`。
+
+### 独立原画基线候选
+
+`build_interaction_expansion.py --baseline-manifest <manifest> --output <local-directory>`
+复用既有打包器与播放器合同，从空包编译显式的新原画基线。它与所有旧base/expansion输入互斥，
+不读取旧人物图集、不继承旧动作、不改变默认追加模式，也不选定或安装候选。
+
+Manifest version 1 包含 `canvas: [512,512]`、独立 `geometryReference`、
+`canonicalSources: {实际坐姿PNG的SHA: 姿态名}`、`worldStool: {source, sourceSHA256}`、
+`sequences`、`nodes`、`counterparts` 及可选 `excludedScope`。固定凳必须保持既有冻结SHA；
+基准名称只标识制作批次，不证明视觉一致性或被用户接受。
+
+- `sequences` 使用唯一 `id`、`kind: action|bridge`、action绑定（仅action）、可选loop，
+  以及 `frames: [{source, sourceSHA256, durationMs, exitSafe?, pauseSafe?, phase?}]`。
+  所有输入已是512 RGBA原画；`source` 相对manifest解析，也可明确给绝对路径。
+- `nodes` 使用唯一 `id`、同样的单张source/SHA/duration与既有 `gesture` 合同。
+  `grabNext/releaseNext` 是完整有序continuation，不是相邻边。编译器不推断动作或补帧。
+- `counterparts: [{sourceSHA256, detachedSHA256}]` 必须精确覆盖本候选每张实际显示坐姿图，
+  包括落座手势中间图；每张必须有唯一 `entrySourceSha256` 绑定到其真实D。
+  坐姿手势的 `grabImmediate` 必须指向它自己的真实D，release须有限终止于真实settled坐姿，
+  或明确恢复到真实坐姿来源。缺图、错误SHA或悬空图直接拒绝，不借旧皮肤补齐。
+- `canonicalSources` 只接受本候选实际出现的坐姿SHA，且不同来源不能别名为同一个姿态。
+  其他姿态按完整实际SHA命名，因此跨资源连接要求真正共享原图。
+- 动作子集可以编译，`build-receipt.json` 明列actions、实际来源、入口及excludedScope。
+  子集候选不代表所有产品状态或所有提放已覆盖。普通动作退出需提供真实bridge；
+  W10等待由Host事实保持，预览静止时长不得成为native拖动启动延迟。
+
+输出仍为既有 `bundle.json`（全部candidate）及PNG图集；池中的源尽可能硬链接、只读使用。
+输出目录不得包含输入源。原画完整路线仍需正常速度、浅/深背景、native root与世界凳检查。
+Focused验证：`python tools/desktop-companion-animation/test_explicit_baseline.py`（包含真实共享播放器roundtrip，
+测试色块只检查编译合同，不是候选皮肤），以及既有 `test_prepare_seated.py`。
