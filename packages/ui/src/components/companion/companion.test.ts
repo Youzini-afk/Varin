@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { ThreadSnapshot } from '@varin/application-client';
-import { projectCompanionIntent as project } from './presentation';
+import { projectCompanionIntent as project, companionObserverAction } from './presentation';
 import { readCompanionPackage as read } from './sequencePackage';
 const snap = (value: object) => ({ activeRun: null, operations: [], ...value }) as unknown as ThreadSnapshot;
 it('separates stale facts and cancellation requests from settled outcomes', () => {
@@ -140,4 +140,16 @@ it('prepares the immediate detached drawing before a landing seat can be shown a
   expect(player.current?.id).toBe('seat');
   expect(player.grab({packageId:'seat',exposure:0})).toBe(true);
   expect(player.current?.id).toBe('seat-detached'); expect(player.loading).toBeNull();
+});
+
+it('keeps task activity factual but never casts the observing companion as its executor', () => {
+  const generating = project(snap({ activeRun: { state: 'generating' } }), 'current');
+  expect(generating.state).toBe('C04'); // The project detail still knows the actual state.
+  for (const action of ['think', 'accept', 'prepare', 'dispatch', 'reading', 'editing', 'organizing', 'output', 'output-emphasis']) {
+    expect(companionObserverAction(action)).toBe('execution-observe');
+    expect(companionObserverAction(action, true)).toBe(action); // Explicit art review only.
+  }
+  for (const action of ['permission', 'query', 'failure', 'unknown-effect-check', 'completion', 'understood', 'permission-allowed', 'cancel-settling']) {
+    expect(companionObserverAction(action)).toBe(action);
+  }
 });

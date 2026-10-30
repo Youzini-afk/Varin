@@ -21,8 +21,9 @@ import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 import { readCompanionPackage, type CompanionPackage } from '@/components/companion/sequencePackage';
 import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
+import { route, type PlaybackAsset } from '@/components/companion/playback.mjs';
 import { pickupPreloadDependencies } from '@/components/companion/pickupPreload';
-import { projectCompanionIntent, newlyAnsweredQuestion, type ObservationHealth } from '@/components/companion/presentation';
+import { projectCompanionIntent, newlyAnsweredQuestion, companionObserverAction, type ObservationHealth } from '@/components/companion/presentation';
 import { initializeLocale, I18nProvider, useI18n, type I18nKey } from '@/lib/i18n';
 import { CompanionSceneFacts, reviewSceneFact, sceneForIntent, type SceneFact } from '@/components/companion/sceneFacts';
 import { useCompanionScene } from '@/components/companion/useCompanionScene';
@@ -137,8 +138,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const permissionAcknowledgement = !reviewRoute && livePermissionReceipt && health === 'current'
     && !['W02','W03','C06'].includes(visualIntent.state ?? '') && !visualIntent.state?.startsWith('E')
     && assetList.some(item => item.action === 'permission-allowed' && item.reviewStatus === 'accepted');
-  const preferredAction = outputBeat && visualIntent.state === 'C05' ? 'output-emphasis' : permissionAcknowledgement ? 'permission-allowed' : reviewRoute && localReviewAction[presentation] ? localReviewAction[presentation]!
+  const taskAction = outputBeat && visualIntent.state === 'C05' ? 'output-emphasis' : permissionAcknowledgement ? 'permission-allowed' : reviewRoute && localReviewAction[presentation] ? localReviewAction[presentation]!
     : visualIntent.state === 'E05' ? (assetList.some(item => item.action === 'reconnecting' && item.reviewStatus === 'accepted') ? 'reconnecting' : 'disconnected') : visualIntent.state === 'T03' && requestedAction !== 'understood' ? 'execution-observe' : requestedAction;
+  const preferredAction = companionObserverAction(taskAction, review && reviewRoute);
   const visualAction = preferredAction && assetList.some(item => item.action === preferredAction && item.reviewStatus === 'accepted' && item.stage === 'motion-candidate' && item.geometryReference && item.entryPose && item.exitPose) ? preferredAction
     : hasActiveWork && !visualIntent.state?.startsWith('E') ? 'external-wait' : preferredAction;
   const localAllowed = !reviewRoute && !manualReview && !hasActiveWork && !liveCompletion && !['W02','W03','E01','E02','E04','E05','E06'].includes(intent.state ?? '');
@@ -187,15 +189,23 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation)
     : stableIntent.state !== intent.state && rawScene.phase === 'active' ? { kind: null, phase: 'withdraw', outcome: null, count: null } as SceneFact : rawScene;
   const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.interactionRoute, director.body.subjectRoute, director.inspectionRoute, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
-  const directorLayout = useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
+  useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
     companionWindow.phase !== 'rest' || (!directorMode && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorMode || reviewRoute ? undefined : team, directorMode ? portfolioProjection.portfolio : undefined, directorMode ? directorContextKey : null, visibleDrawing, directorMode);
   const usableAction = (action: string) => assetList.some(item => item.action === action && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate'));
   const availableQuietActions = COMPANION_QUIET_ACTIONS.filter(usableAction);
   const { restDue, quietAction, finishQuiet } = useCompanionLeisure((directorMode ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorMode || health === 'current' || health === 'unselected'), companionWindow.activityRevision, availableQuietActions.length > 0, availableQuietActions);
   const ordinaryDisplayAction = quietAction && !localAction && usableAction(quietAction) ? quietAction : restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
   const seenHover = React.useRef(0);
-  const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null, usableAction('director-notify-attention'), usableAction);
-  const directorSentenceKey = JSON.stringify([directorContextKey, directorLayout?.inspectionSide]);
+  // Optional expressions must have an authored route from the actual shown package.
+  // An incompatible permission/query asset falls back to the existing neutral notice.
+  const directorAssets = assetList.filter((item): item is PlaybackAsset =>
+    (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate') && item.stage === 'motion-candidate'
+    && !!item.geometryReference && !!item.entryPose && !!item.exitPose);
+  const shownDirectorAsset = directorAssets.find(item => item.id === visibleDrawing?.packageId) ?? null;
+  const usableDirectorExpression = (action: string) => directorAssets.some(item => item.action === action
+    && route(shownDirectorAsset, item, directorAssets, directorReview).status === 'ready');
+  const directorRequestedAction = directorBodyAction(director, null, usableAction('director-notify-attention'), usableDirectorExpression);
+  const directorSentenceKey = directorContextKey;
   const directorBaseAction = finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction;
   const directorLocalAction = directorLocal?.context === directorContextKey && director.health === 'current' && companionWindow.phase === 'rest' && !manualReview ? directorLocal.action : null;
   const directorWelcome = directorMode && localAction === 'welcome' && director.health === 'current' && director.body.verb === 'available' && usableAction('welcome');
@@ -217,7 +227,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (!decision) return;
     // End this inspection sentence, not its project facts; do not replay LISTEN.
     if (usableAction(decision)) {
-      if (directorBaseAction.startsWith('director-listen-')) setFinishedDirectorSentence(directorSentenceKey);
+      if (directorBaseAction === 'director-inspect') setFinishedDirectorSentence(directorSentenceKey);
       setDirectorLocal({ action: decision, context: directorContextKey, event });
     }
   };

@@ -58,3 +58,11 @@ export function newlyAnsweredQuestion(previousPending: ReadonlySet<string>, snap
     && operation.result?.kind === 'control' && record(operation.result.value)?.answer_ref != null);
   return answer?.id ?? null;
 }
+
+/** Focused task activity is not evidence that Varin herself executes or coordinates it.
+ * Preserve factual intent/detail and explicit art review; only select an honest body. */
+export function companionObserverAction(action: string | null, explicitReview = false): string | null {
+  if (explicitReview) return action;
+  return action && ['accept', 'prepare', 'think', 'output', 'output-emphasis', 'reading', 'editing',
+    'coding-input', 'experiment-observe', 'browsing', 'checking', 'organizing', 'dispatch', 'dispatch-observe'].includes(action) ? 'execution-observe' : action;
+}

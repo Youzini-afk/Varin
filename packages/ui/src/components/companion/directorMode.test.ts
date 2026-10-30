@@ -14,3 +14,7 @@ it('keeps legacy and manual development review separate from explicit candidate 
   expect(companionDirectorMode(bundle,true,false)).toBe(false);
   expect(companionDirectorMode([],true,true)).toBe(true);
 });
+
+it('does not require obsolete spatial inspection art to keep the role-safe director route', () => {
+  expect(hasAcceptedDirectorAssets(bundle.filter(asset => !asset.action?.startsWith('director-listen-')))).toBe(true);
+});
