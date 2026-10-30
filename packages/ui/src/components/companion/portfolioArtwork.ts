@@ -162,7 +162,7 @@ export function portfolioArtwork(d:DesktopCompanionScene,side:'left'|'right'|nul
  const dossierDock=managementDossierDock(side,available,occupied);
  const dossierCue=d.cue==='transition'?heldTransfer?.cue:d.cue;
  if(a&&dossierDock&&!['unknown','uncertain'].includes(a.status)&&managementDossierCueMatches(p.mode,dossierCue)){
-  const pose=managementDossierPose(dossierCue!,heldTransfer?.cue===dossierCue?heldTransfer.age:cueAge,dossierDock,d.reducedMotion,heldTransfer?.cue===dossierCue?heldTransfer.from:undefined);
+  const pose=managementDossierPose(dossierCue!,heldTransfer&&heldTransfer.cue===dossierCue?heldTransfer.age:cueAge,dossierDock,d.reducedMotion,heldTransfer&&heldTransfer.cue===dossierCue?heldTransfer.from:undefined);
   if(pose&&pose.opacity>0)z+=managementDossierArt(a.label,pose);
  }
  if(count(p.overflowCards))z+=portfolioText(side==='right'?223:69,92,'+'+count(p.overflowCards),7);return z;
