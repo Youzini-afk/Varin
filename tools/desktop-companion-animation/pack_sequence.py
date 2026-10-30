@@ -91,6 +91,7 @@ def pack(manifest_path, output, max_size=2048, padding=2):
         image_key = (image.size, hashlib.sha256(image.tobytes()).hexdigest())
         if image_key in placements:
             record.update(placements[image_key])
+            image.close()
             continue
         cell_width, cell_height = image.width + 2 * padding, image.height + 2 * padding
         if x + cell_width > max_size:
@@ -115,6 +116,7 @@ def pack(manifest_path, output, max_size=2048, padding=2):
         x += cell_width
         row_height = max(row_height, cell_height)
         used_width, used_height = max(used_width, x), max(used_height, y + cell_height)
+        image.close()
     pages.append(page.crop((0, 0, used_width, used_height)))
     output.mkdir(parents=True, exist_ok=True)
     page_names = []
@@ -122,6 +124,7 @@ def pack(manifest_path, output, max_size=2048, padding=2):
         name = f'atlas-{index:03d}.png'
         page.save(output / name)
         page_names.append({'file': name, 'size': list(page.size)})
+        page.close()
     package = {
         'version': 1, 'id': spec['id'], 'family': spec.get('family'),
         'stage': spec.get('stage'), 'warning': spec.get('warning'),
