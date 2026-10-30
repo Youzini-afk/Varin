@@ -137,8 +137,12 @@ That runs, in order:
    distribution-owned Host runtime needed after lazy activation, including the TypeScript language
    package and its `tsserver`, exists in the physical `app.asar.unpacked` tree.
 
-Build output goes to `packages/electron/dist`. Development sources and the duplicate Web-owned kernel
-are excluded from the desktop dependency tree; desktop uses `resources/kernel`.
+Build output goes to `packages/electron/dist`. The embedded `@varin/web` package includes only its
+production `server`, CLI `bin` and package/license metadata. Its `public`, source checkout files and
+private Host dev/staging/backup generations are excluded at collection time, including optional artwork
+that also exists under `public`. Frontend assets live only in `resources/web-dist`; desktop uses
+`resources/kernel` rather than the duplicate Web-owned kernel. `afterPack` checks this production boundary
+instead of deleting unexpected frontend copies after they have already been collected.
 
 ### Optional desktop companions
 

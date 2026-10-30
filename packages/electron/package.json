@@ -67,7 +67,7 @@
       "dist-bundle/main.mjs",
       "dist-bundle/preload.mjs",
       "!node_modules/@varin/*/{src,test,tests}/**/*",
-      "!node_modules/@varin/web/{application-host,cli,scripts,kernel,dist,.application-host-types}/**/*",
+      "!node_modules/@varin/web/!(server|bin|node_modules|package.json|LICENSE|THIRD_PARTY_NOTICES.md|README.md){,/**/*}",
       "!node_modules/**/*.{js,cjs,mjs,ts,cts,mts}.map",
       "!node_modules/@vscode/ripgrep-*/bin/**/*",
       "!node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",

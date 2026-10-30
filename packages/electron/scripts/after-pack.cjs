@@ -14,6 +14,13 @@ module.exports = (context) => {
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
   const unpackedNodeModulesPath = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules');
+  const packagedWebRoot = path.join(unpackedNodeModulesPath, '@varin', 'web');
+  // The embedded Host consumes its production server generation. Frontend assets
+  // belong to resources/web-dist, and private dev/staging generations are not runtime inputs.
+  const webRuntimeEntries = new Set(['server', 'bin', 'node_modules', 'package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md']);
+  for (const name of fs.readdirSync(packagedWebRoot)) {
+    if (!webRuntimeEntries.has(name)) throw new Error(`Non-runtime Web package entry entered the desktop payload: ${name}`);
+  }
   const kernelExecutable = context.electronPlatformName === 'win32' ? 'varin-kernel.exe' : 'varin-kernel';
   const packagedKernelPath = path.join(resourcesPath, 'kernel', kernelExecutable);
   const kernelManifestPath = path.join(resourcesPath, 'kernel', 'manifest.json');
@@ -112,11 +119,6 @@ module.exports = (context) => {
       throw new Error(`Missing unpacked PDF.js runtime file at ${packagedPath}`);
     }
   }
-  fs.rmSync(
-    path.join(unpackedNodeModulesPath, '@varin', 'web', 'dist'),
-    { recursive: true, force: true },
-  );
-
   const requiredApplicationHostFiles = [
     path.join('node_modules', '@varin', 'script-runtime', 'dist', 'index.js'),
     path.join('node_modules', '@varin', 'script-runtime', 'dist', 'worker.js'),

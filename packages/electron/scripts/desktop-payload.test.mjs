@@ -68,12 +68,25 @@ test('packaging preserves language runtime libraries and assets, including TypeS
   assert(!selected.some((file) => file.endsWith('.map')));
 });
 
-test('packaging excludes generated Host declarations and duplicate UI without dropping runtime code', async () => {
+test('packaging selects the Web runtime without artwork, checkout files or private Host generations', async () => {
   const selected = await collect('@varin/web', [
-    'package.json', 'server/index.js', 'server/index.js.map',
+    'package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md',
+    'server/index.js', 'server/index.js.map', 'bin/cli.js',
+    'server/lib/structure/runtime/tree-sitter-typescript.wasm',
+    'server/computer-driver/windows/driver.ps1',
     'server/production-boundary.json', 'public/icon.png',
+    'public/companion-assets/atlas-000.png', 'public/companion-review-director/bundle.json',
+    '.application-host-dev-123/lib/structure/runtime.wasm',
+    '.application-host-staging-456/index.js', '.server-backup-789/index.js',
     '.application-host-types/index.d.ts', '.application-host-types/index.d.ts.map',
-    'dist/index.html', 'application-host/index.ts',
+    'dist/index.html', 'application-host/index.ts', 'vite.config.ts',
+    'future-development-directory/fixture.json',
   ]);
-  assert.deepEqual(selected, ['package.json', 'public/icon.png', 'server/index.js', 'server/production-boundary.json']);
+  assert.deepEqual(selected, [
+    'LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin/cli.js', 'package.json',
+    'server/computer-driver/windows/driver.ps1', 'server/index.js',
+    'server/lib/structure/runtime/tree-sitter-typescript.wasm', 'server/production-boundary.json',
+  ]);
+  // Builder collects conflicting dependency versions at their nested Node resolution path.
+  assert.deepEqual(await collect('@varin/web/node_modules/example-runtime', ['package.json', 'index.js']), ['index.js', 'package.json']);
 });
