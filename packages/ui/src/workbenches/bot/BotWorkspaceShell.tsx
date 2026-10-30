@@ -7,7 +7,6 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 import {
   archiveBot, changeBotState, createBot, createBotSession, ensureBotEntry, ensurePrimaryBot, listBots, listBotSessions, listBotWork,
   openBotConversation, openBotWorkInWorkbench, updateBot, useBotNavigation, useBotReturn,
@@ -494,7 +493,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const panelControl = isMobile ? undefined : <Tooltip>
     <TooltipTrigger asChild>
       <button type="button" aria-label={panelLabel} aria-expanded={panelVisible} onClick={togglePanel}
-        className={cn('workbench-icon-button app-region-no-drag relative flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', panelVisible && 'bg-interactive-selection text-foreground')}>
+        className="workbench-icon-button app-region-no-drag relative flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <Icon name="layout-right" className="size-4" />
         {!panelVisible && needs.length ? <span className="bot-titlebar-dot" data-tone="warn" aria-hidden="true" /> : null}
       </button>
