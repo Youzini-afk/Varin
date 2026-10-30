@@ -41,8 +41,8 @@
           "durationMs": 120
         },
         {
-          "sourceId": "local-response-l03-contact-r1",
-          "durationMs": 160
+          "sourceId": "local-tap-contact",
+          "durationMs": 240
         },
         {
           "sourceId": "local-response-low-hands-release-r1",
@@ -74,7 +74,7 @@
           "durationMs": 80
         },
         {
-          "sourceId": "local-response-l04-fingertip-overlap-r2",
+          "sourceId": "local-repeat-contact",
           "durationMs": 180
         },
         {

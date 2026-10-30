@@ -274,12 +274,12 @@
       }
     },
     {
-      "id": "local-response-l03-contact-r1",
-      "source": "foreground/local-response/l03-contact-r1.png",
-      "sha256": "5232cdb71e753877cb978951a3781d7dae517babe887e192c90771b2c2ca3a71",
+      "id": "local-tap-contact",
+      "source": "foreground/local-response/tap-contact.png",
+      "sha256": "f456cce009c5a3891f28203cadf437d278ab0cf803e8e774f2a257a5967b3a25",
       "detached": {
-        "source": "detached/local-response/l03-contact-r1.png",
-        "sha256": "192237e44238d259cecd18303c1f200f13fb7ceddc1c0d9f8cc9c825f13149f6"
+        "source": "detached/local-response/tap-contact.png",
+        "sha256": "18b46156791103310346aabad0f980e6c68dc8995c2fed3a77f5f458a137d388"
       }
     },
     {
@@ -292,12 +292,12 @@
       }
     },
     {
-      "id": "local-response-l04-fingertip-overlap-r2",
-      "source": "foreground/local-response/l04-fingertip-overlap-r2.png",
-      "sha256": "882ed39e5ecea546e2b085245243b768a79eabfa23122416338661b7844c8ba9",
+      "id": "local-repeat-contact",
+      "source": "foreground/local-response/repeat-contact.png",
+      "sha256": "cc3b0f54341e80c6dae7607eaee4d9da5f8b60b4ee3e4e6842a62bf48fbf8582",
       "detached": {
-        "source": "detached/local-response/l04-fingertip-overlap-r2.png",
-        "sha256": "2a27c51c4fcd1f7a9eb1a6efd9d20be01df5ebf575d3694ef1cfc3eecb417ce4"
+        "source": "detached/local-response/repeat-contact.png",
+        "sha256": "d5f415f43f29f6c8c9c5e1926a5d6371d9d3230846b67824a5d714f7b66da8ce"
       }
     },
     {
