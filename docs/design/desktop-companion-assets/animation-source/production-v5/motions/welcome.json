@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "id": "v5-welcome-working-phrase",
+  "family": "L05",
+  "action": "welcome",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 240,
+      "phase": "canonical",
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "welcome-attend-release",
+      "durationMs": 160,
+      "phase": "attention-low-release",
+      "interruptionExitIds": [
+        "welcome-attend-release",
+        "welcome-lowering-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "welcome-greeting-rise",
+      "durationMs": 150,
+      "phase": "greeting-ascent",
+      "interruptionExitIds": [
+        "welcome-greeting-rise",
+        "welcome-lowering-mid",
+        "welcome-lowering-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "welcome-greeting-near-cheek",
+      "durationMs": 180,
+      "phase": "near-cheek-arrival",
+      "interruptionExitIds": [
+        "welcome-greeting-near-cheek",
+        "welcome-lowering-mid",
+        "welcome-lowering-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "welcome-wrist-arc-end-r2",
+      "durationMs": 160,
+      "phase": "single-outward-wrist-arc",
+      "interruptionExitIds": [
+        "welcome-wrist-arc-end-r2",
+        "welcome-lowering-mid",
+        "welcome-lowering-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "welcome-lowering-mid",
+      "durationMs": 180,
+      "phase": "independent-lowering",
+      "interruptionExitIds": [
+        "welcome-lowering-mid",
+        "welcome-lowering-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "welcome-lowering-ready",
+      "durationMs": 160,
+      "phase": "near-canonical-settle",
+      "interruptionExitIds": [
+        "welcome-lowering-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 360,
+      "phase": "canonical",
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    }
+  ],
+  "durationMs": 1590,
+  "routes": "welcome-routes.json",
+  "runtimeApproval": false,
+  "eventBindingChanged": false,
+  "welcomeOnly": true,
+  "queuedLateWelcome": false,
+  "interruptBeforePeak": true,
+  "backendEventBinding": false,
+  "trigger": "Genuine current greeting; not reconnect history or queued stale greeting.",
+  "oneShotPolicy": "Interrupted rising exits through lowering without forcing future peak or additional wrist arc."
+}
