@@ -86,9 +86,11 @@ fn mcp() -> HostToolBinding {
     }
 }
 fn prepare(f: &mut Fixture, child: &ChildTask) -> ChildTask {
-    let mut source = child.source.pin().unwrap().source.clone();
-    source.branch_id = Some(format!("child-source:{}", child.operation_id));
-    source.revision = Some(0);
+    let mut source = child.source.selection().cloned().unwrap_or_else(|| child.source.pin().unwrap().source.clone());
+    if child.source.selection().is_none() {
+        source.branch_id = Some(format!("child-source:{}", child.operation_id));
+        source.revision = Some(0);
+    }
     if matches!(
         child.code_result,
         varin_runtime::catalog::collaboration::ChildCodeResult::Pending
@@ -123,6 +125,43 @@ fn derived(original: &HostToolBinding) -> HostToolBinding {
         server.resource_key = server.resource_key.replace("parent", "child");
     }
     binding
+}
+
+fn prepare_project(f: &mut Fixture) -> ChildTask {
+    let child=f.accept();
+    let source: SourceSelection=serde_json::from_value(json!({"resource_owner":{"kind":"local"},"workspace_id":"project-B",
+        "execution_workspace_id":"project-B","mode":"live_root","live_root":{"hostId":"host","rootId":"project-B","canonicalRoot":"/registered/project-B"},
+        "branch_id":null,"revision":null})).unwrap();
+    let prepared=f.db.prepare_project_child_source(&child.execution_id,None,source,None).unwrap().load().unwrap();
+    let child=f.db.attach_child_source(prepared).unwrap();
+    prepare(f,&child)
+}
+#[test]
+fn project_child_prepares_its_actual_mcp_scope_once_without_parent_mcp_then_restores_exact_generation() {
+    let mut f=Fixture::new_project_dispatch();
+    let child=prepare_project(&mut f);
+    let run=child.receipt.as_ref().unwrap().run_id.clone();
+    assert!(child.launch.mcp_binding_ref.is_none());
+    let mut binding=mcp();
+    for server in binding.provenance.servers.values_mut() { server.owner.configuration.config_cwd="/registered/project-B".into(); }
+    let committed=f.db.prepare_mcp_launch(&run,binding.clone()).unwrap();
+    assert_eq!(committed.selection.mcp_binding,Some(binding.clone()));
+    assert!(committed.selection.tools.iter().any(|tool|tool.name=="mcp_discover"));
+    let mut changed=binding.clone(); changed.generation+=1;
+    assert!(f.db.prepare_mcp_launch(&run,changed).is_err());
+    let path=f.root.clone(); drop(f.db);
+    let mut db=Catalog::open(&path).unwrap();
+    assert_eq!(db.prepare_mcp_launch(&run,binding.clone()).unwrap().selection.mcp_binding,Some(binding));
+    drop(db);
+    std::fs::remove_dir_all(path).unwrap();
+}
+#[test]
+fn project_child_with_explicit_native_tools_does_not_gain_additional_mcp_tools() {
+    let mut f=Fixture::new_project_dispatch_with_tools(Some(vec!["file_read".into()]));
+    let child=prepare_project(&mut f);
+    let run=child.receipt.as_ref().unwrap().run_id.clone();
+    assert!(f.db.prepare_mcp_launch(&run,mcp()).is_err());
+    assert!(f.db.launch_intent(&run).unwrap().unwrap().selection.mcp_binding.is_none());
 }
 
 #[test]

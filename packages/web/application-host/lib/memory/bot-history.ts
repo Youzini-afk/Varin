@@ -3,9 +3,11 @@ import { threadMemorySourceText, type ThreadIdentity } from '@varin/application-
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import { KnowledgeMutationError } from '../knowledge/store.js';
 import { sourceRevision } from './memory-sources.js';
+import type { BotRecallWork } from './bot-recall-context.js';
 export interface HistoryMemoryMaterial {
     /** Canonical source of an attributed incoming work update; the actual item remains the read witness. */
     originalId?: string;
+    work?: BotRecallWork;
     span: Extract<MemorySourceSpan, {
         kind: 'history-item';
     }>;
@@ -31,10 +33,13 @@ export function createBotHistory(runtime: AgentRuntimeClient) {
     }>, signal?: AbortSignal): Promise<HistoryMemoryMaterial> => {
         const item = await runtime.botHistory({ botId, threadId: span.threadId, branchId: span.branchId, headId: span.headId, itemId: span.id }, signal);
         const text = threadMemorySourceText(item);
-        const body=item.content as { content?: { kind?: string; output?: { data?: { kind?: string; source?: { itemId?: string } } } } } | null;
+        const body=item.content as { content?: { kind?: string; output?: { data?: { kind?: string; senderThreadId?: string; source?: { itemId?: string; sourceThreadId?: string; sourceBranchId?: string; matterId?: string } } } } } | null;
         const data=body?.content?.output?.data;
         const originalId=data?.kind==='work_update' ? data.source?.itemId : undefined;
-        return { span: { ...span, revision: sourceRevision(text) }, text, role: item.source, ...(originalId?{originalId}:{}) };
+        const work: BotRecallWork | undefined = data?.kind === 'work_update'
+            ? { threadId: data.source?.sourceThreadId, branchId: data.source?.sourceBranchId, matterId: data.source?.matterId }
+            : data?.kind === 'child_report' ? { threadId: data.senderThreadId } : undefined;
+        return { span: { ...span, revision: sourceRevision(text) }, text, role: item.source, ...(originalId?{originalId}:{}), ...(work ? { work } : {}) };
     };
     const branch = async (identity: ThreadIdentity, headId?: string, signal?: AbortSignal,
         afterId?: string, conversationOnly = false, sourceBotId?: string): Promise<HistoryMemoryMaterial[]> => {

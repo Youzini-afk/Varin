@@ -673,6 +673,32 @@ fn validate_child_mcp_derivation(
     Ok(())
 }
 
+/// Selecting a registered project is a new configuration source, rather than a
+/// derivation of the dispatcher's project MCP. Its real execution Source must
+/// already have been accepted; the Host admits definitions/trust from that source.
+fn validate_project_mcp(
+    binding: &HostToolBinding,
+    selected: &super::dispatch::ChildProjectMcp,
+    captured: &ChildMcpCapture,
+    launch: &LaunchMetadata,
+) -> Result<()> {
+    let source = launch.selection.source.as_ref().ok_or_else(||
+        RuntimeError::Conflict("project MCP requires its admitted execution source".into()))?;
+    if captured.execution.source.as_ref().and_then(|source| source.selection()) != Some(source)
+        || source.resource_owner != selected.project.resource_owner
+        || captured.relation.project_id.as_deref() != Some(selected.project.id.as_str())
+        || selected.tools.as_ref().is_some_and(|names| binding.tools.iter().any(|tool| !names.contains(&tool.name)))
+        || binding.provenance.servers.values().any(|server| match server.owner.execution_scope {
+            launches::McpExecutionScope::Workspace => server.owner.resource_owner != source.resource_owner,
+            launches::McpExecutionScope::Global => !server.owner.resource_owner.is_local()
+                || server.owner.configuration.config_cwd != server.owner.configuration.agent_dir,
+        })
+    {
+        return Err(RuntimeError::Conflict("project MCP differs from its selected project, source or exact tools".into()));
+    }
+    Ok(())
+}
+
 impl LaunchChangePreparation {
     pub fn load(self) -> Result<PreparedLaunchChange> {
         let LaunchRead {
@@ -688,24 +714,36 @@ impl LaunchChangePreparation {
                 binding.validate()?;
                 let reference = content.save(&serde_json::to_value(&binding)?)?;
                 let delegated = if let Some(child) = &self.child_selection {
-                    let original_ref = child.mcp_binding_ref.as_ref().ok_or_else(|| {
-                        RuntimeError::Invalid("child has no delegated MCP capability".into())
-                    })?;
-                    let original_selection = selection.mcp_binding_ref.as_ref() == Some(original_ref);
-                    let receipt_replay = !derivations.is_empty()
-                        && selection.mcp_binding_ref.as_ref() == Some(&reference);
-                    if original_selection || receipt_replay {
-                        let original: HostToolBinding =
-                            serde_json::from_value(content.load(original_ref)?)?;
-                        validate_child_mcp_derivation(
-                            &binding, &original, &derivations,
-                            self.child_mcp.as_ref().ok_or_else(|| RuntimeError::Conflict(
-                                "child MCP execution admission is missing".into()))?,
-                            &metadata, &content,
-                        )?;
-                        original_selection
+                    let captured = self.child_mcp.as_ref().ok_or_else(|| RuntimeError::Conflict(
+                        "child MCP execution admission is missing".into()))?;
+                    let profile: super::dispatch::ChildSelectedProfile = serde_json::from_value(
+                        content.load(&captured.relation.selected_profile_ref)?)?;
+                    if let Some(project) = &profile.project_mcp {
+                        if !derivations.is_empty() {
+                            return Err(RuntimeError::Invalid("project MCP uses its own source admission, not a parent derivation".into()));
+                        }
+                        validate_project_mcp(&binding, project, captured, &metadata)?;
+                        // Only replace the initial dispatcher cut, before binding/model use.
+                        // Later prepares/restarts must restore the exact committed generation.
+                        selection.mcp_binding_ref == child.mcp_binding_ref
                     } else {
-                        false
+                        let original_ref = child.mcp_binding_ref.as_ref().ok_or_else(|| {
+                            RuntimeError::Invalid("child has no delegated MCP capability".into())
+                        })?;
+                        let original_selection = selection.mcp_binding_ref.as_ref() == Some(original_ref);
+                        let receipt_replay = !derivations.is_empty()
+                            && selection.mcp_binding_ref.as_ref() == Some(&reference);
+                        if original_selection || receipt_replay {
+                            let original: HostToolBinding =
+                                serde_json::from_value(content.load(original_ref)?)?;
+                            validate_child_mcp_derivation(
+                                &binding, &original, &derivations, captured,
+                                &metadata, &content,
+                            )?;
+                            original_selection
+                        } else {
+                            false
+                        }
                     }
                 } else {
                     false

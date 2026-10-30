@@ -286,6 +286,7 @@ impl Catalog {
             "branch.navigated",
             serde_json::to_value(&result)?,
         )?;
+        super::bot_work_events::navigation(&tx, &result)?;
         tx.execute(
             "INSERT INTO commands(id,intent,receipt) VALUES(?1,?2,?3)",
             params![

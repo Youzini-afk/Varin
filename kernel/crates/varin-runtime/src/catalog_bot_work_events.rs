@@ -26,6 +26,40 @@ pub(super) fn user_input(tx: &Transaction<'_>, run: &Run, item_id: &str) -> Resu
     }
     Ok(())
 }
+pub(super) fn observation(
+    tx: &Transaction<'_>, owner: &super::context_observations::ContextObservationSource, id: &str, change_id: Option<&str>,
+) -> Result<()> {
+    let mut bots = super::bot_work::followers(tx, &owner.thread_id, &owner.branch_id)?;
+    if let Some(bot) = super::bot::thread_bot(tx, &owner.thread_id)? { bots.push(bot); }
+    bots.sort(); bots.dedup();
+    for bot in bots {
+        let target = super::bot_work::entry(tx, &bot)?;
+        // The entry already receives this original observation; task intervention is
+        // what needs to cross back to its assistant, not a copy of its own context.
+        if target == owner.thread_id { continue; }
+        let branch = super::threads::branch(tx, &target)?;
+        event(tx, "bot-work-pending", 1, "bot.work_pending", json!({
+            "kind":"workspace_change", "botId":bot, "targetThreadId":target,
+            "targetBranchId":branch,"sourceThreadId":owner.thread_id,
+            "sourceBranchId":owner.branch_id,"sourceRunId":owner.run_id,"observationId":id,"changeId":change_id
+        }))?;
+    }
+    Ok(())
+}
+pub(super) fn navigation(tx: &Transaction<'_>, receipt: &super::navigation::NavigationReceipt) -> Result<()> {
+    let mut bots = super::bot_work::followers(tx, &receipt.thread_id, &receipt.branch_id)?;
+    if let Some(bot) = super::bot::thread_bot(tx, &receipt.thread_id)? { bots.push(bot); }
+    bots.sort(); bots.dedup();
+    for bot in bots {
+        let target = super::bot_work::entry(tx, &bot)?;
+        if target == receipt.thread_id { continue; }
+        let branch = super::threads::branch(tx, &target)?;
+        event(tx, "bot-work-pending", 1, "bot.work_pending", json!({"kind":"history_changed",
+            "botId":bot,"targetThreadId":target,"targetBranchId":branch,
+            "sourceThreadId":receipt.thread_id,"sourceBranchId":receipt.branch_id,"navigation":receipt}))?;
+    }
+    Ok(())
+}
 pub(super) fn external_report(
     tx: &Transaction<'_>,
     child: &super::external_children::ExternalChild,
@@ -68,7 +102,7 @@ fn suppressed(db: &Connection, cursor: u64, reason: &str) -> Result<()> {
     Ok(())
 }
 fn readable(db: &Connection, data: &Value) -> Result<bool> {
-    if data["kind"] != "user_input" && data["kind"] != "run_report" {
+    if !matches!(data["kind"].as_str(), Some("user_input" | "run_report" | "workspace_change" | "history_changed")) {
         return Ok(true);
     }
     let source = data["sourceThreadId"].as_str().unwrap_or_default();
@@ -79,6 +113,18 @@ fn readable(db: &Connection, data: &Value) -> Result<bool> {
         && (super::scheduling::thread_family(db, source)?
             == super::scheduling::thread_family(db, target)?
             || super::bot_work::linked(db, target, source, Some(branch), false, false)?))
+}
+pub(super) fn ingress_hold(db: &Connection, row: &inputs::QueuedInputMetadata) -> Result<Option<String>> {
+    let inputs::InputOrigin::WorkEvent { event_cursor, .. } = &row.origin else { return Ok(None) };
+    let raw: String = db.query_row("SELECT data FROM events WHERE cursor=?1", [sql_number(*event_cursor)?], |row| row.get(0))?;
+    Ok((!readable(db, &serde_json::from_str(&raw)?)?).then(|| "work_source_access_changed".into()))
+}
+fn workspace_change_projected(db: &Connection, data: &Value) -> Result<bool> {
+    let Some(change_id) = data["changeId"].as_str() else { return Ok(false) };
+    let mut query = db.prepare("SELECT e.data FROM events e JOIN input_queue q ON q.id='bot-work-event:'||e.cursor WHERE e.kind='bot.work_pending' AND json_extract(e.data,'$.changeId')=?1 AND json_extract(e.data,'$.targetThreadId')=?2")?;
+    let rows = query.query_map(params![change_id,data["targetThreadId"].as_str().unwrap_or_default()], |row| row.get::<_,String>(0))?;
+    for raw in rows { if readable(db, &serde_json::from_str(&raw?)?)? { return Ok(true); } }
+    Ok(false)
 }
 
 pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
@@ -115,9 +161,25 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
                     suppressed(&db.db, cursor, "source_unavailable")?;
                     return Ok(());
                 }
+                // A single editor/terminal action may affect several tasks sharing the
+                // execution workspace. Keep each task's passive fact, notify its Bot once.
+                if workspace_change_projected(&db.db, &data)? { suppressed(&db.db, cursor, "same_original_workspace_change")?; return Ok(()); }
                 let content = db.content.clone();
                 let epoch = db.epoch;
                 match data["kind"].as_str() {
+                    Some("history_changed") => (content, epoch, Either::Navigation(data["navigation"].clone()), false),
+                    Some("workspace_change") => {
+                        let id = data["observationId"].as_str().unwrap_or_default();
+                        let original: inputs::QueuedInputMetadata = record(&db.db, "input_queue", id)?;
+                        if !matches!(&original.origin, inputs::InputOrigin::ContextObservation { owner, .. }
+                            if Some(owner.thread_id.as_str()) == data["sourceThreadId"].as_str()
+                            && Some(owner.branch_id.as_str()) == data["sourceBranchId"].as_str()
+                            && Some(owner.run_id.as_str()) == data["sourceRunId"].as_str()) {
+                            return Err(RuntimeError::Conflict("work observation source changed".into()));
+                        }
+                        let reference: String = db.db.query_row("SELECT body FROM input_history_content WHERE input_id=?1", [id], |row| row.get(0))?;
+                        (content, epoch, Either::Observation(serde_json::from_str(&reference)?), false)
+                    }
                     Some("matter_changed") => {
                         let bot = data["botId"]
                             .as_str()
@@ -187,6 +249,12 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
             };
             let publication = content.begin_publication();
             let text=match body {
+            Either::Navigation(receipt) => format!("The user changed the original task's active history through recovery/navigation. Previous reports describe their original work; read the current source before continuing. Original navigation receipt: {}", serde_json::to_string(&receipt)?),
+            Either::Observation(reference) => {
+                let (value, _) = content.load_history_payload(&reference)?;
+                let original: ConversationItem = serde_json::from_value(value)?;
+                match original.content { Content::Text {text} => text, _ => return Err(RuntimeError::Invalid("work observation content missing".into())) }
+            }
             Either::User(item)=> {
                 let item=content.hydrate_history(item)?;
                 let visible=super::execution_persistence::history_input_items(&item.id,item.source,&item.content)?;
@@ -234,6 +302,10 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
                 tx.commit()?;
                 return Ok(());
             }
+            if workspace_change_projected(&tx, &data)? {
+                suppressed(&tx, cursor, "same_original_workspace_change")?;
+                tx.commit()?; return Ok(());
+            }
             let exists: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM input_queue WHERE id=?1)",
                 [&id],
@@ -276,6 +348,8 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
     failure.map_or(Ok(()), Err)
 }
 enum Either {
+    Navigation(Value),
+    Observation(Value),
     User(HistoryItem),
     Report(Vec<HistoryItem>),
     External(Option<super::external_children::ExternalChildRead>),

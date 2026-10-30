@@ -6,7 +6,7 @@ it('reads the actual incoming report and recent exchange without hydrating tool 
     { id: 'user', thread_id: 'thread', source: 'user', content: 'Continue the release' },
     { id: 'assistant', thread_id: 'thread', source: 'assistant', content: { content: { kind: 'text', text: 'The release is awaiting builds.' } } },
     ...Array.from({ length: 40 }, (_, at) => ({ id: `tool${at}`, thread_id: 'thread', source: 'tool', content: 'irrelevant output' })),
-    { id: 'report', thread_id: 'thread', source: 'agent', content: { content: { kind: 'output', output: { parts: [{ kind: 'text', text: 'The Android build finished.' }] } } } },
+    { id: 'report', thread_id: 'thread', source: 'agent', content: { content: { kind: 'output', output: { data: { kind: 'child_report', senderThreadId: 'android-build' }, parts: [{ kind: 'text', text: 'The Android build finished.' }] } } } },
   ];
   const runtime = {
     thread: async () => ({ bot_id: 'bot', branches: [{ branch_id: 'main' }] }),
@@ -16,6 +16,7 @@ it('reads the actual incoming report and recent exchange without hydrating tool 
   const result = await createBotHistory(runtime as never).recent({ runtime: 'agent', threadId: 'thread', branchId: 'main' });
   expect(result.map(item => item.text)).toEqual(['Continue the release', 'The release is awaiting builds.', 'The Android build finished.']);
   expect(runtime.botHistory.mock.calls.map(([input]) => input.itemId)).toEqual(['report', 'assistant', 'user']);
+  expect(result.at(-1)?.work).toEqual({ threadId: 'android-build' });
 });
 
 it('uses each frozen branch boundary when collecting new memory sources', async () => {

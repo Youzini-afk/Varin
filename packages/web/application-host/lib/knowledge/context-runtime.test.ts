@@ -20,6 +20,22 @@ const source = (threadId = 'thread:a'): ThreadObservationSource => ({ threadId, 
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'varin-native-observations-')); store = await openKnowledgeStoreEngine({ dataDir: root, hostId: 'host', workspaceId: 'ws', embedding: null }); sources = [source()]; });
 afterEach(async () => { await store.close(); await rm(root, { recursive: true, force: true }); });
 const runtime = () => createKnowledgeContextRuntime({ getStore: async () => store, threadSources: async () => sources });
+it('publishes original user interventions immediately outside the source write tail, without waiting for a model request', async () => {
+  const request = vi.fn(async (method: string, params: { events?: Array<{ id: number }> }) => {
+    if (method.endsWith('sources')) return sources;
+    return params.events!.map(event => ({ id: `observation:${sources[0]!.runId}:${event.id}`, cursor: event.id, state: 'queued' }));
+  });
+  const publication = createContextObservationPublication({ agentRuntimeRequest: request } as unknown as KernelClient);
+  const context = createKnowledgeContextRuntime({ getStore: async () => store, threadSources: async () => sources,
+    onObservation: owner => publication.publishSource(context, owner) });
+  context.observeDocumentMutation({ workspaceId: 'ws', resourceId: 'report.md', kind: 'modified', owner: { kind: 'web-route', id: 'save' } });
+  await context.drain();
+  expect(request).toHaveBeenCalledOnce();
+  expect(request.mock.calls[0]?.[1]?.events).toMatchObject([{ kind: 'edit', source: 'user', data: { owner: { id: 'save' } } }]);
+  await publication.recover(context);
+  expect(request.mock.calls.filter(([method]) => method.endsWith('admit'))).toHaveLength(1);
+  await context.dispose();
+});
 it('keeps model preparation available with a corrupt observation store and publishes the original events after recovery', async () => {
   const owner = source();
   await store.putEvent({ kind: 'edit', at: 1, sessionId: owner.runId, text: 'editor save', source: 'user' });
@@ -74,6 +90,15 @@ it('persists real document and terminal observations to admitted native Threads 
   await context.dispose(); context = runtime();
   expect(await context.observeTerminalCommand(event, source())).toBe(false);
   expect((await context.observationsForRun({ threadId: 'thread:a', branchId: 'branch:thread:a', runId: 'run:thread:a', afterEventId: first!.eventCursor }))?.events).toEqual([]);
+  await context.dispose();
+});
+it('keeps initial Git inventory and dirty counts passive while attributing an actual branch change', async () => {
+  const context = runtime();
+  for (const event of [{ branch: 'main', changed: 0 }, { branch: 'main', changed: 8 }, { branch: 'feature', changed: 8 }]) {
+    context.observeGitStatus({ workspaceId: 'ws', ...event }); await context.drain();
+  }
+  const events = await store.listEvents({ sessionId: source().runId });
+  expect(events.map(event => event.data?.notifyAssistant)).toEqual([false, false, true]);
   await context.dispose();
 });
 it('does not borrow a local cwd for a fixed or managed source and fences a changed original Run', async () => {

@@ -1585,7 +1585,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 72; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 73; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -2831,6 +2831,7 @@ export interface ChildSelectedProfile {
   tools: string[];
   instructions: string;
   avatar?: string;
+  project_mcp?: { project: ChildProjectSource; tools: string[] | null };
 }
 
 export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string };

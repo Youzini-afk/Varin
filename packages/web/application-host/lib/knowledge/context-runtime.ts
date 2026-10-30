@@ -1,9 +1,12 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
+import { randomUUID } from 'node:crypto';
 import { waitWithSignal } from "../cancellation.js";
 import type { ContextObservationSource } from '../kernel/protocol.generated.js';
 import type { KnowledgeRecallItem, KnowledgeRecallMaterial } from "./recall-material.js";
 import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalCommandEvent, type TerminalExitEvent } from "./observers.js";
 import type { KnowledgeScope, KnowledgeStore, RecallResult, StoredEvent } from "./store.js";
+import type { BotRecallContext, BotRecallWork } from '../memory/bot-recall-context.js';
+import type { MemoryRecallAssociation } from './vectors/index.js';
 
 /** Only the original admitted native launch can establish an observation owner. */
 export interface ThreadObservationIdentity { threadId: string; branchId: string; runId: string }
@@ -36,9 +39,12 @@ export interface KnowledgeContextRuntimeOptions {
   getUserStore?: () => Promise<KnowledgeStore | null>;
   getThreadStore?: (threadId: string) => Promise<KnowledgeStore | null>;
   goalForThread?: (threadId: string) => Promise<string | undefined>;
-  recallForThread?: (input: { workspaceId: string; store: KnowledgeStore; threadId: string; query: string; goal?: string; signal?: AbortSignal }) => Promise<RecallResult[]>;
+  recallContextForThread?: (input: { threadId: string; query: string; work?: readonly BotRecallWork[]; signal?: AbortSignal }) => Promise<BotRecallContext>;
+  recallForThread?: (input: { workspaceId: string; store: KnowledgeStore; threadId: string; query: string; associated?: MemoryRecallAssociation; goal?: string; signal?: AbortSignal }) => Promise<RecallResult[]>;
   /** Reads original launch identities. No renderer or path-derived conversation binding. */
   threadSources?(): Promise<ThreadObservationSource[]>;
+  /** Fires after the original Knowledge write settles, outside its source tail. */
+  onObservation?(owner: ThreadObservationSource): Promise<void>;
   onError?: (error: unknown) => void;
 }
 const emptyMaterial = (): KnowledgeRecallMaterial => ({ knowledge: [] });
@@ -79,7 +85,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     void task.finally(() => { if (refresh === task) refresh = undefined; }).catch(() => {});
     return task;
   };
-  const forWorkspace = async (workspaceId: string, visit: (observers: Observers, binding: ObservationBinding) => Promise<void>, target?: ThreadObservationIdentity): Promise<void> => {
+  const forWorkspace = async (workspaceId: string, visit: (observers: Observers, binding: ObservationBinding) => Promise<void>, target?: ThreadObservationIdentity, publish = false): Promise<void> => {
     await refreshBindings();
     await Promise.all([...bindings.values()].filter(binding => binding.workspaceId === workspaceId && (!target || binding.runId === target.runId && binding.threadId === target.threadId && binding.branchId === target.branchId)).map(binding => {
       const task = binding.tail.then(async () => {
@@ -90,21 +96,26 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         if (observers) await visit(observers, binding);
       });
       binding.tail = task.catch(() => undefined);
-      return task;
+      return task.then(async () => {
+        if (!disposed && publish) await options.onObservation?.({ threadId: binding.threadId, branchId: binding.branchId,
+          runId: binding.runId, anchorId: binding.anchorId, source: binding.source, epoch: binding.epoch });
+      });
     }));
   };
   const observeDocumentMutation = (event: DocumentMutationObservation): void => {
     if (disposed) return;
+    const changeId = `document:${randomUUID()}`;
     const agentWriterActive = event.owner.kind === 'harness' || event.owner.kind.startsWith('harness-') || event.owner.kind.startsWith('agent-') || event.owner.kind === 'agent-runtime';
     track(forWorkspace(event.workspaceId, (observers, binding) => {
       if (agentWriterActive) binding.pendingUserPaths.delete(event.resourceId); else binding.pendingUserPaths.add(event.resourceId);
-      return observers.onDocumentWrite({ workspaceId: event.workspaceId, path: event.resourceId, kind: event.kind, agentWriterActive });
-    }));
+      return observers.onDocumentWrite({ workspaceId: event.workspaceId, path: event.resourceId, kind: event.kind, agentWriterActive, owner: event.owner, changeId,
+        source: agentWriterActive ? 'agent' : ['web-route', 'workspace-edit', 'resource-editor', 'recovery'].includes(event.owner.kind) ? 'user' : 'external' });
+    }, undefined, !agentWriterActive));
   };
   const observeTerminalCommand = async (event: TerminalCommandEvent | TerminalExitEvent, target?: ThreadObservationIdentity): Promise<boolean> => {
     if (disposed) return false;
     let inserted = false;
-    const task = forWorkspace(event.workspaceId, async observers => { inserted = await observers.onTerminalExit(event) || inserted; }, target);
+    const task = forWorkspace(event.workspaceId, async observers => { inserted = await observers.onTerminalExit(event) || inserted; }, target, event.source === 'user');
     track(task); await task; return inserted;
   };
   const observeDiagnostics = (event: DiagnosticEvent): void => {
@@ -112,15 +123,17 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     track(forWorkspace(event.workspaceId, async (observers, binding) => {
       if (!binding.pendingUserPaths.delete(event.path)) return;
       await observers.onDiagnostics(event);
-    }));
+    }, undefined, true));
   };
   const observeGitStatus = (event: GitStatusEvent): void => {
     if (disposed) return;
     const fingerprint = JSON.stringify([event.branch ?? null, event.changed ?? null, event.note ?? null]);
+    const changeId = `git:${randomUUID()}`;
     track(forWorkspace(event.workspaceId, async (observers, binding) => {
       if (binding.gitFingerprint === fingerprint) return;
-      await observers.onGitStatus(event); binding.gitFingerprint = fingerprint;
-    }));
+      const branchChanged = binding.gitFingerprint !== null && JSON.parse(binding.gitFingerprint)[0] !== (event.branch ?? null);
+      await observers.onGitStatus({ ...event, changeId, notifyAssistant: branchChanged }); binding.gitFingerprint = fingerprint;
+    }, undefined, true));
   };
   const drain = async (): Promise<void> => { while (pending.size) await Promise.allSettled([...pending]); };
   const observationsForSource = async (owner: ThreadObservationSource, request: { afterEventId?: number; signal?: AbortSignal } = {}): Promise<ThreadObservationMaterial> => {
@@ -150,7 +163,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     if (binding.threadId !== request.threadId || binding.branchId !== request.branchId) throw new Error('Observation request changed original Run');
     return observationsForSource({ threadId: binding.threadId, branchId: binding.branchId, runId: binding.runId, anchorId: binding.anchorId, epoch: binding.epoch, source: binding.source }, request);
   };
-  type RecallRequest = { threadId: string; query?: string; knownMaterial?: Record<string, string>; signal?: AbortSignal };
+  type RecallRequest = { threadId: string; query?: string; work?: BotRecallWork[]; knownMaterial?: Record<string, string>; signal?: AbortSignal };
   type RecallBinding = { workspaceId: string; recallCache: { query: string; workspaceRevision: string; userRevision: string | null; sessionRevision: string | null; results: RecallResult[] } | null };
   const threadBindings = new Map<string, RecallBinding>();
   const recallMaterial = async (request: RecallRequest, binding: RecallBinding, store: KnowledgeStore, material: KnowledgeRecallMaterial): Promise<void> => {
@@ -159,7 +172,11 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     const goal = await wait(options.goalForThread?.(request.threadId) ?? Promise.resolve(undefined));
     // BC3: the recall query carries the owning work's goal plus the latest
     // message, so "continue" still reaches the memories bound to that work.
-    const recallQuery = [goal, query].filter((part) => part !== undefined && part.length > 0).join("\n") || undefined;
+    const baseQuery = [goal, query].filter((part) => part !== undefined && part.length > 0).join("\n");
+    const projection = await wait(options.recallContextForThread?.({ threadId: request.threadId, query: baseQuery,
+      ...(request.work ? { work: request.work } : {}), ...(request.signal ? { signal: request.signal } : {}) }) ?? Promise.resolve(undefined));
+    const recallQuery = projection?.query || baseQuery || undefined;
+    const recallKey = JSON.stringify([recallQuery, projection?.revision]);
     const retainedKnowledge = Object.keys(request.knownMaterial ?? {}).flatMap((key) => {
       const match = /^knowledge:(workspace|user|bot|session):(\d+)$/.exec(key);
       if (!match) return [];
@@ -195,7 +212,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       const userRevision = userStore ? userStore.knowledgeRevision() : null;
       const sessionRevision = sessionStore ? sessionStore.knowledgeRevision() : null;
       const cached = binding.recallCache;
-      const sameQuery = cached?.query === recallQuery;
+      const sameQuery = cached?.query === recallKey;
       const revisionsChanged = !cached
         || cached.workspaceRevision !== workspaceRevision
         || cached.userRevision !== userRevision || cached.sessionRevision !== sessionRevision;
@@ -219,16 +236,17 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         }
       }
       let recalled: RecallResult[];
-      if (cached?.query === recallQuery
+      if (cached?.query === recallKey
         && cached.workspaceRevision === workspaceRevision
         && cached.userRevision === userRevision && cached.sessionRevision === sessionRevision) {
         recalled = cached.results;
       } else {
         const input = { workspaceId: binding.workspaceId, store, query: recallQuery,
+          ...(projection ? { associated: projection.associated } : {}),
           ...(goal !== undefined ? { goal } : {}), ...(request.signal ? { signal: request.signal } : {}) };
         recalled = options.recallForThread ? await wait(options.recallForThread({ ...input, threadId: request.threadId })) : await wait(store.recall(recallQuery, 5));
         request.signal?.throwIfAborted();
-        binding.recallCache = { query: recallQuery, workspaceRevision, userRevision, sessionRevision, results: recalled };
+        binding.recallCache = { query: recallKey, workspaceRevision, userRevision, sessionRevision, results: recalled };
       }
       material.knowledge = recalled.flatMap((result) => {
         if (result.node.type !== "knowledge") return [];
@@ -267,7 +285,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       if (corrections.length > 0) material.knowledgeCorrections = corrections;
     }
   };
-  const knowledgeForThread = async (request: { threadId: string; scopeId: string; query: string; knownMaterial?: Record<string, string>; signal?: AbortSignal }): Promise<KnowledgeRecallMaterial> => {
+  const knowledgeForThread = async (request: RecallRequest & { scopeId: string; query: string }): Promise<KnowledgeRecallMaterial> => {
     request.signal?.throwIfAborted();
     const existing = threadBindings.get(request.threadId);
     const binding: RecallBinding = existing?.workspaceId === request.scopeId ? existing : { workspaceId: request.scopeId, recallCache: null };

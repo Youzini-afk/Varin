@@ -1,4 +1,5 @@
 import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
+import { isDeepStrictEqual } from 'node:util';
 import { permissionService } from './lib/kernel/permission-service.js';
 import { createPermissionPersistence } from './lib/kernel/permission-persistence.js';
 import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
@@ -25,6 +26,8 @@ import { createManagedRecoveryService } from './lib/kernel/managed-recovery-serv
 import { createManagedScheduleService, createManagedScheduleOwner, createKernelManagedScheduleReceipts, createManagedScheduleReconciler } from './lib/kernel/managed-schedule-service.js';
 import { createBotMemoryOwner } from './lib/kernel/bot-memory-owner.js';
 import { createBotHistory } from './lib/memory/bot-history.js';
+import { createBotRecallContext } from './lib/memory/bot-recall-context.js';
+import { normalizePathIdentity } from './lib/workspace/path-safety.js';
 import { createThreadMemory } from './lib/memory/thread-memory.js';
 import { registerThreadMemoryRoutes } from './lib/memory/thread-memory-routes.js';
 import { createMemoryInference } from './lib/memory/memory-inference.js';
@@ -1821,7 +1824,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: () => console.error('[MCP] Target contribution is unavailable; original calls are not replayed'),
   });
   const agentRuntime: AgentRuntimeClient = new AgentRuntimeClient(kernelClient, async (input, signal) => {
-    if (input.fixed) return prepareChildMcp(input, signal);
+    const projectMcp = input.child?.selected_profile.project_mcp;
+    if (input.fixed && !input.projectDiscovery) return prepareChildMcp(input, signal);
+    if (projectMcp) {
+      const current = (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).find(project => project.id === projectMcp.project.id);
+      if (!current || normalizePathIdentity(current.path) !== normalizePathIdentity(projectMcp.project.path))
+        throw new Error('The selected project MCP configuration source changed; select the project again');
+      if (!input.source || !input.executionCwd || !isDeepStrictEqual(input.source.resourceOwner, projectMcp.project.resource_owner))
+        throw new Error('Project MCP requires the selected project’s admitted execution view');
+    }
     // A read-only fixed branch has no executable filesystem view. Global MCP capabilities run
     // in the neutral Host scope; they must not borrow the mutable project directory.
     const workspace = input.source?.resourceOwner.kind === 'local' && input.executionCwd
@@ -1884,6 +1895,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return originalTarget.retainChild(binding, selected);
       } } : {}),
       ...(input.requiredBinding ? { selection: input.requiredBinding } : {}),
+      ...(projectMcp?.tools ? { toolNames: projectMcp.tools } : {}),
       ...(input.source && !workspace && (!managed || !targetReady) ? { unavailableWorkspaceScope: {
         workspaceId: input.source.workspaceId,
         reason: managed ? 'The selected Host project MCP contribution is preparing or unavailable. Its tools are not being executed on this Host.' : 'Project MCP capabilities require a prepared execution environment matching the pinned source. Only global Host MCP capabilities are available for this read-only source.',
@@ -2043,26 +2055,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   personalizationRuntime = agentRuntime;
   const botHistory = createBotHistory(agentRuntime);
+  const botRecallContext = createBotRecallContext({ runtime: agentRuntime,
+    projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [] });
   const workAssociationForThread = async (threadId: string) => {
-    const botId = (await agentRuntime.thread(threadId)).bot_id;
-    if (!botId) return undefined;
-    const [scope, children] = await Promise.all([agentRuntime.botScope(botId), agentRuntime.children()]);
-    const associated = new Set([threadId]);
-    let cursor = threadId;
-    for (;;) {
-      const parent = children.find(child => child.child_thread_id === cursor)?.parent_thread_id;
-      if (!parent || associated.has(parent)) break;
-      associated.add(parent); cursor = parent;
-    }
-    // Include this work's own delegated descendants, not its siblings' local work.
-    const descendants = new Set([threadId]);
-    for (;;) {
-      const before = descendants.size;
-      for (const child of children) if (descendants.has(child.parent_thread_id)) descendants.add(child.child_thread_id);
-      if (descendants.size === before) break;
-    }
-    for (const id of descendants) associated.add(id);
-    return { threadIds: [...associated], runIds: scope.runs.filter(run => associated.has(run.threadId)).map(run => run.runId) };
+    return (await botRecallContext({ threadId, query: '' })).associated;
   };
   const threadWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
   const threadResourceOwners: Parameters<typeof createThreadResourceScope>[0] = {
@@ -2503,18 +2499,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
     threadSources: () => contextObservationPublication.sources(),
+    onObservation: owner => contextObservationPublication.publishSource(knowledgeContextRuntime, owner),
+    recallContextForThread: botRecallContext,
     goalForThread: async threadId => {
       const goals = await agentRuntime.goals(threadId);
       return goals.findLast(goal => goal.control === 'active')?.objective;
     },
     getThreadStore: async threadId => await knowledgeStoreExistsForScope(threadScopeId(threadId)) ? getKnowledgeStoreForScope(threadScopeId(threadId)) : null,
-    recallForThread: async ({ workspaceId, store, threadId, query, goal, signal }) => {
+    recallForThread: async ({ workspaceId, store, threadId, query, associated, goal, signal }) => {
       const sources: MemoryRecallSource[] = [{ authority: store, scope: 'bot', scopeId: workspaceId }];
       if (await knowledgeStoreExistsForScope(threadScopeId(threadId))) sources.push({ authority: await getKnowledgeStoreForScope(threadScopeId(threadId)), scope: 'session', scopeId: threadScopeId(threadId) });
       const user = await getUserKnowledgeStore();
       if (user) sources.push({ authority: user, scope: 'user', scopeId: 'user' });
       const { results } = await recallMemories({ sources, query, k: 5, workspaceId, judgeWorkspaceId: workspaceId,
-        associated: (await workAssociationForThread(threadId)) ?? {}, ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
+        associated: associated ?? {}, ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
         ...(goal ? { goal } : {}), ...(signal ? { signal } : {}),
  });
       return results;
@@ -2524,6 +2522,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
   contextService.bindObservations((run, signal) => contextObservationPublication.publish(knowledgeContextRuntime, run, signal));
+  // Replay original persisted observations after Host restart; Catalog receipts dedupe them.
+  void contextObservationPublication.recover(knowledgeContextRuntime).catch(error => {
+    console.error('[ContextObservations] Original workspace observations await recovery:', errorMessage(error));
+  });
   const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
   // A grammar catalog must not be able to stop the Host from starting: an
   // unreadable manifest means "nothing is installable", not "no server".

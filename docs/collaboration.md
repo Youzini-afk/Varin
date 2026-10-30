@@ -74,7 +74,9 @@ Bot 的原生回报 owner 独立把新结果送往本次交办请求者，并与
 
 `dispatch.projectId` 按本次冻结的已登记项目选择目标来源，不准备全部项目，也不借用父级文件 grant。
 `matters` 的 `projects` 动作可发现项目 ID。Shared 沿目标项目的实际来源，隔离按需经过原准备与回收 owner；
-原项目专属的 workspace MCP 配置不跨项目搬运。`dispatch.background` 则只按固定历史引用交接背景。
+原项目专属的 workspace MCP 配置不跨项目搬运。目标项目的配置意图随派发固定，在实际 Source 准备后，
+按该项目自己的信任与执行目录准备 MCP；首轮请求前由原 Catalog 提交，之后恢复精确绑定。
+显式工具列表仍保持精确。`dispatch.background` 则只按固定历史引用交接背景。
 `send.afterCurrent` 用于顺序交办独立的新工作，普通补充继续使用原输入边界。
 
 来源保留具体 worktree 的身份。工作方式由每次派发的 `workMode` 选择，与角色、模型和工具子集分别解析：

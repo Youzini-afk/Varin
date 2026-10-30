@@ -35,8 +35,11 @@ fn read_schema() -> ToolSchema {
 #[allow(dead_code)]
 impl Fixture {
     pub(crate) fn new_project_dispatch() -> Self {
+        Self::new_project_dispatch_with_tools(None)
+    }
+    pub(crate) fn new_project_dispatch_with_tools(tools: Option<Vec<String>>) -> Self {
         Self::new_parent_custom(7,read_schema(),ToolSchema{requirements:None,name:DISPATCH_TOOL.into(),version:"1".into(),description:String::new(),schema:json!({"type":"object"}),output_schema:None,metadata:None},
-            false,false,false,|input,_| {input.project_id=Some("project-B".into());input.work_mode=Some(varin_runtime::catalog::dispatch::ChildWorkMode::Shared);})
+            false,false,false,|input,_| {input.project_id=Some("project-B".into());input.work_mode=Some(varin_runtime::catalog::dispatch::ChildWorkMode::Shared);input.tools=tools.clone();})
     }
     pub(crate) fn new() -> Self {
         Self::new_with_schemas(
@@ -680,8 +683,11 @@ impl Fixture {
     }
     pub(crate) fn accept(&mut self) -> varin_runtime::catalog::collaboration::ChildTask {
         if self.input.project_id.is_some() {
-            let selected=self.db.capture_child_dispatch_invocation(&self.context).unwrap().load().unwrap().resolve(&self.input).unwrap();
-            let launch=self.db.prepare_child_launch(&self.context.run_id,self.launch.clone(),selected).unwrap().load().unwrap();
+            let directory=self.db.capture_child_dispatch_invocation(&self.context).unwrap().load().unwrap();
+            let selected=directory.resolve(&self.input).unwrap();
+            let mut launch=self.launch.clone();
+            launch.tools=directory.frozen.allowed_delegation.iter().filter(|tool|selected.profile.tools.contains(&tool.name)).cloned().collect();
+            let launch=self.db.prepare_child_launch(&self.context.run_id,launch,selected).unwrap().load().unwrap();
             let prepared=self.db.prepare_child_admission(&self.context,self.input.clone(),None,launch).unwrap().load().unwrap();
             return self.db.accept_child_references(prepared).unwrap();
         }

@@ -186,6 +186,7 @@ fn initialize_metadata(
     context::initialize(&tx)?;
     // Derived lookup over the original descriptive events; no second matter/task state.
     tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_matter_revisions ON events(subject,json_extract(data,'$.id'),cursor DESC) WHERE kind='bot.matter.updated'")?;
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_work_changes ON events(json_extract(data,'$.changeId'),json_extract(data,'$.targetThreadId')) WHERE kind='bot.work_pending'")?;
     if version == 0 {
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;

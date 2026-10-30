@@ -4,6 +4,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { MemoryResult, MemoryToolOwner } from './memory-owner.js';
 import type { BotHistory } from '../memory/bot-history.js';
+import type { BotRecallWork } from '../memory/bot-recall-context.js';
 import type { MemoryOwner, MemoryService } from '../memory/memory-service.js';
 import { KnowledgeMutationError, type KnowledgeExpectedRevision } from '../knowledge/store.js';
 import { botScopeId } from '../harness/owner-scope.js';
@@ -36,6 +37,7 @@ export function createBotMemoryOwner(options: {
         threadId: string;
         scopeId: string;
         query: string;
+        work?: BotRecallWork[];
         knownMaterial: Record<string, string>;
         signal: AbortSignal;
     }): Promise<KnowledgeRecallMaterial>;
@@ -68,12 +70,14 @@ export function createBotMemoryOwner(options: {
                 ] as MemoryOwner[]).map(async owner => (await options.memory.exclusions(owner))
                     .map(row => ({ id: row.id, scope: row.scope, sources: row.source?.spans ?? [] }))))).flat();
                 const history = await options.history.recent(identity, signal);
+                const work: BotRecallWork[] = [];
                 const recallContext = history.map(item => {
                     const covered=exclusions.flatMap(row=>row.sources).map(span=>item.originalId===span.id?{...span,id:item.span.id,threadId:item.span.threadId}:span);
                     const text=uncoveredSourceSpans(item.span,covered).map(span=>item.text.slice(span.start,span.end)).join('\n');
+                    if (text && item.work) work.push(item.work);
                     return text ? '['+item.role+'] '+text : '';
                 }).filter(Boolean).join('\n\n');
-                const material = await options.knowledge({ threadId: run.thread_id, scopeId: botScopeId(botId!), query: recallContext,
+                const material = await options.knowledge({ threadId: run.thread_id, scopeId: botScopeId(botId!), query: recallContext, work,
                     knownMaterial: Object.fromEntries(retained.map(item => [key(item), JSON.stringify(item)])), signal });
                 const items = new Map(retained.map(item => [key(item), item]));
                 const invalidations = new Map((prior.invalidations ?? []).map(item => [key(item), item]));

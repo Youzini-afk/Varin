@@ -101,6 +101,8 @@ export interface McpPreparation {
   delegatedBinding?: McpBinding;
   fixed?: boolean;
   child?: import('./protocol.generated.js').DelegatedExecution;
+  /** Discover a newly selected project's scope before its first dispatch launch is bound. */
+  projectDiscovery?: boolean;
 }
 export interface RunPolicyScope { runId: string; threadId: string; projectId?: string }
 export interface RunPolicyPreparer {
@@ -1265,7 +1267,10 @@ export class AgentRuntimeClient {
       const saved = await this.launch(runId, signal);
       const run = await this.run(runId, signal);
       const child = await this.childExecutionForRun(runId, signal);
-      if (child && !saved?.selection.mcp_binding) return undefined;
+      const projectMcp = child?.selected_profile.project_mcp;
+      const projectDiscovery = Boolean(projectMcp && child?.trigger.kind === 'dispatch' && saved?.bound_epoch === null
+        && isDeepStrictEqual(saved.selection.mcp_binding, child.launch.mcp_binding));
+      if (child && !saved?.selection.mcp_binding && !projectDiscovery) return undefined;
       if (!this.prepareMcpOwner) {
         if (saved?.selection.mcp_binding)
           throw new Error(
@@ -1280,12 +1285,13 @@ export class AgentRuntimeClient {
         source,
         ...(executionCwd ? { executionCwd } : {}),
         ...(child ? { fixed: true, child } : {}),
+        ...(projectDiscovery ? { projectDiscovery: true } : {}),
       };
       if (!child) this.mcpPreparations.set(runId, input);
       const preparation = this.prepareMcpOwner(
         {
           ...input,
-          ...(saved?.selection.mcp_binding
+          ...(saved?.selection.mcp_binding && !projectDiscovery
             ? child && isDeepStrictEqual(saved.selection.mcp_binding, child.launch.mcp_binding)
               ? { delegatedBinding: saved.selection.mcp_binding }
               : { requiredBinding: saved.selection.mcp_binding }

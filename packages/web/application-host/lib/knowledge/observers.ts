@@ -22,6 +22,9 @@ export interface DocumentWriteEvent {
   kind: "modified" | "created" | "deleted";
   /** Whether a native Agent writer was active at write time */
   agentWriterActive: boolean;
+  changeId?: string;
+  source?: EventSource;
+  owner?: { kind: string; id: string; generation?: number | undefined };
   turnIndex?: number;
 }
 
@@ -54,6 +57,8 @@ export interface DiagnosticEvent {
 }
 
 export interface GitStatusEvent {
+  changeId?: string;
+  notifyAssistant?: boolean;
   workspaceId: string;
   branch?: string;
   changed?: number;
@@ -82,7 +87,7 @@ export function createObservers(deps: ObserverDeps) {
   const { store, sessionId } = deps;
 
   async function onDocumentWrite(event: DocumentWriteEvent): Promise<void> {
-    const source = determineWriteSource(event.agentWriterActive);
+    const source = event.source ?? determineWriteSource(event.agentWriterActive);
     const input: EventInput = {
       kind: "edit",
       at: Date.now(),
@@ -90,7 +95,7 @@ export function createObservers(deps: ObserverDeps) {
       ...(event.turnIndex === undefined ? {} : { turnIndex: event.turnIndex }),
       text: `${event.kind} ${event.path}`,
       refs: { path: event.path },
-      data: { kind: event.kind, path: event.path },
+      data: { kind: event.kind, path: event.path, ...(event.owner ? { owner: event.owner } : {}), ...(event.changeId ? { changeId: event.changeId } : {}) },
       source,
     };
     await store.putEvent(input);
@@ -111,6 +116,7 @@ export function createObservers(deps: ObserverDeps) {
         command: event.command,
         exitCode: event.exitCode,
         origin: event.source,
+        ...(event.commandId ? { changeId: `terminal:${event.sessionId}:${event.commandId}` } : {}),
         ...(event.commandId === undefined ? {} : { commandId: event.commandId }),
         ...(event.cwd === undefined ? {} : { cwd: event.cwd }),
         ...(event.integration === undefined ? {} : { integration: event.integration }),
@@ -151,6 +157,8 @@ export function createObservers(deps: ObserverDeps) {
       text: `git: ${parts.join(", ")}`,
       data: {
         type: "git",
+        ...(event.changeId ? { changeId: event.changeId } : {}),
+        ...(event.notifyAssistant !== undefined ? { notifyAssistant: event.notifyAssistant } : {}),
         ...(event.branch === undefined ? {} : { branch: event.branch }),
         ...(event.changed === undefined ? {} : { changed: event.changed }),
         ...(event.note === undefined ? {} : { note: event.note }),

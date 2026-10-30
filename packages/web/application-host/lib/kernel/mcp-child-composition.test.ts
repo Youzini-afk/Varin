@@ -120,6 +120,21 @@ const deferred = <T>() => {
 };
 const tick = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 
+it('narrows newly discovered project MCP to an explicit tool list and executes it in the actual child directory', async () => {
+  const authority = new McpAuthority(); authorities.push(authority);
+  const lease = await authority.acquire({ ...scope('/project', 'workspace'), executionCwd: '/child-cwd', environmentId: 'host:child' }, { servers: ['shadowed'] });
+  const child = createMcpLease({ lease, kernel: {} as KernelClient, currentPolicy: policy, toolNames: ['shadowed_read'] });
+  leases.push(child);
+  expect(child.binding.tools.map(tool => tool.name)).toEqual(['shadowed_read']);
+  expect(Object.keys(child.binding.provenance.servers)).toEqual(['shadowed']);
+  expect(Object.keys(child.binding.resources).sort()).toEqual(['server:shadowed', 'shadowed_read']);
+  const invocation = call(child.binding, 'shadowed');
+  await child.authorize(invocation, signal);
+  expect((await child.execute(invocation, signal, { kind: 'external', identity: 'child', epoch: 'epoch' })).completion)
+    .toMatchObject({ kind: 'result', outcome: 'succeeded' });
+  expect(sdk.calls).toEqual([{ server: 'shadowed', cwd: '/child-cwd' }]);
+});
+
 it('groups complete frozen local owners and executes global/project contributions in their own child scopes', async () => {
   const f = await fixture();
   const acquire = vi.spyOn(f.authority, 'acquire');

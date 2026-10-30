@@ -13,6 +13,7 @@ pub(super) fn hold(
         return Ok(Some("bot_suspended".into()));
     }
     match row.origin {
+        InputOrigin::WorkEvent { .. } => super::bot_work_events::ingress_hold(db, row),
         InputOrigin::ContextObservation { .. } => context_observations::ingress_hold(db, row, run),
         InputOrigin::Followup { .. } => {
             Ok(followups::ingress_hold(db, row, run)?.map(|reason| format!("{reason:?}")))

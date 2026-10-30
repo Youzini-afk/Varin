@@ -321,7 +321,16 @@ fn validate_names(names: &[String]) -> Result<()> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct ChildProjectMcp {
+    pub project: ChildProjectSource,
+    /// An explicit tool selection stays exact when the target scope is discovered.
+    pub tools: Option<Vec<String>>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ChildSelectedProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_mcp: Option<ChildProjectMcp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     pub preset_id: Option<String>,
@@ -745,6 +754,7 @@ impl ChildDispatchSelection {
                 .cloned()
                 .collect(),
             profile: ChildSelectedProfile {
+                project_mcp: self.project(input)?.map(|project| ChildProjectMcp { project, tools: input.tools.clone() }),
                 avatar,
                 preset_id: input.preset.clone(),
                 catalog_identity: Some(self.catalog.identity.clone()),

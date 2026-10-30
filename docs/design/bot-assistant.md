@@ -539,9 +539,10 @@ Catalog 保存原整理任务、请求和执行回执，KnowledgeStore 保存记
 3. 增量历史使用冻结 head、afterId 和真实范围覆盖；来源回退时重开当前可达视图，已有来源仍按原身份去重。
 4. KnowledgeStore 保留唯一写入者。正文与 nature 解耦，多原文引用与同 store 的确切记忆版本依赖均为可选属性；修订、失效和原回执原子提交。
 5. 新遗忘范围使受影响的有效上下文从原引用重建，同时过滤召回依据、模型侧原文读取和背景交接；原 UI 历史保留。已经发出的请求按原在途语义处理。
-6. Bot 日程使用家目录和 bot:<id> 资产范围，执行归原 Calendar。用户在原生任务内的发言与受跟进任务结果带来源返回；外部执行保持其适配器的真实观察能力。
+6. Bot 日程使用家目录和 bot:<id> 资产范围，执行归原 Calendar。用户在任务内的发言、文件/环境观察、历史恢复和受跟进任务结果沿原回执带来源返回；外部执行保持其适配器的真实观察能力。
 7. send.afterCurrent 明确顺序交办；任务复用保留每次 execution。普通会话仅通过当前有效跟进关系接入，不扩大所有家族的默认范围。
-8. dispatch.background 固定选择原历史材料，inheritContext 沿原含义，projectId/sourceAgent/sourcePath 选择实际文件来源。外部 Harness 的不支持能力明确返回。
+8. dispatch.background 固定选择原历史材料，inheritContext 沿原含义，projectId/sourceAgent/sourcePath 选择实际文件来源。目标项目 MCP 在实际来源准备后独立准入，首轮前固定；显式工具列表继续收窄。外部 Harness 的不支持能力明确返回。
+9. 召回把真实交流与 incoming 原任务身份关联到事项描述及项目登记；不默认关联总助手全部子任务。事项与项目 revision/内容变化参与查询缓存，原权限和记忆关联分别核验。
 
 当前机制见 [Bot](../bot.md)、[协作](../collaboration.md)、[运行时](../runtime.md)及源码旁说明。
 多 Bot 长期协作、外部消息渠道、跨用户共享记忆及外部 Harness 能力桥接继续作为独立议题。

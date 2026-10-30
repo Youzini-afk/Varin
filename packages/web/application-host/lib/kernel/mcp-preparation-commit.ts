@@ -13,7 +13,7 @@ export async function commitPreparedMcpBinding(kernel: KernelClient, runId: stri
   } catch (error) {
     // A one-time child transition may have committed before its ACK was lost. Read
     // without the cancelled preparation signal; this cannot authorize a new effect.
-    const committed = lease.derivations?.length ? await readLaunch().catch(() => null) : null;
+    const committed = await readLaunch().catch(() => null);
     if (!committed || !isDeepStrictEqual(committed.selection.mcp_binding, lease.binding)) throw error;
   }
   signal.throwIfAborted();

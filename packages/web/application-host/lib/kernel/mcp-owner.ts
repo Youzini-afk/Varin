@@ -55,6 +55,8 @@ export interface McpOwnerOptions {
   unavailableWorkspaceScope?: { workspaceId: string; reason: string };
   /** Exact visible dependency set. Retargeting changes only the execution owner/resources. */
   selection?: McpBinding;
+  /** Exact explicit dispatch list when discovering a newly selected project. */
+  toolNames?: readonly string[];
   retarget?: boolean;
   retainChild?: McpToolLease['retainChild'];
 }
@@ -124,6 +126,17 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     if(!configured && !(route.kind === 'task_control' && options.tasks) && !(route.kind==='resource_unsubscribe' && options.resources))continue;
     binding.tools.push(structuredClone(schema));
     binding.routes[schema.name] = structuredClone(route);
+  }
+  if (options.toolNames && !options.selection) {
+    binding.tools = binding.tools.filter(tool => options.toolNames!.includes(tool.name));
+    binding.routes = Object.fromEntries(Object.entries(binding.routes).filter(([name]) => binding.tools.some(tool => tool.name === name)));
+    const gateway = Object.values(binding.routes).some(route => route.kind !== 'direct' && route.kind !== 'direct_task');
+    const resources = new Set(binding.tools.map(tool => binding.resources[tool.name]).filter(Boolean));
+    if (!gateway) binding.provenance.servers = Object.fromEntries(Object.entries(binding.provenance.servers).filter(([, server]) => resources.has(server.resource_key)));
+    binding.resources = Object.fromEntries(Object.entries(binding.resources).filter(([name]) =>
+      binding.tools.some(tool => tool.name === name) || name.startsWith('server:') && name.slice(7) in binding.provenance.servers));
+    for (const name of entries.keys()) if (!binding.tools.some(tool => tool.name === name)) entries.delete(name);
+    for (const name of servers.keys()) if (!(name in binding.provenance.servers)) servers.delete(name);
   }
   if (options.selection) {
     const selected = options.selection;

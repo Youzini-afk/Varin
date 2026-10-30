@@ -13,11 +13,9 @@ export function createContextObservationPublication(kernel: Pick<KernelClient, '
   const reportedUnavailable = new Map<string, ObservationStoreUnavailableError['reason']>();
   const sources = (runId?: string, signal?: AbortSignal) => kernel.agentRuntimeRequest<ContextObservationSource[], 'runtime.context.observations.sources'>(
     'runtime.context.observations.sources', runId ? { runId } : {}, signal);
-  const publish = async (context: Pick<ReturnType<typeof createKnowledgeContextRuntime>, 'observationsForSource' | 'drain'>, run: Run, signal: AbortSignal): Promise<void> => {
+  type Context = Pick<ReturnType<typeof createKnowledgeContextRuntime>, 'observationsForSource' | 'drain'>;
+  const publishOwners = async (context: Context, owners: readonly ContextObservationSource[], signal: AbortSignal): Promise<void> => {
     signal.throwIfAborted();
-    await waitWithSignal(context.drain(), signal);
-    // Oldest source owner first; every event still has its original native Run identity.
-    const owners = await waitWithSignal(sources(run.id, signal), signal);
     const unavailable = new Set<string>();
     for (const owner of owners.toReversed()) {
       signal.throwIfAborted();
@@ -66,5 +64,13 @@ export function createContextObservationPublication(kernel: Pick<KernelClient, '
       cursors.set(key, Math.max(cursors.get(key) ?? 0, eventCursor));
     }
   };
-  return { sources, publish };
+  const publish = async (context: Context, run: Run, signal: AbortSignal): Promise<void> => {
+    await waitWithSignal(context.drain(), signal);
+    // Oldest source owner first; every event still has its original native Run identity.
+    await publishOwners(context, await sources(run.id, signal), signal);
+  };
+  return { sources, publish,
+    publishSource: (context: Context, owner: ContextObservationSource) => publishOwners(context, [owner], new AbortController().signal),
+    recover: async (context: Context) => publishOwners(context, await sources(), new AbortController().signal),
+  };
 }

@@ -51,7 +51,7 @@ pub struct ContextObservationPreparation {
 }
 pub struct PreparedContextObservations {
     owner: ContextObservationSource,
-    facts: Vec<(String, Value, String)>,
+    facts: Vec<(String, Value, String, Option<String>, bool)>,
     _publication: crate::content::ContentPublication,
 }
 pub(super) fn digest(value: &Value) -> Result<String> {
@@ -212,7 +212,7 @@ impl Catalog {
         let tx = self.db.transaction()?;
         validate_owner(&tx, &prepared.owner, self.epoch)?;
         let mut receipts = Vec::new();
-        for (id, history, item_digest) in prepared.facts {
+        for (id, history, item_digest, change_id, notify) in prepared.facts {
             let original = optional_record::<inputs::QueuedInputMetadata>(&tx, "input_queue", &id)?;
             if let Some(row) = original {
                 if !matches!(&row.origin, inputs::InputOrigin::ContextObservation { owner, item_digest: original } if owner.thread_id == prepared.owner.thread_id && owner.branch_id == prepared.owner.branch_id && owner.run_id == prepared.owner.run_id && owner.anchor_id == prepared.owner.anchor_id && owner.source == prepared.owner.source && original == &item_digest)
@@ -247,6 +247,9 @@ impl Catalog {
                 },
                 &history,
             )?;
+            // The observation remains the task's passive original. Its assistant receives
+            // a reference through the existing durable work-event ingress.
+            if notify { super::bot_work_events::observation(&tx, &prepared.owner, &id, change_id.as_deref())?; }
             receipts.push(ContextObservationReceipt {
                 id,
                 cursor,
@@ -273,6 +276,8 @@ impl ContextObservationPreparation {
                 ));
             }
             let id = format!("observation:{}:{}", self.command.owner.run_id, fact.id);
+            let change_id = fact.data.as_ref().and_then(|data| data["changeId"].as_str()).map(str::to_owned);
+            let notify = fact.data.as_ref().is_none_or(|data| data["notifyAssistant"] != false);
             let owner = &self.command.owner;
             // Epoch fences the publication, but is not part of the immutable fact's content.
             let data = json!({"threadId":owner.thread_id,"branchId":owner.branch_id,"sourceRunId":owner.run_id,"anchorId":owner.anchor_id,"source":owner.source,"event":fact});
@@ -295,6 +300,8 @@ impl ContextObservationPreparation {
                 id,
                 self.content.save_history(&value, &None)?,
                 digest(&value)?,
+                change_id,
+                notify,
             ));
         }
         Ok(PreparedContextObservations {
@@ -464,6 +471,53 @@ mod tests {
             .load()
             .unwrap();
         db.admit_input_delivery(prepared).unwrap().unwrap().items
+    }
+    #[test]
+    fn bot_workspace_intervention_replays_its_original_observation_once_and_honors_unfollow() {
+        use super::super::bot_work::{BotMatter, MatterThread, MatterUpdate};
+        let (path, mut db) = open();
+        db.publish_bot_gate(super::super::bot::BotGate { bot_id:"bot".into(), profile_revision:1, activity_operation_id:None, permitted:true }).unwrap();
+        db.create_bot_thread("assistant", "assistant-main", "bot").unwrap();
+        let matter = BotMatter { id:"work".into(), revision:0, title:"Work".into(), description:String::new(), archived:false,
+            threads:vec![MatterThread {thread_id:"thread".into(),branch_id:"main".into(),send:false,memory:false}] };
+        db.update_bot_matter(MatterUpdate {bot_id:"bot".into(),key:"follow".into(),expected_revision:0,matter:matter.clone()},None).unwrap();
+        submit(&mut db, "work", "main", Some(source("root")));
+        let original = owner(&db);
+        let mut observed = command(original.clone(), 1);
+        observed.events[0].data=Some(json!({"changeId":"original-editor-save"}));
+        let receipt = publish(&mut db, observed.clone());
+        assert_eq!(publish(&mut db, observed.clone())[0].cursor, receipt[0].cursor);
+        observed.events[0].id=3;
+        publish(&mut db, observed.clone());
+        observed.events[0].id=4;
+        observed.events[0].kind="source".into();
+        observed.events[0].data=Some(json!({"type":"git","notifyAssistant":false}));
+        publish(&mut db, observed); // Initial inventory/dirty counts remain on the task, without a Bot wake.
+        drop(db);
+        let mutex = std::sync::Mutex::new(Catalog::open(&path).unwrap());
+        super::super::bot_work_events::deliver(&mutex).unwrap();
+        super::super::bot_work_events::deliver(&mutex).unwrap();
+        let mut db = mutex.into_inner().unwrap();
+        let cursor: u64 = db.db.query_row("SELECT cursor FROM events WHERE kind='bot.work_pending' AND json_extract(data,'$.kind')='workspace_change'", [], |row| read_number(row,0)).unwrap();
+        let reference: String = db.db.query_row("SELECT body FROM input_history_content WHERE input_id=?1", [format!("bot-work-event:{cursor}")], |row| row.get(0)).unwrap();
+        let (body, _) = db.content.load_history_payload(&serde_json::from_str::<Value>(&reference).unwrap()).unwrap();
+        let text = serde_json::to_string(&body).unwrap();
+        assert!(text.contains("src/a.ts")); assert!(text.contains("sourceRunId")); assert!(text.contains("observation:"));
+        let count: u64 = db.db.query_row("SELECT count(*) FROM events WHERE kind='bot.work_pending' AND json_extract(data,'$.kind')='workspace_change'", [], |row| read_number(row,0)).unwrap();
+        assert_eq!(count,2); // Two source observations of one action, one assistant update.
+        // An already accepted source fact loses delivery access if the user unfollows before delivery.
+        let mut current = owner(&db); current.epoch = db.epoch;
+        publish(&mut db, command(current, 2));
+        db.update_bot_matter(MatterUpdate { bot_id:"bot".into(),key:"unfollow".into(),expected_revision:1,
+            matter:BotMatter {threads:Vec::new(),..matter} },None).unwrap();
+        let mutex=std::sync::Mutex::new(db);
+        super::super::bot_work_events::deliver(&mutex).unwrap();
+        let db=mutex.into_inner().unwrap();
+        let delivered:u64=db.db.query_row("SELECT count(*) FROM input_queue q JOIN events e ON q.id='bot-work-event:'||e.cursor WHERE json_extract(e.data,'$.kind')='workspace_change'",[],|row|read_number(row,0)).unwrap();
+        assert_eq!(delivered,1);
+        let row: inputs::QueuedInputMetadata=record(&db.db,"input_queue",&format!("bot-work-event:{cursor}")).unwrap();
+        assert_eq!(super::super::bot_work_events::ingress_hold(&db.db,&row).unwrap(),Some("work_source_access_changed".into()));
+        drop(db); std::fs::remove_dir_all(path).unwrap();
     }
     fn snapshot(db: &Catalog, run: &str, request: &str) -> RequestSnapshot {
         let selected = db.run(run).unwrap();

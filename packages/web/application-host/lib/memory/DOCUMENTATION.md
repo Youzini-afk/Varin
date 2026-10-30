@@ -84,6 +84,19 @@ loads them as command templates.
 
 ## Continuous Bot memory
 
+`bot-recall-context.ts` projects the current work and attributed incoming identities onto original
+matters and registered project metadata. Related descriptions enrich the search query; explicit
+memory-enabled work links pin provenance matches. The Bot entry is not a blanket association with
+every descendant. Matter revisions, link changes and project metadata invalidate the recall cache
+without reshuffling already delivered request facts. These hints neither grant source access nor
+read unrelated tool transcripts. Forgotten passages are removed before constructing the query.
+
+Original Knowledge environment observations publish to Catalog as soon as their writes settle,
+outside the source write tail. The existing work-event ingress forwards task intervention to the
+assistant and rechecks current follow access at delivery. Restart replays the original observations
+against durable Catalog receipts. History recovery/navigation contributes its own original receipt;
+neither event substitutes old reports for current file reads.
+
 Memory bodies are free narrative; `nature` is optional. Selection and organization can cite several
 exact original spans in one proposal. Instruction status still requires its actual user source;
 reference material never gains authority through its wording. `remember`/`correct` accept source
