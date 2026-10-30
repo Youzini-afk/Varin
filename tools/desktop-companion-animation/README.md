@@ -172,7 +172,8 @@ Manifest version 1 包含 `canvas: [512,512]`、独立 `geometryReference`、
 基准名称只标识制作批次，不证明视觉一致性或被用户接受。
 
 - `sequences` 使用唯一 `id`、`kind: action|bridge`、action绑定（仅action）、可选loop，
-  以及 `frames: [{source, sourceSHA256, durationMs, exitSafe?, pauseSafe?, phase?}]`。
+  以及 `frames: [{source, sourceSHA256, durationMs, exitSafe?, pauseSafe?, phase?, cue?}]`。
+  可选非空 `cue` 原样传给既有场景词汇适配器，仅标注实际曝光，不创建Host事实或权限。
   所有输入已是512 RGBA原画；`source` 相对manifest解析，也可明确给绝对路径。
 - `nodes` 使用唯一 `id`、同样的单张source/SHA/duration与既有 `gesture` 合同。
   `grabNext/releaseNext` 是完整有序continuation，不是相邻边。编译器不推断动作或补帧。

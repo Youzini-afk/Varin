@@ -169,11 +169,16 @@ def compile_explicit_baseline(manifest_path, output):
             duration = frame.get('durationMs')
             if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
                 raise ValueError('Exposure must be finite and positive')
+            cue = frame.get('cue')
+            if cue is not None and (not isinstance(cue, str) or not cue):
+                raise ValueError('Authored cue must be a nonempty string')
             h = read_image(frame)
             pose = canonical.get(h, geometry + ':draw:' + h)
             frames.append({'sha256': h, 'startMs': time, 'durationMs': duration, 'pose': pose,
                            'exitTo': [pose] if frame.get('exitSafe', False) else [],
                            'pauseSafe': bool(frame.get('pauseSafe', False)), 'phase': frame.get('phase', 'act')})
+            if cue is not None:
+                frames[-1]['cue'] = cue
             time += duration
         if not frames:
             raise ValueError('Empty authored sequence')

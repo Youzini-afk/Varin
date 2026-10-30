@@ -29,7 +29,7 @@ class ExplicitBaselineTests(unittest.TestCase):
                      'worldStool': {'source': str(plate), 'sourceSHA256': sha(plate)},
                      'counterparts': [{'sourceSHA256': self.sh, 'detachedSHA256': self.dh}],
                      'sequences': [{'id': 'rest', 'kind': 'action', 'action': 'external-wait', 'loop': [0, 1],
-                                    'frames': [{'source': str(self.s), 'sourceSHA256': self.sh, 'durationMs': 100, 'exitSafe': True}]}],
+                                    'frames': [{'source': str(self.s), 'sourceSHA256': self.sh, 'durationMs': 100, 'exitSafe': True, 'cue': 'ACCEPT_INWARD'}]}],
                      'nodes': [
                          {'id': 'body', 'source': str(self.d), 'sourceSHA256': self.dh, 'durationMs': 10,
                           'gesture': {'entrySourceSha256': self.sh, 'grabNext': [], 'releaseNext': ['seat'],
@@ -52,6 +52,7 @@ import fs from 'node:fs'; import assert from 'node:assert/strict';
 import {CompanionPlayback} from PLAYER;
 const bundle=JSON.parse(fs.readFileSync(BUNDLE));
 assert.ok(bundle.packages.every(p=>p.reviewStatus==='candidate'));
+assert.equal(bundle.packages.find(p=>p.id==='rest').frames[0].cue,'ACCEPT_INWARD');
 const p=new CompanionPlayback(bundle.packages,{allowCandidates:true});
 p.request('rest'); assert.equal(p.grab(),true); assert.equal(p.current.id,'body');
 p.release(); p.tick(10); assert.equal(p.current.id,'seat');
