@@ -1,8 +1,8 @@
 {
-  "candidateSHA256": "f1062fe37476af76c18302850c94ef0e90949ba992ede1699daec236a59b119b",
-  "baselineSHA256": "1990d2c43e41915305ce77445be27838605b9d8279157e98aa1a1d34633e4a47",
-  "buildReceiptSHA256": "3c8cd15ff6a18932a0961889af94b2af3b3fae29e5ba177cfbf6215254dca003",
-  "rebuildReceiptSHA256": "8b9c8650ce096dabc4421b01851251e2717620049ed1745f8d3b1334ab217d7e",
+  "candidateSHA256": "9d0987fedc0c66fa3faf3fdb5e07c89f6e3c24a6ca9460b1a880df147561bd46",
+  "baselineSHA256": "690ecba2ea00d1b9c6fa519fcab6ce137334922930b7a210911892af5baf6ceb",
+  "buildReceiptSHA256": "14b9b2efc4b145ede209d2f4bac7fb677071c650339291d60a81c6e7ad98fa1b",
+  "rebuildReceiptSHA256": "f23c8dde7f96010b576e285c2c46ebe06c8ea74107a6c1b0b340d1c85409c62c",
   "newPackageIds": [
     "v5-idle",
     "v5-notice",
@@ -145,6 +145,10 @@
     "v5-work-recovery-release",
     "v5-work-recovery-recover",
     "v5-work-active",
+    "v5-blink-recovery-closed-half",
+    "v5-blink-recovery-closed-shut",
+    "v5-blink-recovery-open-half",
+    "v5-blink-recovery-open-shut",
     "v5-d-neutral",
     "v5-d-side",
     "v5-d-support",
@@ -447,7 +451,15 @@
     "v5-work-d-release",
     "v5-work-s-release",
     "v5-work-d-recover",
-    "v5-work-s-recover"
+    "v5-work-s-recover",
+    "v5-blink-closed-half-s",
+    "v5-blink-closed-half-d",
+    "v5-blink-closed-shut-s",
+    "v5-blink-closed-shut-d",
+    "v5-blink-open-half-s",
+    "v5-blink-open-half-d",
+    "v5-blink-open-shut-s",
+    "v5-blink-open-shut-d"
   ],
   "uniqueDrawingSha256": [
     "023324131992a88007993f05eac65a9229d18b677be40dbf5c6a914666483ff9",
@@ -470,7 +482,9 @@
     "0f120042e83fecba67c4dea6fbf0477c8e79e6c3c39ab91116c9702d159f2fff",
     "10665c9e79a6d460b5bbd617a9b52c9a5ddc52e80e0df6042c3c62f15c3c68c2",
     "11173f5e95b96310cfabde599baddf08f6222e70dbb1b07613a95a3e1dfac3f7",
+    "12781381b2d8c308b5391f8d881b2fdc02ecb42e0e5f683a19fc1414e51f235b",
     "12fdc092c7640c1df041ef1876a4286a8473d643a88893b438bfedbd9eae8018",
+    "1387a3abdbe40c321685ef9a09e2ae303a9adf49a51b2d586cf1a587ea314d5a",
     "155425acc7447ed66f6963c4f1f06031a7d08f0e487b627902210c8e0f72efb4",
     "166c9a7a37276804ee1bbdb62c8add25172796a2619273d7693d91b04dac19dd",
     "17513828d1c27ba9862bf71cc8306209bcee3f4ebc94f2610eef9e8077f640f7",
@@ -522,6 +536,7 @@
     "4194a12312a6b9ddf3f6cc47dab79977b40c6977f30b73f35d3a41ac77cdc70c",
     "41b4d9bc352878829e6526f80f14355a9d901ccddcaccb97907789b22cf287d5",
     "41b706cfaa734f3fcfe006bae3e48d1cba236c5981d9b4d90fd8e9cf8e7be4c3",
+    "43ec0701f2b773a71a63399488fd61f4a08c454db6aaf89c447b5f4d91308750",
     "441793325a451cc48b8137898924e40dc733af3a8efc48d060fb33c02c9c2d31",
     "4490b8fd54b8aaabeeefd96aaf2183b431868ab5bf4eb29690431c7c2f98f327",
     "44f48605301c4d804aed1265713fa0fd3b1d30c55e9191e401206250d399e190",
@@ -550,6 +565,7 @@
     "609bd8c4079bd449d9c94eca325686637a6dbbab417985d8c856a3f7fb3fbf07",
     "6216cbb1ef399c9569f5298fd448349d18d54bbd304088d5b27da82d4910f36d",
     "63d101e93bafd035cbbf070982e2da5f33a8ed5b30b103fd7703f190c62afcc5",
+    "63ecea53ee04b8719b6b2650da3c2e4ca813f70eeb318098d2926f4284c42651",
     "6460676469485113040cda24de3f868dbd19ef8ce1595a5207a5bde6961d7a37",
     "67868f707dc6c5d2948e3c7280f99515c39915b23ffd19e844769d46d711760a",
     "67ce9d2647d3900292e4a67b0a6652f9999e0cd16a6ca3f4d97cf0c9b6197fcc",
@@ -565,11 +581,13 @@
     "72589942769a124ff9bace810b2f1ad02d4538b326ad8bd1bf21c119855d4cae",
     "738588f9d056f756f5b3a99fcc8fc19fc215c5a84f0d7c90f26af5ad784829e9",
     "74b81e99fdfaa3acc864288fbbddec688fd2d1f774092285fff802ab90108d9d",
+    "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
     "7681113545d0535564c5159033ed0d73cad72e902d779094730db8493465ee7c",
     "7870bf907ac56d74f4fbb909bddf9126c94fa2ad2199653bf70f5df28e5cb1e0",
     "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
     "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
     "7a7049ef64206ce90278bbc082ed88979156e8fe67ebfb3f67801a9e4b2c09c5",
+    "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
     "7b69afd39f98bdff6eda280f3274b2018da4daaee7bd443cc25b00b184d70fdd",
     "7c8fedf4bab8725ece13633282a1d66c2660971ada52d0a1f1521a08bd84f13c",
     "7d0bcda57300cd18e147e90ab2530764f35b4306513d25225b96df7b590c1acc",
@@ -618,6 +636,7 @@
     "a0ee5583aecff55c9813ee23a15c9e1d872f144a4ccdc2d07ad402d6e1154091",
     "a1953170a226145457477800073b421d498356940b002d73fb0449d08d026172",
     "a1d7d66fed51fc6cdd3d7c8c89514f5a0373f0969c343e14c4997aefc8c54292",
+    "a202f3b41ea0a76a7f17b4be23c38853d0fa2e5c4ac5cd1d4225fb010d724e48",
     "a4c0584bf3c560d75484781a31ad7501a50abb9aa178efd10d8c2a9db1dc2513",
     "a53ec51004dd6ae0edfc99bb44448c39383f8df42a0c0a3d2293ed03ba0bdc18",
     "a5bce37e7415c1d5928de6f6c894aa7cd09edb706741ddd93600dd30b6101c54",
@@ -670,6 +689,7 @@
     "d56566594914c58d1a0fe629be83bfcbd821f7480fbd3be7a58d37ffe293fc49",
     "d64e1b13c6f7396d29ad86e2299fb1018fd4b1664a382f26d9e30a1cd44b0609",
     "d68827232aeb13c28f775dec37aa467c45d8ec116815eb1d1e05979737d58001",
+    "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
     "d868bfbf6d05fbb2a1e787f0c52937a30e7bc27410c4739aabcc73d856f11b74",
     "d96d1628345f6e34e3ce25dd4c14f17baefa0b048e0a1f9fdfd2c3c9779a83a3",
     "d9e59fe8a31fb0ee05279fff1a490cad38ebb7ee305847179044a0a3584e4663",
@@ -729,28 +749,34 @@
     "atlas-013.png": "e8546bb980cece0444c549149902c1a0338fca92dde4be698597e11a7abd3ceb",
     "atlas-014.png": "f0a43a7b1c8df107d8a43fb2e4f7e99bbf101371747574c81a01ff9b01ecafec",
     "atlas-015.png": "54e5a375610e78f0f550e010ba27ea2fb51460b5e9c92e58d133715bd592de08",
-    "atlas-016.png": "8d2df9f2537331d65433346cab361ecd2d5a6ad1827c7a825e4c15624fa4614f",
+    "atlas-016.png": "702e8613d25c6909642ee7bd6f29fc4e3f81d8ce0f7ea602f2b65f4afa6ee8b6",
     "world-stool-b16b339dd67bbbdc.png": "b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7"
   },
   "reviewer": "assistant",
   "decision": "selected",
   "scope": "feature-branch default candidate",
   "basis": [
-    "Parent assistant reviewed exact candidate normal360 actual-player ordered loop and permission-exit frames, seven same-pose ordinary/detached pairs, source invariance and actual-player audit receipts on2026-10-30.",
-    "Actual visible alternating key hand articulation, two unequal typing bursts and read-screen pauses in5590ms loop; separate entry/release/recover. No wave reuse or source deformation.",
-    "All247 previous prepared source identities, full512 RGBA reconstructions, offsets and422 existing package semantics remain unchanged; original fixed stool and canonical open/selected-C closed endpoints retained.",
-    "All14 new source full512 RGBA reconstructions match prepared originals; independent portable selected-source rebuild succeeds without historical prepared inputs.",
-    "Production CompanionPlayback:132 latest-intent exits,66 actual-source pickup/releases,21 encountered recovery regrabs, unchanged-request loop continuation and authored reduced-motion read hold; zero failures.",
-    "Existing material algorithm with explicit new-source regions preserves alpha, protected eyes/badge and all outside-allow pixels."
+    "Parent inspected normal-scale neutral, half-closed and closed keyposes and closed FG/D pair; canonical head, laptop, hands and body remain visually consistent at reviewed scale.",
+    "Authored sparse cadence reviewed: unequal long canonical open-eye holds with brief half/closed/half eyelid sequences; no continuous live-desktop viewing claimed.",
+    "Actual player exits, same-pose pickups, recovery regrabs and pauseSafe checks passed; old261 drawing pixels and non-target package semantics remain unchanged.",
+    "Actual app cue key excludes exposure; preserved action, cue and context do not create new task or result beats.",
+    "Production bounded-page packer passed exact prior baseline byte identity and successful standard portable rebuild; no temporary compiler fork used.",
+    "All four targets were already sustained canonical-neutral loops. Sparse same-head eyelids preserve canonical entry/exit identities, existing cue vocabulary, original fixed stool, work-active and all other action semantics. No new timer, state owner or work assertion.",
+    "All261 original prepared source full512 RGBA/registration and440 non-target original package semantics unchanged. Eight new prepared source full512 reconstructions exact; four target loops modified and12 bridge/gesture packages appended.",
+    "Production CompanionPlayback:198 latest-intent exits,108 actual-source pickup/releases,32 naturally reached recovery regrabs covering all four new seated nodes,36 pauseSafe checks; zero failures. Only open-eye canonical holds pauseSafe.",
+    "Existing material algorithm preserves alpha, protected eyes/badge and outside-allow pixels for all8 new sources; all original profile entries retained.",
+    "Standard single-process independent portable rebuild completed using bounded-page production packer (325172 KiB peak RSS); last-use close and bounded-page serialization retain exact prior261-source baseline bundle, sequence,17 atlases and stool bytes. Focused packer2/preparation5/explicit-baseline5 tests passed."
   ],
   "notClaimed": [
     "User acceptance of every motion frame",
-    "Full native cross-platform or live Host event end-to-end acceptance",
-    "Actual keyboard input or individual tool execution proof",
-    "Full UI typecheck: process was killed without TypeScript diagnostics; unrelated broad check remains blocked"
+    "Continuous live-desktop motion viewing",
+    "Full native cross-platform or live Host end-to-end acceptance",
+    "Task activity or tool execution proof",
+    "Full UI typecheck or production UI build; known separate validation limit remains",
+    "L08 seat adjustment or W04/W05 completion"
   ],
   "geometryEpoch": "varin-canonical-v5-study",
-  "selectedBundleSha256": "255e32ff1fbdc3efc7418aaa3901d9304542e9e83c13989a1d35c2e38348b2ca",
+  "selectedBundleSha256": "9293ab547dd5e0879e9ae4cb9403a408bcab9524f8975c48c649126f713e35b1",
   "packageIds": [
     "v5-idle",
     "v5-notice",
@@ -893,6 +919,10 @@
     "v5-work-recovery-release",
     "v5-work-recovery-recover",
     "v5-work-active",
+    "v5-blink-recovery-closed-half",
+    "v5-blink-recovery-closed-shut",
+    "v5-blink-recovery-open-half",
+    "v5-blink-recovery-open-shut",
     "v5-d-neutral",
     "v5-d-side",
     "v5-d-support",
@@ -1195,16 +1225,24 @@
     "v5-work-d-release",
     "v5-work-s-release",
     "v5-work-d-recover",
-    "v5-work-s-recover"
+    "v5-work-s-recover",
+    "v5-blink-closed-half-s",
+    "v5-blink-closed-half-d",
+    "v5-blink-closed-shut-s",
+    "v5-blink-closed-shut-d",
+    "v5-blink-open-half-s",
+    "v5-blink-open-half-d",
+    "v5-blink-open-shut-s",
+    "v5-blink-open-shut-d"
   ],
   "sourceRebuild": {
-    "sourceManifestSHA256": "1990d2c43e41915305ce77445be27838605b9d8279157e98aa1a1d34633e4a47",
-    "recipeSHA256": "efd22f0efa83f79494bed2d8c99eff32642fca33eb8073462acff224c3e5ca4b",
+    "sourceManifestSHA256": "690ecba2ea00d1b9c6fa519fcab6ce137334922930b7a210911892af5baf6ceb",
+    "recipeSHA256": "390bf6d51eb88ff914206fbd4213caa23e0b67d59187138208a69dde6117ddfc",
     "pythonVersion": "3.12.14",
     "pillowVersion": "12.3.0",
     "toolSHA256": {
       "compile_upright_pickup.py": "137b3d00107d8aefa579f6d5bb2206756cc27c0a3cde7c334060c0311f768709",
-      "pack_sequence.py": "c7ccb8e2890eef6b9bdde7508abe5cababd7a5885fbe02878cfed8060835fa09"
+      "pack_sequence.py": "bc70a3c356889b05ffa587cbc30409934bda95fca21f4630f0cea5d434a74e2a"
     },
     "operation": "whole-canvas-lanczos-512; plate-then-foreground; zero-offset",
     "detachedOnlyEncoding": [
@@ -1226,12 +1264,13 @@
   "publicInstalled": true,
   "branchDefaultAdoption": {
     "date": "2026-10-30",
-    "scope": "Exact sustained active-work selected source/graph expansion and matching material profile; current feature-branch default only.",
-    "motionReview": "Normal360 actual-player ordered loop, interruption to permission and paired artwork; physical native/window and live Host event review remain separate.",
+    "scope": "Exact sparse neutral-eyelid loops and same-pose recovery/pickup graph plus matching material profile; feature-branch default only.",
+    "motionReview": "Normal360 neutral/half/shut keyposes, same-pose pairs and exact short-eyelid/long-hold cadence. Not continuous live-desktop viewing.",
     "notClaimed": [
-      "User full visual acceptance",
-      "Native cross-platform acceptance",
-      "Individual tool execution proof"
+      "User complete visual acceptance",
+      "Native cross-platform or live Host end-to-end acceptance",
+      "Task activity or tool execution proof",
+      "L08/W04/W05 completion"
     ]
   }
 }

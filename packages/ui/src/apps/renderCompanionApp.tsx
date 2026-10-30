@@ -1,3 +1,6 @@
+import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { resolveCompanionAccentPalette } from '@/components/companion/companionAccentPalette';
 import { showCompanionAttentionSummary } from '@/components/companion/attentionPresentation';
 import { useCompanionAssociation } from '@/components/companion/useCompanionAssociation';
 import { companionDirectorMode } from '@/components/companion/directorMode';
@@ -36,6 +39,8 @@ import catalog from '../../../../tools/desktop-companion-animation/coverage.json
 // eslint-disable-next-line react-refresh/only-export-components
 function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const { t } = useI18n();
+  const { currentTheme } = useThemeSystem();
+  const accentPalette = React.useMemo(() => resolveCompanionAccentPalette(currentTheme), [currentTheme]);
   const review = new URLSearchParams(window.location.search).get('review') === '1';
   const [reviewStageOnly, setReviewStageOnly] = React.useState(false);
   const reviewChrome = review && !reviewStageOnly;
@@ -504,7 +509,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (!node) return;
     paintSurface.current ??= document.createElement('canvas');
     if (!paintCompanionFrame(node, paintSurface.current, sequence, images, exposure, stage => {
-      accentMaterial.current.apply(stage, sequence, images[sequence.frames[exposure]!.page]!, exposure, bundledEpoch);
+      accentMaterial.current.apply(stage, sequence, images[sequence.frames[exposure]!.page]!, exposure, bundledEpoch, accentPalette);
     })) return;
     const frame = sequence.frames[exposure]!;
     const cue = frame.cue ? sceneCue(frame.cue, sequence.sceneAction ?? sequence.action) : 'engaged';
@@ -533,9 +538,11 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     const images = next && imageCache.current[next.packageId];
     if (sequence && images && next) { drawActualFrame(sequence, images, next.exposure); setAsset(sequence); setExposure(next.exposure); }
   };
+  // Repaint the current exposure on theme changes, including a paused/static pose.
+  // Palette changes do not enter playback, interaction, session or cue identities.
   React.useEffect(() => {
     if (asset) drawActualFrame(asset, pictures, displayedExposure);
-  }, [asset, pictures, displayedExposure, automatic.context, automatic.packageId, automatic.exposure, companionWindow.refreshHitMask]);
+  }, [asset, pictures, displayedExposure, automatic.context, automatic.packageId, automatic.exposure, companionWindow.refreshHitMask, accentPalette]);
   const handledWorld = React.useRef(0);
   React.useEffect(() => {
     const event = automatic.worldEvent;
@@ -654,5 +661,5 @@ export function renderCompanionApp(apis: RuntimeAPIs) {
   const root = document.getElementById('root');
   if (!root) throw new Error('Companion root not found');
   initializeLocale();
-  createRoot(root).render(<I18nProvider><CompanionApp apis={apis} /></I18nProvider>);
+  createRoot(root).render(<ThemeSystemProvider passiveTransparent><I18nProvider><CompanionApp apis={apis} /></I18nProvider></ThemeSystemProvider>);
 }

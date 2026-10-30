@@ -136,9 +136,12 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
 interface ThemeSystemProviderProps {
   children: React.ReactNode;
   defaultThemeId?: string;
+  /** Read-only transparent windows follow the same resolved theme without owning
+   * saved preferences, browser/native chrome, splash colors or theme motion. */
+  passiveTransparent?: boolean;
 }
 
-export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemProviderProps) {
+export function ThemeSystemProvider({ children, defaultThemeId, passiveTransparent = false }: ThemeSystemProviderProps) {
   const cssGenerator = useMemo(() => new CSSVariableGenerator(), []);
   const [preferences, setPreferences] = useState<ThemePreferences>(() => buildInitialPreferences(defaultThemeId));
   const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => getInitialSystemPreference());
@@ -322,19 +325,19 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, []);
 
   const appliedThemeRef = React.useRef<string | null>(null);
-  React.useEffect(() => { trackRecentPointer(); }, []);
+  React.useEffect(() => { if (!passiveTransparent) trackRecentPointer(); }, [passiveTransparent]);
   useIsomorphicLayoutEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
     let restoreTransitions: (() => void) | undefined;
     const apply = () => {
-      restoreTransitions = suppressTransitionsForThemeSwitch();
+      if (!passiveTransparent) restoreTransitions = suppressTransitionsForThemeSwitch();
       cssGenerator.apply(currentTheme);
-      if (!receivesParentThemeSync) {
+      if (!passiveTransparent && !receivesParentThemeSync) {
         publishEmbeddedThemeBootstrap(currentTheme);
       }
-      updateBrowserChrome(currentTheme);
+      if (!passiveTransparent) updateBrowserChrome(currentTheme);
 
       const root = document.documentElement;
       root.classList.remove('light', 'dark');
@@ -343,11 +346,11 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     // The first theme is simply applied; a change spreads from where the user clicked.
     const previous = appliedThemeRef.current;
     appliedThemeRef.current = currentTheme.metadata.id;
-    if (previous === null || previous === currentTheme.metadata.id || receivesParentThemeSync) apply();
+    if (passiveTransparent || previous === null || previous === currentTheme.metadata.id || receivesParentThemeSync) apply();
     else inkThemeChange(apply);
 
     return () => restoreTransitions?.();
-  }, [cssGenerator, currentTheme, updateBrowserChrome]);
+  }, [cssGenerator, currentTheme, updateBrowserChrome, passiveTransparent, receivesParentThemeSync]);
 
   useEffect(() => {
     if (preferences.themeMode !== 'system' || typeof window === 'undefined') {
@@ -369,7 +372,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [preferences.themeMode, receivesParentThemeSync]);
 
   useEffect(() => {
-    if (receivesParentThemeSync || typeof window === 'undefined') {
+    if (passiveTransparent || receivesParentThemeSync || typeof window === 'undefined') {
       return;
     }
 
@@ -390,7 +393,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         },
       },
     });
-  }, [ensureThemeById, preferences, receivesParentThemeSync]);
+  }, [ensureThemeById, preferences, receivesParentThemeSync, passiveTransparent]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -450,7 +453,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
-    suppressTransitionsForThemeSwitch();
+    if (!passiveTransparent) suppressTransitionsForThemeSwitch();
     flushSync(() => {
       if (receivesParentThemeSync && syncedTheme) {
         setEmbeddedSyncedTheme(syncedTheme);
@@ -472,7 +475,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         };
       });
     });
-  }, [receivesParentThemeSync]);
+  }, [receivesParentThemeSync, passiveTransparent]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -523,7 +526,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [applyIncomingThemeSync]);
 
   const persistThemePreferences = useCallback((next: ThemePreferences) => {
-    if (receivesParentThemeSync) return;
+    if (passiveTransparent || receivesParentThemeSync) return;
 
     const lightTheme = ensureThemeById(next.lightThemeId, 'light');
     const darkTheme = ensureThemeById(next.darkThemeId, 'dark');
@@ -546,17 +549,17 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       splashBgDark: darkTheme.colors.surface.background,
       splashFgDark: darkTheme.colors.surface.foreground,
     });
-  }, [ensureThemeById, receivesParentThemeSync, systemPrefersDark]);
+  }, [ensureThemeById, receivesParentThemeSync, systemPrefersDark, passiveTransparent]);
 
   useEffect(() => {
-    if (receivesParentThemeSync || !isDesktopShell) {
+    if (passiveTransparent || receivesParentThemeSync || !isDesktopShell) {
       return;
     }
 
     void (async () => {
       await setDesktopWindowTheme(preferences.themeMode, currentTheme.metadata.variant);
     })();
-  }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode, receivesParentThemeSync]);
+  }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode, receivesParentThemeSync, passiveTransparent]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || receivesParentThemeSync) {
@@ -610,7 +613,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [receivesParentThemeSync]);
 
   const setThemeModeHandler = useCallback((mode: ThemeMode) => {
-    if (preferences.themeMode === mode) {
+    if (passiveTransparent || preferences.themeMode === mode) {
       return;
     }
 
@@ -620,10 +623,11 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     } satisfies ThemePreferences;
     setPreferences(next);
     persistThemePreferences(next);
-  }, [persistThemePreferences, preferences]);
+  }, [persistThemePreferences, preferences, passiveTransparent]);
 
   const setLightThemePreference = useCallback(
     (themeId: string) => {
+      if (passiveTransparent) return;
       const theme = availableThemes.find(
         (candidate) =>
           candidate.metadata.id === themeId && candidate.metadata.variant === 'light',
@@ -637,11 +641,12 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       setPreferences(next);
       persistThemePreferences(next);
     },
-    [availableThemes, persistThemePreferences, preferences],
+    [availableThemes, persistThemePreferences, preferences, passiveTransparent],
   );
 
   const setDarkThemePreference = useCallback(
     (themeId: string) => {
+      if (passiveTransparent) return;
       const theme = availableThemes.find(
         (candidate) =>
           candidate.metadata.id === themeId && candidate.metadata.variant === 'dark',
@@ -655,7 +660,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       setPreferences(next);
       persistThemePreferences(next);
     },
-    [availableThemes, persistThemePreferences, preferences],
+    [availableThemes, persistThemePreferences, preferences, passiveTransparent],
   );
 
   const value: ThemeContextValue = {

@@ -1165,6 +1165,42 @@
         "source": "detached/active-work/recover.png",
         "sha256": "08b9c2d29969133d99c24f2bdaf420b0cb6017d7b475df8e162b080651a4c9fc"
       }
+    },
+    {
+      "id": "neutral-blink-closed-half",
+      "source": "foreground/neutral-blink/closed-half.png",
+      "sha256": "fd3a6fa9e0523485184162be049ed781cb428a489b23b1bea4e35f7102bef03b",
+      "detached": {
+        "source": "detached/neutral-blink/closed-half.png",
+        "sha256": "4ed94b3042822a2f61d721d19b2b1297a7bcb8b912bad740003c84a03ea27489"
+      }
+    },
+    {
+      "id": "neutral-blink-closed-shut",
+      "source": "foreground/neutral-blink/closed-shut.png",
+      "sha256": "4d7b2200e089bd77278db42a06d2a98aa7814f4b058622c534eeefa77aef03e3",
+      "detached": {
+        "source": "detached/neutral-blink/closed-shut.png",
+        "sha256": "5a7aace3b6358148c6e3c0b4185db386b28114db7dcbe773afecc8227542fbb7"
+      }
+    },
+    {
+      "id": "neutral-blink-open-half",
+      "source": "foreground/neutral-blink/open-half.png",
+      "sha256": "f0a5476ad6c29cf2795ae89674b0e3b847f8f2beeaa84e6ec3541a7e06f690e8",
+      "detached": {
+        "source": "detached/neutral-blink/open-half.png",
+        "sha256": "845e98571f987832a7f061baea807a4a50a2fee7debd0b2a1b15f566583a13b7"
+      }
+    },
+    {
+      "id": "neutral-blink-open-shut",
+      "source": "foreground/neutral-blink/open-shut.png",
+      "sha256": "5210c2f213069f4be77ebb3b16fb3010fee58ce5ed3655814886bbfece0846c6",
+      "detached": {
+        "source": "detached/neutral-blink/open-shut.png",
+        "sha256": "3d8d57dfeb99e8cad34ae18a120bc7ede4541bcea1628adecd9ad63db101f781"
+      }
     }
   ]
 }

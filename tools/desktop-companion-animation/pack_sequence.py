@@ -83,7 +83,16 @@ def pack(manifest_path, output, max_size=2048, padding=2):
         if not 0 <= start < end <= len(frames):
             raise ValueError('loop is a [start, endExclusive] frame range')
     # Shelf packing keeps author order. No source rescaling or in-between generation.
-    pages = []
+    output.mkdir(parents=True, exist_ok=True)
+    page_names = []
+
+    def write_page(canvas, used_width, used_height):
+        name = f'atlas-{len(page_names):03d}.png'
+        with canvas.crop((0, 0, used_width, used_height)) as cropped:
+            cropped.save(output / name)
+            page_names.append({'file': name, 'size': list(cropped.size)})
+        canvas.close()
+
     placements = {}
     page = Image.new('RGBA', (max_size, max_size))
     x = y = row_height = used_width = used_height = 0
@@ -91,12 +100,13 @@ def pack(manifest_path, output, max_size=2048, padding=2):
         image_key = (image.size, hashlib.sha256(image.tobytes()).hexdigest())
         if image_key in placements:
             record.update(placements[image_key])
+            image.close()
             continue
         cell_width, cell_height = image.width + 2 * padding, image.height + 2 * padding
         if x + cell_width > max_size:
             x, y, row_height = 0, y + row_height, 0
         if y + cell_height > max_size:
-            pages.append(page.crop((0, 0, used_width, used_height)))
+            write_page(page, used_width, used_height)
             page = Image.new('RGBA', (max_size, max_size))
             x = y = row_height = used_width = used_height = 0
         px, py = x + padding, y + padding
@@ -109,19 +119,14 @@ def pack(manifest_path, output, max_size=2048, padding=2):
             page.paste(strip, (x, y))
             strip = page.crop((x, py + image.height - 1, x + cell_width, py + image.height)).resize((cell_width, padding))
             page.paste(strip, (x, py + image.height))
-        placement = dict(page=len(pages), rect=[px, py, image.width, image.height])
+        placement = dict(page=len(page_names), rect=[px, py, image.width, image.height])
         placements[image_key] = placement
         record.update(placement)
         x += cell_width
         row_height = max(row_height, cell_height)
         used_width, used_height = max(used_width, x), max(used_height, y + cell_height)
-    pages.append(page.crop((0, 0, used_width, used_height)))
-    output.mkdir(parents=True, exist_ok=True)
-    page_names = []
-    for index, page in enumerate(pages):
-        name = f'atlas-{index:03d}.png'
-        page.save(output / name)
-        page_names.append({'file': name, 'size': list(page.size)})
+        image.close()
+    write_page(page, used_width, used_height)
     package = {
         'version': 1, 'id': spec['id'], 'family': spec.get('family'),
         'stage': spec.get('stage'), 'warning': spec.get('warning'),
