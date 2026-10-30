@@ -103,6 +103,11 @@ interface HeaderProps {
   onToggleRightDrawer?: () => void;
   /** The mobile right toggle opens a workbench's own panel instead of Git. */
   rightDrawerLabels?: { open: string; close: string };
+  /**
+   * Mobile only: a workbench's own title in place of the main-tab strip. It opens and closes the
+   * right panel itself, so the separate right toggle is left out.
+   */
+  mobileTitle?: React.ReactNode;
   leftDrawerOpen?: boolean;
   rightDrawerOpen?: boolean;
 }
@@ -112,6 +117,7 @@ export const Header: React.FC<HeaderProps> = ({
   navigationSubtitle,
   panelControl,
   sidebarAttention,
+  mobileTitle,
   onToggleLeftDrawer,
   onToggleRightDrawer,
   rightDrawerLabels,
@@ -1030,7 +1036,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {(!isSessionSwitcherOpen || Boolean(onToggleLeftDrawer)) && (
         <>
-          <div className="app-region-no-drag flex min-w-0 flex-1 items-center">
+          {mobileTitle ? <div className="app-region-no-drag flex min-w-0 flex-1 items-center justify-center">{mobileTitle}</div> : <div className="app-region-no-drag flex min-w-0 flex-1 items-center">
             <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-hidden touch-pan-x overscroll-x-contain">
               <div className="flex w-max items-center gap-1 pr-1">
                 <div
@@ -1090,7 +1096,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               </div>
             </div>
-          </div>
+          </div>}
 
           <div className="flex items-center gap-1 shrink-0">
             {projectActionsContext && (
@@ -1181,7 +1187,7 @@ export const Header: React.FC<HeaderProps> = ({
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {onToggleRightDrawer ? (
+            {onToggleRightDrawer && !mobileTitle ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

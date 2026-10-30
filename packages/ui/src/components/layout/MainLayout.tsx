@@ -64,9 +64,11 @@ interface MainLayoutProps {
     sidebarAttention?: 'info' | 'warn' | null;
     /** The sidebar opens over the work area; pressing outside it closes it. */
     floatingSidebar?: boolean;
+    /** Mobile title-bar centre that opens and closes the secondary panel's bottom sheet. */
+    renderMobileTitle?: (panel: { open: boolean; toggle(): void }) => React.ReactNode;
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention, floatingSidebar = false }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention, floatingSidebar = false, renderMobileTitle }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -319,6 +321,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                         navigationTitle={navigationTitle}
                         navigationSubtitle={navigationSubtitle}
                         rightDrawerLabels={secondaryPanelToggleLabels}
+                        mobileTitle={renderMobileTitle?.({ open: mobileRightSidebarOpen, toggle: handleToggleMobileRightDrawer })}
                         onToggleLeftDrawer={() => {
                             const nextOpen = !mobileLeftDrawerOpen;
                             if (mobileRightSidebarOpen) {
