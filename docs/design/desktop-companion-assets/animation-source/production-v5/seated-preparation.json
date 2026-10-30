@@ -78,6 +78,81 @@
       "id": "permission-hold",
       "source": "foreground/permission/hold.png",
       "sha256": "04039b3e24e93e2853b7580d4e92b16bd7febe270448fcdcd30660cdcc9028d5"
+    },
+    {
+      "id": "closed-neutral",
+      "source": "foreground/closed-neutral.png",
+      "sha256": "51ef169e2c6dfe11f594f4a941585dec41bc103a0e1784f210dc7ad4c5a60734"
+    },
+    {
+      "id": "lid-contact-000",
+      "source": "foreground/lid/contact-000.png",
+      "sha256": "10b74670a50ffd6cbf5ef049e9e29babef276b42d14f7af3bf6de82aa7fe6d18"
+    },
+    {
+      "id": "lid-contact-015",
+      "source": "foreground/lid/contact-015.png",
+      "sha256": "d19b7204a89930ff9d1c80f7ac91e7fddbc347bbdabf3aeaf706052634a485b0"
+    },
+    {
+      "id": "lid-contact-030",
+      "source": "foreground/lid/contact-030.png",
+      "sha256": "dc658aa2b7a62c61feb5e9cba1d96b05275911fb2fd5fa85f3fd041625e0dbcd"
+    },
+    {
+      "id": "lid-contact-045",
+      "source": "foreground/lid/contact-045.png",
+      "sha256": "10d659907e46cb92592bfa9d18323121ce7b165c0ac324c5a0db3b57d1100190"
+    },
+    {
+      "id": "lid-contact-055",
+      "source": "foreground/lid/contact-055.png",
+      "sha256": "10e2d79fd93fd19b74dbddb15e0fe5f07ec8b40a14546b90848d328c26cf0af5"
+    },
+    {
+      "id": "lid-contact-070",
+      "source": "foreground/lid/contact-070.png",
+      "sha256": "eb66b589ef5597ea44d09acb95df03d4a72aa57c3b7daf2fe51c37c56cbbc86e"
+    },
+    {
+      "id": "lid-contact-085",
+      "source": "foreground/lid/contact-085.png",
+      "sha256": "5a3b9da77be1d8ee1659367db56aa8b3198cfbdfba0577bf3234672ad7284e73"
+    },
+    {
+      "id": "lid-contact-100",
+      "source": "foreground/lid/contact-100.png",
+      "sha256": "80daf1cf3c420e5a8d221072c5cdc0dd9bc95e7351ff921d717b9c598b94d13b"
+    },
+    {
+      "id": "lid-release-first",
+      "source": "foreground/lid/release-first.png",
+      "sha256": "aa8fffbc5aa732e9c96749e9d12b205a9ea695339f2ea1874899940a84c30164"
+    },
+    {
+      "id": "lid-release-middle",
+      "source": "foreground/lid/release-middle.png",
+      "sha256": "13128ed154e8143ceae8d1b7fbd252361d6cfa0808b4a50de11afd494437b89f"
+    },
+    {
+      "id": "lid-release-low",
+      "source": "foreground/lid/release-low.png",
+      "sha256": "06249853bc404eb49b6fbe9adeff1c55ca077495d88692e0684ec3537edfefff"
+    },
+    {
+      "id": "lid-closing-lift",
+      "source": "foreground/lid/closing-lift.png",
+      "sha256": "c326dedf46a2b056e7c125ced13e384bc9bf903c056726a1a9bf70783ecbdba2"
+    },
+    {
+      "id": "lid-closing-approach",
+      "source": "foreground/lid/closing-approach.png",
+      "sha256": "f4225dc3c3caf7570d7508c844ddcf4d6da4e81cad62bddc15e8e09dce1afa49"
+    },
+    {
+      "id": "lid-closing-settle",
+      "source": "foreground/lid/closing-settle.png",
+      "sha256": "915e3bc1b9290b69c85b4041246a41419c894df9f4eb203080623c9ff2fd5006"
     }
   ]
 }
