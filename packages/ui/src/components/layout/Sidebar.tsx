@@ -12,13 +12,15 @@ const SIDEBAR_MAX_WIDTH = 500;
 interface SidebarProps {
     isOpen: boolean;
     isMobile: boolean;
+    /** Opens over the work area instead of pushing it, for narrow desktop windows. */
+    floating?: boolean;
     children: React.ReactNode;
     className?: string;
     /** Fixed strip rendered above the scrollable content (e.g. toggle + project actions). */
     topBar?: React.ReactNode;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className, topBar }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, floating = false, children, className, topBar }) => {
     const { t } = useI18n();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const hasManuallyResized = useUIStore((state) => state.hasManuallyResizedLeftSidebar);
@@ -64,7 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         Math.max(SIDEBAR_MIN_WIDTH, hasManuallyResized ? sidebarWidth : SIDEBAR_CONTENT_WIDTH)
     );
     const appliedWidth = isOpen ? openWidth : 0;
-    useMainColumnGlide(sidebarRef, isOpen, !isMobile && !isResizing, openWidth, 'sidebar');
+    useMainColumnGlide(sidebarRef, isOpen, !isMobile && !isResizing && !floating, openWidth, 'sidebar');
 
     if (isMobile) return null;
 
@@ -132,8 +134,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 'workbench-sidebar bg-sidebar varin-vibrancy-surface',
                 isOpen && 'border-r border-sidebar-border',
                 !isOpen && 'border-r-0',
+                floating && 'absolute inset-y-0 left-0 z-30',
+                floating && isOpen && 'shadow-[14px_0_40px_-24px_rgb(0_0_0/0.45)]',
                 className,
             )}
+            data-floating={floating || undefined}
             style={{
                 width: `${currentWidth}px`,
                 minWidth: `${currentWidth}px`,

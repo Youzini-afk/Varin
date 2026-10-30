@@ -66,14 +66,18 @@ function useMatchMedia(query: string): boolean {
  * While Bot is shown, the shared sidebar follows the Bot's own preference (collapsed by default),
  * and the ordinary workbench gets its own back on leaving (docs/design/bot-ui.md §2).
  */
-function useBotSidebar(committed: boolean, isMobile: boolean): void {
+function useBotSidebar(committed: boolean, isMobile: boolean, floating: boolean): void {
+  // A floating sidebar is a passing overlay: it starts closed and its opening is not the preference.
+  const floatingNow = React.useRef(floating);
+  floatingNow.current = floating;
   React.useEffect(() => {
     if (!committed || isMobile) return undefined;
+    // Captures the ordinary workbench's sidebar first, before anything below changes it.
     const layout = useBotLayout.getState();
     if (layout.ordinarySidebar === null) layout.setOrdinarySidebar(useUIStore.getState().isSidebarOpen);
-    useUIStore.getState().setSidebarOpen(layout.sidebarOpen);
+    useUIStore.getState().setSidebarOpen(floatingNow.current ? false : layout.sidebarOpen);
     const unsubscribe = useUIStore.subscribe((state, previous) => {
-      if (state.isSidebarOpen !== previous.isSidebarOpen) useBotLayout.getState().setSidebarOpen(state.isSidebarOpen);
+      if (state.isSidebarOpen !== previous.isSidebarOpen && !floatingNow.current) useBotLayout.getState().setSidebarOpen(state.isSidebarOpen);
     });
     return () => {
       unsubscribe();
@@ -82,6 +86,14 @@ function useBotSidebar(committed: boolean, isMobile: boolean): void {
       if (ordinary !== null) useUIStore.getState().setSidebarOpen(ordinary);
     };
   }, [committed, isMobile]);
+  // Entering or leaving the floating width: the overlay starts closed; docked again, the preference returns.
+  const wasFloating = React.useRef(floating);
+  React.useEffect(() => {
+    const before = wasFloating.current;
+    wasFloating.current = floating;
+    if (!committed || isMobile || before === floating) return;
+    useUIStore.getState().setSidebarOpen(floating ? false : useBotLayout.getState().sidebarOpen);
+  }, [committed, isMobile, floating]);
 }
 
 /** Bot identity, sessions and work remain Host-owned; this shell selects and presents them. */
@@ -139,7 +151,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const setTab = useBotLayout(state => state.setTab);
   const floating = useMatchMedia('(min-width: 760px) and (max-width: 1023px)');
   const panelVisible = !isMobile && (floating ? narrowPanelOpen : panelOpen);
-  useBotSidebar(committed, isMobile);
+  // Below 1280px the sidebar opens over the conversation instead of pushing it (§8).
+  const floatingSidebar = useMatchMedia('(max-width: 1279px)') && !isMobile;
+  useBotSidebar(committed, isMobile, floatingSidebar);
 
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; opening.current?.abort(); }; }, []);
   React.useEffect(() => committed ? subscribeVarinEvents((event) => {
@@ -332,8 +346,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     const order = sessionsWithWork?.map(session => session.identity.threadId) ?? [];
     noteSwitchDirection(order.indexOf(identity.threadId) - order.indexOf(selectedEntry?.threadId ?? ''));
     if (floating) setNarrowPanelOpen(false);
+    if (floatingSidebar) useUIStore.getState().setSidebarOpen(false);
     void openBotConversation(selected.id, identity, selected.homeDir).catch((cause: unknown) => setError(message(cause)));
-  }, [selected, sessionsWithWork, selectedEntry, floating]);
+  }, [selected, sessionsWithWork, selectedEntry, floating, floatingSidebar]);
 
   const openWork = React.useCallback((identity: ThreadIdentity, origin?: BotReturnPoint['focus']) => {
     if (!selected) return;
@@ -534,5 +549,6 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   return <MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
     secondaryPanelLabel={t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}
-    navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} headerPanelControl={panelControl} sidebarAttention={sidebarAttention} />;
+    navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} headerPanelControl={panelControl} sidebarAttention={sidebarAttention}
+    floatingSidebar={floatingSidebar} />;
 };

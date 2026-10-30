@@ -62,9 +62,11 @@ interface MainLayoutProps {
     navigationSubtitle?: string;
     headerPanelControl?: React.ReactNode;
     sidebarAttention?: 'info' | 'warn' | null;
+    /** The sidebar opens over the work area; pressing outside it closes it. */
+    floatingSidebar?: boolean;
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention, floatingSidebar = false }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -426,10 +428,14 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                 <>
                     <Header navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} panelControl={headerPanelControl} sidebarAttention={sidebarAttention} />
                     {/* Desktop navigation and work area share the row below the titlebar. */}
-                    <div className="agent-workspace-row flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+                    <div className="agent-workspace-row relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+                        {floatingSidebar && isSidebarOpen ? (
+                            <div aria-hidden="true" className="absolute inset-0 z-20 bg-black/10" onPointerDown={() => useUIStore.getState().setSidebarOpen(false)} />
+                        ) : null}
                         <Sidebar
                             isOpen={isSidebarOpen}
                             isMobile={isMobile}
+                            floating={floatingSidebar}
                             className="border-border"
                         >
                             <WorkbenchReplacement
