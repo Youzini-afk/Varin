@@ -49,10 +49,18 @@ const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/Se
 interface MainLayoutProps {
     renderConversation?: (active: boolean) => React.ReactNode;
     renderNavigator?: (isVisible: boolean) => React.ReactNode;
+    /**
+     * A workbench's own secondary panel. On desktop it replaces the context panel and its rail
+     * and must render an `aside` beside the main canvas; on mobile it fills the right drawer.
+     */
+    renderSecondaryPanel?: (placement: 'docked' | 'drawer') => React.ReactNode;
     navigationTitle?: string;
+    navigationSubtitle?: string;
+    headerPanelControl?: React.ReactNode;
+    sidebarAttention?: 'info' | 'warn' | null;
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, navigationTitle }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -303,6 +311,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                     {/* Mobile: header + drawer mode */}
                     {!isSettingsDialogOpen && <Header
                         navigationTitle={navigationTitle}
+                        navigationSubtitle={navigationSubtitle}
                         onToggleLeftDrawer={() => {
                             const nextOpen = !mobileLeftDrawerOpen;
                             if (mobileRightSidebarOpen) {
@@ -378,7 +387,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                             {mobileRightDrawerVisible && (
                                 <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: rightDrawerX }} aria-hidden={!mobileRightSidebarOpen}>
                                     <ErrorBoundary>
-                                        <React.Suspense fallback={null}><GitView isActive={mobileRightSidebarOpen} /></React.Suspense>
+                                        {renderSecondaryPanel
+                                            ? renderSecondaryPanel('drawer')
+                                            : <React.Suspense fallback={null}><GitView isActive={mobileRightSidebarOpen} /></React.Suspense>}
                                     </ErrorBoundary>
                                 </motion.div>
                             )}
@@ -406,7 +417,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                 </DrawerProvider>
             ) : (
                 <>
-                    <Header navigationTitle={navigationTitle} />
+                    <Header navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} panelControl={headerPanelControl} sidebarAttention={sidebarAttention} />
                     {/* Desktop navigation and work area share the row below the titlebar. */}
                     <div className="agent-workspace-row flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
                         <Sidebar
@@ -452,19 +463,19 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                                 <ErrorBoundary><WorktreesView /></ErrorBoundary>
                                             </main>
                                             <WorkbenchContributionSlot kind="panel" slot="workbench.secondary.before" />
-                                            <WorkbenchReplacement
+                                            {renderSecondaryPanel ? <ErrorBoundary>{renderSecondaryPanel('docked')}</ErrorBoundary> : <WorkbenchReplacement
                                                 target={WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer}
                                                 fallback={<ContextPanel />}
-                                            />
+                                            />}
                                             <WorkbenchContributionSlot kind="panel" slot="workbench.secondary.after" />
                                         </div>
                                     </div>
                                 </div>
                                 <div data-page-scroll-lock="true">
                                     <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.before" />
-                                    <div className="workbench-rail-reveal" data-open={isContextRailOpen} aria-hidden={!isContextRailOpen} inert={!isContextRailOpen}>
+                                    {renderSecondaryPanel ? null : <div className="workbench-rail-reveal" data-open={isContextRailOpen} aria-hidden={!isContextRailOpen} inert={!isContextRailOpen}>
                                         <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
-                                    </div>
+                                    </div>}
                                     <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.after" />
                                 </div>
                             </div>

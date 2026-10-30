@@ -1,0 +1,312 @@
+import type { BotActivity, BotMemoryItem, BotSession, BotSummary, BotWorkItem, ThreadIdentity } from '@varin/application-client';
+import type { MessageFeedPage, Outcome, Run, RunState, ThreadSummary } from '@varin/protocol';
+import type { I18nKey } from '@/lib/i18n';
+
+/**
+ * Pure projections for the Bot workbench (docs/design/bot-ui.md §5). Every value is derived from
+ * Host facts already in the UI: the Bot record, its sessions and work, the live Thread catalog,
+ * collaboration feeds and memory. Nothing here is stored or written back.
+ */
+
+export type BotFigureState = 'offline' | 'sleeping' | 'waking' | 'waiting' | 'result' | 'thinking' | 'working' | 'listening' | 'idle';
+
+/** What a piece of active work is doing. Stopping keeps "asked to stop" apart from "stopped". */
+export type BotWorkStatus = 'waiting-permission' | 'waiting-question' | 'running' | 'preparing' | 'queued' | 'paused' | 'stopping';
+
+const ACTIVE_RUN_STATES: readonly RunState[] = ['accepted', 'preparing', 'runnable', 'generating', 'executing', 'waiting'];
+export const isActiveRun = (run: Run | null | undefined): run is Run => Boolean(run && ACTIVE_RUN_STATES.includes(run.state));
+
+export function runStatus(run: Run | null | undefined): BotWorkStatus | null {
+  if (!isActiveRun(run)) return null;
+  if (run.cancel_requested) return 'stopping';
+  if (run.state === 'waiting') {
+    const on = run.waiting_on ?? '';
+    if (on.startsWith('permission:')) return 'waiting-permission';
+    if (on.startsWith('question:')) return 'waiting-question';
+    if (on.startsWith('policy-pause:')) return 'paused';
+    return 'running';
+  }
+  if (run.state === 'preparing') return 'preparing';
+  if (run.state === 'accepted' || run.state === 'runnable') return 'queued';
+  return 'running';
+}
+export const isWaitingStatus = (status: BotWorkStatus | null): status is 'waiting-permission' | 'waiting-question' => status === 'waiting-permission' || status === 'waiting-question';
+
+/** The branch's current Run from the live catalog; the work list's copy only when the catalog lacks the Thread. */
+export function liveRun(thread: ThreadSummary | undefined, branchId: string, fallback: Run | null): Run | null {
+  const branch = thread?.branches.find(candidate => candidate.branch_id === branchId);
+  if (!branch) return fallback;
+  const run = branch.latest_run;
+  return run && (branch.active_run_id === run.id || isActiveRun(run)) ? run : null;
+}
+
+export interface BotWorkView {
+  key: string;
+  identity: ThreadIdentity;
+  /** The executor's name; the task title when no participant name is known. */
+  name: string;
+  task: string;
+  avatar: string | null;
+  /** The Bot conversation the work reports back to; null when the Host could not attribute it. */
+  sessionThreadId: string | null;
+  status: BotWorkStatus | null;
+  updatedAtMs: number;
+}
+
+export const workKey = (identity: ThreadIdentity): string => `${identity.threadId}\u0000${identity.branchId}`;
+
+/** Delegated work of one Bot with its live state. Followed and session items are not delegated work. */
+export function workViews(items: readonly BotWorkItem[], threads: readonly ThreadSummary[], feeds: readonly BotSessionFeed[]): BotWorkView[] {
+  const participants = new Map<string, { name: string; avatar: string | null }>();
+  const tasks = new Map<string, { task: string; at: number }>();
+  for (const { page } of feeds) {
+    for (const participant of page.participants) participants.set(participant.threadId, { name: participant.name, avatar: participant.avatar });
+    for (const dispatch of page.dispatches ?? []) {
+      const key = workKey({ runtime: 'agent', threadId: dispatch.targetThreadId, branchId: dispatch.targetBranchId });
+      const known = tasks.get(key);
+      if (!known || known.at < dispatch.acceptedAtMs) tasks.set(key, { task: dispatch.task, at: dispatch.acceptedAtMs });
+    }
+  }
+  return items.filter(item => item.purpose === 'work').map(item => {
+    const thread = threads.find(candidate => candidate.thread_id === item.identity.threadId) ?? item.thread;
+    const participant = participants.get(item.identity.threadId);
+    const key = workKey(item.identity);
+    return {
+      key,
+      identity: item.identity,
+      name: participant?.name || thread.title || item.identity.threadId,
+      task: tasks.get(key)?.task ?? '',
+      avatar: participant?.avatar ?? thread.avatar ?? null,
+      sessionThreadId: item.sessionThreadId ?? null,
+      status: runStatus(liveRun(thread, item.identity.branchId, item.activeRun)),
+      updatedAtMs: thread.updated_at_ms,
+    };
+  });
+}
+
+/** One Bot conversation as the sidebar and panel show it. */
+export interface BotSessionView {
+  identity: ThreadIdentity;
+  thread: ThreadSummary;
+  primary: boolean;
+  /** Branches other than the main one, oldest first. */
+  branches: ThreadIdentity[];
+  running: boolean;
+  /** Its own Run or work it dispatched waits for the user. */
+  waiting: boolean;
+  unread: boolean;
+}
+
+export function sessionViews(sessions: readonly BotSession[], threads: readonly ThreadSummary[], work: readonly BotWorkView[]): BotSessionView[] {
+  return sessions.map(session => {
+    const thread = threads.find(candidate => candidate.thread_id === session.identity.threadId) ?? session.thread;
+    const runs = thread.branches.map(branch => runStatus(liveRun(thread, branch.branch_id, null)));
+    const delegated = work.filter(item => item.sessionThreadId === thread.thread_id);
+    return {
+      identity: session.identity,
+      thread,
+      primary: session.primary,
+      branches: thread.branches.filter(branch => branch.branch_id !== thread.main_branch_id)
+        .map(branch => ({ runtime: 'agent' as const, threadId: thread.thread_id, branchId: branch.branch_id })),
+      running: runs.some(status => status !== null && !isWaitingStatus(status)),
+      waiting: runs.some(isWaitingStatus) || delegated.some(item => isWaitingStatus(item.status)),
+      unread: thread.unread,
+    };
+  });
+}
+
+export interface BotNeed {
+  key: string;
+  identity: ThreadIdentity;
+  name: string;
+  avatar: string | null;
+  kind: 'permission' | 'question';
+  /** True for the Bot's own conversation, which is handled in Bot mode rather than the workbench. */
+  session: boolean;
+}
+
+export function needsOf(bot: BotSummary, sessions: readonly BotSessionView[], work: readonly BotWorkView[]): BotNeed[] {
+  const needs: BotNeed[] = [];
+  for (const session of sessions) {
+    for (const branch of session.thread.branches) {
+      const status = runStatus(liveRun(session.thread, branch.branch_id, null));
+      if (!isWaitingStatus(status)) continue;
+      const identity = { runtime: 'agent' as const, threadId: session.thread.thread_id, branchId: branch.branch_id };
+      needs.push({ key: workKey(identity), identity, name: bot.name, avatar: null, kind: status === 'waiting-permission' ? 'permission' : 'question', session: true });
+    }
+  }
+  for (const item of work) {
+    if (!isWaitingStatus(item.status)) continue;
+    needs.push({ key: item.key, identity: item.identity, name: item.name, avatar: item.avatar, kind: item.status === 'waiting-permission' ? 'permission' : 'question', session: false });
+  }
+  return needs;
+}
+
+export interface BotFigureFacts {
+  offline: boolean;
+  activity: BotActivity['state'] | undefined;
+  inactive: boolean;
+  needs: number;
+  result: boolean;
+  thinking: boolean;
+  working: number;
+  listening: boolean;
+}
+
+/** §5.7, highest priority first. */
+export function figureState(facts: BotFigureFacts): BotFigureState {
+  if (facts.offline) return 'offline';
+  if (facts.activity === 'waking') return 'waking';
+  if ((facts.activity && facts.activity !== 'awake') || facts.inactive) return 'sleeping';
+  if (facts.needs > 0) return 'waiting';
+  if (facts.result) return 'result';
+  if (facts.thinking) return 'thinking';
+  if (facts.working > 0) return 'working';
+  if (facts.listening) return 'listening';
+  return 'idle';
+}
+
+export interface BotStateLine {
+  key: I18nKey;
+  params?: Record<string, string | number>;
+  tone: 'warn' | 'none';
+  /** The line ends with a wake control. */
+  wake?: boolean;
+  /** Worth announcing to assistive technology (§9). */
+  announce?: boolean;
+}
+
+/** A neutral statement of the real state. It never speaks as the model. */
+export function stateLine(bot: BotSummary, state: BotFigureState, details: { needs: readonly BotNeed[]; working: readonly BotWorkView[]; resultName: string | null }): BotStateLine {
+  switch (state) {
+    case 'offline': return { key: 'bot.state.offline', tone: 'none', announce: true };
+    case 'waking': return { key: 'bot.state.waking', tone: 'none' };
+    case 'sleeping': {
+      if (bot.deletion) return { key: bot.deletion.error ? 'settings.bots.deleteFailed' : 'settings.bots.deleting', tone: bot.deletion.error ? 'warn' : 'none' };
+      if (bot.archived) return { key: 'bot.state.archived', tone: 'none' };
+      const activity = bot.activity?.state;
+      if (activity === 'sleeping') return { key: 'bot.state.goingToSleep', tone: 'none' };
+      if (activity === 'sleep-failed') return { key: 'bot.state.sleepFailed', tone: 'warn' };
+      if (activity === 'wake-failed') return { key: 'bot.state.wakeFailed', tone: 'warn', wake: true };
+      return { key: 'bot.state.sleeping', tone: 'none', wake: true };
+    }
+    case 'waiting': {
+      const [first] = details.needs;
+      if (details.needs.length > 1 || !first) return { key: 'bot.state.waitingMany', params: { count: details.needs.length }, tone: 'warn', announce: true };
+      return { key: first.kind === 'permission' ? 'bot.state.waitingPermission' : 'bot.state.waitingQuestion', params: { name: first.name }, tone: 'warn', announce: true };
+    }
+    case 'result': return { key: 'bot.state.result', params: { name: details.resultName ?? bot.name }, tone: 'none', announce: true };
+    case 'thinking': return { key: 'bot.state.thinking', tone: 'none' };
+    case 'working': {
+      const [first] = details.working;
+      return details.working.length === 1 && first
+        ? { key: 'bot.state.workingOne', params: { name: first.name }, tone: 'none' }
+        : { key: 'bot.state.workingMany', params: { count: details.working.length }, tone: 'none' };
+    }
+    case 'listening': return { key: 'bot.state.listening', tone: 'none' };
+    default: return { key: 'bot.state.idle', tone: 'none' };
+  }
+}
+
+/** The pale word beside a Bot in the sidebar; empty when there is nothing to say. */
+export function shortState(state: BotFigureState): { key: I18nKey; tone: 'warn' | 'none' } | null {
+  if (state === 'sleeping') return { key: 'bot.short.sleeping', tone: 'none' };
+  if (state === 'offline') return { key: 'bot.short.offline', tone: 'none' };
+  if (state === 'waiting') return { key: 'bot.short.waiting', tone: 'warn' };
+  if (state === 'working' || state === 'thinking') return { key: 'bot.short.working', tone: 'none' };
+  return null;
+}
+
+export interface BotSessionFeed { sessionThreadId: string; page: MessageFeedPage }
+
+export type BotTimelineEvent = {
+  id: string;
+  atMs: number;
+  /** The Bot conversation the event belongs to. */
+  sessionThreadId: string | null;
+} & (
+  | { kind: 'dispatch'; name: string; task: string; target: ThreadIdentity }
+  | { kind: 'report'; name: string; outcome: Outcome; source: ThreadIdentity; session: ThreadIdentity }
+  | { kind: 'you'; name: string; target: ThreadIdentity }
+  | { kind: 'memory'; content: string; memoryId: number }
+);
+
+/**
+ * The work as it happened: what was handed out, what came back, what the user did in the
+ * workbench and what was remembered. Built from the sessions' collaboration feeds and memory.
+ */
+export function buildTimeline(feeds: readonly BotSessionFeed[], memory: readonly BotMemoryItem[] | null): BotTimelineEvent[] {
+  const events = new Map<string, BotTimelineEvent>();
+  for (const { sessionThreadId, page } of feeds) {
+    const names = new Map(page.participants.map(participant => [participant.threadId, participant.name]));
+    const nameOf = (threadId: string) => names.get(threadId) || threadId;
+    for (const dispatch of page.dispatches ?? []) {
+      if (dispatch.senderThreadId !== sessionThreadId) continue;
+      events.set(`dispatch:${dispatch.operationId}`, {
+        id: `dispatch:${dispatch.operationId}`, atMs: dispatch.acceptedAtMs, sessionThreadId, kind: 'dispatch',
+        name: nameOf(dispatch.targetThreadId), task: dispatch.task,
+        target: { runtime: 'agent', threadId: dispatch.targetThreadId, branchId: dispatch.targetBranchId },
+      });
+    }
+    for (const report of page.reports ?? []) {
+      if (report.targetThreadId !== sessionThreadId || report.acceptedAtMs === undefined) continue;
+      events.set(`report:${report.operationId}:${report.acceptedCursor}`, {
+        id: `report:${report.operationId}:${report.acceptedCursor}`, atMs: report.acceptedAtMs, sessionThreadId, kind: 'report',
+        name: nameOf(report.senderThreadId), outcome: report.outcome,
+        source: { runtime: 'agent', threadId: report.senderThreadId, branchId: report.senderBranchId },
+        session: { runtime: 'agent', threadId: report.targetThreadId, branchId: report.targetBranchId },
+      });
+    }
+    for (const message of page.messages) {
+      if (message.actor.kind !== 'user' || message.targetThreadId === sessionThreadId) continue;
+      events.set(`you:${message.messageId}`, {
+        id: `you:${message.messageId}`, atMs: message.acceptedAtMs, sessionThreadId, kind: 'you',
+        name: nameOf(message.targetThreadId), target: { runtime: 'agent', threadId: message.targetThreadId, branchId: message.targetBranchId },
+      });
+    }
+  }
+  for (const item of memory ?? []) {
+    if (item.inactive) continue;
+    events.set(`memory:${item.id}`, { id: `memory:${item.id}`, atMs: item.createdAt, sessionThreadId: null, kind: 'memory', content: item.content, memoryId: item.id });
+  }
+  return [...events.values()].sort((a, b) => b.atMs - a.atMs);
+}
+
+/** The latest report that came back to any of the Bot's conversations. */
+export function latestReport(timeline: readonly BotTimelineEvent[]): Extract<BotTimelineEvent, { kind: 'report' }> | null {
+  return timeline.find((event): event is Extract<BotTimelineEvent, { kind: 'report' }> => event.kind === 'report') ?? null;
+}
+
+const startOfDay = (ms: number) => { const date = new Date(ms); date.setHours(0, 0, 0, 0); return date.getTime(); };
+/** Groups events by local day, newest first, keeping their order inside each day. */
+export function groupByDay<T extends { atMs: number }>(events: readonly T[]): Array<{ day: number; events: T[] }> {
+  const groups: Array<{ day: number; events: T[] }> = [];
+  for (const event of events) {
+    const day = startOfDay(event.atMs);
+    const last = groups.at(-1);
+    if (last?.day === day) last.events.push(event);
+    else groups.push({ day, events: [event] });
+  }
+  return groups;
+}
+export function dayLabel(day: number, now: number, locale: string): { key: 'bot.activity.today' | 'bot.activity.yesterday' } | { text: string } {
+  const today = startOfDay(now);
+  if (day === today) return { key: 'bot.activity.today' };
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (day === yesterday.getTime()) return { key: 'bot.activity.yesterday' };
+  return { text: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', weekday: 'short' }).format(day) };
+}
+export const clockTime = (ms: number, locale: string): string => new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false }).format(ms);
+/** Today shows the time; later days add the date. */
+export function scheduleWhen(atMs: number, locale: string, now = Date.now()): string {
+  const time = clockTime(atMs, locale);
+  return startOfDay(atMs) === startOfDay(now) ? time : `${new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(atMs)} ${time}`;
+}
+
+/** Splits a translated sentence around the name so the name can be set in bold (§5.4). */
+export const NAME_MARK = '\u0000';
+export function splitNamed(text: string): { before: string; after: string } | null {
+  const index = text.indexOf(NAME_MARK);
+  return index < 0 ? null : { before: text.slice(0, index), after: text.slice(index + NAME_MARK.length) };
+}

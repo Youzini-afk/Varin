@@ -196,6 +196,13 @@
 @keyframes tool-member-arrive { from { opacity: 0; transform: translateY(6px); } }
 @keyframes tool-member-avatar { from { opacity: 0; transform: rotate(-14deg) scale(.7); } }
 .tool-member-purpose { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Where the member's conversation opens takes the status's place while the row is pointed at (Bot workbench). */
+.tool-member-open { display: inline-grid; justify-items: end; flex: none; }
+.tool-member-open > * { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; transition: opacity var(--motion-dur-fade) var(--motion-ease-out), translate var(--motion-dur-glide) var(--motion-ease-glide); }
+.tool-member-open > [data-go] { opacity: 0; translate: 0 5px; font-size: var(--text-micro); color: var(--foreground); }
+.tool-member-line:is(:hover, :focus-visible, :focus-within) .tool-member-open > [data-now] { opacity: 0; translate: 0 -5px; }
+.tool-member-line:is(:hover, :focus-visible, :focus-within) .tool-member-open > [data-go] { opacity: 1; translate: none; }
+@media (hover: none) { .tool-member-open > [data-now] { opacity: 0; } .tool-member-open > [data-go] { opacity: 1; translate: none; } }
 .tool-member-detail { margin: 2px 0 12px 14px; padding: 4px 0 4px 20px; border-left: 1px solid var(--border); display: grid; gap: 10px; }
 .tool-inline-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .tool-inline-actions button { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-micro); color: var(--muted-foreground); border-radius: 3px; }

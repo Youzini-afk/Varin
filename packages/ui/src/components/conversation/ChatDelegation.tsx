@@ -17,6 +17,7 @@ import { invocationOperationId, toolRecord, toolText } from './toolInvocation';
 import type { ToolViewProps } from './toolViewTypes';
 import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { ExternalDelegationMessage } from '../thread/ExternalDelegates';
+import { ChildNavigationContext } from './childNavigation';
 
 export function ChatDelegation({ call, execution, result, status, generating, cwd, output, details }: ToolViewProps) {
   const { t } = useI18n();
@@ -59,8 +60,10 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
     }, failure => { if (!controller.signal.aborted) setError(String(failure)); });
     return () => controller.abort();
   }, [expanded, conversation?.api, conversation?.identity, operationId, original, owner, host, retry, result?.notDispatched, result?.status, generating, execution?.child, external]);
+  const childNavigation = React.useContext(ChildNavigationContext);
   const open = () => {
     if (!conversation || !threadId || !branchId) return;
+    if (childNavigation) { childNavigation.open({ runtime: 'agent', threadId, branchId }); return; }
     useUIStore.getState().openContextPanelTab(cwd, { mode: 'threads', thread: conversation.identity,
       member: { runtime: 'agent', threadId, branchId } });
   };
@@ -71,14 +74,19 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
     catch (failure) { if (host === getRuntimeEndpointGeneration()) { setStopping(false); setError(String(failure)); } }
   };
   if (external) return <ExternalDelegationMessage child={external} />;
+  const memberState = childState ? <ChildState state={(stopping || exact?.cancel_requested || execution?.operation?.cancel_requested) && active ? 'stopping' : childState} />
+    : <ToolStatus status={status} generating={generating} stopped={stopping && Boolean(active)} />;
   return <ToolDisclosure id={'tool:' + call.id} className="tool-delegation group" onExpanded={setExpanded}>
     <summary className="tool-member-line" data-arrive={arrives || undefined}>
       {threadId ? <AgentAvatar identity={threadId} avatar={child?.avatar ?? exact?.avatar ?? execution?.agent?.avatar ?? savedAvatar} size={23} />
         : <Icon name="ai-agent" className="size-4 text-muted-foreground" />}
       <span className="typography-meta font-medium truncate">{name}</span>
       <span className="tool-member-purpose typography-micro text-muted-foreground" title={task}>{task}</span>
-      {childState ? <ChildState state={(stopping || exact?.cancel_requested || execution?.operation?.cancel_requested) && active ? 'stopping' : childState} />
-        : <ToolStatus status={status} generating={generating} stopped={stopping && Boolean(active)} />}
+      {childNavigation && threadId && branchId && conversation ? <span className="tool-member-open">
+        <span data-now="">{memberState}</span>
+        {/* The status gives way to where the member opens; a press goes there instead of unfolding the row. */}
+        <button type="button" data-go="" onClick={event => { event.preventDefault(); event.stopPropagation(); open(); }}>{childNavigation.label}<Icon name="external-link" className="size-3" /></button>
+      </span> : memberState}
       <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" />
     </summary>
     <div className="tool-member-detail">

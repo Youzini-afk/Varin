@@ -79,7 +79,7 @@ const resourceErrorMessages = new Map([
   ['resource-cancelled', 'Skill or resource preparation was cancelled. Try again when ready.'],
 ]);
 
-export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, readOnly = false, messageHandoff }: { messageHandoff?: MessageHandoff; onWorkChanged?: () => void; preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
+export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, readOnly = false, messageHandoff, emptyHero }: { emptyHero?: { visual: React.ReactNode; title: string }; messageHandoff?: MessageHandoff; onWorkChanged?: () => void; preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const draftKey = threadComposerKey(threadHostKey(), identity);
@@ -497,7 +497,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       onRead={operation => api.operation(operation.id)} onCancel={operation => api.cancelOperation(operation.id)}
       onAnswer={(operation, answers) => api.answerQuestion({ ...identity, operationId: operation.id, answers })} />}
     {/* A send moves the title and starters out while the composer docks; loading history removes them at once. */}
-    <Departure present={empty} animated={sendDeparts} exit="rise" className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center"><VarinLogo width={24} height={24} decorative className="text-muted-foreground" /><h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle')}</h1></Departure>
+    <Departure present={empty} animated={sendDeparts} exit="rise" className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center">{emptyHero?.visual ?? <VarinLogo width={24} height={24} decorative className="text-muted-foreground" />}<h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyHero?.title ?? (emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle'))}</h1></Departure>
     {snapshot && <ThreadWorkStrips key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('goals')} onFollowups={() => showOverview('followups')} />}
     <div className="chat-input-column conversation-composer-queue">{snapshot && <ThreadInputQueue key={`${host}:${identity.threadId}:${identity.branchId}`}
       api={api} identity={identity} inputs={snapshot.inputs} pending={pending}

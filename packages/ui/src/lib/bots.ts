@@ -1,5 +1,5 @@
 import type { BotCreateInput, BotUpdateInput, BotModelSelection, BotReadyEntry, BotSummary, BotWorkItem, BotMemoryItem } from '@varin/application-client';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
+import { createScheduledTasksHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import { create } from 'zustand';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/useUIStore';
 
 export type { BotModelSelection, BotSummary, BotWorkItem, BotReadyEntry, BotSession, BotMemoryItem } from '@varin/application-client';
 const api = () => { const bots = getRegisteredRuntimeAPIs()?.bots; if (!bots) throw new Error('Bot service is unavailable'); return bots; };
+const schedules = createScheduledTasksHttpAPI();
 export const listBots = (signal?: AbortSignal) => api().list(signal);
 export const ensurePrimaryBot = (signal?: AbortSignal) => api().primary(signal);
 export const getBot = (id: string, signal?: AbortSignal) => api().get(id, signal);
@@ -26,14 +27,25 @@ export const listBotWork = (id: string, signal?: AbortSignal) => api().work(id, 
 export const listBotSessions = (id: string, signal?: AbortSignal) => api().sessions.list(id, signal);
 export const createBotSession = (id: string) => api().sessions.create(id);
 export const listBotMatters = (id: string, signal?: AbortSignal) => api().matters.list(id, signal);
+/** The Bot's Calendar tasks live under its `bot:<id>` asset namespace (docs/bot.md). */
+export const listBotSchedules = (id: string, signal?: AbortSignal) => schedules.list(`bot:${id}`, signal);
 
 /**
  * Where the user left the Bot when they opened its delegated work in the ordinary workbench.
  * Only presentation state: the back control returns to this conversation and reading position.
  */
-export interface BotReturnPoint { botId: string; botName: string; session: BotReadyEntry; sessionTitle: string; workThreadId: string; scrollTop: number | null }
-export const useBotReturn = create<{ point: BotReturnPoint | null }>(() => ({ point: null }));
-subscribeRuntimeEndpointWillChange(() => useBotReturn.setState({ point: null }));
+export interface BotReturnPoint {
+  botId: string;
+  botName: string;
+  session: BotReadyEntry;
+  sessionTitle: string;
+  workThreadId: string;
+  /** The panel row the user left from, lit again on return. */
+  focus?: { tab: 'overview' | 'activity' | 'memory' | 'schedule'; id: string };
+}
+/** `returned` is the point the user just came back through, until the Bot shell has shown it. */
+export const useBotReturn = create<{ point: BotReturnPoint | null; returned: BotReturnPoint | null }>(() => ({ point: null, returned: null }));
+subscribeRuntimeEndpointWillChange(() => useBotReturn.setState({ point: null, returned: null }));
 
 /** View selection only. Identities are always returned by the Host. */
 export const useBotNavigation = create<{ botId: string | null; entry: BotReadyEntry | null; model: BotModelSelection | null; archived?: boolean }>(() => ({ botId: null, entry: null, model: null }));
@@ -81,4 +93,5 @@ export const returnToBot = async (point: BotReturnPoint): Promise<void> => {
   if (generation !== getRuntimeEndpointGeneration()) return;
   useUIStore.getState().setSettingsDialogOpen(false);
   await openBotConversation(point.botId, point.session);
+  useBotReturn.setState({ point: null, returned: point });
 };

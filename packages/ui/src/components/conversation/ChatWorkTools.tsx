@@ -14,10 +14,20 @@ import { ToolHeadingText } from './ToolHeadingText';
 import { useToolTargets } from './toolTargetContext';
 import { toolSubject } from './toolSubject';
 import { ChatQuestionTool } from './ChatQuestionTool';
+import { MemoryNavigationContext } from './memoryNavigation';
+
+/** The memory row a confirmed write names: Bot memory reports it under `result.knowledge`. */
+const writtenMemoryId = (data: Record<string, unknown>): string | null => {
+  const written = toolRecord(toolRecord(data.memoryReceipt).result);
+  const id = toolRecord(written.knowledge).id ?? written.id;
+  return typeof id === 'number' && Number.isSafeInteger(id) ? String(id) : null;
+};
+
 export function ChatWorkTool({ call, execution, result, status, generating, cwd, output, details }: ToolViewProps) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
   const targets = useToolTargets();
+  const memoryNavigation = React.useContext(MemoryNavigationContext);
   if (call.name === 'ask_user' || call.name === 'question_status') return <ChatQuestionTool {...{ call, execution, result, status, generating, cwd, output, details }} />;
   const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result);
   const plan = call.name === 'todo', memory = call.name === 'memory', settings = call.name.startsWith('settings_');
@@ -48,6 +58,9 @@ export function ChatWorkTool({ call, execution, result, status, generating, cwd,
       {purposeContent}
       {memory && !purposeContent && <>{Boolean(args.scope ?? data.scope) && <p className="typography-micro text-muted-foreground">{t('chat.tools.scope')} · {toolText(data.scope) || toolText(args.scope)}</p>}
         {content && <blockquote className="tool-memory-text">{content}</blockquote>}</>}
+      {memory && memoryNavigation && status === 'success' && args.action !== 'delete' ? <div className="tool-inline-actions">
+        <button type="button" onClick={() => memoryNavigation.open(writtenMemoryId(data))}>{memoryNavigation.label}<Icon name="arrow-right-s" className="size-3" /></button>
+      </div> : null}
       <ToolResultNotice data={data} status={status} />
       {objectResult && !purposeContent && !(plan && planItems.length || memory && content) && <JsonSummaryView data={data} />}
       {output}{details}

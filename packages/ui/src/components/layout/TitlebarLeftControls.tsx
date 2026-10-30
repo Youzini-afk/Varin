@@ -18,7 +18,7 @@ const ICON_BUTTON_CLASS =
  * this row, so controls and the adjacent title never overlap or change parents.
  * Left padding clears native window controls where the surface needs it.
  */
-export const TitlebarLeftControls: React.FC = () => {
+export const TitlebarLeftControls: React.FC<{ attention?: 'info' | 'warn' | null }> = ({ attention = null }) => {
   const { t } = useI18n();
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -72,9 +72,10 @@ export const TitlebarLeftControls: React.FC = () => {
               type="button"
               onClick={toggleSidebar}
               aria-label={t('header.actions.openSessionsAria')}
-              className={cn(ICON_BUTTON_CLASS, 'shrink-0')}
+              className={cn(ICON_BUTTON_CLASS, 'relative shrink-0')}
             >
               <Icon name="layout-left" className="h-[18px] w-[18px]" />
+              {attention ? <span className="bot-titlebar-dot" data-tone={attention === 'warn' ? 'warn' : undefined} aria-hidden="true" /> : null}
             </button>
           </TooltipTrigger>
           <TooltipContent>

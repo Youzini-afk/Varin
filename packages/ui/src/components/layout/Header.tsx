@@ -42,6 +42,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { TitlebarLeftControls } from '@/components/layout/TitlebarLeftControls';
+import { BotDelegatedNote, BotReturnChip } from '@/workbenches/bot/BotReturnChip';
 import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
 import { invokeDesktop, isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
@@ -92,6 +93,12 @@ interface TabConfig {
 
 interface HeaderProps {
   navigationTitle?: string;
+  /** A second line under a workbench-owned title (the Bot conversation's Bot). */
+  navigationSubtitle?: string;
+  /** Replaces the context panel controls for a workbench that owns its own secondary panel. */
+  panelControl?: React.ReactNode;
+  /** A dot on the sidebar toggle while the sidebar is closed and something in it changed. */
+  sidebarAttention?: 'info' | 'warn' | null;
   onToggleLeftDrawer?: () => void;
   onToggleRightDrawer?: () => void;
   leftDrawerOpen?: boolean;
@@ -100,6 +107,9 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   navigationTitle,
+  navigationSubtitle,
+  panelControl,
+  sidebarAttention,
   onToggleLeftDrawer,
   onToggleRightDrawer,
   leftDrawerOpen,
@@ -802,7 +812,8 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
-      <TitlebarLeftControls />
+      <TitlebarLeftControls attention={sidebarAttention ?? null} />
+      {navigationTitle === undefined ? <BotReturnChip /> : null}
       <div className="flex min-w-0 flex-1 self-stretch items-center">
         {activeSurfaceHeader ? (
           <div className="mr-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-left">
@@ -816,7 +827,13 @@ export const Header: React.FC<HeaderProps> = ({
             ) : null}
           </div>
         ) : navigationTitle !== undefined ? (
-          <span className="mr-3 truncate typography-ui-label text-foreground">{navigationTitle}</span>
+          <div className="mr-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-left">
+            <SwapText text={navigationTitle} hold={0} direction={recentSwitchDirection() === -1 ? -1 : 1}
+              className="typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full" />
+            {navigationSubtitle ? (
+              <span className="max-w-full truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">{navigationSubtitle}</span>
+            ) : null}
+          </div>
         ) : (
           <div className="app-region-no-drag mr-3 flex min-w-0 max-w-full items-center gap-0.5 py-0.5 -my-0.5 text-left">
             {!isSidebarOpen ? (
@@ -883,6 +900,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
               {(sessionDirectory || (currentSessionId && activeProjectLabel) || currentBranchLabel) ? (
                 <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+                  <BotDelegatedNote />
                   {sessionDirectory ? <span className="truncate">{sessionDirectory}</span> : null}
                   {currentSessionId && activeProjectLabel ? <span className="min-w-0 truncate">{projectNameMenu}</span> : null}
                   {currentBranchLabel ? (
@@ -956,7 +974,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>}
           <OpenInAppButton directory={actionDirectory} className="mr-1" />
           <WorkbenchServices />
-          <ContextPanelControls />
+          {panelControl ?? <ContextPanelControls />}
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
       </div>

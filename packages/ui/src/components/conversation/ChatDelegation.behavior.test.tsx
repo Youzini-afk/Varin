@@ -82,3 +82,21 @@ it('keeps a completed child’s saved avatar after leaving and reopening its col
   await act(async () => useThreadStore.setState({ threads: [{ ...summary, title: 'Renamed child' }] }));
   expect(avatar()).toBe(summary.avatar);
 });
+
+it('opens the member where the surrounding workbench asks, without unfolding the row', async () => {
+  const { ChildNavigationContext } = await import('./childNavigation');
+  const panel = vi.spyOn(useUIStore.getState(), 'openContextPanelTab').mockImplementation(() => {});
+  const open = vi.fn();
+  const execution = { toolCallId: 'dispatch', operationId: 'operation', status: 'running',
+    child: { task: { name: 'Writer', child_thread_id: 'child', child_branch_id: 'child-branch' } } } as unknown as ChatToolExecutionState;
+  const presentation = { identity: { runtime: 'agent' as const, threadId: 'parent', branchId: 'parent-branch' }, api: { cancelOperation: vi.fn() }, toolExecutions: {} } as unknown as ConversationPresentation;
+  await act(async () => root.render(<I18nProvider><ChildNavigationContext.Provider value={{ label: 'Open in workbench', open }}><ConversationContext.Provider value={presentation}>
+    <ToolDisclosureScope sessionId="delegation-workbench"><ChatDelegation call={{ type: 'toolCall', id: 'dispatch', name: 'dispatch', arguments: { task: 'Draft notes' } }}
+      execution={execution} cwd="/workspace" status="running" output={null} details={null} /></ToolDisclosureScope>
+  </ConversationContext.Provider></ChildNavigationContext.Provider></I18nProvider>));
+  const go = [...container.querySelectorAll('button')].find(button => button.textContent === 'Open in workbench')!;
+  await act(async () => go.click());
+  expect(open).toHaveBeenCalledExactlyOnceWith({ runtime: 'agent', threadId: 'child', branchId: 'child-branch' });
+  expect(panel).not.toHaveBeenCalled();
+  expect(container.querySelector('details')?.hasAttribute('open')).toBe(false);
+});

@@ -9,6 +9,7 @@
 @import "./styles/tool-interactions.css";
 @import "./styles/thinking.css";
 @import "./styles/collaboration.css";
+@import "./styles/bot.css";
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */

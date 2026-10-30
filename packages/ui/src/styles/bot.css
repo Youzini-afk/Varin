@@ -1,0 +1,307 @@
+/*
+ * Bot workbench (workbenches/bot, docs/design/bot-ui.md). Colours come from the theme tokens;
+ * warm is only for "needs you", info-blue only for "new" and "your change". Motion uses the
+ * tokens in motion.css; reduced and off levels are handled there globally.
+ */
+
+/* ── Figure (§5.7). Placeholder drawing; the art replaces the SVG, the states stay. ─────────── */
+.bot-figure {
+  --bot-figure-shell: color-mix(in srgb, var(--surface-elevated, var(--background)) 94%, var(--foreground));
+  --bot-figure-line: var(--foreground);
+  --bot-figure-visor: #20272a;
+  --bot-figure-visor-rest: #3b4245;
+  --bot-figure-eye: #eeeee8;
+  position: relative;
+  display: inline-block;
+  flex: none;
+}
+.dark .bot-figure {
+  --bot-figure-shell: color-mix(in srgb, var(--surface-elevated, var(--background)) 90%, var(--foreground));
+  --bot-figure-visor: #0b0b0b;
+  --bot-figure-visor-rest: #1a1a1a;
+}
+/* Positioned so it paints above the glow that sits behind it. */
+.bot-figure svg { position: relative; display: block; width: 100%; height: 100%; overflow: visible; }
+.bot-figure-body { transform-box: view-box; transform-origin: 50% 90%; }
+.bot-figure-shell { fill: var(--bot-figure-shell); stroke: var(--bot-figure-line); stroke-width: 3; transition: fill 500ms var(--motion-ease-out); }
+.bot-figure-visor { fill: var(--bot-figure-visor); transition: fill 600ms var(--motion-ease-out); }
+.bot-figure-eyes { transform-box: view-box; transition: transform var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-figure-eye { fill: var(--bot-figure-eye); transform-box: fill-box; transform-origin: 50% 50%; transition: transform var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-figure-closed, .bot-figure-happy { fill: none; stroke: var(--bot-figure-eye); stroke-width: 3.6; stroke-linecap: round; opacity: 0; transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-figure-zz { opacity: 0; transition: opacity 400ms var(--motion-ease-out); }
+.bot-figure-zz text { font: 700 11px var(--font-sans, system-ui); fill: var(--muted-foreground); }
+.bot-figure-glow {
+  /* It sits behind the drawing, so the warm light has to reach past the shell's edge to be seen. */
+  position: absolute; inset: -30%; border-radius: 50%; pointer-events: none; opacity: 0;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--status-warning) 40%, transparent) 55%, transparent 100%);
+  transition: opacity 500ms var(--motion-ease-out);
+}
+.bot-figure[data-state="idle"] .bot-figure-eye { animation: bot-blink 5.6s infinite; }
+.bot-figure[data-state="listening"] .bot-figure-eye { transform: scale(1.08, 1.14); }
+.bot-figure[data-state="listening"] .bot-figure-eyes { transform: translateY(-1px); }
+.bot-figure[data-state="thinking"] .bot-figure-eyes { animation: bot-think 3.4s var(--motion-ease-out) infinite; }
+.bot-figure[data-state="thinking"] .bot-figure-eye { transform: scaleY(.9); }
+.bot-figure[data-state="working"] .bot-figure-eyes { transform: translateY(4px); }
+.bot-figure[data-state="working"] .bot-figure-eye { transform: scaleY(.8); }
+.bot-figure[data-state="working"] .bot-figure-body { animation: bot-bob 2.6s ease-in-out infinite; }
+.bot-figure[data-state="waiting"] .bot-figure-eye { transform: scale(1.1); }
+/* Entering "needs you" it hops once, then the warm glow breathes. */
+.bot-figure[data-state="waiting"] .bot-figure-body { animation: bot-hop var(--motion-dur-settle) var(--motion-ease-settle) 1; }
+.bot-figure[data-state="waiting"] .bot-figure-glow { opacity: 1; animation: bot-glow 2.4s ease-in-out infinite; }
+.bot-figure[data-state="result"] .bot-figure-eyes { opacity: 0; }
+.bot-figure[data-state="result"] .bot-figure-happy { opacity: 1; }
+.bot-figure[data-state="result"] .bot-figure-body { animation: bot-press var(--motion-dur-settle) var(--motion-ease-settle) 1; }
+.bot-figure[data-state="sleeping"] .bot-figure-eyes { opacity: 0; }
+.bot-figure[data-state="sleeping"] .bot-figure-closed { opacity: 1; }
+.bot-figure[data-state="sleeping"] .bot-figure-visor { fill: var(--bot-figure-visor-rest); }
+.bot-figure[data-state="sleeping"] .bot-figure-zz { opacity: 1; }
+.bot-figure[data-state="sleeping"] .bot-figure-zz text { animation: bot-zz 3s ease-in-out infinite; }
+.bot-figure[data-state="sleeping"] .bot-figure-zz text:nth-child(2) { animation-delay: 1s; }
+.bot-figure[data-state="sleeping"] .bot-figure-zz text:nth-child(3) { animation-delay: 2s; }
+.bot-figure[data-state="sleeping"] .bot-figure-body { animation: bot-snooze 4s ease-in-out infinite; }
+.bot-figure[data-state="waking"] .bot-figure-eye { animation: bot-wake 1.4s var(--motion-ease-out) infinite; }
+.bot-figure[data-state="offline"] svg { filter: grayscale(1); opacity: .5; }
+.bot-figure[data-state="offline"] .bot-figure-eye { opacity: .45; }
+/* Small sizes only take the pose. */
+.bot-figure[data-still], .bot-figure[data-still] * { animation: none !important; }
+.bot-figure[data-still] .bot-figure-glow, .bot-figure[data-still] .bot-figure-zz { display: none; }
+/* Loops stop while nobody can see them. */
+:root[data-page-hidden] .bot-figure *, [data-offscreen] .bot-figure * { animation-play-state: paused !important; }
+/* A newly selected Bot's figure settles into place. */
+.bot-figure-arrive { animation: bot-figure-arrive var(--motion-dur-settle) var(--motion-ease-settle) backwards; }
+@keyframes bot-figure-arrive { from { opacity: 0; scale: .9; } }
+@keyframes bot-blink { 0%, 46%, 50%, 100% { transform: scaleY(1); } 48% { transform: scaleY(.12); } }
+@keyframes bot-think { 0%, 100% { transform: translate(4px, -3px); } 45%, 55% { transform: translate(-3px, -3px); } }
+@keyframes bot-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.6px); } }
+@keyframes bot-hop { 0%, 100% { transform: translateY(0); } 35% { transform: translateY(-5px); } }
+@keyframes bot-press { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.04, .94); } }
+@keyframes bot-glow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes bot-zz { 0% { opacity: 0; transform: translate(0, 6px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(9px, -16px); } }
+@keyframes bot-snooze { 0%, 100% { transform: translateY(1.5px); } 50% { transform: translateY(0); } }
+@keyframes bot-wake { 0% { transform: scaleY(.15); } 30% { transform: scaleY(.6); } 40% { transform: scaleY(.2); } 70%, 100% { transform: scaleY(1); } }
+
+/* ── Small marks ───────────────────────────────────────────────────────────────────────── */
+.bot-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--status-info); }
+.bot-dot[data-tone="warn"] { background: var(--status-warning); }
+.bot-dot[data-arrive] { animation: rail-badge-in var(--motion-dur-settle) var(--motion-ease-settle) both; }
+.bot-ring {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%; flex: none;
+  border: 1.6px solid var(--interactive-border); border-top-color: var(--muted-foreground);
+  animation: bot-spin 900ms linear infinite;
+}
+@keyframes bot-spin { to { transform: rotate(360deg); } }
+:root[data-page-hidden] .bot-ring, [data-offscreen] .bot-ring { animation-play-state: paused; }
+/* A row reached from elsewhere lights up once and fades (§5.3). */
+.bot-flash { animation: bot-flash 1100ms var(--motion-ease-out); }
+@keyframes bot-flash { 0%, 30% { background-color: var(--interactive-selection); } 100% { background-color: transparent; } }
+.bot-titlebar-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--status-info); box-shadow: 0 0 0 2px var(--workbench-frame, var(--sidebar)); pointer-events: none; }
+.bot-titlebar-dot[data-tone="warn"] { background: var(--status-warning); }
+
+/* ── Sidebar (§3) ──────────────────────────────────────────────────────────────────────── */
+.bot-nav-list { position: relative; }
+.bot-nav-row {
+  position: relative; display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;
+  border-radius: var(--radius-md, 6px); text-align: left; color: var(--foreground);
+  transition: background-color var(--motion-dur-fade) var(--motion-ease-out), color var(--motion-dur-fade) var(--motion-ease-out);
+}
+.bot-nav-row:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: -2px; }
+.bot-nav-row[data-current] { background: var(--interactive-selection); }
+.bot-nav-bot { height: 36px; padding: 0 6px 0 8px; font-weight: 600; }
+.bot-nav-session { height: 32px; padding: 0 10px 0 36px; }
+.bot-nav-session[data-branch] { padding-left: 52px; color: var(--muted-foreground); }
+.bot-nav-session[data-branch]::before {
+  content: ''; position: absolute; left: 41px; top: 6px; width: 7px; height: 11px;
+  border-left: 1px solid var(--interactive-border); border-bottom: 1px solid var(--interactive-border); border-bottom-left-radius: 5px;
+}
+.bot-nav-chevron { color: var(--muted-foreground); transition: transform var(--motion-dur-glide) var(--motion-ease-glide); }
+.bot-nav-group[data-open="false"] .bot-nav-chevron { transform: rotate(-90deg); }
+.bot-nav-sessions { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide); }
+.bot-nav-sessions > div { min-height: 0; overflow: hidden; }
+.bot-nav-group[data-open="false"] .bot-nav-sessions { grid-template-rows: 0fr; }
+
+/* ── Right panel frame (§5, §5.9) ──────────────────────────────────────────────────────── */
+.bot-panel[data-resizing] { transition: none; user-select: none; }
+.bot-panel[data-resizing] > div { transition: none; }
+.bot-panel-handle {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 8px; z-index: 50; cursor: col-resize; outline: none;
+}
+.bot-panel-handle::after {
+  content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: transparent;
+  transition: background-color var(--motion-dur-fade) var(--motion-ease-out);
+}
+.bot-panel-handle:hover::after, .bot-panel[data-resizing] .bot-panel-handle::after { background: var(--interactive-border); }
+.bot-panel-handle:focus-visible::after { background: var(--interactive-focus, var(--ring)); }
+.bot-panel-body { position: relative; display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; }
+
+/* Stage: fixed above the tabs; only another Bot changes it (§5.1). */
+.bot-stage {
+  position: relative; flex: none; height: 214px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  padding: 0 18px 16px; border-bottom: 1px solid var(--border); overflow: hidden;
+  transition: height var(--motion-dur-glide) var(--motion-ease-glide), padding var(--motion-dur-glide) var(--motion-ease-glide);
+}
+.bot-stage-floor {
+  position: absolute; inset: 0; pointer-events: none; opacity: .9;
+  background-image: linear-gradient(to right, var(--border) 1px, transparent 1px), linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+  background-size: 22px 22px; background-position: center 14px;
+  -webkit-mask-image: radial-gradient(ellipse 58% 62% at 50% 44%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(ellipse 58% 62% at 50% 44%, #000 0%, transparent 78%);
+  transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
+}
+.bot-stage-menu { position: absolute; top: 8px; right: 8px; z-index: 2; }
+.bot-stage-figure { position: relative; z-index: 1; margin-bottom: 14px; }
+.bot-stage-text { position: relative; z-index: 1; display: flex; min-width: 0; max-width: 100%; flex-direction: column; align-items: center; gap: 3px; }
+.bot-stage-name { max-width: 100%; border-radius: 6px; padding: 0 4px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; transition: background-color var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-stage-name:hover { background: var(--interactive-hover); }
+.bot-stage-state { display: flex; min-height: 20px; max-width: 100%; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted-foreground); }
+.bot-stage-state[data-tone="warn"] { color: var(--status-warning); }
+.bot-stage-wake {
+  height: 22px; padding: 0 9px; border-radius: 11px; font-size: 12px; color: var(--foreground); flex: none;
+  box-shadow: inset 0 0 0 1px var(--interactive-border); background: var(--background);
+}
+@media (max-height: 719px) {
+  .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
+  .bot-stage-figure { margin: 0; }
+  .bot-stage-figure .bot-figure { width: 40px !important; height: 36px !important; }
+  .bot-stage-text { align-items: flex-start; }
+  .bot-stage-name { padding: 0; font-size: 14px; }
+  .bot-stage-floor { opacity: 0; }
+}
+
+/* Tabs (§5.2). */
+.bot-tabs { position: relative; flex: none; display: flex; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid var(--border); }
+.bot-tab {
+  position: relative; height: 36px; padding: 0 10px; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 500; color: var(--muted-foreground);
+  transition: color var(--motion-dur-snap) var(--motion-ease-snap);
+}
+.bot-tab:hover, .bot-tab[aria-selected="true"] { color: var(--foreground); }
+.bot-tab:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: -4px; }
+.bot-tab .bot-dot { position: absolute; top: 9px; right: 2px; }
+.bot-tabs .tab-underline { bottom: -1px; background: var(--foreground); }
+.bot-panes { position: relative; flex: 1; min-height: 0; }
+.bot-pane { position: absolute; inset: 0; overflow-x: hidden; overflow-y: auto; padding: 8px 8px 24px; scrollbar-width: thin; }
+/* The incoming pane enters from the direction of travel; its first six items 18ms apart. */
+.bot-pane[data-enter] > * { animation: bot-pane-enter var(--motion-dur-glide) var(--motion-ease-glide) backwards; }
+.bot-pane[data-enter] > :nth-child(2) { animation-delay: 18ms; }
+.bot-pane[data-enter] > :nth-child(3) { animation-delay: 36ms; }
+.bot-pane[data-enter] > :nth-child(4) { animation-delay: 54ms; }
+.bot-pane[data-enter] > :nth-child(5) { animation-delay: 72ms; }
+.bot-pane[data-enter] > :nth-child(n + 6) { animation-delay: 90ms; }
+.bot-pane[data-leaving] { pointer-events: none; animation: bot-pane-leave var(--motion-dur-exit) var(--motion-ease-exit) forwards; }
+@keyframes bot-pane-enter { from { opacity: 0; translate: calc(8px * var(--bot-pane-direction, 1)) 0; } }
+@keyframes bot-pane-leave { to { opacity: 0; translate: calc(-8px * var(--bot-pane-direction, 1)) 0; } }
+
+/* Shared rows and blocks. */
+.bot-section-label { padding: 14px 10px 4px; font-size: 12px; color: var(--muted-foreground); }
+.bot-row {
+  display: flex; width: 100%; min-width: 0; align-items: center; gap: 10px; border-radius: 10px; padding: 7px 10px; text-align: left;
+  transition: background-color var(--motion-dur-snap) var(--motion-ease-snap);
+}
+.bot-row:hover { background: var(--interactive-hover); }
+.bot-row:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: -2px; }
+.bot-row-status { margin-left: auto; display: inline-grid; justify-items: end; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
+.bot-row-status > span { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 5px; transition: opacity var(--motion-dur-fade) var(--motion-ease-out), translate var(--motion-dur-glide) var(--motion-ease-glide); }
+.bot-row-status > [data-go] { opacity: 0; translate: 0 5px; color: var(--foreground); }
+.bot-row:is(:hover, :focus-visible) .bot-row-status > [data-now] { opacity: 0; translate: 0 -5px; }
+.bot-row:is(:hover, :focus-visible) .bot-row-status > [data-go] { opacity: 1; translate: none; }
+.bot-row-status [data-tone="warn"] { color: var(--status-warning); }
+.bot-faces { display: inline-flex; flex: none; }
+.bot-faces > * + * { margin-left: -5px; }
+.bot-segment { position: relative; display: inline-flex; padding: 2px; border-radius: 9px; background: var(--surface-muted, var(--interactive-hover)); box-shadow: inset 0 0 0 1px var(--border); }
+.bot-segment > button { position: relative; z-index: 1; height: 26px; padding: 0 11px; border-radius: 7px; font-size: 12.5px; color: var(--muted-foreground); transition: color var(--motion-dur-snap) var(--motion-ease-snap); }
+.bot-segment > button[aria-pressed="true"] { color: var(--foreground); }
+.bot-segment-knob {
+  position: absolute; top: 2px; left: 0; height: 26px; border-radius: 7px; pointer-events: none;
+  background: var(--surface-elevated, var(--background)); box-shadow: 0 0 0 1px var(--border), 0 1px 2px rgb(0 0 0 / .08);
+  transition: translate var(--motion-dur-glide) var(--motion-ease-glide), width var(--motion-dur-glide) var(--motion-ease-glide);
+}
+.bot-pane-bar { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
+
+/* Overview (§5.3). */
+.bot-need {
+  display: flex; width: calc(100% - 4px); align-items: center; gap: 11px; margin: 4px 2px 6px; padding: 12px; border-radius: 12px; text-align: left;
+  background: color-mix(in srgb, var(--status-warning) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-warning) 22%, transparent);
+  transition: background-color var(--motion-dur-snap) var(--motion-ease-snap);
+  animation: bot-need-in var(--motion-dur-settle) var(--motion-ease-settle) backwards;
+}
+.bot-need:hover { background: color-mix(in srgb, var(--status-warning) 13%, transparent); }
+.bot-need-detail { color: var(--status-warning); }
+@keyframes bot-need-in { from { opacity: 0; scale: .97; } }
+.bot-block {
+  position: relative; display: flex; width: 100%; flex-direction: column; gap: 6px; border-radius: 12px; padding: 12px 12px 13px; text-align: left;
+  transition: background-color var(--motion-dur-snap) var(--motion-ease-snap), scale var(--motion-dur-snap) var(--motion-ease-snap);
+}
+.bot-block:hover { background: var(--interactive-hover); }
+.bot-block:active { scale: .98; }
+.bot-block + .bot-block::before { content: ''; position: absolute; left: 12px; right: 12px; top: 0; height: 1px; background: var(--border); transition: opacity var(--motion-dur-snap) var(--motion-ease-snap); }
+.bot-block:hover::before, .bot-block:hover + .bot-block::before { opacity: 0; }
+.bot-block-head { display: flex; align-items: center; font-size: 12px; color: var(--muted-foreground); }
+.bot-block-head > svg { margin-left: auto; opacity: 0; translate: -4px 0; transition: opacity var(--motion-dur-snap) var(--motion-ease-snap), translate var(--motion-dur-snap) var(--motion-ease-snap); }
+.bot-block:hover .bot-block-head > svg { opacity: 1; translate: none; }
+.bot-quote { border-left: 2px solid color-mix(in srgb, var(--muted-foreground) 45%, transparent); padding-left: 10px; font-size: 13.5px; line-height: 1.7; }
+
+/* Activity timeline (§5.4). */
+.bot-timeline { position: relative; margin: 2px 0 0 12px; padding-left: 14px; }
+.bot-timeline::before { content: ''; position: absolute; left: 3px; top: 12px; bottom: 12px; width: 1px; background: var(--interactive-border); }
+.bot-event { position: relative; display: flex; width: 100%; gap: 10px; border-radius: 9px; padding: 7px 10px 7px 4px; text-align: left; font-size: 13px; line-height: 1.55; transition: background-color var(--motion-dur-snap) var(--motion-ease-snap); }
+.bot-event:hover { background: var(--interactive-hover); }
+.bot-event::before { content: ''; position: absolute; left: -15px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: var(--background); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--foreground) 30%, transparent); }
+.bot-event[data-kind="you"]::before { background: color-mix(in srgb, var(--status-info) 16%, transparent); box-shadow: inset 0 0 0 1.5px var(--status-info); }
+.bot-event[data-tone="warn"]::before { box-shadow: inset 0 0 0 1.5px var(--status-warning); }
+.bot-event-time { width: 38px; flex: none; padding-top: 1px; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.bot-event-text { min-width: 0; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.bot-event-text b { color: var(--foreground); font-weight: 600; }
+.bot-event-sub { display: block; margin-top: 2px; font-size: 12px; color: var(--muted-foreground); opacity: .8; }
+
+/* Memory (§5.5). */
+.bot-memory { position: relative; display: flex; flex-direction: column; gap: 6px; border-radius: 12px; padding: 12px; transition: background-color var(--motion-dur-snap) var(--motion-ease-snap); }
+.bot-memory + .bot-memory::before { content: ''; position: absolute; left: 12px; right: 12px; top: 0; height: 1px; background: var(--border); }
+.bot-memory:hover { background: var(--interactive-hover); }
+.bot-memory:is(:hover, [data-open="true"])::before, .bot-memory:is(:hover, [data-open="true"]) + .bot-memory::before { opacity: 0; }
+.bot-memory[data-open="true"] { background: var(--surface-muted, var(--interactive-hover)); }
+.bot-memory[data-inactive] p { color: var(--muted-foreground); }
+.bot-memory-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
+.bot-tag { border-radius: 6px; padding: 1px 6px; font-size: 10.5px; color: var(--muted-foreground); background: var(--surface-muted, var(--interactive-hover)); box-shadow: inset 0 0 0 1px var(--border); }
+.bot-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide); }
+.bot-fold > div { min-height: 0; overflow: hidden; }
+.bot-fold[data-open="true"] { grid-template-rows: 1fr; }
+.bot-source { display: flex; flex-direction: column; gap: 3px; border-radius: 10px; padding: 9px 11px; background: var(--background); box-shadow: inset 0 0 0 1px var(--border); }
+/* Forgetting: the text leaves with a little blur while the item folds away (§7). */
+.bot-memory[data-leaving] { pointer-events: none; display: grid; grid-template-rows: 0fr; padding-block: 0; opacity: 0; filter: blur(2px); transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), padding var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-exit) var(--motion-ease-exit), filter var(--motion-dur-exit) var(--motion-ease-exit); }
+.bot-memory[data-leaving] > * { min-height: 0; overflow: hidden; }
+
+/* Schedule (§5.6). */
+.bot-schedule { display: flex; width: 100%; flex-direction: column; border-radius: 12px; text-align: left; transition: background-color var(--motion-dur-snap) var(--motion-ease-snap); }
+.bot-schedule:hover { background: var(--interactive-hover); }
+.bot-schedule[data-open="true"] { background: var(--surface-muted, var(--interactive-hover)); }
+.bot-schedule-when { width: 56px; flex: none; display: flex; flex-direction: column; line-height: 1.35; }
+.bot-schedule-when b { font-size: 14.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.bot-schedule[data-paused] :is(.bot-schedule-when b, .bot-schedule-name) { color: var(--muted-foreground); }
+.bot-schedule-detail { display: grid; grid-template-columns: 70px 1fr; gap: 6px 10px; padding: 0 12px 12px 80px; font-size: 12.5px; color: var(--muted-foreground); }
+.bot-schedule-detail dt { opacity: .8; }
+.bot-schedule-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* Profile page pushed over the tab content (§5.8). */
+.bot-profile-page { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; background: var(--background); animation: bot-profile-in var(--motion-dur-travel) var(--motion-ease-travel) backwards; }
+.bot-profile-page[data-leaving] { pointer-events: none; animation: bot-profile-out var(--motion-dur-exit) var(--motion-ease-exit) forwards; }
+@keyframes bot-profile-in { from { opacity: 0; translate: 24px 0; } }
+@keyframes bot-profile-out { to { opacity: 0; translate: 24px 0; } }
+.bot-savebar {
+  position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 3; display: flex; align-items: center; gap: 8px; border-radius: 12px; padding: 9px 10px 9px 14px;
+  background: var(--surface-elevated, var(--background)); box-shadow: 0 0 0 1px var(--border), 0 22px 50px -18px rgb(0 0 0 / .3); font-size: 12.5px; color: var(--muted-foreground);
+  animation: bot-need-in var(--motion-dur-settle) var(--motion-ease-settle) backwards;
+}
+
+/* Narrow windows: the panel floats over the conversation as a card instead of pushing it (§8). */
+@media (min-width: 760px) and (max-width: 1023px) {
+  .bot-panel[data-floating] { position: absolute; top: 8px; right: 8px; bottom: 8px; z-index: 30; margin-left: 0; border-radius: 14px; box-shadow: 0 0 0 1px var(--border), 0 22px 50px -18px rgb(0 0 0 / .35); }
+  .bot-panel[data-floating][data-open="false"] { box-shadow: none; }
+}
+
+/* ── Leaving for the workbench and coming back (§6). ─────────────────────────────────── */
+.bot-return-chip {
+  display: inline-flex; height: 28px; max-width: 260px; align-items: center; gap: 6px; border-radius: 8px; padding: 0 10px 0 6px; margin-left: 4px;
+  font-size: 12.5px; color: var(--muted-foreground); background: var(--background); box-shadow: inset 0 0 0 1px var(--interactive-border);
+  transition: background-color var(--motion-dur-snap) var(--motion-ease-snap), color var(--motion-dur-snap) var(--motion-ease-snap);
+  animation: bot-need-in var(--motion-dur-settle) var(--motion-ease-settle) backwards;
+}
+.bot-return-chip:hover { color: var(--foreground); background: var(--surface-elevated, var(--background)); }
