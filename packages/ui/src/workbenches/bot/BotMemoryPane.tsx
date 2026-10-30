@@ -11,6 +11,7 @@ import { springTiming } from '@/lib/motion/tokens';
 import { useBotLayout } from './botLayout';
 import { useBotPanel } from './botPanelModel';
 import { BotSegment } from './botParts';
+import { memorySourceLabel } from './botPresentation';
 import { useFlash, useScrollIntoFocus } from './botFocus';
 import type { BotRead } from './useBotFacts';
 
@@ -77,7 +78,7 @@ function MemoryItem({ item, open, onToggle, onChanged, onForgotten }: {
         <p className="m-0 whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{item.content}</p>
         <span className="bot-memory-meta">
           <span>{new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric' }).format(item.createdAt)}</span>
-          <span>· {item.sourceKind ?? t('bot.memory.direct')}</span>
+          <span>· {memorySourceLabel(item.sourceKind, t)}</span>
           {item.inactive ? <span className="bot-tag">{t('bot.memory.obsolete')}</span> : null}
         </span>
       </button>}

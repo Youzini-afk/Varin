@@ -101,6 +101,8 @@ interface HeaderProps {
   sidebarAttention?: 'info' | 'warn' | null;
   onToggleLeftDrawer?: () => void;
   onToggleRightDrawer?: () => void;
+  /** The mobile right toggle opens a workbench's own panel instead of Git. */
+  rightDrawerLabels?: { open: string; close: string };
   leftDrawerOpen?: boolean;
   rightDrawerOpen?: boolean;
 }
@@ -112,6 +114,7 @@ export const Header: React.FC<HeaderProps> = ({
   sidebarAttention,
   onToggleLeftDrawer,
   onToggleRightDrawer,
+  rightDrawerLabels,
   leftDrawerOpen,
   rightDrawerOpen,
 }) => {
@@ -512,6 +515,9 @@ export const Header: React.FC<HeaderProps> = ({
     onToggleLeftDrawer?.();
   }, [leftDrawerOpen, onToggleLeftDrawer]);
 
+  const rightDrawerLabel = rightDrawerLabels
+    ? (rightDrawerOpen ? rightDrawerLabels.close : rightDrawerLabels.open)
+    : t(rightDrawerOpen ? 'header.actions.closeGitSidebar' : 'header.actions.openGitSidebar');
   const handleMobileRightDrawerToggle = React.useCallback(() => {
     if (!rightDrawerOpen) {
       setIsMobileServicesOpen(false);
@@ -1186,13 +1192,13 @@ export const Header: React.FC<HeaderProps> = ({
                       'relative',
                       mobileActiveHeaderItem === 'git' && 'bg-interactive-selection text-interactive-selection-foreground'
                     )}
-                    aria-label={rightDrawerOpen ? t('header.actions.closeGitSidebar') : t('header.actions.openGitSidebar')}
+                    aria-label={rightDrawerLabel}
                   >
                     <Icon name="layout-right" className="h-5 w-5" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>{rightDrawerOpen ? t('header.actions.closeGitSidebar') : t('header.actions.openGitSidebar')}</p>
+                  <p>{rightDrawerLabel}</p>
                 </TooltipContent>
               </Tooltip>
             ) : null}

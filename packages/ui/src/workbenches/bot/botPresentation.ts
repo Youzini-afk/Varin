@@ -304,6 +304,16 @@ export function scheduleWhen(atMs: number, locale: string, now = Date.now()): st
   return startOfDay(atMs) === startOfDay(now) ? time : `${new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(atMs)} ${time}`;
 }
 
+/** Words for where a memory came from; an unrecognised kind is shown as the Host wrote it. */
+const MEMORY_SOURCE: Record<string, I18nKey> = {
+  'agent-memory': 'bot.memory.source.agent',
+  'memory-organizer': 'bot.memory.source.organizer',
+  'user-correction': 'bot.memory.source.correction',
+  'user-extracted': 'bot.memory.source.saved',
+};
+export const memorySourceLabel = (kind: string | null, t: (key: I18nKey) => string): string =>
+  kind === null ? t('bot.memory.direct') : MEMORY_SOURCE[kind] ? t(MEMORY_SOURCE[kind]) : kind;
+
 /** Splits a translated sentence around the name so the name can be set in bold (§5.4). */
 export const NAME_MARK = '\u0000';
 export function splitNamed(text: string): { before: string; after: string } | null {

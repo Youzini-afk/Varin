@@ -1,9 +1,10 @@
 import React from 'react';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Icon } from '@/components/icon/Icon';
+import { SwapText } from '@/components/motion/SwapText';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useBotPanel } from './botPanelModel';
-import { clockTime, latestReport, isWaitingStatus, scheduleWhen, type BotNeed } from './botPresentation';
+import { clockTime, latestReport, isWaitingStatus, memorySourceLabel, scheduleWhen, type BotNeed } from './botPresentation';
 import { Named } from './botParts';
 import { useFlash } from './botFocus';
 
@@ -47,7 +48,7 @@ export function BotOverviewPane() {
       <span className="bot-block-head">{t('bot.overview.running')}<Icon name="arrow-right-s" className="size-3.5" /></span>
       <span className="flex min-w-0 items-center gap-2 text-[14px]">
         <span className="bot-faces">{running.slice(0, 4).map(item => <AgentAvatar key={item.key} identity={item.identity.threadId} avatar={item.avatar} size={20} />)}</span>
-        <span className="truncate">{t('bot.overview.runningCount', { count: running.length })}</span>
+        <SwapText text={t('bot.overview.runningCount', { count: running.length })} hold={0} className="min-w-0" />
       </span>
       <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground"><span className="bot-ring" aria-hidden="true" />
         <span className="truncate">{running[0]!.name}{running[0]!.task ? ` · ${running[0]!.task}` : ''}</span></span>
@@ -59,7 +60,7 @@ export function BotOverviewPane() {
     {memory ? <button type="button" className="bot-block" onClick={() => model.focusTab('memory', String(memory.id))}>
       <span className="bot-block-head">{t('bot.overview.memory')}<Icon name="arrow-right-s" className="size-3.5" /></span>
       <span className="bot-quote line-clamp-3">{memory.content}</span>
-      <span className="text-[12.5px] text-muted-foreground">{new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(memory.createdAt)}{memory.sourceKind ? ` · ${memory.sourceKind}` : ` · ${t('bot.memory.direct')}`}</span>
+      <span className="text-[12.5px] text-muted-foreground">{new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(memory.createdAt)} · {memorySourceLabel(memory.sourceKind, t)}</span>
     </button> : null}
     {next ? <button type="button" className="bot-block" onClick={() => model.focusTab('schedule', next.id)}>
       <span className="bot-block-head">{t('bot.overview.schedule')}<Icon name="arrow-right-s" className="size-3.5" /></span>

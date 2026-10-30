@@ -23,6 +23,8 @@ export interface SidebarConversation {
   projectIds: string[];
   branchId: string;
   branches: ThreadBranch[];
+  /** Work a Bot delegated. Its parent is a Bot conversation, which the ordinary sidebar does not list. */
+  botId?: string;
 }
 export interface ConversationSessionAttentionState { kind: 'complete' | 'error'; updatedAt: number }
 
@@ -36,7 +38,9 @@ export function useSidebarCatalog() {
   const drafts = useThreadDraftStore(state => state.drafts);
   return React.useMemo(() => {
     const attentionBySession: Record<string, ConversationSessionAttentionState> = {};
-    const summaries: SidebarConversation[] = threads.filter(thread => !thread.bot_id && thread.deleted_at_ms === null).map(thread => {
+    // A Bot's own conversations belong to the Bot workbench; the work it delegated is ordinary
+    // execution and is listed with its project like any other (docs/design/bot-ui.md §6).
+    const summaries: SidebarConversation[] = threads.filter(thread => (!thread.bot_id || thread.parent_thread_id) && thread.deleted_at_ms === null).map(thread => {
       const branch = thread.branches.find(branch => branch.branch_id === thread.main_branch_id);
       const projectIds = thread.observer_project_ids.filter((id): id is string => id !== null);
       const draft = drafts[threadComposerKey(host, { runtime: 'agent', threadId: thread.thread_id, branchId: thread.main_branch_id })];
@@ -48,6 +52,7 @@ export function useSidebarCatalog() {
         createdAt: new Date(thread.created_at_ms).toISOString(), updatedAt: new Date(thread.updated_at_ms).toISOString(),
         ...(thread.archived ? { archivedAt: new Date(thread.updated_at_ms).toISOString() } : {}),
         ...(thread.parent_thread_id ? { parentId: thread.parent_thread_id } : {}),
+        ...(thread.bot_id ? { botId: thread.bot_id } : {}),
         busy, unread: thread.unread, pinned: thread.pinned, projectIds, branchId: thread.main_branch_id, branches: thread.branches };
     });
     for (const c of external) summaries.push({ id: c.id, harness: c.harness, name: c.title, firstMessage: c.title, cwd: c.cwd,

@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
 import { ContextPanelRail } from './ContextPanelRail';
+import { MobileBottomSheet } from './MobileBottomSheet';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
@@ -51,16 +52,19 @@ interface MainLayoutProps {
     renderNavigator?: (isVisible: boolean) => React.ReactNode;
     /**
      * A workbench's own secondary panel. On desktop it replaces the context panel and its rail
-     * and must render an `aside` beside the main canvas; on mobile it fills the right drawer.
+     * and must render an `aside` beside the main canvas; on mobile it fills a bottom sheet.
      */
     renderSecondaryPanel?: (placement: 'docked' | 'drawer') => React.ReactNode;
+    /** Accessible names for that panel and its mobile header toggle. */
+    secondaryPanelLabel?: string;
+    secondaryPanelToggleLabels?: { open: string; close: string };
     navigationTitle?: string;
     navigationSubtitle?: string;
     headerPanelControl?: React.ReactNode;
     sidebarAttention?: 'info' | 'warn' | null;
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -312,6 +316,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                     {!isSettingsDialogOpen && <Header
                         navigationTitle={navigationTitle}
                         navigationSubtitle={navigationSubtitle}
+                        rightDrawerLabels={secondaryPanelToggleLabels}
                         onToggleLeftDrawer={() => {
                             const nextOpen = !mobileLeftDrawerOpen;
                             if (mobileRightSidebarOpen) {
@@ -384,12 +389,14 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                     />
                                 </ErrorBoundary>
                             </motion.div>
-                            {mobileRightDrawerVisible && (
+                            {renderSecondaryPanel ? (
+                                <MobileBottomSheet open={mobileRightSidebarOpen} onOpenChange={setMobileRightSidebarOpen} label={secondaryPanelLabel ?? ''}>
+                                    <ErrorBoundary>{renderSecondaryPanel('drawer')}</ErrorBoundary>
+                                </MobileBottomSheet>
+                            ) : mobileRightDrawerVisible && (
                                 <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: rightDrawerX }} aria-hidden={!mobileRightSidebarOpen}>
                                     <ErrorBoundary>
-                                        {renderSecondaryPanel
-                                            ? renderSecondaryPanel('drawer')
-                                            : <React.Suspense fallback={null}><GitView isActive={mobileRightSidebarOpen} /></React.Suspense>}
+                                        <React.Suspense fallback={null}><GitView isActive={mobileRightSidebarOpen} /></React.Suspense>
                                     </ErrorBoundary>
                                 </motion.div>
                             )}

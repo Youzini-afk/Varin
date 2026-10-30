@@ -221,3 +221,17 @@ it('saves a parent title on blur without changing its child', async () => {
   expect(mocks.update).toHaveBeenCalledExactlyOnceWith('parent', { title: 'Renamed parent' });
   expect(titleButton('Child task')).toBeDefined();
 });
+
+it('lists the work a Bot delegated with a Bot mark, but not the Bot’s own conversations', async () => {
+  await act(async () => {
+    useThreadStore.setState(store => ({ threads: [...store.threads,
+      { ...summary('bot-session', 'Bot conversation', null), bot_id: 'varin' },
+      { ...summary('bot-work', 'Delegated draft', 'bot-session'), bot_id: 'varin' },
+    ] }));
+  });
+  expect(titleButton('Bot conversation')).toBeUndefined();
+  const delegated = titleButton('Delegated draft');
+  expect(delegated).toBeDefined();
+  expect(delegated.querySelector('[aria-label="bot.sidebar.delegated"]')).not.toBeNull();
+  expect(titleButton('Child task').querySelector('[aria-label="bot.sidebar.delegated"]')).toBeNull();
+});

@@ -533,5 +533,6 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }} />;
 
   return <MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
+    secondaryPanelLabel={t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}
     navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} headerPanelControl={panelControl} sidebarAttention={sidebarAttention} />;
 };

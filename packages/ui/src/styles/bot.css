@@ -166,6 +166,13 @@
   .bot-stage-name { padding: 0; font-size: 14px; }
   .bot-stage-floor { opacity: 0; }
 }
+/* In the phone sheet the stage is always the compact row, so the tabs get the room (§8). */
+.mobile-bottom-sheet .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
+.mobile-bottom-sheet .bot-stage-figure { margin: 0; }
+.mobile-bottom-sheet .bot-stage-figure .bot-figure { width: 40px !important; height: 36px !important; }
+.mobile-bottom-sheet .bot-stage-text { align-items: flex-start; }
+.mobile-bottom-sheet .bot-stage-name { padding: 0; font-size: 14px; }
+.mobile-bottom-sheet .bot-stage-floor { opacity: 0; }
 
 /* Tabs (§5.2). */
 .bot-tabs { position: relative; flex: none; display: flex; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid var(--border); }

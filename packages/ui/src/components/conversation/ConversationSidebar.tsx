@@ -9,6 +9,7 @@ import { useHoverPill, useSelectionGlide } from './sidebarHighlights';
 import { pauseLoopsOffscreen } from '@/lib/motion/loops';
 import { noteSwitchDirection } from '@/lib/motion/switchDirection';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
+import { BotFigure } from '@/workbenches/bot/BotFigure';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -387,6 +388,9 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
             className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
           >
             <span className="min-w-0 flex-1 truncate typography-ui-label font-normal">{title}</span>
+            {session.botId ? <span className="inline-flex shrink-0 opacity-70" title={t('bot.sidebar.delegated')} aria-label={t('bot.sidebar.delegated')} role="img">
+              <BotFigure state="idle" size={14} still />
+            </span> : null}
             {extensionDecoration}
             {pendingDialogCount > 0 ? (
               <span
