@@ -57,27 +57,47 @@
     {
       "id": "permission-release",
       "source": "foreground/permission/release.png",
-      "sha256": "c8ba3f9e2efbd382b9ac3ddcc86dce12dffedcd56f88616a10fa4f2b54256ee7"
+      "sha256": "c8ba3f9e2efbd382b9ac3ddcc86dce12dffedcd56f88616a10fa4f2b54256ee7",
+      "detached": {
+        "source": "detached/permission/release.png",
+        "sha256": "46814f0271274c7e24902c610a63ba260d71b84226775c6567b24b617b8a93bb"
+      }
     },
     {
       "id": "permission-upper",
       "source": "foreground/permission/upper.png",
-      "sha256": "49143d872115041c28aa7ba4fea9784280e0ec6680d5fc51262c0f8601476f27"
+      "sha256": "49143d872115041c28aa7ba4fea9784280e0ec6680d5fc51262c0f8601476f27",
+      "detached": {
+        "source": "detached/permission/upper.png",
+        "sha256": "8a328c4572f1d58d0dbcf6c9191571286463c8fcb4eea5dc406b9f43292848de"
+      }
     },
     {
       "id": "permission-mid",
       "source": "foreground/permission/mid.png",
-      "sha256": "e4665dbd2cbf41c92e6449cd01b24a4f291c7fea5ba47bf5820804942fbd3713"
+      "sha256": "e4665dbd2cbf41c92e6449cd01b24a4f291c7fea5ba47bf5820804942fbd3713",
+      "detached": {
+        "source": "detached/permission/mid.png",
+        "sha256": "b384d9c78bad782ec588e43e09f6360b8ba85e1a8a24ab51a0c5ab40450d3d58"
+      }
     },
     {
       "id": "permission-low",
       "source": "foreground/permission/low.png",
-      "sha256": "b097ef872a965d02c23e4bed1bc590420bda5805606f626a1aac1119d8a1904a"
+      "sha256": "b097ef872a965d02c23e4bed1bc590420bda5805606f626a1aac1119d8a1904a",
+      "detached": {
+        "source": "detached/permission/low.png",
+        "sha256": "0e59622c2aa995cbc79b5f5627f9a5c77184c085ae38738f134089e48370a2fb"
+      }
     },
     {
       "id": "permission-hold",
       "source": "foreground/permission/hold.png",
-      "sha256": "04039b3e24e93e2853b7580d4e92b16bd7febe270448fcdcd30660cdcc9028d5"
+      "sha256": "04039b3e24e93e2853b7580d4e92b16bd7febe270448fcdcd30660cdcc9028d5",
+      "detached": {
+        "source": "detached/permission/hold.png",
+        "sha256": "fe7871ba7b4becbd7ac76c5caa09829fc95f1330c4d6c6941c997aa2de117055"
+      }
     },
     {
       "id": "closed-neutral",

@@ -54,5 +54,5 @@
     "question",
     "completion"
   ],
-  "integration": "Selected authoring source only. Host request state controls hold/return; local touch never grants permission. Same-pose pickup counterparts and live interruption closure remain to be authored and verified."
+  "integration": "Selected authoring source with five same-pose detached counterparts. Host request state controls hold/return; local touch never grants permission. Live interruption closure and temporal visual acceptance remain to be verified."
 }
