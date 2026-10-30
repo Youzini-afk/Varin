@@ -1,3 +1,4 @@
+import type { CompanionAttentionView } from './attentionCoordinator';
 import type { CompanionIntent } from './presentation';
 
 // A visual settling budget, never an execution timeout or a business-state delay.
@@ -45,4 +46,13 @@ export class CompanionVisualStabilizer {
   remaining(now: number): number | null {
     return this.settling ? Math.max(0, ORDINARY_VISUAL_SETTLE_MS - (now - this.candidateAt)) : null;
   }
+}
+
+/** Quiet only for a known-current empty Host; missing/stale facts are not empty. */
+export function showCompanionAttentionSummary(attention: CompanionAttentionView, focused: boolean): boolean {
+  const snapshot = attention.snapshot;
+  return focused || attention.health !== 'current' || !snapshot
+    || snapshot.coverage.native !== 'complete' || snapshot.branches.length > 0 || snapshot.items.length > 0
+    || snapshot.teamExecutions.length > 0 || snapshot.counts.actionRequired !== 0
+    || snapshot.counts.affectedBranches !== 0 || snapshot.counts.unknownEffects !== 0;
 }

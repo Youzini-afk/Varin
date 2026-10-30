@@ -83,3 +83,20 @@ it('uses companion task reminders for Agent/unknown and preserves explicit Bot c
  act(()=>root.render(<CompanionAttentionSummary directorMode interactionRoute="bot-coordinator" attention={attention} focused={false} focusStatus="" onInspect={()=>{}}/>));
  expect(document.body.textContent).toContain('Portfolio overview');
 });
+
+it('keeps a known-current empty companion quiet but preserves focus, uncertain state and pending facts', () => {
+ const root=environment();
+ const empty={...facts,branches:[],items:[],teamExecutions:[],counts:{actionRequired:0,affectedBranches:0,unknownEffects:0}};
+ const quiet={snapshot:empty,health:'current' as const,refreshing:false,observationRevision:0};
+ act(()=>root.render(<CompanionAttentionSummary attention={quiet} focused={false} focusStatus="" onInspect={()=>{}}/>));
+ expect(document.getElementById('root')!.textContent).toBe('');
+ act(()=>root.render(<CompanionAttentionSummary attention={{...quiet,refreshing:true}} focused={false} focusStatus="" onInspect={()=>{}}/>));
+ expect(document.getElementById('root')!.textContent).toBe('');
+ for(const override of [{health:'unknown' as const},{health:'synchronizing' as const},{snapshot:null},{snapshot:facts},
+  {snapshot:{...empty,branches:facts.branches}},{snapshot:{...empty,counts:{...empty.counts,unknownEffects:1}}}]) {
+  act(()=>root.render(<CompanionAttentionSummary attention={{...quiet,...override}} focused={false} focusStatus="" onInspect={()=>{}}/>));
+  expect(document.getElementById('root')!.querySelector('button')).not.toBeNull();
+ }
+ act(()=>root.render(<CompanionAttentionSummary attention={quiet} focused focusTitle="Focused task" focusStatus="" onInspect={()=>{}}/>));
+ expect(document.getElementById('root')!.textContent).toContain('Focused task');
+});

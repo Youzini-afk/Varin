@@ -5,6 +5,7 @@ import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import type { CompanionAttentionView } from './attentionCoordinator';
 import type { DirectorInteractionRoute } from './directorPresentation';
 import { CompanionAttentionLedger } from './attentionLedger';
+import { showCompanionAttentionSummary } from './attentionPresentation';
 
 const kindKey = (kind: ThreadAttentionItem['kind']) => `companion.attention.${kind}` as I18nKey;
 const same = (a: { threadId: string; branchId: string }, b: { threadId: string; branchId: string } | null) => a.threadId === b?.threadId && a.branchId === b?.branchId;
@@ -100,6 +101,7 @@ export function CompanionAttentionSummary({ attention, focusTitle, focused, focu
   const attentionText = attention.health !== 'current' ? t(attention.health === 'unknown' ? 'companion.attention.stale' : 'companion.attention.sync')
     : snapshot?.counts.actionRequired ? t('companion.attention.needsYou', { count: snapshot.counts.actionRequired, tasks: snapshot.counts.affectedBranches })
       : snapshot?.items.length ? t('companion.attention.otherUpdates', { count: snapshot.items.length }) : '';
+  if (!showCompanionAttentionSummary(attention, focused)) return null;
   const first = snapshot?.items.find(item => item.actionable) ?? snapshot?.items.find(item => item.kind === 'effect_unknown') ?? snapshot?.items[0];
   const branch = first && snapshot?.branches.find(row => same(row, first));
   return <div style={{ textAlign: 'center', maxWidth: '100%', fontSize: 12 }}>
