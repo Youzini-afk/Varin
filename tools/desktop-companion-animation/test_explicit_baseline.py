@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from PIL import Image
-from compile_upright_pickup import compile_explicit_baseline
+from compile_upright_pickup import atlas_source_order, compile_explicit_baseline
 
 ROOT = Path(__file__).resolve().parents[2]
 sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
@@ -42,6 +42,31 @@ class ExplicitBaselineTests(unittest.TestCase):
         path = self.root / 'source.json'
         path.write_text(json.dumps(data or self.data))
         return compile_explicit_baseline(path, self.root / 'out')
+
+    def test_atlas_author_order_is_opt_in_and_exact(self):
+        sources = {self.sh: self.s, self.dh: self.d}
+        legacy = sorted(sources)
+        self.assertEqual(atlas_source_order({}, sources), legacy)
+        authored = list(reversed(legacy))
+        self.assertEqual(atlas_source_order({'atlasSourceOrder': authored}, sources), authored)
+        self.build()
+        self.assertEqual([f['sha256'] for f in json.loads((self.root / 'out/sequence.json').read_text())['frames']], legacy)
+        ordered = {**self.data, 'atlasSourceOrder': authored}
+        path = self.root / 'ordered.json'; path.write_text(json.dumps(ordered))
+        compile_explicit_baseline(path, self.root / 'ordered-out')
+        self.assertEqual([f['sha256'] for f in json.loads((self.root / 'ordered-out/sequence.json').read_text())['frames']], authored)
+        def semantics(path):
+            bundle = json.loads(path.read_text())
+            for package in bundle['packages']:
+                package.pop('pages')
+                for frame in package['frames']:
+                    frame.pop('page'); frame.pop('rect')
+            return bundle
+        self.assertEqual(semantics(self.root / 'out/bundle.json'), semantics(self.root / 'ordered-out/bundle.json'))
+        for bad in [None, 'invalid', [], [self.sh], [self.sh, self.sh],
+                    [self.sh, '0' * 64], [self.sh, self.dh, '0' * 64], [[], self.sh]]:
+            with self.subTest(order=bad), self.assertRaisesRegex(ValueError, 'exactly once'):
+                atlas_source_order({'atlasSourceOrder': bad}, sources)
 
     def test_actual_player_roundtrip_and_no_legacy_art(self):
         receipt = self.build()

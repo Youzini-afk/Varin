@@ -179,6 +179,17 @@ def prepare_explicit_baseline(manifest_path, output):
     return target
 
 
+def atlas_source_order(spec, sources):
+    """Optional frozen author order; omitted manifests retain sorted-SHA packing."""
+    order = spec.get('atlasSourceOrder')
+    if 'atlasSourceOrder' not in spec:
+        return sorted(sources)
+    if (not isinstance(order, list) or any(not isinstance(h, str) for h in order)
+            or len(order) != len(set(order)) or set(order) != set(sources)):
+        raise ValueError('atlasSourceOrder must list every actual source SHA exactly once')
+    return order
+
+
 def compile_explicit_baseline(manifest_path, output):
     """Compile only declared source-keyed art for the existing player; never load legacy art.
 
@@ -347,6 +358,7 @@ def compile_explicit_baseline(manifest_path, output):
         raise ValueError('Missing exact pickup entry for actual displayed sources: ' + str(sorted(seated - set(entries))))
     if any(path.is_relative_to(output) for path in [manifest_path, stool_path, *sources.values()]):
         raise ValueError('Baseline output must not contain or overwrite its source inputs')
+    source_order = atlas_source_order(spec, sources)
     # All semantic validation above precedes any output. Pool uses hardlinks when
     # possible; atlas packing reads originals without rewriting them.
     pool = output / 'pool'
@@ -362,7 +374,7 @@ def compile_explicit_baseline(manifest_path, output):
             except OSError:
                 shutil.copyfile(source, dest)
     source_manifest = {'id': 'explicit-baseline-pool', 'canvas': [512, 512],
-                       'frames': [{'source': h + '.png', 'durationMs': 1} for h in sorted(sources)]}
+                       'frames': [{'source': h + '.png', 'durationMs': 1} for h in source_order]}
     (pool / 'source.json').write_text(json.dumps(source_manifest))
     atlas = pack(pool / 'source.json', output)
     placements = {f['sha256']: f for f in atlas['frames']}

@@ -88,3 +88,5 @@ python tools/desktop-companion-animation/pack_sequence.py \
 `runtime-baseline.json`保存当前候选的完整有序句子、cue、当前源退出、提起/落座/重抓及开闭端点绑定，不再依赖本地历次候选目录或试验脚本。只需本目录精选源、配方、原固定凳plate和既有编译工具即可重建；命令见`tools/desktop-companion-animation/README.md`的Portable selected-source baseline。配方122个坐姿条目现在都有真实同姿去凳，补入的7张W08去凳仅为已用候选的精选源，不是重新生成或视觉准入。另显式登记E桥接/悬空与闭盖relax三张仅去凳源的编码设置。
 
 原图SHA与整画布512px准备后的PNG SHA分别验证，不能混用；Python/Pillow版本及工具SHA写入重建回执。基准bundle SHA为`a225f19fc57d683ae27e2999a18133e9ac4b6f571db98c4645d6eeea7221042f`，247张真实准备图、422个包。此可重建检查点保留机械和行为语义，但仍是候选，不更改公开选中资源、生产验收或原生时序结论。
+
+`atlasSourceOrder`现显式冻结按作者动作族及真实直接提起依赖首次出现的247源顺序；它只改变图集布局，不改变源SHA、偏移、动作时长或物理路线。不提供该字段时编译器仍按SHA排序，可复现上述a225基准。顺序必须恰好覆盖全部实际源，重复、缺失或多余源均拒绝。新布局bundle SHA为`de48f7493f46042823ab23a359fd83ff11ef46cf9d5175f4bc1a78b66e75bd4e`：两次独立从精选源准备并打包均逐字节一致，247源SHA、RGBA裁切和偏移、422包全部非图集语义保持不变。实际图集依赖统计确认23个主要动作/端点包的解码页集合均缩小；睡眠睁眼落座节点的直接提起依赖由2页增至4页，是明确保留的局部取舍，不代表全图集体积缩小或已定位原生退出原因。
