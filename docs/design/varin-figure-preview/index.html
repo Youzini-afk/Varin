@@ -89,7 +89,7 @@ const EYE = { L:[489, 706], R:[763, 706] };
 const HL = { L:[511, 651], R:[741, 651] }, HL2 = { L:[471, 716], R:[781, 716] };
 const BROW = { L:[486, 548], R:[757, 542] };
 const HAND = { L:[473, 1097], R:[767, 1097] };
-const AHOGE = [236, 462], KNOT = [1040, 492];
+const AHOGE = [236, 462], KNOT = [1036, 532];
 const SKIN = '#fae5dd', LASH = '#2f3555';
 
 // ---------------------------------------------------------------- parameters and springs
@@ -287,8 +287,13 @@ class Figure {
     this.ahoge = el('g', {}, this.fig); el('use', { href:`#${u}hair`, 'clip-path':ahogeIn }, this.ahoge);
     const hc = el('clipPath', { id:`${u}hc` }, defs); el('use', { href:`#${u}hairBase` }, hc);
     this.sheenRect = el('rect', { x:-300, y:60, width:260, height:1200, fill:`url(#${u}s)`, opacity:0 }, el('g', { 'clip-path':`url(#${u}hc)` }, this.fig));
+    // Black ribbon wrapped under the bun; the two tails sway from the band.
     this.ribbon = el('g', {}, this.fig);
-    paint('ribbonDim', el('g', { opacity:.62 }, this.ribbon)); paint('ribbon', this.ribbon);
+    this.tailR = el('path', { fill:'#26272d', d:'M1050 530 L1076 522 Q1092 604 1124 676 L1106 669 L1094 690 Q1068 606 1050 530 Z' }, this.ribbon);
+    el('path', { fill:'#2a2b32', d:'M998 540 L1046 536 Q1046 620 1056 708 L1025 692 L996 716 Q989 622 998 540 Z' }, this.ribbon);
+    el('path', { d:'M1036 548 Q1036 616 1043 690', fill:'none', stroke:'#35363e', 'stroke-width':5, 'stroke-linecap':'round' }, this.ribbon);
+    el('path', { fill:'#2a2b32', d:'M1000 474 Q1040 477 1081 490 L1075 525 Q1034 534 993 549 Z' }, this.fig);
+    el('path', { d:'M1005 479 Q1040 482 1076 494', fill:'none', stroke:'#474954', 'stroke-width':4, 'stroke-linecap':'round' }, this.fig);
     const clipG = el('g', {}, this.fig);
     el('path', { fill:'#2b2c33', d:'M858 283 L932 285 L940 297 L924 322 L897 323 L862 384 L820 368 Z' }, clipG);
     el('path', { fill:'#7f9fe4', d:'M889 325 L946 323 L966 343 L930 423 L845 423 L872 370 L880 364 L899 378 L912 355 L908 347 L887 331 Z' }, clipG);
@@ -488,6 +493,7 @@ class Figure {
     // Hair accents.
     this.ahoge.setAttribute('transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
     this.ribbon.setAttribute('transform', `rotate(${this.sec.r} ${KNOT[0]} ${KNOT[1]})`);
+    this.tailR.setAttribute('transform', `rotate(${this.sec.r * .6 + 1.2 * Math.sin(this.t * 1.7) * this.L} 1062 526)`);
     const sx = (t - this.sheenAt) / .95;
     if (sx >= 0 && sx < 1) { this.sheenRect.setAttribute('opacity', 1); this.sheenRect.setAttribute('transform', `rotate(-18 628 600) translate(${lerp(-200, 1500, smooth(sx))} 0)`); }
     else this.sheenRect.setAttribute('opacity', 0);
