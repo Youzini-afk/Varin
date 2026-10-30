@@ -153,6 +153,33 @@
       "id": "lid-closing-settle",
       "source": "foreground/lid/closing-settle.png",
       "sha256": "915e3bc1b9290b69c85b4041246a41419c894df9f4eb203080623c9ff2fd5006"
+    },
+    {
+      "id": "lift-side",
+      "source": "foreground/lift/side.png",
+      "sha256": "e5190c1d5199efa6f4dc4ed2adec52d74d4ee031149dc30d9cbf2614a9b50ba6",
+      "detached": {
+        "source": "detached/lift/side.png",
+        "sha256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+      }
+    },
+    {
+      "id": "lift-support",
+      "source": "foreground/lift/support.png",
+      "sha256": "2cdbd6683705abb13f985ddc07baca852bd8de37f0f3a49a3c280f403917a190",
+      "detached": {
+        "source": "detached/lift/support.png",
+        "sha256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+      }
+    },
+    {
+      "id": "lift-return",
+      "source": "foreground/lift/return.png",
+      "sha256": "a0735a8e5f1925bc716bbc08425e6bfcd83cd4926601269c8ef5ef6291cb858a",
+      "detached": {
+        "source": "detached/lift/return.png",
+        "sha256": "f543dfea0a08735937c8f1358f1626ba31253e91f83412e71464fc3aad737ea1"
+      }
     }
   ]
 }
