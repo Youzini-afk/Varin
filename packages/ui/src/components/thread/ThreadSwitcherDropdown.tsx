@@ -47,7 +47,7 @@ const SwitcherNode: React.FC<{
       ? <Icon name="error-warning" className="size-3.5 shrink-0 text-[var(--status-error)]" />
       : attention
         ? <Icon name="notification-3" className="size-3.5 shrink-0 text-[var(--status-warning)]" />
-        : session.parentId ? null : <Icon name="chat-4" className="size-3.5 shrink-0 text-muted-foreground" />;
+        : session.harness && !session.parentId ? <Icon name="chat-4" className="size-3.5 shrink-0 text-muted-foreground" /> : null;
   return (
     <>
       <DropdownMenuItem
@@ -55,7 +55,7 @@ const SwitcherNode: React.FC<{
         className={cn('min-w-0 gap-2', currentSessionId === session.id && 'bg-interactive-active')}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
       >
-        {session.parentId && <AgentAvatar identity={session.id} avatar={session.avatar} size={20} />}{icon}
+        {session.harness && !session.parentId ? null : <AgentAvatar identity={session.id} avatar={session.avatar} size={20} {...(session.lead ? { role: 'lead' as const } : {})} />}{icon}
         <span className="min-w-0 flex-1">
           <span className="block truncate typography-ui-label text-foreground">
             {conversationSessionTitle(session, untitled)}

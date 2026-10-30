@@ -50,6 +50,8 @@ export interface BotWorkView {
   avatar: string | null;
   /** The Bot conversation the work reports back to; null when the Host could not attribute it. */
   sessionThreadId: string | null;
+  /** The session handed this work over directly, so it leads that task; its own helpers do not. */
+  lead: boolean;
   status: BotWorkStatus | null;
   updatedAtMs: number;
 }
@@ -87,6 +89,7 @@ export function workViews(items: readonly BotWorkItem[], threads: readonly Threa
       task: tasks.get(key) ?? '',
       avatar: participant?.avatar ?? thread.avatar ?? null,
       sessionThreadId: item.sessionThreadId ?? null,
+      lead: !!item.sessionThreadId && thread.parent_thread_id === item.sessionThreadId,
       status: runStatus(liveRun(thread, item.identity.branchId, item.activeRun)),
       updatedAtMs: thread.updated_at_ms,
     };
@@ -129,6 +132,7 @@ export interface BotNeed {
   identity: ThreadIdentity;
   name: string;
   avatar: string | null;
+  lead: boolean;
   kind: 'permission' | 'question';
   /** True for the Bot's own conversation, which is handled in Bot mode rather than the workbench. */
   session: boolean;
@@ -141,18 +145,25 @@ export function needsOf(bot: BotSummary, sessions: readonly BotSessionView[], wo
       const status = runStatus(liveRun(session.thread, branch.branch_id, null));
       if (!isWaitingStatus(status)) continue;
       const identity = { runtime: 'agent' as const, threadId: session.thread.thread_id, branchId: branch.branch_id };
-      needs.push({ key: workKey(identity), identity, name: bot.name, avatar: null, kind: status === 'waiting-permission' ? 'permission' : 'question', session: true });
+      needs.push({ key: workKey(identity), identity, name: bot.name, avatar: null, lead: false, kind: status === 'waiting-permission' ? 'permission' : 'question', session: true });
     }
   }
   for (const item of work) {
     if (!isWaitingStatus(item.status)) continue;
-    needs.push({ key: item.key, identity: item.identity, name: item.name, avatar: item.avatar, kind: item.status === 'waiting-permission' ? 'permission' : 'question', session: false });
+    needs.push({ key: item.key, identity: item.identity, name: item.name, avatar: item.avatar, lead: item.lead, kind: item.status === 'waiting-permission' ? 'permission' : 'question', session: false });
   }
   return needs;
 }
 
-/** The Host's presence projection in the shape the panel lists needs. */
-export const presenceNeeds = (presence: BotPresence): BotNeed[] => presence.needs.map(need => ({ ...need, key: workKey(need.identity) }));
+/** The Host's presence projection in the shape the panel lists needs. A delegated need leads
+ * its task when the Thread directory shows a session of this Bot handed it over directly. */
+export const presenceNeeds = (presence: BotPresence, threads: readonly ThreadSummary[] = []): BotNeed[] => {
+  const byId = new Map(threads.map(thread => [thread.thread_id, thread]));
+  return presence.needs.map(need => {
+    const parent = need.session ? undefined : byId.get(byId.get(need.identity.threadId)?.parent_thread_id ?? '');
+    return { ...need, key: workKey(need.identity), lead: parent?.bot_id === presence.botId && !parent.parent_thread_id };
+  });
+};
 
 export interface BotFigureFacts {
   offline: boolean;

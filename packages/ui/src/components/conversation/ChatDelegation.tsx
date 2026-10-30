@@ -41,6 +41,11 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
   // Settled children leave the current-task snapshot. Their persisted avatar is
   // still in the same Thread directory the sidebar uses, including after remount.
   const savedAvatar = useThreadStore(state => state.threads.find(thread => thread.thread_id === threadId)?.avatar);
+  // Work a Bot conversation hands over directly leads its task; ordinary sub-tasks do not.
+  const leadsTask = useThreadStore(state => {
+    const parent = state.threads.find(thread => thread.thread_id === conversation?.identity.threadId);
+    return !!parent?.bot_id && !parent.parent_thread_id;
+  });
   const branchId = exact?.child_branch_id ?? child?.child_branch_id ?? toolText(receipt.branchId);
   const name = exact?.name || child?.name || toolText(receipt.name) || toolText(args.name) || t('chat.tools.delegatedTask');
   const task = toolText(args.task);
@@ -78,7 +83,7 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
     : <ToolStatus status={status} generating={generating} stopped={stopping && Boolean(active)} />;
   return <ToolDisclosure id={'tool:' + call.id} className="tool-delegation group" onExpanded={setExpanded}>
     <summary className="tool-member-line" data-arrive={arrives || undefined}>
-      {threadId ? <AgentAvatar identity={threadId} avatar={child?.avatar ?? exact?.avatar ?? execution?.agent?.avatar ?? savedAvatar} size={23} />
+      {threadId ? <AgentAvatar identity={threadId} avatar={child?.avatar ?? exact?.avatar ?? execution?.agent?.avatar ?? savedAvatar} size={23} {...(leadsTask ? { role: 'lead' as const } : {})} />
         : <Icon name="ai-agent" className="size-4 text-muted-foreground" />}
       <span className="typography-meta font-medium truncate">{name}</span>
       <span className="tool-member-purpose typography-micro text-muted-foreground" title={task}>{task}</span>

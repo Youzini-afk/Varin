@@ -308,7 +308,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     return () => clearTimeout(timer);
   }, [result]);
 
-  const needs = React.useMemo(() => selectedPresence ? presenceNeeds(selectedPresence) : selected && sessionsWithWork ? needsOf(selected, sessionsWithWork, work) : [], [selectedPresence, selected, sessionsWithWork, work]);
+  const needs = React.useMemo(() => selectedPresence ? presenceNeeds(selectedPresence, catalog) : selected && sessionsWithWork ? needsOf(selected, sessionsWithWork, work) : [], [selectedPresence, catalog, selected, sessionsWithWork, work]);
   const working = React.useMemo<readonly { name: string }[]>(() => selectedPresence?.working ?? work.filter(item => item.status !== null && !isWaitingStatus(item.status)), [selectedPresence, work]);
   const currentThread = selectedEntry ? catalog.find(thread => thread.thread_id === selectedEntry.threadId) : undefined;
   const currentRun = selectedEntry ? liveRun(currentThread, selectedEntry.branchId, null) : null;

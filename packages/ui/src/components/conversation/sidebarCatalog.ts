@@ -25,6 +25,16 @@ export interface SidebarConversation {
   branches: ThreadBranch[];
   /** Work a Bot delegated. Its parent is a Bot conversation, which the ordinary sidebar does not list. */
   botId?: string;
+  /** Leads a task: a top-level task, or work a Bot conversation handed over directly. */
+  lead: boolean;
+}
+type CatalogThread = { thread_id: string; parent_thread_id: string | null; bot_id: string | null };
+/** A lead is decided by who handed the work over, not by whether a parent exists: a Bot's own
+ * conversation is a session, so the work it dispatched directly is a lead, like a top-level task. */
+export function isLeadThread(thread: CatalogThread, byId: ReadonlyMap<string, CatalogThread>): boolean {
+  if (!thread.parent_thread_id) return true;
+  const parent = byId.get(thread.parent_thread_id);
+  return !!parent && !!parent.bot_id && parent.bot_id === thread.bot_id && !parent.parent_thread_id;
 }
 export interface ConversationSessionAttentionState { kind: 'complete' | 'error'; updatedAt: number }
 
@@ -38,6 +48,7 @@ export function useSidebarCatalog() {
   const drafts = useThreadDraftStore(state => state.drafts);
   return React.useMemo(() => {
     const attentionBySession: Record<string, ConversationSessionAttentionState> = {};
+    const byId = new Map(threads.map(thread => [thread.thread_id, thread]));
     // A Bot's own conversations belong to the Bot workbench; the work it delegated is ordinary
     // execution and is listed with its project like any other (docs/design/bot-ui.md §6).
     const summaries: SidebarConversation[] = threads.filter(thread => (!thread.bot_id || thread.parent_thread_id) && thread.deleted_at_ms === null).map(thread => {
@@ -52,13 +63,13 @@ export function useSidebarCatalog() {
         createdAt: new Date(thread.created_at_ms).toISOString(), updatedAt: new Date(thread.updated_at_ms).toISOString(),
         ...(thread.archived ? { archivedAt: new Date(thread.updated_at_ms).toISOString() } : {}),
         ...(thread.parent_thread_id ? { parentId: thread.parent_thread_id } : {}),
-        ...(thread.bot_id ? { botId: thread.bot_id } : {}),
+        ...(thread.bot_id ? { botId: thread.bot_id } : {}), lead: isLeadThread(thread, byId),
         busy, unread: thread.unread, pinned: thread.pinned, projectIds, branchId: thread.main_branch_id, branches: thread.branches };
     });
     for (const c of external) summaries.push({ id: c.id, harness: c.harness, name: c.title, firstMessage: c.title, cwd: c.cwd,
       createdAt: new Date(c.createdAt).toISOString(), updatedAt: new Date(c.updatedAt).toISOString(),
       ...(c.archived ? { archivedAt: new Date(c.updatedAt).toISOString() } : {}), ...(c.parent ? { parentId: c.parent.threadId } : {}),
-      pinned: c.pinned, busy: Boolean(c.activeTurn), unread: false, projectIds: projects.filter(p => projectContainsPath(p, c.cwd)).map(p => p.id), branchId: '', branches: [] });
+      pinned: c.pinned, busy: Boolean(c.activeTurn), unread: false, lead: !c.parent, projectIds: projects.filter(p => projectContainsPath(p, c.cwd)).map(p => p.id), branchId: '', branches: [] });
     return { summaries, activeSessions: summaries.filter(summary => !summary.archivedAt), attentionBySession };
   }, [threads, host, projects, drafts, external]);
 }

@@ -15,7 +15,7 @@ function NeedCard({ need }: { need: BotNeed }) {
   const model = useBotPanel();
   const flash = useFlash(model.focus?.tab === 'overview' && model.focus.id === need.key, model.focus?.token);
   return <button type="button" className={`bot-need ${flash ?? ''}`} onClick={() => model.openNeed(need)}>
-    <AgentAvatar identity={need.identity.threadId} avatar={need.avatar} size={26} />
+    <AgentAvatar identity={need.identity.threadId} avatar={need.avatar} size={26} {...(need.lead ? { role: 'lead' as const } : {})} />
     <span className="flex min-w-0 flex-col leading-snug">
       <b className="truncate text-[13.5px] font-semibold">{need.name}</b>
       <span className="bot-need-detail truncate text-[12.5px]">{t(need.kind === 'permission' ? 'bot.overview.needPermission' : 'bot.overview.needQuestion')}</span>
@@ -47,7 +47,7 @@ export function BotOverviewPane() {
     {running.length ? <button type="button" className="bot-block" onClick={() => model.focusTab('activity', running[0]!.key)}>
       <span className="bot-block-head">{t('bot.overview.running')}<Icon name="arrow-right-s" className="size-3.5" /></span>
       <span className="flex min-w-0 items-center gap-2 text-[14px]">
-        <span className="bot-faces">{running.slice(0, 4).map(item => <AgentAvatar key={item.key} identity={item.identity.threadId} avatar={item.avatar} size={20} />)}</span>
+        <span className="bot-faces">{running.slice(0, 4).map(item => <AgentAvatar key={item.key} identity={item.identity.threadId} avatar={item.avatar} size={20} {...(item.lead ? { role: 'lead' as const } : {})} />)}</span>
         <SwapText text={t('bot.overview.runningCount', { count: running.length })} hold={0} className="min-w-0" />
       </span>
       <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground"><span className="bot-ring" aria-hidden="true" />

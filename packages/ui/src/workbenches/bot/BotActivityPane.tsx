@@ -38,7 +38,7 @@ function WorkRow({ item, showSession }: { item: BotWorkView; showSession: boolea
   const ref = React.useRef<HTMLButtonElement>(null);
   useScrollIntoFocus(ref, focused, model.focus?.token);
   return <button ref={ref} type="button" className={`bot-row min-h-12 ${flash ?? ''}`} onClick={() => model.openWork(item.identity, { tab: 'activity', id: item.key })}>
-    <AgentAvatar identity={item.identity.threadId} avatar={item.avatar} size={24} />
+    <AgentAvatar identity={item.identity.threadId} avatar={item.avatar} size={24} {...(item.lead ? { role: 'lead' as const } : {})} />
     <span className="flex min-w-0 flex-col leading-snug">
       <b className="truncate text-[13.5px] font-semibold">{item.name}</b>
       <span className="truncate text-[12.5px] text-muted-foreground">{item.task || item.identity.threadId}{showSession && item.sessionThreadId ? <i className="not-italic opacity-75"> · {model.sessionTitle(item.sessionThreadId)}</i> : null}</span>

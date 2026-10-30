@@ -341,9 +341,9 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
           <span className="size-5 shrink-0" />
         )}
 
-        {session.parentId && <AgentAvatar identity={session.id} avatar={session.avatar} size={20} />}
+        {session.harness && !session.parentId ? null : <AgentAvatar identity={session.id} avatar={session.avatar} size={20} {...(session.lead ? { role: 'lead' as const } : {})} />}
         {/* The status changes in place: the previous icon rises out and the next settles in. */}
-        <SwapIcon className="shrink-0" enter="settle" swapKey={isBusy ? 'busy' : attention?.kind === 'error' ? 'error' : attention ? 'unread' : pinned ? 'pinned' : !session.parentId ? 'default' : 'none'}>
+        <SwapIcon className="shrink-0" enter="settle" swapKey={isBusy ? 'busy' : attention?.kind === 'error' ? 'error' : attention ? 'unread' : pinned ? 'pinned' : session.harness && !session.parentId ? 'default' : 'none'}>
         {isBusy ? (
           <span
             className="mx-[3px] size-2 shrink-0 rounded-full bg-primary"
@@ -358,7 +358,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
           </span>
         ) : pinned ? (
           <Icon name="pushpin" className="size-3.5 shrink-0 text-primary" />
-        ) : !session.parentId ? (
+        ) : session.harness && !session.parentId ? (
           <Icon name="chat-4" className="size-3.5 shrink-0 text-muted-foreground/70" />
         ) : null}
         </SwapIcon>

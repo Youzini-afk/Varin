@@ -62,7 +62,7 @@ export function CompanionAttentionPanel({ attention, identity, focusTitle, onFoc
         <ul style={{ listStyle: 'none', padding: 0 }}>{pageRows(rows, index).map(item => {
           const branch = snapshot.branches.find(row => same(row, item));
           return <li key={item.key} style={{ borderTop: '1px solid #dce5df', padding: '9px 0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><AgentAvatar identity={item.threadId} avatar={branch?.avatar} size={21}/>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><AgentAvatar identity={item.threadId} avatar={branch?.avatar} size={21} {...(branch && (branch.parentThreadId === null ? branch.botSessionThreadId !== branch.threadId : branch.botSessionThreadId === branch.parentThreadId) ? { role: 'lead' as const } : {})}/>
               <strong style={{ overflowWrap: 'anywhere' }}>{branch?.title || t('companion.attention.untitled')}</strong></div>
             <small style={{ overflowWrap: 'anywhere' }}>{item.branchId}</small>
             <p style={{ margin: '5px 0' }}>{t(kindKey(item.kind))}</p>
