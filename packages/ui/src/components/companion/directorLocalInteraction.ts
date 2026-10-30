@@ -24,7 +24,7 @@ export function directorLocalResponse(input: {
   if (input.responsePlaying) return null; // Never restart the current response on every input.
   const response = input.event === 'tap-repeat' ? input.idle && input.playfulAvailable && (input.closed ? input.closedPlayfulAvailable : input.safeOpenEndpoint) ? 'tap-repeat-response' : null
     : input.event === 'hover' && !input.closed && input.safeOpenEndpoint && input.openHoverAvailable ? 'open-hover-response'
-    : input.event === 'tap' ? input.closed ? 'tap-response' : 'director-open-attention'
+    : input.event === 'tap' ? input.closed || input.idle && input.safeOpenEndpoint && input.responseAvailable?.('tap-response') ? 'tap-response' : 'director-open-attention'
     : input.closed ? 'hover-response' : 'director-open-attention';
   if (!response || !input.responseAvailable || input.responseAvailable(response)) return response;
   // Missing closed-specific art may honestly open for attention, but only via

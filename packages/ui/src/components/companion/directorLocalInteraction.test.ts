@@ -84,3 +84,15 @@ it('uses routed open attention only when a closed response is missing, preservin
   expect(directorLocalResponse({...hover,event:'tap',responseAvailable:action=>action==='tap-response'})).toBe('tap-response');
   expect(directorLocalResponse({...hover,event:'tap-repeat',idle:true,playfulAvailable:true,responseAvailable:()=>true})).toBeNull();
 });
+
+
+it('uses the authored open tap only for idle safe pixels with a real route, otherwise keeps attention', () => {
+  const tap = { ...base, idle: true, safeOpenEndpoint: true, responseAvailable: () => true };
+  expect(directorLocalResponse(tap)).toBe('tap-response');
+  for (const override of [{idle:false}, {safeOpenEndpoint:false}, {responseAvailable:(action:string)=>action==='director-open-attention'}])
+    expect(directorLocalResponse({...tap,...override})).toBe('director-open-attention');
+  for (const override of [{finiteHandover:true}, {interacting:true}, {blockedUI:true}, {responsePlaying:true}])
+    expect(directorLocalResponse({...tap,...override})).toBeNull();
+  const session=createDirectorReviewFixtureSession();session.step('requests');const pending=session.view();
+  expect(directorLocalResponse({...tap,idle:companionLocalIdle(pending.attention,pending.presentation.health)})).toBe('director-open-attention');
+});
