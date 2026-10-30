@@ -12,6 +12,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Responsibility | Entry points |
 | --- | --- |
 | Single durable owner, short metadata transactions, format preflight | [catalog.rs](src/catalog.rs) |
+| One-time supported-generation conversion before recovery | [catalog_upgrade.rs](src/catalog_upgrade.rs) |
 | Thread titles, archive/pin, read positions and visibility tombstones | [catalog_threads.rs](src/catalog_threads.rs) |
 | Deleted conversation metadata retirement and surviving reference protection | [catalog_retention.rs](src/catalog_retention.rs) |
 | Worker lifecycle, cancellation, policy actions, model/tool settlement | [execution.rs](src/execution.rs), [supervisor.rs](src/supervisor.rs) |
@@ -28,14 +29,19 @@ This document is the local code map and maintenance boundary, not an implementat
 
 Private domain types stay in Rust. [The kernel schema](../../protocol/schema.json) generates wire
 Rust/TypeScript DTOs and shared state enums; `types_generated.rs` is generated output. Current format
-constants and read-only validation live beside their domains. Do not copy version numbers into a
-second maintenance ledger or add old-format fallback readers.
+constants and read-only validation live beside their domains. Internal structures may evolve freely;
+opening an existing supported generation converts it once, then all business readers use the current
+representation. Do not add parallel old-format execution/read paths or a second format ledger.
 
 ## Boundaries to preserve
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
-  events together. Read-only preflight rejects incompatible/malformed existing formats before epoch
-  changes or recovery. A failed open cannot turn history into an empty cache.
+  events together. Read-only preflight identifies supported generations and rejects unknown/newer or
+  malformed stores before writable recovery. The owner upgrades format 78 (v0.9.33) to 79 in place;
+  conversion, version marker and upgrade event commit atomically before epoch changes or recovery.
+  Failure or process interruption before commit rolls back the conversion; reopening retries it.
+  Existing immutable bodies, identities and original receipts remain in place without a full database copy.
+  A failed open cannot turn history into an empty cache or replay a dispatched effect.
 - Catalog owns references and identity/CAS checks. Providers, tools, extension callbacks, filesystem
   scans, body hydration/serialization and network work execute outside its lock. Capture the relevant
   epoch/revision/head, prepare on a worker, then recheck at publication.

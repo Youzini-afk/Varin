@@ -18,7 +18,7 @@ documents. Git preserves their history.
   and Catalog for Varin execution. External harnesses own their native loops; their product bindings,
   admissions and observations remain in the same Rust Catalog, without synthetic native Runs.
   Embedded Pi runtime packages and the former worker transport are retired. Do not reintroduce
-  a parallel conversation owner or automatically migrate user assets.
+  a parallel conversation owner or import another harness's private stores as native conversations.
 - Preserve existing provider/auth, remote/pairing/relay, allowed-directory, external-access audit,
   session/history/queue and platform capabilities when changing their owner. Preserve LICENSE and
   THIRD_PARTY_NOTICES obligations independently of documentation cleanup.
@@ -45,9 +45,11 @@ documents. Git preserves their history.
   observation does not release original readers, writers, assignments or source cleanup responsibility.
 - Missing, empty, invalid, stale, unavailable, failed, conflicting and unknown states stay distinct.
   Failed or superseded preparation leaves the previous valid generation authoritative.
-- There is no compatibility requirement for obsolete internal formats. Reject unsupported/malformed stores
-  without overwriting assets; do not add automatic internal-format upgrade/import paths. Current-format
-  durability/recovery still applies. Workspace files, Git, historical conversation data and external config remain assets.
+- Internal schemas may evolve freely. The original storage owner upgrades supported existing generations
+  automatically before normal execution; business code uses the current representation afterward.
+  Commit converted records and their format marker together, preserve user identities and original receipts,
+  and never replay dispatched effects during conversion. Reject unknown/newer/malformed stores without
+  overwriting assets. Workspace files, Git, historical conversation data and external config remain assets.
 - Do not invent hard limits without a concrete protocol/platform/safety/data/resource reason. Defaults,
   warnings, budgets and hard rejection are different contracts.
 - Keep filesystem, network, credential, shell and process behavior in the proper trusted owner. Validate

@@ -83,8 +83,11 @@ Thread、branch 的小型身份记录和删除回执保留，支持稳定身份�
 
 [Catalog](../kernel/crates/varin-runtime/src/catalog.rs) 通过独占 owner 锁管理
 `conversation.sqlite`，使用 SQLite WAL/FULL 短事务。初次安装所有内部域在同一事务完成。
-已有数据先只读检查格式，再打开 writer、推进 epoch 和恢复；不支持或损坏的内部格式明确失败，
-保留数据，不能像处理缓存一样重建用户历史。
+已有数据先只读检查已知格式和结构，再由原 writer 自动升级到当前结构。升级步骤位于
+[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，目前覆盖格式 78 → 79。
+转换、版本号和 `catalog.upgraded` 事件一起提交，随后才推进 epoch、恢复执行；正文对象和历史回执保持原样，
+已派发的效果不能因升级而重放。转换未提交时由 SQLite 回滚，下次打开重新升级，不另存完整数据库副本。
+未知、新于当前或结构损坏的内部格式明确失败并保留数据，不能像处理缓存一样重建用户历史。
 
 用户输入与命令 key、分支前置条件、选定配置和受理回执一起提交。相同重试返回原回执，
 冲突复用 key 则失败。排队输入保留受理时的配置和 revision；编辑、interrupt、next-Run

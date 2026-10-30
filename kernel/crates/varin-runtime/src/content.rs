@@ -541,7 +541,7 @@ impl ContentStore {
     }
 }
 
-/// Internal representations are not migrated. Unknown formats and all original files remain intact.
+/// Validate the current content domain after Catalog upgrades, before recovery or collection.
 pub(crate) fn initialize(db: &Connection, _content: &ContentStore) -> Result<()> {
     let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
     let format: i64 = db.query_row(

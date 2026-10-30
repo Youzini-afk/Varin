@@ -40,6 +40,13 @@ pub enum RuntimeError {
     Invalid(String),
     #[error("unsupported catalog format {0}; user history was preserved")]
     Format(i64),
+    #[error("catalog upgrade {from} -> {to} failed: {source}; the upgrade was not committed, reopen to retry")]
+    Upgrade {
+        from: i64,
+        to: i64,
+        #[source]
+        source: Box<RuntimeError>,
+    },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
 pub(crate) const FORMAT: i64 = 79;
@@ -112,11 +119,11 @@ fn fence(run: &Run, epoch: u64) -> Result<()> {
     Ok(())
 }
 
-/// A rejected database may contain committed WAL pages. Read-only validation must precede
-/// any write-capable SQLite handle: dropping a read/write connection can checkpoint its WAL.
+/// Identify and validate an existing generation before opening its writer. Unknown or
+/// malformed stores may have committed WAL pages and must remain untouched on rejection.
 fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if version != 0 && version != FORMAT {
+    if version != 0 && !upgrades::supports(version) {
         return Err(RuntimeError::Format(version));
     }
     let existing: i64 = db.query_row(
@@ -127,38 +134,43 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
     if version == 0 && existing != 0 {
         return Err(RuntimeError::Format(0));
     }
-    if version == FORMAT {
-        threads::check_format(db)?;
-        db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
-        db.prepare("SELECT id,run_id,node_id,state,body FROM model_steps")?;
-        inputs::check_format(db)?;
-        followups::check_format(db)?;
-        calendar::check_format(db)?;
-        external::check_format(db)?;
-        goals::check_format(db)?;
-        mcp_interactions::check_format(db)?;
-        bot::check_format(db)?;
-        db.prepare("SELECT run_id,identity,kind,state_ref,pending_state_ref,action_ref,continuation_ref,activation_cursor,pending,wait_id FROM policy_checkpoints")?;
-        db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
-        db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
-        db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
-        db.prepare("SELECT id,run_id,generation,status,body FROM policy_selections")?;
-        context_jobs::check_format(db)?;
-        launches::check_format(db)?;
-        collaboration::check_format(db)?;
-        context::check_format(db)?;
-        let content_format: i64 = db.query_row(
-            "SELECT version FROM runtime_content_format WHERE id=1",
-            [],
-            |r| r.get(0),
-        )?;
-        if content_format != crate::content::CONTENT_FORMAT {
-            return Err(RuntimeError::Invalid(
-                "unsupported content format; data was preserved".into(),
-            ));
-        }
+    if version != 0 {
+        check_catalog_schema(db, version)?;
     }
     Ok(version)
+}
+
+fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
+    threads::check_format(db)?;
+    db.prepare("SELECT id,thread_id,parent,run_id,body FROM history")?;
+    db.prepare("SELECT id,run_id,node_id,state,body FROM model_steps")?;
+    inputs::check_format(db)?;
+    followups::check_format(db)?;
+    calendar::check_format(db)?;
+    upgrades::check_external_schema(db, version)?;
+    goals::check_format(db)?;
+    mcp_interactions::check_format(db)?;
+    bot::check_format(db)?;
+    db.prepare("SELECT run_id,identity,kind,state_ref,pending_state_ref,action_ref,continuation_ref,activation_cursor,pending,wait_id FROM policy_checkpoints")?;
+    db.prepare("SELECT action_id,node_id,call_id,position,call,receipt,outcome FROM policy_graph_nodes")?;
+    db.prepare("SELECT action_id,node_id,dependency_id FROM policy_graph_dependencies")?;
+    db.prepare("SELECT id,run_id,revision,status,active,body FROM model_selections")?;
+    db.prepare("SELECT id,run_id,generation,status,body FROM policy_selections")?;
+    context_jobs::check_format(db)?;
+    launches::check_format(db)?;
+    collaboration::check_format(db)?;
+    context::check_format(db)?;
+    let content_format: i64 = db.query_row(
+        "SELECT version FROM runtime_content_format WHERE id=1",
+        [],
+        |r| r.get(0),
+    )?;
+    if content_format != crate::content::CONTENT_FORMAT {
+        return Err(RuntimeError::Invalid(
+            "unsupported content format; data was preserved".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Installing the catalog is one commit. A failed first open must leave a new, empty
@@ -257,8 +269,11 @@ impl Catalog {
         db.pragma_update(None, "foreign_keys", true)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "FULL")?;
+        if version != 0 && version != FORMAT {
+            upgrades::apply(&mut db, version)?;
+        }
         let content = crate::content::ContentStore::open(root.as_ref().join("content"))?;
-        let epoch = initialize_metadata(&mut db, version, &content)?;
+        let epoch = initialize_metadata(&mut db, if version == 0 { 0 } else { FORMAT }, &content)?;
         let mut this = Self {
             db,
             content,
@@ -1713,6 +1728,9 @@ mod execution_persistence;
 
 #[path = "catalog_external.rs"]
 pub mod external;
+
+#[path = "catalog_upgrade.rs"]
+mod upgrades;
 #[path = "catalog_external_children.rs"]
 pub mod external_children;
 #[path = "catalog_external_messages.rs"]
