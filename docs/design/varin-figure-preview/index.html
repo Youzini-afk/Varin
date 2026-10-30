@@ -233,16 +233,31 @@ class Figure {
     const outer = el('g', { 'clip-path':above }, svg);
     this.fig = el('g', {}, outer);
 
-    // Body: traced coat and knit, with hand-drawn straps, collar, necklace and sleeve motifs.
-    const body = el('g', {}, this.fig); paint('body', body);
-    el('path', { fill:'#82a3e6', d:'M529 906 L529 868 Q529 842 556 841 Q608 849 660 847 Q700 840 714 849 Q724 858 724 878 L724 906 Z' }, body);
-    el('path', { d:'M588 868 V912 M664 868 V912', stroke:'#6b8bd5', 'stroke-width':8, 'stroke-linecap':'round' }, body);
-    const straps = el('g', { fill:'#2b2c33' }, body); el('path', { d:'M450 912 L493 900 L512 1040 L466 1046 Z' }, straps); el('path', { d:'M760 900 L803 912 L790 1038 L742 1034 Z' }, straps);
-    const buckles = el('g', { fill:'#5e6372' }, body); el('path', { d:'M452 948 L505 938 L509 976 L456 986 Z' }, buckles); el('path', { d:'M749 940 L800 950 L796 986 L745 976 Z' }, buckles);
-    el('path', { d:'M540 912 Q562 946 601 966 M712 908 Q690 946 651 966', fill:'none', stroke:'#a08470', 'stroke-width':4.5, 'stroke-linecap':'round' }, body);
+    // Behind the chin: a fill for the shoulder area, the inside of the collar and a little neck.
+    const under = el('g', {}, this.fig);
+    el('path', { fill:'#9599b8', d:'M260 1300 L262 1100 C290 1000 390 915 470 892 L530 836 L724 836 L784 892 C864 915 964 1000 992 1100 L994 1300 Z' }, under);
+    el('path', { fill:'#6c8dd5', d:'M536 880 C540 862 584 854 626 854 C668 854 712 862 716 880 Z' }, under);
+    el('path', { fill:'#f6dcd2', d:'M594 826 H658 V874 Q626 884 594 874 Z' }, under);
+    el('path', { fill:'#efcdc3', d:'M594 836 Q626 866 658 836 V826 H594 Z' }, under);
+
+    // Clothes, drawn as clean shapes: open white coat, ribbed turtleneck, straps, sleeves resting on the sill.
+    const body = el('g', {}, this.fig);
+    el('path', { fill:'#f4f4f7', d:'M529 893 C470 900 420 935 390 965 C355 1000 325 1045 306 1100 L296 1300 L956 1300 L946 1100 C927 1045 897 1000 862 965 C832 935 782 900 723 893 Z' }, body);
+    el('path', { fill:'#e5e5ec', d:'M520 897 C500 960 512 1030 522 1300 L537 1300 L537 900 Z M732 897 C752 960 740 1030 730 1300 L715 1300 L715 900 Z' }, body);
+    el('path', { fill:'#82a3e6', d:'M537 900 L715 900 L719 1300 L533 1300 Z' }, body);
+    el('path', { fill:'#7495dc', d:'M537 914 Q626 934 715 914 L715 930 Q626 944 537 930 Z' }, body);
+    el('path', { fill:'#82a3e6', d:'M529 910 L529 884 Q529 864 548 860 Q588 876 626 879 Q664 876 704 860 Q723 864 723 884 L723 910 Q723 918 714 919 Q626 926 538 919 Q529 918 529 910 Z' }, body);
+    el('path', { d:'M588 890 V910 M664 890 V910', fill:'none', stroke:'#6b8bd5', 'stroke-width':7, 'stroke-linecap':'round' }, body);
+    el('path', { fill:'#82a3e6', d:'M541 1032 L402 1032 C378 1034 352 1056 333 1078 C324 1089 318 1097 314 1104 L302 1300 L541 1300 Z M711 1032 L850 1032 C874 1034 900 1056 919 1078 C928 1089 934 1097 938 1104 L950 1300 L711 1300 Z' }, body);
+    el('path', { d:'M402 1032 C378 1034 352 1056 333 1078 M850 1032 C874 1034 900 1056 919 1078', fill:'none', stroke:'#9cb6ec', 'stroke-width':5, 'stroke-linecap':'round' }, body);
+    const straps = el('g', { fill:'#2b2c33' }, body);
+    el('path', { d:'M452 914 Q470 902 492 901 L512 1040 L466 1046 Z' }, straps); el('path', { d:'M761 901 Q783 902 801 914 L787 1046 L742 1040 Z' }, straps);
+    const buckles = el('g', { fill:'#5e6372' }, body);
+    el('path', { d:'M455 948 L503 940 L507 976 L459 985 Z' }, buckles); el('path', { d:'M750 940 L798 948 L794 985 L746 976 Z' }, buckles);
+    el('path', { d:'M548 918 Q568 948 601 966 M704 918 Q684 948 651 966', fill:'none', stroke:'#a08470', 'stroke-width':4.5, 'stroke-linecap':'round' }, body);
     el('path', { d:'M626 961 L654 989 L626 1017 L598 989 Z', fill:'none', stroke:'#f3c690', 'stroke-width':9, 'stroke-linejoin':'round' }, body);
     const motif = el('g', { fill:'#82a3e6', stroke:'#f4f4f7', 'stroke-width':4 }, body);
-    for (const [x, r] of [[396, -40], [858, 40]]) { const m = el('g', { transform:`translate(${x} 1010) rotate(${r})` }, motif); for (const [a, b] of [[-28, -18.5], [0, -18.5], [-28, 0], [0, 0]]) el('rect', { x:a, y:b, width:28, height:18.5 }, m); }
+    for (const [x, r] of [[400, -40], [852, 40]]) { const m = el('g', { transform:`translate(${x} 1000) rotate(${r})` }, motif); for (const [a, b] of [[-28, -18.5], [0, -18.5], [-28, 0], [0, 0]]) el('rect', { x:a, y:b, width:28, height:18.5, rx:2 }, m); }
 
     paint('face', el('g', {}, this.fig));
     // Face features slide a little under the bangs when the head "turns".
