@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "worldStool": {
+    "source": "../production-v2/relocation/frames/world-stool-grounded-v4.png",
+    "sha256": "b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7"
+  },
+  "frames": [
+    {
+      "id": "neutral",
+      "source": "foreground/open-neutral.png",
+      "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+    },
+    {
+      "id": "listen",
+      "source": "foreground/listen-crest.png",
+      "sha256": "9f3fe1064cea658997db5e99b24a9ae8784ac76576ae75f39b49680d5eb83046"
+    },
+    {
+      "id": "reminder",
+      "source": "foreground/reminder-crest.png",
+      "sha256": "1cf65e8e967902253e77aedb66f94b74ffb10c68fee8945a332822fc81b860e4"
+    }
+  ]
+}
