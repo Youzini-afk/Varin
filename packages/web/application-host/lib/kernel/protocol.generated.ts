@@ -677,6 +677,7 @@ export interface BotActivityParams {
 export interface BotActivityInput {
   origin: string;
   threadId: string | null;
+  branchId: string | null;
   change: string | null;
 }
 

@@ -130,7 +130,8 @@ const memoryReceipt = (value: unknown): ChatMemoryReceipt => {
   return receipt as unknown as ChatMemoryReceipt;
 };
 
-const decodePresence = (value: unknown): BotPresence => {
+/** Also decodes the `varin:bot-presence` push, which carries the same projection. */
+export const decodeBotPresence = (value: unknown): BotPresence => {
   const presence = record(value); string(presence.botId); strings(presence.replying);
   array(presence.needs, value => {
     const need = record(value); entry(need.identity); string(need.name);
@@ -162,7 +163,7 @@ const decodeActivity = (value: unknown): BotActivityPage => {
       string(event.threadId); string(event.branchId);
     } else if (event.kind === 'quiet') {
       string(event.runId);
-      array(event.inputs, value => { const input = record(value); string(input.origin); if (!nullableString(input.threadId) || !nullableString(input.change)) invalid(); });
+      array(event.inputs, value => { const input = record(value); string(input.origin); if (!nullableString(input.threadId) || !nullableString(input.branchId) || !nullableString(input.change)) invalid(); });
     } else if (event.kind === 'schedule') {
       string(event.occurrenceId); string(event.definitionId); string(event.name); string(event.state);
     } else invalid();
@@ -231,7 +232,7 @@ export function createBotsHttpAPI(): BotsAPI {
       return result;
     },
     presence: async (id, signal) => {
-      const presence = decodePresence((await request(`${path(id)}/presence`, 'GET', undefined, signal)).presence);
+      const presence = decodeBotPresence((await request(`${path(id)}/presence`, 'GET', undefined, signal)).presence);
       if (presence.botId !== id) invalid();
       return presence;
     },

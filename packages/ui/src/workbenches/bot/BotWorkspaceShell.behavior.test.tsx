@@ -13,7 +13,7 @@ import { useBotLayout } from './botLayout';
 const state = vi.hoisted(() => ({
   profileId: 'varin.bot',
   list: vi.fn(), ensure: vi.fn(), primary: vi.fn(), work: vi.fn(), sessions: vi.fn(), createSession: vi.fn(), memory: vi.fn(), schedules: vi.fn(),
-  create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(), openWork: vi.fn(),
+  create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(), openWork: vi.fn(), activity: vi.fn(), presence: vi.fn(),
 }));
 vi.mock('@/lib/bots', async original => ({
   ...await original<typeof import('@/lib/bots')>(),
@@ -25,6 +25,8 @@ vi.mock('@/lib/bots', async original => ({
   createBotSession: state.createSession,
   listBotMemory: state.memory,
   listBotSchedules: state.schedules,
+  readBotActivity: state.activity,
+  readBotPresence: state.presence,
   createBot: state.create,
   updateBot: state.update,
   archiveBot: state.archive,
@@ -132,6 +134,9 @@ describe('Bot workbench', () => {
     state.createSession.mockReset();
     state.memory.mockReset().mockResolvedValue([]);
     state.schedules.mockReset().mockResolvedValue([]);
+    state.activity.mockReset().mockImplementation(async (botId: string) => ({ botId, events: [], participants: [], before: null, eventCursor: 0 }));
+    // Without a projection the selected Bot falls back to the live catalog and work list.
+    state.presence.mockReset().mockRejectedValue(new Error('presence unavailable'));
     state.create.mockReset().mockResolvedValue(bot('new'));
     state.update.mockReset().mockResolvedValue(bot('a'));
     state.archive.mockReset().mockResolvedValue(bot('a'));
@@ -330,6 +335,41 @@ describe('Bot workbench', () => {
     expect(state.create).not.toHaveBeenCalled();
   });
 
+  it('draws every Bot from the Host presence, including one that is not selected', async () => {
+    state.presence.mockImplementation(async (botId: string) => botId === 'a'
+      ? { botId, needs: [], replying: [], working: [{ identity: { runtime: 'agent', threadId: 'w', branchId: 'wb' }, name: 'Reviewer', avatar: null, sessionThreadId: 'entry-a' }] }
+      : { botId, needs: [{ identity: { runtime: 'agent', threadId: 'entry-b', branchId: 'branch-b' }, name: 'Bot b', avatar: null, kind: 'question', session: true }], replying: [], working: [] });
+    await render();
+    expect(container.querySelector('.bot-stage .bot-figure')?.getAttribute('data-state')).toBe('working');
+    expect(container.querySelector('[data-sidebar-row="bot:b"] .bot-figure')?.getAttribute('data-state')).toBe('waiting');
+    expect(state.presence.mock.calls.map(([botId]) => botId).sort()).toEqual(['a', 'b']);
+  });
+  it('lists a quiet round’s inputs on request and loads earlier activity below', async () => {
+    const quiet = { cursor: 9, atMs: Date.now(), sessionThreadId: 'entry-a', sessionBranchId: 'branch-a', kind: 'quiet', runId: 'r', inputs: [
+      { origin: 'message', threadId: 'writer', branchId: 'wb', change: null }, { origin: 'message', threadId: 'editor', branchId: 'eb', change: null }] };
+    const dispatch = { cursor: 3, atMs: Date.now() - 1000, sessionThreadId: 'entry-a', sessionBranchId: 'branch-a', kind: 'dispatch', operationId: 'op', executionId: 'e',
+      threadId: 'writer', branchId: 'wb', task: 'Draft the notes', preset: null };
+    const participants = [{ threadId: 'writer', name: 'Writer', agentId: 'w', avatar: null }, { threadId: 'editor', name: 'Editor', agentId: 'e', avatar: null }];
+    state.list.mockResolvedValue([bot('a')]);
+    state.activity.mockImplementation(async (botId: string, page?: { before?: number }) => page?.before === 9
+      ? { botId, events: [dispatch], participants, before: null, eventCursor: 9 }
+      : { botId, events: [quiet], participants, before: 9, eventCursor: 9 });
+    await render();
+    await click('bot.tab.activity');
+    const pane = () => container.querySelector('[role="tabpanel"]')!;
+    const round = pane().querySelector<HTMLButtonElement>('.bot-event[data-kind="quiet"]')!;
+    expect(round.textContent).toContain('bot.event.quietReports');
+    expect(pane().querySelector('.bot-event-inputs')).toBeNull();
+    await act(async () => { round.click(); });
+    expect([...pane().querySelectorAll('.bot-event-input')].map(item => item.textContent)).toEqual(['bot.event.quietReport', 'bot.event.quietReport']);
+    await act(async () => { pane().querySelector<HTMLButtonElement>('.bot-event-input')!.click(); });
+    expect(state.openWork).toHaveBeenCalledWith(expect.objectContaining({ workThreadId: 'writer' }), { runtime: 'agent', threadId: 'writer', branchId: 'wb' });
+    await click('bot.activity.earlier');
+    await settle();
+    expect(state.activity).toHaveBeenLastCalledWith('a', { before: 9, limit: 30 });
+    expect(pane().querySelector('.bot-event[data-kind="dispatch"]')?.textContent).toContain('Draft the notes');
+    expect(find('bot.activity.earlier')).toBeUndefined();
+  });
   it('keeps sleeping native history read-only and does not ensure or wake it', async () => {
     const entry = { runtime: 'agent' as const, threadId: 'sleep-work', branchId: 'sleep-branch' };
     state.list.mockResolvedValue([{ ...bot('a'), entry, activity: { state: 'asleep', operationId: 'sleep', planned: true, work: [], machines: [], error: null } }]);

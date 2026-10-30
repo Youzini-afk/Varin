@@ -78,6 +78,7 @@ export interface FileObservationAuthority {coordinatorHostId:string;authorityId:
 export interface BotActivityInput {
   origin: string;
   threadId: string | null;
+  branchId: string | null;
   change: string | null;
 }
 

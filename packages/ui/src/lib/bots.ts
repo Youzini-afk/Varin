@@ -27,6 +27,9 @@ export const listBotWork = (id: string, signal?: AbortSignal) => api().work(id, 
 export const listBotSessions = (id: string, signal?: AbortSignal) => api().sessions.list(id, signal);
 export const createBotSession = (id: string) => api().sessions.create(id);
 export const listBotMatters = (id: string, signal?: AbortSignal) => api().matters.list(id, signal);
+// Panel reads report a missing service as a failed read rather than throwing inside an effect.
+export const readBotActivity = async (id: string, page?: { before?: number; limit?: number }, signal?: AbortSignal) => api().activity(id, page, signal);
+export const readBotPresence = async (id: string, signal?: AbortSignal) => api().presence(id, signal);
 /** The Bot's Calendar tasks live under its `bot:<id>` asset namespace (docs/bot.md). */
 export const listBotSchedules = (id: string, signal?: AbortSignal) => schedules.list(`bot:${id}`, signal);
 

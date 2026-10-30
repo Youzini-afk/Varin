@@ -576,7 +576,7 @@ fn bot_activity_shows_a_followed_change_and_the_background_round_that_stayed_qui
     assert_eq!(events[0]["sessionThreadId"], "thread");
     assert!(events[0]["atMs"].as_u64().is_some());
     assert!(events[0]["inputs"].as_array().unwrap().iter()
-        .any(|input| input["origin"] == "work_event" && input["threadId"] == "ordinary" && input["change"] == "user_input"));
+        .any(|input| input["origin"] == "work_event" && input["threadId"] == "ordinary" && input["branchId"] == "ordinary-main" && input["change"] == "user_input"));
     assert_eq!(events[1]["kind"], "change");
     assert_eq!(events[1]["change"], "user_input");
     assert_eq!(events[1]["threadId"], "ordinary");

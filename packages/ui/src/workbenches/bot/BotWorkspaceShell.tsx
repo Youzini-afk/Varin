@@ -32,11 +32,12 @@ import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useBotLayout, type BotPanelTab } from './botLayout';
 import type { BotPanelFocus, BotPanelModel } from './botPanelModel';
 import {
-  buildTimeline, figureState, isActiveRun, isWaitingStatus, liveRun, needsOf, runStatus, sessionViews, stateLine, workViews,
+  buildTimeline, figureState, isActiveRun, isWaitingStatus, liveRun, needsOf, presenceNeeds, runStatus, sessionViews, stateLine, workViews,
   type BotFigureState, type BotSessionView,
 } from './botPresentation';
-import { useBotFacts } from './useBotFacts';
+import { useBotFacts, useBotPresence } from './useBotFacts';
 import { BotFigure } from './BotFigure';
+import { BotMobileTitle } from './BotMobileTitle';
 import { BotNavigator } from './BotNavigator';
 import { BotPanel, BotPanelBody } from './BotPanel';
 
@@ -250,9 +251,14 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       : [{ identity: selected.entry, thread: entryThread, primary: true }, ...(known ?? [])];
     return items ? sessionViews(items, catalog, []) : null;
   }, [selected, sessionItems, sessionsError, catalog]);
-  const facts = useBotFacts({ botId: selected?.id ?? null, sessions: sessions ?? [], threads, revision: revision + workRevision, enabled: committed && Boolean(selected) && !settingsOpen });
-  const feeds = React.useMemo(() => facts.feeds.value ?? [], [facts.feeds.value]);
-  const work = React.useMemo(() => workViews(workItems ?? [], catalog, feeds), [workItems, catalog, feeds]);
+  const facts = useBotFacts({ botId: selected?.id ?? null, revision: revision + workRevision, enabled: committed && Boolean(selected) && !settingsOpen });
+  const activity = facts.activity.value;
+  const work = React.useMemo(() => workViews(workItems ?? [], catalog, activity), [workItems, catalog, activity]);
+  // The Host's presence for every live Bot drives their figures; the selected Bot falls back to the
+  // live catalog only until its first projection arrives.
+  const liveBotIds = React.useMemo(() => (bots ?? []).filter(bot => !bot.archived && !bot.deletion).map(bot => bot.id), [bots]);
+  const presence = useBotPresence(liveBotIds, committed && !settingsOpen);
+  const selectedPresence = selectedId ? presence.get(selectedId)?.value ?? null : null;
   const sessionsWithWork = React.useMemo(() => sessions && selected ? sessionViews(sessions.map(view => ({ identity: view.identity, thread: view.thread, primary: view.primary })), catalog, work) : sessions, [sessions, selected, catalog, work]);
   const currentSession = sessionsWithWork?.find(session => session.identity.threadId === selectedEntry?.threadId) ?? null;
   const ownsConversation = Boolean(selectedEntry && selected && (currentSession
@@ -303,20 +309,24 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     return () => clearTimeout(timer);
   }, [result]);
 
-  const needs = React.useMemo(() => selected && sessionsWithWork ? needsOf(selected, sessionsWithWork, work) : [], [selected, sessionsWithWork, work]);
-  const working = React.useMemo(() => work.filter(item => item.status !== null && !isWaitingStatus(item.status)), [work]);
+  const needs = React.useMemo(() => selectedPresence ? presenceNeeds(selectedPresence) : selected && sessionsWithWork ? needsOf(selected, sessionsWithWork, work) : [], [selectedPresence, selected, sessionsWithWork, work]);
+  const working = React.useMemo<readonly { name: string }[]>(() => selectedPresence?.working ?? work.filter(item => item.status !== null && !isWaitingStatus(item.status)), [selectedPresence, work]);
   const currentThread = selectedEntry ? catalog.find(thread => thread.thread_id === selectedEntry.threadId) : undefined;
   const currentRun = selectedEntry ? liveRun(currentThread, selectedEntry.branchId, null) : null;
-  const thinking = isActiveRun(currentRun) && !isWaitingStatus(runStatus(currentRun));
-  const figureOf = React.useCallback((bot: BotSummary): BotFigureState => figureState({
-    offline, activity: bot.activity?.state, inactive: Boolean(bot.archived || bot.deletion),
-    needs: bot.id === selectedId ? needs.length : 0, result: bot.id === selectedId && result !== null,
-    thinking: bot.id === selectedId && thinking, working: bot.id === selectedId ? working.length : 0,
-    listening: bot.id === selectedId && listening,
-  }), [offline, selectedId, needs.length, result, thinking, working.length, listening]);
+  const thinking = selectedPresence ? selectedPresence.replying.length > 0 : isActiveRun(currentRun) && !isWaitingStatus(runStatus(currentRun));
+  const figureOf = React.useCallback((bot: BotSummary): BotFigureState => {
+    const current = bot.id === selectedId;
+    const other = current ? null : presence.get(bot.id)?.value ?? null;
+    return figureState({
+      offline, activity: bot.activity?.state, inactive: Boolean(bot.archived || bot.deletion),
+      needs: current ? needs.length : other?.needs.length ?? 0, result: current && result !== null,
+      thinking: current ? thinking : Boolean(other?.replying.length), working: current ? working.length : other?.working.length ?? 0,
+      listening: current && listening,
+    });
+  }, [offline, selectedId, presence, needs.length, result, thinking, working.length, listening]);
   const figures = React.useMemo(() => new Map((bots ?? []).map(bot => [bot.id, figureOf(bot)])), [bots, figureOf]);
   const figure = selected ? figureOf(selected) : 'idle';
-  const timeline = React.useMemo(() => buildTimeline(feeds, facts.memory.value), [feeds, facts.memory.value]);
+  const timeline = React.useMemo(() => buildTimeline(activity, facts.memory.value), [activity, facts.memory.value]);
 
   const sessionTitleOf = React.useCallback((view: BotSessionView) => view.primary && !view.thread.title ? t('bot.session.primary') : view.thread.title || t('bot.session.untitled'), [t]);
   const sessionTitle = React.useCallback((threadId: string) => {
@@ -448,9 +458,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   };
 
   const mattersForBot = matters?.botId === selectedId ? matters.items : null;
-  const panelModel = React.useMemo<BotPanelModel | null>(() => selected && sessionsWithWork ? {
-    bot: selected, figure,
-    line: stateLine(selected, figure, { needs, working, resultName: result?.name ?? null }),
+  const line = React.useMemo(() => selected ? stateLine(selected, figure, { needs, working, resultName: result?.name ?? null }) : null, [selected, figure, needs, working, result]);
+  const panelModel = React.useMemo<BotPanelModel | null>(() => selected && sessionsWithWork && line ? {
+    bot: selected, figure, line,
     sessions: sessionsWithWork, session: currentSession, work, needs, timeline, facts, matters: mattersForBot, threads,
     readOnly: readOnly || offline, busy: actionBusy !== null, focus, profileOpen,
     sessionTitle, focusTab,
@@ -465,7 +475,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     onBotChanged: bot => { if (bot) setBots(list => list?.map(item => item.id === bot.id ? bot : item) ?? [bot]); refresh(); },
     requestDelete: () => setDeleting(selected),
     archive: () => { void mutateBot(selected, 'archive'); },
-  } : null, [selected, figure, needs, working, result, sessionsWithWork, currentSession, work, timeline, facts, mattersForBot, threads, readOnly, offline, actionBusy, focus, profileOpen,
+  } : null, [selected, figure, line, needs, sessionsWithWork, currentSession, work, timeline, facts, mattersForBot, threads, readOnly, offline, actionBusy, focus, profileOpen,
     sessionTitle, focusTab, openWork, openSession, mutateBot, archiveMatter, newSession]);
 
   const childNavigation = React.useMemo<ChildNavigation>(() => ({ label: t('bot.work.openInWorkbench'), open: identity => openWork(identity) }), [t, openWork]);
@@ -550,5 +560,6 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   return <MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
     secondaryPanelLabel={t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}
     navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} headerPanelControl={panelControl} sidebarAttention={sidebarAttention}
-    floatingSidebar={floatingSidebar} />;
+    floatingSidebar={floatingSidebar}
+    renderMobileTitle={isMobile && selected && line ? panel => <BotMobileTitle bot={selected} figure={figure} line={line} open={panel.open} onToggle={panel.toggle} /> : undefined} />;
 };

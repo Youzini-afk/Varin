@@ -74,7 +74,7 @@ it('reads Bot activity pages and presence, and refuses another Bot or an unknown
     requests.push(String(input).replace(/^.*\/api/, '/api'));
     if (String(input).includes('/presence')) return Response.json({ presence: { ...presence, botId: owner } });
     return Response.json({ botId: owner, before: 7, eventCursor: 12, participants: [{ threadId: 'work', name: 'Reviewer', agentId: 'agent', avatar: null }],
-      events: [{ kind, cursor: 9, atMs: null, sessionThreadId: 'thread-original', sessionBranchId: 'branch-original', runId: 'run', inputs: [{ origin: 'message', threadId: 'work', change: null }] }] });
+      events: [{ kind, cursor: 9, atMs: null, sessionThreadId: 'thread-original', sessionBranchId: 'branch-original', runId: 'run', inputs: [{ origin: 'message', threadId: 'work', branchId: 'work-main', change: null }] }] });
   };
   try {
     const api = createBotsHttpAPI();

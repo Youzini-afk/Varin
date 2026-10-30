@@ -12,6 +12,7 @@ pub struct ActivityInput {
     pub origin: String,
     /// The conversation that produced it, when the input has one.
     pub thread_id: Option<String>,
+    pub branch_id: Option<String>,
     /// The work update's kind for `work_event` inputs.
     pub change: Option<String>,
 }
@@ -220,21 +221,18 @@ impl ActivityRead {
 }
 
 fn quiet_inputs(db: &Connection, run_id: &str) -> Result<Vec<ActivityInput>> {
-    let mut query = db.prepare("SELECT origin,sender_thread_id,body FROM input_queue WHERE run_id=?1 AND state='delivered' ORDER BY cursor")?;
+    let mut query = db.prepare("SELECT origin,sender_thread_id,sender_branch_id,body FROM input_queue WHERE run_id=?1 AND state='delivered' ORDER BY cursor")?;
     let rows = query
-        .query_map([run_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, String>(2)?)))?
+        .query_map([run_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, String>(3)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    rows.into_iter().map(|(origin, sender, body)| {
+    rows.into_iter().map(|(origin, thread_id, branch_id, body)| {
         let row: inputs::QueuedInputMetadata = serde_json::from_str(&body)?;
         let inputs::InputOrigin::WorkEvent { event_cursor, .. } = row.origin else {
-            return Ok(ActivityInput { origin, thread_id: sender, change: None });
+            return Ok(ActivityInput { origin, thread_id, branch_id, change: None });
         };
         let raw: String = db.query_row("SELECT data FROM events WHERE cursor=?1", [sql_number(event_cursor)?], |r| r.get(0))?;
         let data: Value = serde_json::from_str(&raw)?;
-        Ok(ActivityInput {
-            origin,
-            thread_id: data["sourceThreadId"].as_str().map(str::to_owned),
-            change: data["kind"].as_str().map(str::to_owned),
-        })
+        let text = |key: &str| data[key].as_str().map(str::to_owned);
+        Ok(ActivityInput { origin, thread_id: text("sourceThreadId"), branch_id: text("sourceBranchId"), change: text("kind") })
     }).collect()
 }

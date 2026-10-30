@@ -1,4 +1,4 @@
-import { RuntimeEventSource } from '@varin/application-client';
+import { RuntimeEventSource, decodeBotPresence, type BotPresence } from '@varin/application-client';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { parseComputerAutomationInvalidation, parseComputerAutomationState, parseComputerActivity } from '@varin/protocol';
 import type { ComputerActivityEntry, ComputerAutomationInvalidation, ComputerAutomationState } from '@varin/protocol';
@@ -48,6 +48,7 @@ export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | HarnessKnowl
   | { type: 'ssh-instance-status'; status: unknown }
   | { type: 'bot-changed'; botId: string }
   | { type: 'bot-work-changed' }
+  | { type: 'bot-presence'; botId: string; presence: BotPresence }
   | ({ type: 'computer-activity' } & ComputerActivityEntry)
   | ({ type: 'computer-automation-invalidated' } & ComputerAutomationInvalidation)
   | { type: 'computer-automation'; state: ComputerAutomationState };
@@ -198,6 +199,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
   if (envelope.type === 'varin:bot-work-changed') {
     for (const listener of listeners) listener({ type: 'bot-work-changed' });
+    return;
+  }
+  if (envelope.type === 'varin:bot-presence') {
+    const properties = getEventProperties(envelope.properties);
+    try {
+      const presence = decodeBotPresence(properties?.presence);
+      if (properties?.botId === presence.botId) for (const listener of listeners) listener({ type: 'bot-presence', botId: presence.botId, presence });
+    } catch { /* Ignore malformed presence projections; the next read replaces them. */ }
     return;
   }
 

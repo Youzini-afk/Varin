@@ -97,6 +97,21 @@
 .bot-titlebar-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--status-info); box-shadow: 0 0 0 2px var(--workbench-frame, var(--sidebar)); pointer-events: none; }
 .bot-titlebar-dot[data-tone="warn"] { background: var(--status-warning); }
 
+/* Phone title bar (§8): the compact Bot opens the bottom sheet. */
+.bot-mobile-title {
+  display: flex; min-width: 0; max-width: 100%; height: 40px; align-items: center; gap: 8px; border-radius: 10px; padding: 0 8px 0 6px;
+  text-align: left; transition: background-color var(--motion-dur-snap) var(--motion-ease-snap);
+}
+.bot-mobile-title:active, .bot-mobile-title[data-open] { background: var(--interactive-hover); }
+.bot-mobile-title:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.bot-mobile-title .bot-figure { flex: none; }
+.bot-mobile-title-text { display: flex; min-width: 0; flex-direction: column; line-height: 1.2; }
+.bot-mobile-title-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; color: var(--foreground); }
+.bot-mobile-title-state { display: flex; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 11.5px; color: var(--muted-foreground); }
+.bot-mobile-title-state[data-tone="warn"] { color: var(--status-warning); }
+.bot-mobile-title-caret { flex: none; color: var(--muted-foreground); transition: rotate var(--motion-dur-snap) var(--motion-ease-snap); }
+.bot-mobile-title[data-open] .bot-mobile-title-caret { rotate: 180deg; }
+
 /* ── Sidebar (§3) ──────────────────────────────────────────────────────────────────────── */
 .bot-nav-list { position: relative; }
 .bot-nav-row {
@@ -258,6 +273,14 @@
 .bot-event-text { min-width: 0; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .bot-event-text b { color: var(--foreground); font-weight: 600; }
 .bot-event-sub { display: block; margin-top: 2px; font-size: 12px; color: var(--muted-foreground); opacity: .8; }
+/* A quiet round is a hollow, fainter dot: something happened without asking for you. */
+.bot-event[data-kind="quiet"]::before { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--foreground) 18%, transparent); }
+.bot-event-caret { display: inline-block; margin-left: 2px; vertical-align: -2px; transition: rotate var(--motion-dur-snap) var(--motion-ease-snap); }
+.bot-event-group[data-open] .bot-event-caret { rotate: 90deg; }
+.bot-event-inputs { margin: 0 0 4px 48px; padding: 0; list-style: none; }
+.bot-event-input { display: block; max-width: 100%; border-radius: 6px; padding: 3px 6px; text-align: left; font-size: 12.5px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+button.bot-event-input:hover { background: var(--interactive-hover); color: var(--foreground); }
+.bot-event-input b { color: var(--foreground); font-weight: 600; }
 
 /* Memory (§5.5). */
 .bot-memory { position: relative; display: flex; flex-direction: column; gap: 6px; border-radius: 12px; padding: 12px; transition: background-color var(--motion-dur-snap) var(--motion-ease-snap); }

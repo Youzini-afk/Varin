@@ -5,7 +5,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
 import { useBotLayout } from './botLayout';
 import { useBotPanel } from './botPanelModel';
-import { clockTime, dayLabel, groupByDay, isWaitingStatus, type BotTimelineEvent, type BotWorkStatus, type BotWorkView } from './botPresentation';
+import type { CalendarOccurrenceState } from '@varin/protocol';
+import { clockTime, dayLabel, groupByDay, isWaitingStatus, type BotQuietInput, type BotTimelineEvent, type BotWorkStatus, type BotWorkView } from './botPresentation';
 import { BotSegment, Named } from './botParts';
 import { useFlash, useScrollIntoFocus } from './botFocus';
 
@@ -49,23 +50,79 @@ function WorkRow({ item, showSession }: { item: BotWorkView; showSession: boolea
   </button>;
 }
 
+const YOU_KEY: Record<Extract<BotTimelineEvent, { kind: 'you' }>['change'], I18nKey> = {
+  user_input: 'bot.event.you',
+  workspace_change: 'bot.event.youWorkspace',
+  history_changed: 'bot.event.youHistory',
+};
+const SCHEDULE_NOTE: Partial<Record<CalendarOccurrenceState, I18nKey>> = {
+  held: 'bot.event.scheduleHeld',
+  failed: 'bot.event.scheduleFailed',
+  cancelled: 'bot.event.scheduleCancelled',
+};
+
+function QuietLine({ inputs }: { inputs: readonly BotQuietInput[] }) {
+  const { t } = useI18n();
+  const [only] = inputs;
+  if (!only) return <>{t('bot.event.quietRound')}</>;
+  if (inputs.length === 1) return only.kind === 'report' && only.name ? <Named id="bot.event.quietOneReport" name={only.name} /> : <>{t('bot.event.quietOne')}</>;
+  return <>{t(inputs.every(input => input.kind === 'report') ? 'bot.event.quietReports' : 'bot.event.quietMixed', { count: inputs.length })}</>;
+}
+
+function QuietInputRow({ input }: { input: BotQuietInput }) {
+  const { t } = useI18n();
+  const model = useBotPanel();
+  const label = input.kind === 'report' && input.name ? <Named id="bot.event.quietReport" name={input.name} />
+    : input.kind === 'change' && input.name ? <Named id="bot.event.quietChange" name={input.name} />
+      : t(input.kind === 'schedule' ? 'bot.event.quietSchedule' : 'bot.event.quietOther');
+  const open = input.target ? () => model.openWork(input.target!) : input.kind === 'schedule' ? () => model.focusTab('schedule') : null;
+  return <li>{open ? <button type="button" className="bot-event-input" onClick={open}>{label}</button> : <span className="bot-event-input">{label}</span>}</li>;
+}
+
+/** A round that ended without a reply: a disclosure listing what it handled (§5.4). */
+function QuietRow({ event, showSession, locale }: { event: Extract<BotTimelineEvent, { kind: 'quiet' }>; showSession: boolean; locale: string }) {
+  const model = useBotPanel();
+  const [open, setOpen] = React.useState(false);
+  const listed = event.inputs.length > 1 || (event.inputs.length === 1 && event.inputs[0]!.kind !== 'report');
+  const text = <span className="bot-event-text">
+    <span><QuietLine inputs={event.inputs} />{listed ? <Icon name="arrow-right-s" className="bot-event-caret size-3.5" /> : null}</span>
+    {showSession && event.sessionThreadId ? <span className="bot-event-sub">{model.sessionTitle(event.sessionThreadId)}</span> : null}
+  </span>;
+  const time = <span className="bot-event-time">{event.atMs === null ? '' : clockTime(event.atMs, locale)}</span>;
+  if (!listed) {
+    const only = event.inputs[0];
+    return <button type="button" className="bot-event" data-kind="quiet" onClick={() => only?.target ? model.openWork(only.target) : model.openSession(event.session)}>{time}{text}</button>;
+  }
+  return <div className="bot-event-group" data-open={open || undefined}>
+    <button type="button" className="bot-event" data-kind="quiet" aria-expanded={open} onClick={() => setOpen(value => !value)}>{time}{text}</button>
+    {open ? <ul className="bot-event-inputs">{event.inputs.map((input, index) => <QuietInputRow key={index} input={input} />)}</ul> : null}
+  </div>;
+}
+
 function EventRow({ event, showSession, locale }: { event: BotTimelineEvent; showSession: boolean; locale: string }) {
   const model = useBotPanel();
+  const { t } = useI18n();
+  if (event.kind === 'quiet') return <QuietRow event={event} showSession={showSession} locale={locale} />;
   const open = () => {
     if (event.kind === 'dispatch' || event.kind === 'you') model.openWork(event.target);
     else if (event.kind === 'report') model.openSession(event.session);
+    else if (event.kind === 'schedule') model.focusTab('schedule');
     else model.focusTab('memory', String(event.memoryId));
   };
   const reportKey: I18nKey | null = event.kind !== 'report' ? null : event.outcome === 'succeeded' ? 'bot.event.reportSucceeded'
     : event.outcome === 'failed' ? 'bot.event.reportFailed' : event.outcome === 'cancelled' ? 'bot.event.reportCancelled' : 'bot.event.reportUnknown';
-  return <button type="button" className="bot-event" data-kind={event.kind} data-tone={event.kind === 'report' && event.outcome !== 'succeeded' ? 'warn' : undefined} onClick={open}>
-    <span className="bot-event-time">{clockTime(event.atMs, locale)}</span>
+  const note = event.kind === 'schedule' ? SCHEDULE_NOTE[event.state] : undefined;
+  const warn = (event.kind === 'report' && event.outcome !== 'succeeded') || (event.kind === 'schedule' && event.state === 'failed');
+  return <button type="button" className="bot-event" data-kind={event.kind} data-tone={warn ? 'warn' : undefined} onClick={open}>
+    <span className="bot-event-time">{event.atMs === null ? '' : clockTime(event.atMs, locale)}</span>
     <span className="bot-event-text">
       {event.kind === 'dispatch' ? <Named id="bot.event.dispatch" name={event.name} />
         : event.kind === 'report' ? <Named id={reportKey!} name={event.name} />
-          : event.kind === 'you' ? <Named id="bot.event.you" name={event.name} />
-            : <MemoryEvent content={event.content} />}
+          : event.kind === 'you' ? <Named id={YOU_KEY[event.change]} name={event.name} />
+            : event.kind === 'schedule' ? <Named id="bot.event.schedule" name={event.name} />
+              : <MemoryEvent content={event.content} />}
       {event.kind === 'dispatch' && event.task ? <span className="bot-event-sub line-clamp-2">{event.task}</span> : null}
+      {note ? <span className="bot-event-sub">{t(note)}</span> : null}
       {showSession && event.sessionThreadId ? <span className="bot-event-sub">{model.sessionTitle(event.sessionThreadId)}</span> : null}
     </span>
   </button>;
@@ -89,6 +146,7 @@ export function BotActivityPane() {
   const events = model.timeline.filter(event => event.kind === 'memory' ? scope === 'all' : inScope(event.sessionThreadId));
   const matters = model.matters?.filter(matter => !matter.archived) ?? [];
   const showSession = scope === 'all' && model.sessions.length > 1;
+  const activity = model.facts.activity;
   const now = Date.now();
   return <>
     <div className="bot-pane-bar">
@@ -113,18 +171,24 @@ export function BotActivityPane() {
       <p className="bot-section-label">{t('bot.activity.running')}</p>
       {running.map(item => <WorkRow key={item.key} item={item} showSession={showSession} />)}
     </section> : null}
-    {model.facts.feeds.status === 'failed' ? <div role="alert" className="mx-2 my-2 flex gap-2 typography-meta text-destructive">
-      <span className="min-w-0 flex-1 break-words">{model.facts.feeds.error}</span>
-      <button type="button" className="shrink-0 text-foreground hover:underline" onClick={model.facts.retryFeeds}>{t('settings.harness.retry')}</button>
+    {activity.status === 'failed' ? <div role="alert" className="mx-2 my-2 flex gap-2 typography-meta text-destructive">
+      <span className="min-w-0 flex-1 break-words">{activity.error}</span>
+      <button type="button" className="shrink-0 text-foreground hover:underline" onClick={model.facts.retryActivity}>{t('settings.harness.retry')}</button>
     </div> : null}
     {groupByDay(events).map(group => {
-      const label = dayLabel(group.day, now, locale);
-      return <section key={group.day} aria-label={'key' in label ? t(label.key) : label.text}>
+      const label = group.day === null ? { key: 'bot.activity.undated' as const } : dayLabel(group.day, now, locale);
+      return <section key={group.day ?? 'undated'} aria-label={'key' in label ? t(label.key) : label.text}>
         <p className="bot-section-label">{'key' in label ? t(label.key) : label.text}</p>
         <div className="bot-timeline">{group.events.map(event => <EventRow key={event.id} event={event} showSession={showSession} locale={locale} />)}</div>
       </section>;
     })}
-    {!events.length && !running.length && model.facts.feeds.status === 'ready' ? <p className="px-4 py-7 text-center text-[13px] text-muted-foreground">{t('bot.activity.empty')}</p> : null}
-    {!events.length && model.facts.feeds.status === 'loading' ? <p role="status" className="px-4 py-7 text-center typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
+    {activity.value?.before != null ? <div className="flex flex-col items-center gap-1 px-4 py-3">
+      <button type="button" className="text-[12.5px] text-muted-foreground hover:text-foreground disabled:opacity-50" disabled={model.facts.earlier.loading} onClick={model.facts.loadEarlier}>
+        {model.facts.earlier.loading ? t('common.loading') : t('bot.activity.earlier')}
+      </button>
+      {model.facts.earlier.error ? <span role="alert" className="typography-meta text-destructive">{model.facts.earlier.error}</span> : null}
+    </div> : null}
+    {!events.length && !running.length && activity.status === 'ready' && activity.value.before === null ? <p className="px-4 py-7 text-center text-[13px] text-muted-foreground">{t('bot.activity.empty')}</p> : null}
+    {!events.length && activity.status === 'loading' ? <p role="status" className="px-4 py-7 text-center typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
   </>;
 }

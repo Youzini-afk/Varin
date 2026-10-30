@@ -1,11 +1,11 @@
-import type { BotActivity, BotMemoryItem, BotSession, BotSummary, BotWorkItem, ThreadIdentity } from '@varin/application-client';
-import type { MessageFeedPage, Outcome, Run, RunState, ThreadSummary } from '@varin/protocol';
+import type { BotActivity, BotMemoryItem, BotPresence, BotSession, BotSummary, BotWorkItem, ThreadIdentity } from '@varin/application-client';
+import type { BotActivityEvent, BotActivityInput, CalendarOccurrenceState, MessageParticipant, Outcome, Run, RunState, ThreadSummary } from '@varin/protocol';
 import type { I18nKey } from '@/lib/i18n';
 
 /**
  * Pure projections for the Bot workbench (docs/design/bot-ui.md §5). Every value is derived from
  * Host facts already in the UI: the Bot record, its sessions and work, the live Thread catalog,
- * collaboration feeds and memory. Nothing here is stored or written back.
+ * the Host's presence projection, the Bot's activity pages and memory. Nothing here is stored.
  */
 
 export type BotFigureState = 'offline' | 'sleeping' | 'waking' | 'waiting' | 'result' | 'thinking' | 'working' | 'listening' | 'idle';
@@ -55,17 +55,25 @@ export interface BotWorkView {
 
 export const workKey = (identity: ThreadIdentity): string => `${identity.threadId}\u0000${identity.branchId}`;
 
+/**
+ * The loaded part of a Bot's activity, newest first, with names for the threads it mentions.
+ * `before` is the cursor of the next older page; null once the start is loaded.
+ */
+export interface BotActivityView {
+  events: readonly BotActivityEvent[];
+  participants: readonly MessageParticipant[];
+  before: number | null;
+}
+
 /** Delegated work of one Bot with its live state. Followed and session items are not delegated work. */
-export function workViews(items: readonly BotWorkItem[], threads: readonly ThreadSummary[], feeds: readonly BotSessionFeed[]): BotWorkView[] {
-  const participants = new Map<string, { name: string; avatar: string | null }>();
-  const tasks = new Map<string, { task: string; at: number }>();
-  for (const { page } of feeds) {
-    for (const participant of page.participants) participants.set(participant.threadId, { name: participant.name, avatar: participant.avatar });
-    for (const dispatch of page.dispatches ?? []) {
-      const key = workKey({ runtime: 'agent', threadId: dispatch.targetThreadId, branchId: dispatch.targetBranchId });
-      const known = tasks.get(key);
-      if (!known || known.at < dispatch.acceptedAtMs) tasks.set(key, { task: dispatch.task, at: dispatch.acceptedAtMs });
-    }
+export function workViews(items: readonly BotWorkItem[], threads: readonly ThreadSummary[], activity: BotActivityView | null): BotWorkView[] {
+  const participants = new Map((activity?.participants ?? []).map(participant => [participant.threadId, participant] as const));
+  // Events are newest first, so the first dispatch seen is the latest task for that work.
+  const tasks = new Map<string, string>();
+  for (const event of activity?.events ?? []) {
+    if (event.kind !== 'dispatch') continue;
+    const key = workKey({ runtime: 'agent', threadId: event.threadId, branchId: event.branchId });
+    if (!tasks.has(key)) tasks.set(key, event.task);
   }
   return items.filter(item => item.purpose === 'work').map(item => {
     const thread = threads.find(candidate => candidate.thread_id === item.identity.threadId) ?? item.thread;
@@ -75,7 +83,7 @@ export function workViews(items: readonly BotWorkItem[], threads: readonly Threa
       key,
       identity: item.identity,
       name: participant?.name || thread.title || item.identity.threadId,
-      task: tasks.get(key)?.task ?? '',
+      task: tasks.get(key) ?? '',
       avatar: participant?.avatar ?? thread.avatar ?? null,
       sessionThreadId: item.sessionThreadId ?? null,
       status: runStatus(liveRun(thread, item.identity.branchId, item.activeRun)),
@@ -142,6 +150,9 @@ export function needsOf(bot: BotSummary, sessions: readonly BotSessionView[], wo
   return needs;
 }
 
+/** The Host's presence projection in the shape the panel lists needs. */
+export const presenceNeeds = (presence: BotPresence): BotNeed[] => presence.needs.map(need => ({ ...need, key: workKey(need.identity) }));
+
 export interface BotFigureFacts {
   offline: boolean;
   activity: BotActivity['state'] | undefined;
@@ -177,7 +188,7 @@ export interface BotStateLine {
 }
 
 /** A neutral statement of the real state. It never speaks as the model. */
-export function stateLine(bot: BotSummary, state: BotFigureState, details: { needs: readonly BotNeed[]; working: readonly BotWorkView[]; resultName: string | null }): BotStateLine {
+export function stateLine(bot: BotSummary, state: BotFigureState, details: { needs: readonly BotNeed[]; working: readonly { name: string }[]; resultName: string | null }): BotStateLine {
   switch (state) {
     case 'offline': return { key: 'bot.state.offline', tone: 'none', announce: true };
     case 'waking': return { key: 'bot.state.waking', tone: 'none' };
@@ -217,59 +228,65 @@ export function shortState(state: BotFigureState): { key: I18nKey; tone: 'warn' 
   return null;
 }
 
-export interface BotSessionFeed { sessionThreadId: string; page: MessageFeedPage }
+/** What a quiet round consumed, as the timeline names it. */
+export interface BotQuietInput { kind: 'report' | 'change' | 'schedule' | 'other'; name: string | null; target: ThreadIdentity | null }
 
 export type BotTimelineEvent = {
   id: string;
-  atMs: number;
+  /** Null for facts the runtime recorded before it kept their wall time. */
+  atMs: number | null;
   /** The Bot conversation the event belongs to. */
   sessionThreadId: string | null;
 } & (
   | { kind: 'dispatch'; name: string; task: string; target: ThreadIdentity }
   | { kind: 'report'; name: string; outcome: Outcome; source: ThreadIdentity; session: ThreadIdentity }
-  | { kind: 'you'; name: string; target: ThreadIdentity }
+  | { kind: 'you'; name: string; change: 'user_input' | 'workspace_change' | 'history_changed'; target: ThreadIdentity }
+  | { kind: 'quiet'; session: ThreadIdentity; inputs: BotQuietInput[] }
+  | { kind: 'schedule'; name: string; state: CalendarOccurrenceState; session: ThreadIdentity }
   | { kind: 'memory'; content: string; memoryId: number }
 );
 
+const quietInput = (input: BotActivityInput, nameOf: (threadId: string) => string): BotQuietInput => {
+  const target = input.threadId && input.branchId ? { runtime: 'agent' as const, threadId: input.threadId, branchId: input.branchId } : null;
+  const name = input.threadId ? nameOf(input.threadId) : null;
+  if (input.origin === 'message' || (input.origin === 'work_event' && (input.change === 'run_report' || input.change === 'external_report'))) return { kind: 'report', name, target };
+  if (input.origin === 'work_event' && (input.change === 'user_input' || input.change === 'workspace_change' || input.change === 'history_changed')) return { kind: 'change', name, target };
+  if (input.origin === 'calendar') return { kind: 'schedule', name: null, target: null };
+  return { kind: 'other', name, target };
+};
+
 /**
- * The work as it happened: what was handed out, what came back, what the user did in the
- * workbench and what was remembered. Built from the sessions' collaboration feeds and memory.
+ * The work as it happened: what was handed out, what came back, what the user changed in the work,
+ * rounds that ended without disturbing the user, schedules and what was remembered. Activity keeps
+ * its original order. Memory has no event cursor: while older pages remain, only memory newer than
+ * the oldest loaded fact with a time belongs here, and the rest arrives with the earlier pages.
  */
-export function buildTimeline(feeds: readonly BotSessionFeed[], memory: readonly BotMemoryItem[] | null): BotTimelineEvent[] {
-  const events = new Map<string, BotTimelineEvent>();
-  for (const { sessionThreadId, page } of feeds) {
-    const names = new Map(page.participants.map(participant => [participant.threadId, participant.name]));
-    const nameOf = (threadId: string) => names.get(threadId) || threadId;
-    for (const dispatch of page.dispatches ?? []) {
-      if (dispatch.senderThreadId !== sessionThreadId) continue;
-      events.set(`dispatch:${dispatch.operationId}`, {
-        id: `dispatch:${dispatch.operationId}`, atMs: dispatch.acceptedAtMs, sessionThreadId, kind: 'dispatch',
-        name: nameOf(dispatch.targetThreadId), task: dispatch.task,
-        target: { runtime: 'agent', threadId: dispatch.targetThreadId, branchId: dispatch.targetBranchId },
-      });
+export function buildTimeline(activity: BotActivityView | null, memory: readonly BotMemoryItem[] | null): BotTimelineEvent[] {
+  const names = new Map((activity?.participants ?? []).map(participant => [participant.threadId, participant.name]));
+  const nameOf = (threadId: string) => names.get(threadId) || threadId;
+  const identity = (threadId: string, branchId: string): ThreadIdentity => ({ runtime: 'agent', threadId, branchId });
+  const facts = (activity?.events ?? []).map((event): BotTimelineEvent => {
+    const base = { id: `${event.kind}:${event.cursor}`, atMs: event.atMs, sessionThreadId: event.sessionThreadId };
+    const session = identity(event.sessionThreadId, event.sessionBranchId);
+    switch (event.kind) {
+      case 'dispatch': return { ...base, kind: 'dispatch', name: nameOf(event.threadId), task: event.task, target: identity(event.threadId, event.branchId) };
+      case 'report': return { ...base, kind: 'report', name: nameOf(event.threadId), outcome: event.outcome, source: identity(event.threadId, event.branchId), session };
+      case 'change': return { ...base, kind: 'you', name: nameOf(event.threadId), change: event.change, target: identity(event.threadId, event.branchId) };
+      case 'quiet': return { ...base, kind: 'quiet', session, inputs: event.inputs.map(input => quietInput(input, nameOf)) };
+      case 'schedule': return { ...base, kind: 'schedule', name: event.name, state: event.state, session };
     }
-    for (const report of page.reports ?? []) {
-      if (report.targetThreadId !== sessionThreadId || report.acceptedAtMs === undefined) continue;
-      events.set(`report:${report.operationId}:${report.acceptedCursor}`, {
-        id: `report:${report.operationId}:${report.acceptedCursor}`, atMs: report.acceptedAtMs, sessionThreadId, kind: 'report',
-        name: nameOf(report.senderThreadId), outcome: report.outcome,
-        source: { runtime: 'agent', threadId: report.senderThreadId, branchId: report.senderBranchId },
-        session: { runtime: 'agent', threadId: report.targetThreadId, branchId: report.targetBranchId },
-      });
-    }
-    for (const message of page.messages) {
-      if (message.actor.kind !== 'user' || message.targetThreadId === sessionThreadId) continue;
-      events.set(`you:${message.messageId}`, {
-        id: `you:${message.messageId}`, atMs: message.acceptedAtMs, sessionThreadId, kind: 'you',
-        name: nameOf(message.targetThreadId), target: { runtime: 'agent', threadId: message.targetThreadId, branchId: message.targetBranchId },
-      });
-    }
+  });
+  const known = facts.flatMap(event => event.atMs === null ? [] : [event.atMs]);
+  const floor = activity?.before == null ? -Infinity : known.length ? Math.min(...known) : Infinity;
+  const remembered = (memory ?? []).filter(item => !item.inactive && item.createdAt >= floor).sort((a, b) => b.createdAt - a.createdAt)
+    .map((item): BotTimelineEvent => ({ id: `memory:${item.id}`, atMs: item.createdAt, sessionThreadId: null, kind: 'memory', content: item.content, memoryId: item.id }));
+  const timeline: BotTimelineEvent[] = [];
+  let next = 0;
+  for (const event of facts) {
+    if (event.atMs !== null) while (next < remembered.length && remembered[next]!.atMs! > event.atMs) timeline.push(remembered[next++]!);
+    timeline.push(event);
   }
-  for (const item of memory ?? []) {
-    if (item.inactive) continue;
-    events.set(`memory:${item.id}`, { id: `memory:${item.id}`, atMs: item.createdAt, sessionThreadId: null, kind: 'memory', content: item.content, memoryId: item.id });
-  }
-  return [...events.values()].sort((a, b) => b.atMs - a.atMs);
+  return [...timeline, ...remembered.slice(next)];
 }
 
 /** The latest report that came back to any of the Bot's conversations. */
@@ -278,12 +295,19 @@ export function latestReport(timeline: readonly BotTimelineEvent[]): Extract<Bot
 }
 
 const startOfDay = (ms: number) => { const date = new Date(ms); date.setHours(0, 0, 0, 0); return date.getTime(); };
-/** Groups events by local day, newest first, keeping their order inside each day. */
-export function groupByDay<T extends { atMs: number }>(events: readonly T[]): Array<{ day: number; events: T[] }> {
-  const groups: Array<{ day: number; events: T[] }> = [];
+/**
+ * Groups events by local day, newest first, keeping their order inside each day. An event without
+ * a recorded time stays where it happened, in the day above it; a leading one gets a group of its own.
+ */
+export function groupByDay<T extends { atMs: number | null }>(events: readonly T[]): Array<{ day: number | null; events: T[] }> {
+  const groups: Array<{ day: number | null; events: T[] }> = [];
   for (const event of events) {
-    const day = startOfDay(event.atMs);
     const last = groups.at(-1);
+    if (event.atMs === null) {
+      if (last) last.events.push(event); else groups.push({ day: null, events: [event] });
+      continue;
+    }
+    const day = startOfDay(event.atMs);
     if (last?.day === day) last.events.push(event);
     else groups.push({ day, events: [event] });
   }

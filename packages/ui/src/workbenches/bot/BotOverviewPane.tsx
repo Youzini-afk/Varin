@@ -34,14 +34,14 @@ export function BotOverviewPane() {
   const memory = model.facts.memory.value?.filter(item => !item.inactive).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
   const next = model.facts.tasks.value?.filter(task => task.enabled && task.calendar?.definition.next_at_ms)
     .sort((a, b) => (a.calendar!.definition.next_at_ms ?? 0) - (b.calendar!.definition.next_at_ms ?? 0))[0] ?? null;
-  const loading = model.facts.feeds.status === 'loading' && model.facts.memory.status === 'loading' && model.facts.tasks.status === 'loading';
-  const failures = [model.facts.feeds, model.facts.memory, model.facts.tasks].filter(read => read.status === 'failed');
+  const loading = model.facts.activity.status === 'loading' && model.facts.memory.status === 'loading' && model.facts.tasks.status === 'loading';
+  const failures = [model.facts.activity, model.facts.memory, model.facts.tasks].filter(read => read.status === 'failed');
   const empty = !model.needs.length && !running.length && !report && !memory && !next;
 
   return <>
     {failures.length ? <div role="alert" className="mx-2 my-2 flex items-start gap-2 rounded-lg px-2 py-2 typography-meta text-destructive">
       <span className="min-w-0 flex-1 break-words">{failures.map(read => read.status === 'failed' ? read.error : '').join(' · ')}</span>
-      <button type="button" className="shrink-0 text-foreground hover:underline" onClick={() => { model.facts.retryFeeds(); model.facts.retryMemory(); model.facts.retryTasks(); }}>{t('settings.harness.retry')}</button>
+      <button type="button" className="shrink-0 text-foreground hover:underline" onClick={() => { model.facts.retryActivity(); model.facts.retryMemory(); model.facts.retryTasks(); }}>{t('settings.harness.retry')}</button>
     </div> : null}
     {model.needs.slice(0, MAX_NEEDS).map(need => <NeedCard key={need.key} need={need} />)}
     {running.length ? <button type="button" className="bot-block" onClick={() => model.focusTab('activity', running[0]!.key)}>
@@ -54,7 +54,7 @@ export function BotOverviewPane() {
         <span className="truncate">{running[0]!.name}{running[0]!.task ? ` · ${running[0]!.task}` : ''}</span></span>
     </button> : null}
     {report ? <button type="button" className="bot-block" onClick={() => model.openSession(report.session)}>
-      <span className="bot-block-head">{t('bot.overview.latest')} · {clockTime(report.atMs, locale)}<Icon name="arrow-right-s" className="size-3.5" /></span>
+      <span className="bot-block-head">{t('bot.overview.latest')}{report.atMs === null ? null : ` · ${clockTime(report.atMs, locale)}`}<Icon name="arrow-right-s" className="size-3.5" /></span>
       <span className="text-[14px] leading-relaxed"><Named id="bot.overview.latestReport" name={report.name} params={{ session: model.sessionTitle(report.session.threadId) }} /></span>
     </button> : null}
     {memory ? <button type="button" className="bot-block" onClick={() => model.focusTab('memory', String(memory.id))}>
