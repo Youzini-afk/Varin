@@ -23,7 +23,7 @@ import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
 import { route, type PlaybackAsset } from '@/components/companion/playback.mjs';
 import { pickupPreloadDependencies } from '@/components/companion/pickupPreload';
-import { projectCompanionIntent, newlyAnsweredQuestion, companionObserverAction, type ObservationHealth } from '@/components/companion/presentation';
+import { projectCompanionIntent, newlyAnsweredQuestion, companionObserverAction, companionReceipt, currentCompanionReceipt, consumeCompanionReceipt, type CompanionReceipt, type ObservationHealth } from '@/components/companion/presentation';
 import { initializeLocale, I18nProvider, useI18n, type I18nKey } from '@/lib/i18n';
 import { CompanionSceneFacts, reviewSceneFact, sceneForIntent, type SceneFact } from '@/components/companion/sceneFacts';
 import { useCompanionScene } from '@/components/companion/useCompanionScene';
@@ -70,9 +70,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const previousRun = React.useRef<{ id: string; state: string } | null>(null);
   const [liveCompletion, setLiveCompletion] = React.useState<string | null>(null);
   const pendingQuestions = React.useRef(new Set<string>());
-  const [liveAnswer, setLiveAnswer] = React.useState<string | null>(null);
-  const [livePermissionReceipt, setLivePermissionReceipt] = React.useState(false);
-  const lastSceneReceipt = React.useRef<SceneFact | null>(null);
+  const [receipt, setReceipt] = React.useState<CompanionReceipt | null>(null);
   const sceneFacts = React.useRef(new CompanionSceneFacts());
   const sceneScope = React.useRef(0);
   const sceneIdentity = React.useRef('');
@@ -127,6 +125,12 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const team = teamProjector.current.observe(snapshot, health, generation);
   const observedNativeIdle = companionLocalIdle(attention.snapshot, attention.health);
   // Shared neutral/attentive performances are visual fallbacks, not invented tool categories.
+  const receiptScope = JSON.stringify([generation, attention.observationRevision, selected?.identity ?? null, productMode, directorMode, fixtureActive]);
+  const receiptBlocked = document.hidden || manualReview || reviewRoute || fixtureActive || controlsOpen || attentionOpen || !canAnimateEdges.current
+    || health !== 'current' || ['W02', 'W03', 'C06'].includes(intent.state ?? '') || !!intent.state?.startsWith('E');
+  const currentReceipt = currentCompanionReceipt(receipt, receiptScope, receiptBlocked, snapshot?.activeRun?.id ?? null);
+  const liveAnswer = currentReceipt?.kind === 'question';
+  const livePermissionReceipt = currentReceipt?.kind === 'permission';
   const requestedAction = !reviewRoute && liveAnswer && health === 'current' && visualIntent.state !== 'C06' && visualIntent.state !== 'W02' && visualIntent.state !== 'W03' && !visualIntent.state?.startsWith('E') ? 'understood' : visualIntent.state === 'L07' || (!reviewRoute && visualIntent.state === 'C06' && liveCompletion !== snapshot?.activeRun?.id)
     ? 'idle-closed'
     : visualIntent.state === null ? (snapshot?.activeRun?.state === 'cancelled' ? 'idle-closed' : 'external-wait')
@@ -163,12 +167,12 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const companionWindow = useCompanionWindow(canvas, review, () => beforeNativeLift.current(), () => repeatTapAllowed.current);
   canAnimateEdges.current = companionWindow.phase === 'rest';
   React.useEffect(() => {
-    if (companionWindow.phase !== 'rest') { setDirectorLocal(null); discardDirectorTransient.current(); setLiveCompletion(null); setLiveAnswer(null); setLivePermissionReceipt(false); setOutputBeat(false); setLocalAction(null); }
+    if (companionWindow.phase !== 'rest') { setDirectorLocal(null); discardDirectorTransient.current(); setLiveCompletion(null); setReceipt(null); setOutputBeat(false); setLocalAction(null); }
   }, [companionWindow.phase]);
   React.useEffect(() => {
     const visibility = () => {
       setDirectorLocal(null); discardDirectorTransient.current();
-      setLiveCompletion(null); setLiveAnswer(null); setLivePermissionReceipt(false); setOutputBeat(false); setLocalAction(null);
+      setLiveCompletion(null); setReceipt(null); setOutputBeat(false); setLocalAction(null);
       setProviderProgress(current => current?.kind === 'retry' ? current : null);
       if (!document.hidden) { attention.refresh(); void focusedProjection.current?.refresh(); }
     };
@@ -210,7 +214,26 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const directorBaseAction = finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction;
   const directorLocalAction = directorLocal?.context === directorContextKey && director.health === 'current' && companionWindow.phase === 'rest' && !manualReview ? directorLocal.action : null;
   const directorWelcome = directorMode && localAction === 'welcome' && director.health === 'current' && director.body.verb === 'available' && usableAction('welcome');
-  const displayAction = directorMode ? directorLocalAction ?? (directorWelcome ? 'welcome' : quietAction && usableAction(quietAction) ? quietAction : restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
+  const finiteReceiptHandover = !!director.body.edge || ['director-intake', 'director-gather-present', 'completion', 'failure'].includes(directorBaseAction)
+    || !!shownDirectorAsset && ['director-intake', 'director-gather-present', 'completion', 'failure'].includes(shownDirectorAsset.action ?? '')
+      && (visibleDrawing?.frameIndex ?? 0) < shownDirectorAsset.frames.length - 1;
+  const directorReceiptBlocked = companionWindow.phase !== 'rest' || directorMode && (director.interactionRoute !== 'agent-companion' || director.health !== 'current'
+    || !!director.body.attentionItem || (attention.snapshot?.counts.actionRequired ?? 0) > 0 || (attention.snapshot?.counts.unknownEffects ?? 0) > 0
+    || !!director.body.subject && (director.body.subject.threadId !== selected?.identity.threadId || director.body.subject.branchId !== selected?.identity.branchId)
+    || finiteReceiptHandover || !!directorLocalAction);
+  const receiptAction = currentReceipt && !directorReceiptBlocked
+    ? directorMode ? usableDirectorExpression('receipt-ack') ? 'receipt-ack' : null
+      : currentReceipt.kind === 'question' ? 'understood' : 'permission-allowed'
+    : null;
+  const receiptProducerBlocked = React.useRef(false);
+  // The callback sees the *next* Host intent. Do not suppress a real receipt
+  // using the previous render's still-pending request or synchronizing health.
+  receiptProducerBlocked.current = document.hidden || manualReview || reviewRoute || fixtureActive || controlsOpen || attentionOpen
+    || companionWindow.phase !== 'rest' || directorMode && (productMode !== 'agent-companion' || finiteReceiptHandover);
+  React.useEffect(() => {
+    if (receiptBlocked || directorReceiptBlocked || directorMode && !receiptAction || receipt?.scope !== receiptScope || receipt?.runId !== (snapshot?.activeRun?.id ?? null)) setReceipt(null);
+  }, [receiptBlocked, directorReceiptBlocked, directorMode, receiptAction, receiptScope, receipt, snapshot?.activeRun?.id]);
+  const displayAction = directorMode ? receiptAction ?? directorLocalAction ?? (directorWelcome ? 'welcome' : quietAction && usableAction(quietAction) ? quietAction : restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
   repeatTapAllowed.current = directorMode && localInteractionIdle && director.health === 'current' && !directorLocalAction && usableAction('tap-repeat-response');
   const localDirectorResponse = (event: 'tap' | 'tap-repeat' | 'hover') => {
     const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
@@ -250,7 +273,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   }, [companionWindow.hoverRevision, localAllowed, controlsOpen, assetList, directorMode, localDirectorResponse]);
   React.useEffect(() => { if (!companionWindow.hovered) { setLocalAction(current => current === 'hover-response' ? null : current); setDirectorLocal(current => current?.event === 'hover' ? null : current); } }, [companionWindow.hovered]);
   const displayedDrawing = React.useRef<{ packageId: string; exposure: number; context: string | null } | null>(null);
-  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current }, { allowCandidates: directorReview, presentationKey: directorMode ? directorContextKey : null });
+  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current }, { allowCandidates: directorReview, presentationKey: receiptAction && displayAction === receiptAction ? currentReceipt?.key : directorMode ? directorContextKey : null });
   React.useEffect(() => {
     if (directorMode && automatic.context === directorContextKey && automatic.finished && directorRequestedAction !== 'director-supervise'
       && assetList.find(item => item.id === automatic.packageId)?.action === directorRequestedAction) {
@@ -262,11 +285,11 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (automatic.finished && COMPANION_QUIET_ACTIONS.some(action => action === assetList.find(item => item.id === automatic.packageId)?.action)) finishQuiet();
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'output-emphasis') setOutputBeat(false);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
-    if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'permission-allowed') setLivePermissionReceipt(false);
-    if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'understood') setLiveAnswer(null);
+    if (automatic.finished && ['receipt-ack', 'permission-allowed', 'understood'].includes(assetList.find(item => item.id === automatic.packageId)?.action ?? ''))
+      setReceipt(current => consumeCompanionReceipt(current, automatic.context));
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === directorLocalAction) setDirectorLocal(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === localAction) setLocalAction(null);
-  }, [automatic.finished, automatic.packageId, assetList, localAction, directorLocalAction, finishQuiet]);
+  }, [automatic.finished, automatic.context, automatic.packageId, assetList, localAction, directorLocalAction, finishQuiet]);
 
   // A local greeting/tap is not a queued application event. Higher-priority facts
   // discard it instead of replaying it after a permission or interruption clears.
@@ -303,10 +326,10 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   }, [controlsOpen, apis.threads, generation]);
   React.useEffect(() => {
     if (selected) setLocalAction(null);
-    lastSceneReceipt.current = null; setLivePermissionReceipt(false);
+    setReceipt(null);
     setProviderScope(null); setProviderProgress(progressFacts.current.reset()); setOutputBeat(false); lastOutputBeat.current = { event: 0, at: -Infinity };
     setSceneFact(sceneFacts.current.reset());
-    setSnapshot(undefined); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null);
+    setSnapshot(undefined); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear();
     if (!attention.projectionAPI || !selected || selected.generation !== generation) { setConnection('No thread selected'); setHealth('unselected'); return; }
     let closed = false;
     setConnection('Synchronizing current Host snapshot'); setHealth('synchronizing');
@@ -314,24 +337,28 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       value => { if (!closed) {
         // Observe each projection callback before React can coalesce short tool snapshots.
         const nextScene = sceneFacts.current.observe(value, 'current');
-        if (!document.hidden && canAnimateEdges.current && nextScene !== lastSceneReceipt.current && nextScene.kind === 'permission' && nextScene.phase === 'resolve' && nextScene.outcome === 'allowed') setLivePermissionReceipt(true);
-        lastSceneReceipt.current = nextScene; setSceneFact(nextScene);
+        setSceneFact(nextScene);
         const answered = newlyAnsweredQuestion(pendingQuestions.current, value);
-        if (answered && !document.hidden && canAnimateEdges.current) setLiveAnswer(answered);
+        const proof = sceneFacts.current.matchedReceipt;
+        const matched = answered ? { kind: 'question' as const, operationId: answered, outcome: 'answered' as const } : proof;
+        const operation = matched ? value.operations.find(row => row.id === matched.operationId) : null;
+        const nextReceipt = matched && (!value.activeRun || operation?.run_id === value.activeRun.id)
+          ? companionReceipt(receiptScope, matched, value.activeRun?.id ?? null) : null;
+        if (nextReceipt && !document.hidden && canAnimateEdges.current && !receiptProducerBlocked.current) setReceipt(nextReceipt);
         pendingQuestions.current = new Set(value.operations.filter(operation => operation.executor === 'ask_user' && operation.phase !== 'terminal').map(operation => operation.id));
         const nextIntent = projectCompanionIntent(value, 'current');
-        if (nextIntent.state === 'W02' || nextIntent.state === 'W03' || nextIntent.state?.startsWith('E')) { setLiveAnswer(null); setLivePermissionReceipt(false); setLiveCompletion(null); }
+        if (nextIntent.state === 'W02' || nextIntent.state === 'W03' || nextIntent.state?.startsWith('E')) { setReceipt(null); setLiveCompletion(null); }
         const nextRun = value.activeRun, previous = previousRun.current;
         if (nextRun?.id !== previous?.id) setLiveCompletion(null);
-        if (nextRun && ['completed', 'failed', 'cancelled'].includes(nextRun.state)) { setLiveAnswer(null); setLivePermissionReceipt(false); }
+        if (nextRun && ['completed', 'failed', 'cancelled'].includes(nextRun.state)) { setReceipt(null); }
         if (!document.hidden && canAnimateEdges.current && nextRun?.state === 'completed' && previous?.id === nextRun.id && !['completed','failed','cancelled'].includes(previous.state)) setLiveCompletion(nextRun.id);
         previousRun.current = nextRun ? { id: nextRun.id, state: nextRun.state } : null;
         setSnapshot(value); setHealth('current'); setConnection('Observing existing thread — read only'); } },
-      cause => { if (!closed) { setProviderScope(null); setProviderProgress(progressFacts.current.reset()); setLivePermissionReceipt(false); lastSceneReceipt.current = null; setSceneFact(sceneFacts.current.reset()); setHealth('unknown'); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null); setConnection(`Connection unknown: ${String(cause)}`); } },
+      cause => { if (!closed) { setProviderScope(null); setProviderProgress(progressFacts.current.reset()); setReceipt(null); setSceneFact(sceneFacts.current.reset()); setHealth('unknown'); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setConnection(`Connection unknown: ${String(cause)}`); } },
       (parts, context) => { if (!closed) { setProviderScope(context ? JSON.stringify([context.runId, context.requestId ?? null]) : null); setProviderProgress(progressFacts.current.observe(parts, context, Date.now())); } }, undefined, undefined, { contextInspection: false });
     focusedProjection.current = projection; projection.start();
     return () => { closed = true; if (focusedProjection.current === projection) focusedProjection.current = null; projection.close(); };
-  }, [attention.projectionAPI, attention.observationRevision, selected, generation]);
+  }, [attention.projectionAPI, attention.observationRevision, selected, generation, receiptScope]);
   React.useEffect(() => () => {
     loadGeneration.current++;
     for (const page of decodedPages.current.values()) page.image?.close();

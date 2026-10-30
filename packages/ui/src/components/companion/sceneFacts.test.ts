@@ -47,6 +47,38 @@ describe('companion decorative facts', () => {
     expect(facts.observe(snapshot([{...op('bad',null),phase:'running'}]),'current').kind).toBeNull();
   });
 
+  test('exposes only the current identity-matched receipt after newer-scene precedence', () => {
+    const facts = new CompanionSceneFacts();
+    const permission = (decision: string | null, id = 'permission-1') => ({ id: 'op', phase: decision === null ? 'waiting' : 'terminal', result: { kind: 'control', value: { permission: { id, decision, call: {}, scope: {} } } } });
+    const question = { id: 'question', executor: 'ask_user', phase: 'waiting' };
+    facts.observe(snapshot([permission('allow_once')]), 'current');
+    expect(facts.matchedReceipt).toBeNull(); // Initial history is not a live edge.
+    facts.observe(snapshot([permission(null)]), 'current');
+    facts.observe(snapshot([permission('allow_once', 'different-permission')]), 'current');
+    expect(facts.matchedReceipt).toBeNull();
+    facts.observe(snapshot([permission(null)]), 'current');
+    facts.observe(snapshot([]), 'current');
+    expect(facts.matchedReceipt).toBeNull(); // Disappearance proves no decision.
+    facts.observe(snapshot([permission(null)]), 'current');
+    facts.observe(snapshot([permission('allow_once'), question]), 'current');
+    expect(facts.matchedReceipt).toBeNull(); // A newer pending request wins.
+    facts.observe(snapshot([{ ...question, phase: 'terminal', outcome: 'succeeded', result: { kind: 'control', value: { answer_ref: 'answer-1' } } }]), 'current');
+    expect(facts.matchedReceipt).toEqual({ kind: 'question', operationId: 'question', outcome: 'answered' });
+    facts.observe(snapshot([]), 'current');
+    expect(facts.matchedReceipt).toBeNull(); // Even if the decorative resolve tail persists.
+    for (const [decision, outcome] of [['allow_once', 'allowed'], ['deny', 'denied']] as const) {
+      facts.observe(snapshot([permission(null)]), 'current');
+      const scene = facts.observe(snapshot([permission(decision)]), 'current');
+      expect(facts.matchedReceipt).toEqual({ kind: 'permission', operationId: 'op', permissionId: 'permission-1', outcome });
+      expect(scene).toEqual({ kind: 'permission', phase: 'resolve', outcome, count: null });
+      facts.reset();
+      expect(facts.matchedReceipt).toBeNull();
+    }
+    facts.observe(snapshot([permission(null)]), 'current');
+    facts.observe(snapshot([permission('allow_once')]), 'unknown');
+    expect(facts.matchedReceipt).toBeNull();
+  });
+
   test('parallel known work stays readable, child counts stay factual, spoofed tool names stay unclassified', () => {
     const facts=new CompanionSceneFacts();
     expect(facts.observe(snapshot([tool('file_edit'),tool('websearch')],{child:{state:'running'}}),'current')).toMatchObject({kind:'editing',count:1});

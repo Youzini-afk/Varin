@@ -4,6 +4,10 @@ import { projectCompanionIntent, unresolvedPermissionId, type ObservationHealth 
 import { operationPresentation } from './toolPresentation';
 
 export type SceneFact = Pick<DesktopCompanionScene, 'kind' | 'phase' | 'outcome' | 'count' | 'status'>;
+export type MatchedCompanionReceipt = Readonly<
+  | { kind: 'permission'; operationId: string; permissionId: string; outcome: 'allowed' | 'denied' }
+  | { kind: 'question'; operationId: string; outcome: 'answered' }
+>;
 const none: SceneFact = { kind: null, phase: 'withdraw', outcome: null, count: null };
 const kinds: Record<string, DesktopCompanionScene['kind']> = { T01: 'reading', T02: 'editing', T04: 'searching', T06: 'organize', T07: 'verify', T08: 'dispatch', W02: 'permission', W03: 'question' };
 const object = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -11,6 +15,9 @@ const permission = (operation: ThreadSnapshot['operations'][number]) => object(o
 
 /** A bounded visual edge latch, not an operation owner. Initial snapshots never replay receipts. */
 export class CompanionSceneFacts {
+  private receiptProof: MatchedCompanionReceipt | null = null;
+  /** Only this observation's matched, precedence-surviving receipt; not scene transport or a queue. */
+  get matchedReceipt(): MatchedCompanionReceipt | null { return this.receiptProof; }
   private pendingPermissions = new Map<string, string>();
   private pendingQuestions = new Set<string>();
   private shownPermission: { operationId: string; permissionId: string } | null = null;
@@ -18,10 +25,12 @@ export class CompanionSceneFacts {
   private active: SceneFact = none;
   private shown: SceneFact = none;
   reset(): SceneFact {
+    this.receiptProof = null;
     this.pendingPermissions.clear(); this.pendingQuestions.clear(); this.shownPermission = null; this.shownQuestion = null; this.active = this.shown = none;
     return this.shown;
   }
   observe(snapshot: ThreadSnapshot, health: ObservationHealth): SceneFact {
+    this.receiptProof = null;
     const intent = projectCompanionIntent(snapshot, health);
     if (health !== 'current' || intent.state?.startsWith('E')) return this.reset();
     const pending = snapshot.operations.filter(op => op.phase !== 'terminal' && (!snapshot.activeRun || op.run_id === snapshot.activeRun.id));
@@ -35,16 +44,23 @@ export class CompanionSceneFacts {
     }
     const current: SceneFact = { kind, phase: 'active', outcome: null, count: children ? Math.min(children, 99) : null };
     let receipt: SceneFact | null = null;
+    let proof: MatchedCompanionReceipt | null = null;
     for (const operation of snapshot.operations) {
       const p = permission(operation);
       if (this.pendingPermissions.has(operation.id) && this.shownPermission?.operationId === operation.id
         && typeof p?.id === 'string' && this.shownPermission.permissionId === p.id && this.pendingPermissions.get(operation.id) === p.id) {
         const decision = p?.decision;
-        if (decision === 'allow_once' || decision === 'allow_always' || decision === 'deny') receipt = { kind: 'permission', phase: 'resolve', outcome: decision === 'deny' ? 'denied' : 'allowed', count: null };
+        if (decision === 'allow_once' || decision === 'allow_always' || decision === 'deny') {
+          const outcome = decision === 'deny' ? 'denied' : 'allowed';
+          receipt = { kind: 'permission', phase: 'resolve', outcome, count: null };
+          proof = { kind: 'permission', operationId: operation.id, permissionId: p.id, outcome };
+        }
       }
       if (this.shownQuestion === operation.id && this.pendingQuestions.has(operation.id) && operation.phase === 'terminal' && operation.outcome === 'succeeded'
-        && operation.result?.kind === 'control' && object(operation.result.value)?.answer_ref != null)
+        && operation.result?.kind === 'control' && object(operation.result.value)?.answer_ref != null) {
         receipt = { kind: 'question', phase: 'resolve', outcome: 'answered', count: null };
+        proof = { kind: 'question', operationId: operation.id, outcome: 'answered' };
+      }
     }
     this.pendingPermissions = new Map(pending.flatMap(op => { const id = unresolvedPermissionId(op); return id !== null ? [[op.id, id] as const] : []; }));
     this.pendingQuestions = new Set(pending.filter(op => op.executor === 'ask_user').map(op => op.id));
@@ -53,7 +69,7 @@ export class CompanionSceneFacts {
     this.shownQuestion = kind === 'question' && this.pendingQuestions.size === 1 ? [...this.pendingQuestions][0]! : null;
     // A current newer scene wins. A receipt can resolve only the scene that was actually shown.
     if (kind) this.shown = current;
-    else if (receipt && this.active.kind === receipt.kind) this.shown = receipt;
+    else if (receipt && this.active.kind === receipt.kind) { this.shown = receipt; this.receiptProof = proof; }
     else if (this.active.kind) this.shown = { ...this.active, phase: 'withdraw', outcome: null };
     this.active = kind ? current : none;
     return this.shown;

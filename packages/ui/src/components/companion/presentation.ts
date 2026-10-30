@@ -66,3 +66,26 @@ export function companionObserverAction(action: string | null, explicitReview = 
   return action && ['accept', 'prepare', 'think', 'output', 'output-emphasis', 'reading', 'editing',
     'coding-input', 'experiment-observe', 'browsing', 'checking', 'organizing', 'dispatch', 'dispatch-observe'].includes(action) ? 'execution-observe' : action;
 }
+
+/** One transient visual receipt shared by mutually exclusive display routes.
+ * Scope includes endpoint generation, observation, branch and consumer route.
+ * It never owns or clears the underlying request/decision. */
+export interface CompanionReceipt {
+  key: string;
+  scope: string;
+  kind: 'question' | 'permission';
+  operationId: string;
+  runId: string | null;
+  permissionId?: string;
+}
+export function companionReceipt(scope: string, proof: { kind: 'question' | 'permission'; operationId: string; permissionId?: string; outcome: 'answered' | 'allowed' | 'denied' }, runId: string | null = null): CompanionReceipt | null {
+  if (proof.outcome === 'denied') return null;
+  return { scope, runId, kind: proof.kind, operationId: proof.operationId, ...(proof.permissionId ? { permissionId: proof.permissionId } : {}),
+    key: JSON.stringify(['matched-receipt', scope, runId, proof.kind, proof.operationId, proof.permissionId ?? null]) };
+}
+export function currentCompanionReceipt(receipt: CompanionReceipt | null, scope: string, blocked: boolean, runId: string | null = null): CompanionReceipt | null {
+  return !blocked && receipt?.scope === scope && receipt.runId === runId ? receipt : null;
+}
+export function consumeCompanionReceipt(receipt: CompanionReceipt | null, completedKey: string | null): CompanionReceipt | null {
+  return receipt?.key === completedKey ? null : receipt;
+}
