@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "bundleSHA256": "9293ab547dd5e0879e9ae4cb9403a408bcab9524f8975c48c649126f713e35b1",
+  "pages": {
+    "atlas-000.png": {
+      "file": "occlusion-atlas-000.png",
+      "sha256": "44186597b38b152b23e64d07df49704aa48ce6b349a7df52a0e0f889c0c256e8",
+      "size": [
+        1995,
+        2034
+      ]
+    },
+    "atlas-001.png": {
+      "file": "occlusion-atlas-001.png",
+      "sha256": "901aaf7da6ced53ca723a651f6389d0755aac08abe41dbd8226bf9589db03e59",
+      "size": [
+        2000,
+        2032
+      ]
+    },
+    "atlas-002.png": {
+      "file": "occlusion-atlas-002.png",
+      "sha256": "137ed796408fdb7e00829c0e01567474f2f941e138f80b833a26e303b84547e0",
+      "size": [
+        1990,
+        2034
+      ]
+    },
+    "atlas-003.png": {
+      "file": "occlusion-atlas-003.png",
+      "sha256": "1e639b7ee558ef03810e5db27799f533cedb1f65594e1dd2cb7accfe444d1b03",
+      "size": [
+        2019,
+        2035
+      ]
+    },
+    "atlas-004.png": {
+      "file": "occlusion-atlas-004.png",
+      "sha256": "679e3790f2aa9d614c59ec52362d69ef67985f8028d0c1e1e326278bbb554229",
+      "size": [
+        1994,
+        2034
+      ]
+    },
+    "atlas-005.png": {
+      "file": "occlusion-atlas-005.png",
+      "sha256": "66247c39a64551a58928508ffbb307186164c986ea077f03ad4bb0ed565d76ab",
+      "size": [
+        2016,
+        2035
+      ]
+    },
+    "atlas-006.png": {
+      "file": "occlusion-atlas-006.png",
+      "sha256": "36aeda507c3e2675698ab3ed943299b33e7960abc69980d177a0bdc5cb950b42",
+      "size": [
+        2018,
+        2036
+      ]
+    },
+    "atlas-007.png": {
+      "file": "occlusion-atlas-007.png",
+      "sha256": "05b710c3b959a5b6d0c73d5b1b2edb49bfbfbbf19cd5247050da01fc9aa92efd",
+      "size": [
+        1988,
+        2037
+      ]
+    },
+    "atlas-008.png": {
+      "file": "occlusion-atlas-008.png",
+      "sha256": "a22cec88e64beb55b39ccc17fd37381b0b7efa58e97f87337465c957e69333e1",
+      "size": [
+        2001,
+        2036
+      ]
+    },
+    "atlas-009.png": {
+      "file": "occlusion-atlas-009.png",
+      "sha256": "0ce8f51bad918fb0373230606fc5305c7b7cbd751f2f0d73118fa80a87dd1abe",
+      "size": [
+        2006,
+        2037
+      ]
+    },
+    "atlas-010.png": {
+      "file": "occlusion-atlas-010.png",
+      "sha256": "5eff5c643d10b2db919443a0de71e45186b2a02bfe4fb54941ddefd0b00a88fb",
+      "size": [
+        2010,
+        2036
+      ]
+    },
+    "atlas-011.png": {
+      "file": "occlusion-atlas-011.png",
+      "sha256": "3287a803ac9d142dc430214dd7fe2cf4f9ba0d1b7906da07d2f7dd6fa12f31aa",
+      "size": [
+        2021,
+        2035
+      ]
+    },
+    "atlas-012.png": {
+      "file": "occlusion-atlas-012.png",
+      "sha256": "45ea330328390bc0395309caf7663a0b5967984c30c2642e117ef06f59331f66",
+      "size": [
+        1991,
+        2032
+      ]
+    },
+    "atlas-013.png": {
+      "file": "occlusion-atlas-013.png",
+      "sha256": "49d2d823b0c894fce8cf3c78464be63f21b9f94022101a1d5b1d4d32ad8e386a",
+      "size": [
+        2014,
+        2036
+      ]
+    },
+    "atlas-014.png": {
+      "file": "occlusion-atlas-014.png",
+      "sha256": "734bc22408a08d29787d463e33ade06350a13d18b7532516180637b80b38deba",
+      "size": [
+        1987,
+        2044
+      ]
+    },
+    "atlas-015.png": {
+      "file": "occlusion-atlas-015.png",
+      "sha256": "0635c39d3b03ce9ef15da6c7af9a8689adb7d7c37db1e8052acb7b3ee1db6891",
+      "size": [
+        2015,
+        2034
+      ]
+    },
+    "atlas-016.png": {
+      "file": "occlusion-atlas-016.png",
+      "sha256": "9b79b8d8722d98a433ccf7c022746a0e97ee3caf087c4f07dc130b826e8bbafa",
+      "size": [
+        2019,
+        2035
+      ]
+    }
+  }
+}

@@ -7,17 +7,20 @@ const bundle = (page = 'atlas-000.png', candidateOnly = false) => ({ candidateOn
  { page: 0, rect: [2, 2, 2, 2], offset: [1, 1], durationMs: 100 },
  { page: 1, rect: [1, 2, 2, 2], offset: [1, 1], durationMs: 100 },
 ] }] });
-function setup(value = bundle()) {
+function setup(value = bundle(), occlusion?: unknown, digest = (bytes: ArrayBuffer) => new TextDecoder().decode(bytes) === 'alpha' ? 'c'.repeat(64) : epoch) {
  const requests: string[] = [], disposed: string[] = [], decode: Array<() => void> = [], updates: Array<SceneCharacterMask | null> = [];
  const environment: SceneCharacterMaskEnvironment = {
-  fetch: async input => { requests.push(input); return input.endsWith('bundle.json') ? new Response(JSON.stringify(value)) : new Response('png'); },
-  sha256: async () => epoch,
+  fetch: async input => { requests.push(input); return input.endsWith('bundle.json') ? new Response(JSON.stringify(value))
+    : input.endsWith('occlusion.json') ? new Response(JSON.stringify(occlusion ?? null), { status: occlusion ? 200 : 404 })
+      : new Response(input.includes('occlusion-') ? 'alpha' : 'png'); },
+  sha256: async bytes => digest(bytes),
   decode: () => new Promise(resolve => { const href = `blob:atlas-${decode.length}`; decode.push(() => resolve({ href, width: 8, height: 8, dispose: () => disposed.push(href) })); }),
  };
  const cache = new SceneCharacterMaskCache('selected', value => updates.push(value), environment);
  return { cache, requests, disposed, decode, updates, environment };
 }
-const flush = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
+// Manifest and page reads settle through real Response bodies, not only microtasks.
+const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
 it('admits only the exact bundle hash/package/frame and fixed local resource names', async () => {
  const s = setup(); expect(await s.cache.setDrawing(drawing(0, otherEpoch))).toBeNull(); expect(s.requests).toEqual(['/companion-assets/bundle.json']);
  expect(await s.cache.setDrawing({ ...drawing(), packageId: '../secret' })).toBeNull(); expect(s.decode).toHaveLength(0);
@@ -104,4 +107,16 @@ it('a hidden surface cancels speculative decode and never publishes its late com
  const s = setup(value), first = s.cache.setDrawing(drawing()); await flush(); s.decode[0]!(); await first;
  await flush(); s.cache.clear(); const updates = s.updates.length; s.decode[1]!(); await flush();
  expect(s.cache.current).toBeNull(); expect(s.updates).toHaveLength(updates); expect(s.disposed).toEqual(['blob:atlas-0', 'blob:atlas-1']);
+});
+it('reads the bundle-bound alpha page instead of the colour atlas, and falls back on any mismatch', async () => {
+ const manifest = (bundleSHA256 = epoch) => ({ version: 1, bundleSHA256, pages: { 'atlas-000.png': { file: 'occlusion-atlas-000.png', sha256: 'c'.repeat(64), size: [8, 8] } } });
+ const s = setup(bundle(), manifest()), first = s.cache.setDrawing(drawing()); await flush(); s.decode[0]!();
+ expect((await first)?.rect).toEqual([1, 2, 2, 2]);
+ expect(s.requests.filter(x => x.includes('.png'))[0]).toBe(`/companion-assets/occlusion-atlas-000.png?epoch=${epoch}`);
+ expect(s.requests.some(x => x.startsWith('/companion-assets/atlas-000.png'))).toBe(false);
+ for (const fallback of [setup(bundle(), manifest(otherEpoch)), setup(bundle(), manifest(), () => epoch), setup(bundle())]) {
+  const pending = fallback.cache.setDrawing(drawing()); await flush(); fallback.decode[0]!();
+  expect((await pending)?.rect).toEqual([1, 2, 2, 2]);
+  expect(fallback.requests.filter(x => x.includes('.png')).at(-1)).toBe(`/companion-assets/atlas-000.png?epoch=${epoch}`);
+ }
 });

@@ -34,6 +34,9 @@ const paths: Record<SceneCharacterBundle, string> = { selected: '/companion-asse
 const validEpoch = (value: string) => /^[a-f0-9]{64}$/.test(value);
 const validPage = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.png$/.test(value) && !value.includes('..');
 interface PageJob { key: string; abort: AbortController; promise: Promise<DecodedAtlas> }
+/** Alpha-only pages derived from the same bundle (tools/desktop-companion-animation/build_occlusion_pages.py). */
+type OcclusionPages = ReadonlyMap<string, { file: string; sha256: string }>;
+const validDigest = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
 /** Current atlas plus at most one next atlas/job. Predictions never publish or replace current alpha. */
 export class SceneCharacterMaskCache {
@@ -41,6 +44,7 @@ export class SceneCharacterMaskCache {
   private request = 0;
   private epoch: string | null = null;
   private index: Promise<Map<string, CompanionPackage>> | null = null;
+  private occlusion: Promise<OcclusionPages | null> | null = null;
   private verifiedIndex: Map<string, CompanionPackage> | null = null;
   private spare: { key: string; atlas: DecodedAtlas } | null = null;
   private indexAbort: AbortController | null = null;
@@ -57,7 +61,7 @@ export class SceneCharacterMaskCache {
   /** Scope/drag/hide must call clear synchronously, so no old-mask frame can be rendered. */
   clear(): void {
     this.generation++; this.request++; this.publish(null); this.cancelPending();
-    this.indexAbort?.abort(); this.indexAbort = null; this.index = null; this.verifiedIndex = null; this.epoch = null;
+    this.indexAbort?.abort(); this.indexAbort = null; this.index = null; this.occlusion = null; this.verifiedIndex = null; this.epoch = null;
     this.spare?.atlas.dispose(); this.spare = null;
     this.page?.atlas.dispose(); this.page = null;
   }
@@ -80,6 +84,22 @@ export class SceneCharacterMaskCache {
       return index;
     })();
   }
+  /** Optional: a missing, stale or malformed manifest keeps the colour atlas as the silhouette source. */
+  private loadOcclusion(epoch: string, signal: AbortSignal): Promise<OcclusionPages | null> {
+    return (async () => {
+      const response = await this.environment.fetch(`${paths[this.selector]}occlusion.json`, signal);
+      if (!response.ok) return null;
+      const manifest: unknown = await response.json();
+      const pages = manifest && typeof manifest === 'object' ? (manifest as { bundleSHA256?: unknown; pages?: unknown }) : null;
+      if (!pages || pages.bundleSHA256 !== epoch || !pages.pages || typeof pages.pages !== 'object') return null;
+      const result = new Map<string, { file: string; sha256: string }>();
+      for (const [page, entry] of Object.entries(pages.pages as Record<string, { file?: unknown; sha256?: unknown }>)) {
+        if (!validPage(page) || typeof entry?.file !== 'string' || !validPage(entry.file) || !validDigest(entry.sha256)) return null;
+        result.set(page, { file: entry.file, sha256: entry.sha256 });
+      }
+      return result;
+    })().catch(() => null);
+  }
   private pageFor(epoch: string, asset: CompanionPackage, frameIndex: number): string {
     return `${epoch}:${asset.pages[asset.frames[frameIndex]!.page]!.file}`;
   }
@@ -99,9 +119,22 @@ export class SceneCharacterMaskCache {
     this.pending = job;
     job.promise = (async () => {
       const file = asset.pages[asset.frames[frameIndex]!.page]!.file;
-      const response = await this.environment.fetch(`${paths[this.selector]}${file}?epoch=${epoch}`, abort.signal);
-      if (!response.ok || abort.signal.aborted) throw new Error('Character mask atlas unavailable');
-      const decoded = await this.environment.decode(await response.blob(), abort.signal);
+      // The silhouette needs only alpha: prefer the bundle-bound alpha page (~14x smaller than
+      // the colour atlas). Its digest is checked; any mismatch falls back to the colour atlas.
+      const occlusion = (await this.occlusion)?.get(file);
+      let bytes: Blob | null = null;
+      if (occlusion && !abort.signal.aborted) {
+        const response = await this.environment.fetch(`${paths[this.selector]}${occlusion.file}?epoch=${epoch}`, abort.signal).catch(() => null);
+        const body = response?.ok ? await response.arrayBuffer() : null;
+        if (body && await this.environment.sha256(body) === occlusion.sha256) bytes = new Blob([body], { type: 'image/png' });
+      }
+      if (!bytes) {
+        const response = await this.environment.fetch(`${paths[this.selector]}${file}?epoch=${epoch}`, abort.signal);
+        if (!response.ok || abort.signal.aborted) throw new Error('Character mask atlas unavailable');
+        bytes = await response.blob();
+      }
+      if (abort.signal.aborted) throw new Error('Character mask atlas unavailable');
+      const decoded = await this.environment.decode(bytes, abort.signal);
       if (abort.signal.aborted || this.pending !== job || generation !== this.generation) { decoded.dispose(); throw new Error('Superseded character mask atlas'); }
       this.spare = { key, atlas: decoded }; // Never dispose the displayed page merely to prefetch.
       return decoded;
@@ -124,7 +157,10 @@ export class SceneCharacterMaskCache {
     if (!validEpoch(drawing.epoch) || typeof drawing.packageId !== 'string' || !drawing.packageId || !Number.isSafeInteger(drawing.frameIndex) || drawing.frameIndex < 0) { this.clear(); return null; }
     const key = JSON.stringify([drawing.epoch, drawing.packageId, drawing.frameIndex]);
     if (this.ready?.key === key) return this.ready;
-    if (this.epoch !== drawing.epoch) { this.clear(); this.epoch = drawing.epoch; this.index = this.loadIndex(drawing.epoch); }
+    if (this.epoch !== drawing.epoch) {
+      this.clear(); this.epoch = drawing.epoch; this.index = this.loadIndex(drawing.epoch);
+      this.occlusion = this.index.then(() => this.indexAbort ? this.loadOcclusion(drawing.epoch, this.indexAbort.signal) : null, () => null);
+    }
     const generation = this.generation, request = ++this.request;
     const latest = () => !this.disposed && generation === this.generation && request === this.request;
     try {

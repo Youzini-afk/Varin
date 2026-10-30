@@ -42,11 +42,22 @@ export function applyCompanionAccentPixels(pixels: Uint8ClampedArray, width: num
   return changed;
 }
 
-/** Two registered processed exposures (2 MiB); no atlas mutation or bitmap retention.
- * Bitmap identity invalidates cached pixels when a decoded generation is replaced. */
+/** No atlas mutation or bitmap retention; bitmap identity invalidates cached pixels when a decoded
+ * generation is replaced. Presentation cache sized by the drawn content: every eligible source of the shown package and of
+ * the package shown before it (about 1 MiB each, at least the two last exposures). A looping
+ * performance therefore recolours each source once instead of on every exposure change. */
 export class CompanionAccentMaterial {
   private cache = new Map<string, { bitmap: WeakRef<ImageBitmap>; pixels: ImageData }>();
-  clear(): void { this.cache.clear(); }
+  private shown: { id: string; sources: number } | null = null;
+  private previousSources = 0;
+  clear(): void { this.cache.clear(); this.shown = null; this.previousSources = 0; }
+  private capacity(sequence: CompanionPackage): number {
+    if (!this.shown || this.shown.id !== sequence.id) {
+      this.previousSources = this.shown?.sources ?? 0;
+      this.shown = { id: sequence.id, sources: new Set(sequence.frames.flatMap(frame => frame.sha256 && regions[frame.sha256] ? [frame.sha256] : [])).size };
+    }
+    return Math.max(2, this.shown.sources + this.previousSources);
+  }
   apply(stage: CanvasRenderingContext2D, sequence: CompanionPackage, bitmap: ImageBitmap, exposure: number, epoch: string | null, palette: CompanionAccentPalette = DEFAULT_COMPANION_ACCENT_PALETTE): boolean {
     const frame = sequence.frames[exposure], source = frame?.sha256 && regions[frame.sha256];
     if (epoch !== profile.bundleSHA256 || sequence.geometryReference !== profile.geometryReference || !source) return false;
@@ -59,7 +70,8 @@ export class CompanionAccentMaterial {
     applyCompanionAccentPixels(pixels.data, pixels.width, pixels.height, source, palette);
     stage.putImageData(pixels, 0, 0);
     this.cache.delete(key); this.cache.set(key, { bitmap: new WeakRef(bitmap), pixels });
-    while (this.cache.size > 2) this.cache.delete(this.cache.keys().next().value!);
+    const capacity = this.capacity(sequence);
+    while (this.cache.size > capacity) this.cache.delete(this.cache.keys().next().value!);
     return true;
   }
 }

@@ -184,7 +184,8 @@ export function mountCompanionScene(root: HTMLElement) {
   root.setAttribute('aria-hidden','true');
   let resetRoster=false;
   let maskCache:SceneCharacterMaskCache|null=null, maskSelector:'selected'|'review'|null=null, characterMask:SceneCharacterMask|null=null;
-  const hideRear=()=>{root.querySelector?.('[data-spatial-behind]')?.setAttribute('visibility','hidden');};
+  // Hiding edits the drawn layer in place, so its next frame must be written again.
+  const hideRear=()=>{const rear=root.querySelector?.('[data-spatial-behind]');if(!rear)return;rear.setAttribute('visibility','hidden');if(nodes)written.delete(nodes.layers);};
   let portfolioBeats=new Map<string,PortfolioBeat>();
   let portfolioCueStarted=0;
   let portfolioListen:PortfolioListen|null=null,workEpoch=performance.now();
@@ -194,6 +195,26 @@ export function mountCompanionScene(root: HTMLElement) {
   let teamBeats = new Map<string, TeamBeat>();
   const departing = new Map<string,{ member: TeamMember; at: number }>();
   let current: SceneUpdate | null=null, previous: SceneUpdate|null=null, started=0, previousAt=0, lastRevision=-1, frame=0, phaseStarted=0, previousElapsed=0, cueStarted=0;
+  const svgNS='http://www.w3.org/2000/svg';
+  const face=geometry.protectedFace;
+  const staticDefs=`<linearGradient id="paper" x1="0" y1="0" x2=".1" y2="1"><stop stop-color="#fffdf5"/><stop offset=".44" stop-color="#fbfcff"/><stop offset="1" stop-color="#dce7f1"/></linearGradient><linearGradient id="spirit-glass" x2=".3" y2="1"><stop stop-color="#fffaf4" stop-opacity=".8"/><stop offset="1" stop-color="#c3cee9" stop-opacity=".45"/></linearGradient><linearGradient id="ribbon" x2=".3" y2="1"><stop stop-color="#e9e5f5"/><stop offset=".48" stop-color="#c7c6e0"/><stop offset="1" stop-color="#a1afcb"/></linearGradient><linearGradient id="metal" x2=".8" y2="1"><stop stop-color="#fff2ca"/><stop offset=".4" stop-color="#e6ce9d"/><stop offset="1" stop-color="#b59b74"/></linearGradient><filter id="paper-depth" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#273449" flood-opacity=".13"/></filter><clipPath id="outside-face"><path d="M-100 -100H400V350H-100Z M${face.x} ${face.y}V${face.y+face.height}H${face.x+face.width}V${face.y}Z" clip-rule="evenodd"/></clipPath>`;
+  let nodes:{svg:Element;mask:Element;frame:Element;clip:Element;layers:Element;team:Element}|null=null;
+  const written=new WeakMap<Element,string>();
+  const surface=()=>{
+    if(nodes&&root.firstChild===nodes.svg&&root.childNodes.length===1)return nodes;
+    const svg=root.ownerDocument.createElementNS(svgNS,'svg');
+    svg.setAttribute('width','100%');svg.setAttribute('height','100%');
+    svg.innerHTML=`<defs>${staticDefs}</defs><defs data-scene-mask=""></defs><g data-scene-frame=""><g clip-path="url(#outside-face)" data-scene-clip=""><g data-scene-layers=""></g><g data-scene-team=""></g></g></g>`;
+    const part=(name:string)=>svg.querySelector(`[data-scene-${name}]`)!;
+    nodes={svg,mask:part('mask'),frame:part('frame'),clip:part('clip'),layers:part('layers'),team:part('team')};
+    root.replaceChildren(svg);
+    return nodes;
+  };
+  const write=(node:Element,markup:string)=>{if(written.get(node)!==markup){node.innerHTML=markup;written.set(node,markup);}};
+  const attribute=(node:Element,name:string,value:string|null)=>{
+    if(value===null){if(node.hasAttribute(name))node.removeAttribute(name);}
+    else if(node.getAttribute(name)!==value)node.setAttribute(name,value);
+  };
   const render = (now: number) => {
     frame=0;
     if(workTimer!==undefined){clearTimeout(workTimer);workTimer=undefined;}
@@ -203,7 +224,6 @@ export function mountCompanionScene(root: HTMLElement) {
     const d:DesktopCompanionScene=departing.size?{...incoming,team:{members:[...(incoming.team?.members??[]),...[...departing.values()].map(value=>value.member)],overflowCount:incoming.team?.overflowCount??null}}:incoming;
     const w=root.clientWidth||522,h=root.clientHeight||432;
     const scale=l.character.width*w/geometry.character.width, tx=l.character.x*w-geometry.character.x*scale,ty=l.character.y*h-geometry.character.y*scale;
-    const face = geometry.protectedFace;
     // Layout anchors are independent of identity art; replace together with the next canonical.
     const leftEdge=(l.visible.x*w-tx)/scale,rightEdge=((l.visible.x+l.visible.width)*w-tx)/scale;
     const leftCrop=leftEdge>9, rightCrop=rightEdge<285;
@@ -230,7 +250,14 @@ export function mountCompanionScene(root: HTMLElement) {
     const withdraw = terminal && !d.reducedMotion ? ease(phaseAge/end) : 0;
     const layers = withdraw ? `<g transform="translate(${150*withdraw*.08} ${148*withdraw*.08}) scale(${1-withdraw*.08})">${body}</g>` : body;
     // All edge compositions are authored above; anchors never move with lanes.
-    root.innerHTML=`<svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg"><defs>${maskDefs}<linearGradient id="paper" x1="0" y1="0" x2=".1" y2="1"><stop stop-color="#fffdf5"/><stop offset=".44" stop-color="#fbfcff"/><stop offset="1" stop-color="#dce7f1"/></linearGradient><linearGradient id="spirit-glass" x2=".3" y2="1"><stop stop-color="#fffaf4" stop-opacity=".8"/><stop offset="1" stop-color="#c3cee9" stop-opacity=".45"/></linearGradient><linearGradient id="ribbon" x2=".3" y2="1"><stop stop-color="#e9e5f5"/><stop offset=".48" stop-color="#c7c6e0"/><stop offset="1" stop-color="#a1afcb"/></linearGradient><linearGradient id="metal" x2=".8" y2="1"><stop stop-color="#fff2ca"/><stop offset=".4" stop-color="#e6ce9d"/><stop offset="1" stop-color="#b59b74"/></linearGradient><filter id="paper-depth" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#273449" flood-opacity=".13"/></filter><clipPath id="outside-face"><path d="M-100 -100H400V350H-100Z M${face.x} ${face.y}V${face.y+face.height}H${face.x+face.width}V${face.y}Z" clip-rule="evenodd"/></clipPath></defs><g transform="translate(${tx} ${ty}) scale(${scale})" ><g clip-path="url(#outside-face)" ${d.layout==='spatial-b-v1'?'':'filter="url(#paper-depth)"'}><g opacity="${opacity}">${layers}</g>${teamLayer}</g></g></svg>`;
+    // Stable surface: static defs are parsed once, the mask only when its source changes,
+    // and each changing layer is rewritten only when its markup actually differs.
+    const s=surface();
+    write(s.mask,maskDefs);
+    attribute(s.frame,'transform',`translate(${tx} ${ty}) scale(${scale})`);
+    attribute(s.clip,'filter',d.layout==='spatial-b-v1'?null:'url(#paper-depth)');
+    attribute(s.layers,'opacity',String(opacity));
+    write(s.layers,layers);write(s.team,teamLayer);
     if(terminal&&phaseAge>=end&&!hasTeam) { root.replaceChildren(); return; }
     const portfolioMoving=d.kind==='portfolio'&&[...portfolioBeats.values()].some(beat=>now-beat.at<480);
     const teamMoving=[...teamBeats.values()].some(beat=>((d.kind==='dispatch'&&beat.entering) || beat.state==='leaving') && now-beat.at<650);

@@ -120,3 +120,21 @@ test('cache switches palettes without stale tint, reuses two exposures, and evic
   apply('vesper-dark', {} as ImageBitmap);
   expect(stage.getImageData).toHaveBeenCalledTimes(5);
 });
+
+test('a looping package recolours each of its sources once instead of on every exposure', () => {
+  const material = new CompanionAccentMaterial();
+  const sources = Object.keys(profile.sources).slice(0, 5);
+  // A loop that revisits five sources, like the authored work cycle.
+  const frames = [...sources, ...sources, ...sources].map(sha256 => ({ sha256 }));
+  const loop = { id: 'loop', canvas: [512,512], geometryReference: profile.geometryReference, frames } as CompanionPackage;
+  const stage = { getImageData: vi.fn(() => ({ width: 512, height: 512, data: data() })), putImageData: vi.fn() } as unknown as CompanionPackage & CanvasRenderingContext2D;
+  const bitmap = {} as ImageBitmap;
+  for (let exposure = 0; exposure < frames.length; exposure++) material.apply(stage, loop, bitmap, exposure, profile.bundleSHA256);
+  expect(stage.getImageData).toHaveBeenCalledTimes(sources.length);
+  expect(stage.putImageData).toHaveBeenCalledTimes(frames.length);
+  // A bridge keeps the loop's recoloured sources for the return.
+  const bridge = { id: 'bridge', canvas: [512,512], geometryReference: profile.geometryReference, frames: [{ sha256: Object.keys(profile.sources)[9]! }] } as CompanionPackage;
+  material.apply(stage, bridge, bitmap, 0, profile.bundleSHA256);
+  for (let exposure = 0; exposure < sources.length; exposure++) material.apply(stage, loop, bitmap, exposure, profile.bundleSHA256);
+  expect(stage.getImageData).toHaveBeenCalledTimes(sources.length + 1);
+});
