@@ -191,3 +191,8 @@ Manifest version 1 包含 `canvas: [512,512]`、独立 `geometryReference`、
 输出目录不得包含输入源。原画完整路线仍需正常速度、浅/深背景、native root与世界凳检查。
 Focused验证：`python tools/desktop-companion-animation/test_explicit_baseline.py`（包含真实共享播放器roundtrip，
 测试色块只检查编译合同，不是候选皮肤），以及既有 `test_prepare_seated.py`。
+
+显式基线可声明 `endpoints`：`geometryReference` 必须与基线一致；`open` / `closed` 各用
+`{pose, sourceSha256}` 绑定实际 canonical seated 原画；`closedSourceSha256` 明确列出闭盖原画
+（包括生活/睡眠中间画），不得用动作名或旧姿态字符串推断。编译器和运行时 loader 都验证这些
+绑定。元数据只描述原画端点，不授予 accepted 状态；缺少此声明的旧 selected 包仍使用其原有几何合同。

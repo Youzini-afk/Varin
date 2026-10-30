@@ -71,3 +71,31 @@ export function readCompanionPackage(value: unknown, review: boolean): Companion
     reviewStatus: typeof data.reviewStatus === 'string' ? data.reviewStatus : undefined,
     warning: typeof data.warning === 'string' ? data.warning : undefined };
 }
+
+/** Bundle-authored physical endpoints. Source membership describes drawings,
+ * never application state or acceptance; the loader verifies every binding. */
+export interface CompanionEndpoints {
+  geometryReference: string;
+  open: { pose: string; sourceSha256: string };
+  closed: { pose: string; sourceSha256: string };
+  closedSourceSha256: string[];
+}
+export function readCompanionEndpoints(value: unknown, packages: readonly CompanionPackage[]): CompanionEndpoints | null {
+  if (value === undefined) return null; // Existing selected legacy bundles have no explicit block.
+  const data = record(value);
+  if (typeof data.geometryReference !== 'string' || !data.geometryReference || !packages.length
+    || packages.some(asset => asset.geometryReference !== data.geometryReference || asset.entryPose !== asset.frames[0]?.pose || asset.exitPose !== asset.frames.at(-1)?.pose)) throw new Error('Endpoint geometry or drawing boundaries do not match bundle');
+  const seated = packages.filter(asset => !asset.gesture || asset.gesture.embeddedStool).flatMap(asset => asset.frames);
+  const endpoint = (value: unknown) => {
+    const row = record(value);
+    if (typeof row.pose !== 'string' || !row.pose || typeof row.sourceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(row.sourceSha256)
+      || !seated.some(frame => frame.pose === row.pose && frame.sha256 === row.sourceSha256)
+      || packages.some(asset => asset.frames.some(frame => frame.pose === row.pose && frame.sha256 !== row.sourceSha256))) throw new Error('Endpoint is not its exact seated drawing');
+    return { pose: row.pose, sourceSha256: row.sourceSha256 };
+  };
+  const open = endpoint(data.open), closed = endpoint(data.closed), membership = data.closedSourceSha256;
+  if (open.pose === closed.pose || open.sourceSha256 === closed.sourceSha256 || !Array.isArray(membership)
+    || new Set(membership).size !== membership.length || !membership.includes(closed.sourceSha256) || membership.includes(open.sourceSha256)
+    || membership.some(sha => typeof sha !== 'string' || !/^[a-f0-9]{64}$/.test(sha) || !seated.some(frame => frame.sha256 === sha))) throw new Error('Invalid closed drawing membership');
+  return { geometryReference: data.geometryReference, open, closed, closedSourceSha256: membership as string[] };
+}

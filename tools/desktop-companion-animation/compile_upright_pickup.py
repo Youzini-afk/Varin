@@ -198,6 +198,18 @@ def compile_explicit_baseline(manifest_path, output):
     seated = {f['sha256'] for p in packages if not p.get('gesture') or p['gesture'].get('embeddedStool') for f in p['frames']}
     if not set(canonical) <= seated:
         raise ValueError('Canonical source is not an actual displayed seated drawing')
+    endpoints = spec.get('endpoints')
+    if endpoints is not None:
+        if not isinstance(endpoints, dict) or endpoints.get('geometryReference') != geometry:
+            raise ValueError('Endpoint geometry does not match explicit baseline')
+        for key in ('open', 'closed'):
+            endpoint = endpoints.get(key)
+            if not isinstance(endpoint, dict) or canonical.get(endpoint.get('sourceSha256')) != endpoint.get('pose') or endpoint.get('sourceSha256') not in seated:
+                raise ValueError('Endpoint must bind its actual canonical seated source')
+        opened, closed = endpoints['open'], endpoints['closed']
+        membership = endpoints.get('closedSourceSha256')
+        if opened == closed or opened['sourceSha256'] == closed['sourceSha256'] or opened['pose'] == closed['pose'] or not isinstance(membership, list) or any(not isinstance(h, str) for h in membership) or len(set(membership)) != len(membership) or not set(membership) <= seated or closed['sourceSha256'] not in membership or opened['sourceSha256'] in membership:
+            raise ValueError('Invalid explicit closed drawing membership')
     pairs = {}
     for pair in spec.get('counterparts', []):
         h, d = pair['sourceSHA256'], pair['detachedSHA256']
@@ -291,6 +303,8 @@ def compile_explicit_baseline(manifest_path, output):
     shutil.copyfile(stool_path, output / stool_file)
     bundle = {'version': 1, 'candidateOnly': True, 'geometryEpoch': geometry, 'packages': packages,
               'worldStool': {'file': stool_file, 'sha256': stool_hash, 'canvas': [512, 512]}}
+    if endpoints is not None:
+        bundle['endpoints'] = endpoints
     (output / 'bundle.json').write_text(json.dumps(bundle, indent=2) + '\n')
     receipt = {'candidateSHA256': hashlib.sha256((output / 'bundle.json').read_bytes()).hexdigest(),
                'manifestSHA256': hashlib.sha256(raw).hexdigest(), 'geometryReference': geometry,

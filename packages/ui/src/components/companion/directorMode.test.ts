@@ -18,3 +18,14 @@ it('keeps legacy and manual development review separate from explicit candidate 
 it('does not require obsolete spatial inspection art to keep the role-safe director route', () => {
   expect(hasAcceptedDirectorAssets(bundle.filter(asset => !asset.action?.startsWith('director-listen-')))).toBe(true);
 });
+
+import { readCompanionEndpoints } from './sequencePackage';
+it('admits an explicitly verified independent geometry only with the required accepted actions',()=>{
+  const open='a'.repeat(64),closed='b'.repeat(64);
+  const assets=bundle.map(asset=>{const isClosed=asset.action==='idle-closed',pose=isClosed?'closed-canonical':'open-canonical';return {...asset,geometryReference:'independent-drawings',entryPose:pose,exitPose:pose,frames:[{...asset.frames[0]!,pose,sha256:isClosed?closed:open}]};});
+  const endpoints=readCompanionEndpoints({geometryReference:'independent-drawings',open:{pose:'open-canonical',sourceSha256:open},closed:{pose:'closed-canonical',sourceSha256:closed},closedSourceSha256:[closed]},assets);
+  expect(hasAcceptedDirectorAssets(assets)).toBe(false);
+  expect(hasAcceptedDirectorAssets(assets,endpoints)).toBe(true);
+  expect(hasAcceptedDirectorAssets(assets.map(asset=>({...asset,reviewStatus:'candidate'})),endpoints)).toBe(false);
+  expect(hasAcceptedDirectorAssets(assets.filter(asset=>asset.action!=='director-supervise'),endpoints)).toBe(false);
+});

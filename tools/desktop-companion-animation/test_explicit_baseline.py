@@ -62,6 +62,24 @@ assert.equal(p.gesture,null); assert.equal(p.current.id,'rest'); assert.equal(p.
 """.replace('PLAYER', json.dumps((ROOT / 'packages/ui/src/components/companion/playback.mjs').as_uri())).replace('BUNDLE', json.dumps(str(self.root / 'out/bundle.json')))
         subprocess.run(['node', '--input-type=module', '-e', script], check=True)
 
+    def test_explicit_endpoints_bind_only_actual_canonical_sources(self):
+        c, d = self.root / 'closed.png', self.root / 'closed-body.png'
+        Image.new('RGBA', (512, 512), (40, 90, 170, 255)).save(c)
+        Image.new('RGBA', (512, 512), (50, 90, 180, 255)).save(d)
+        ch, dh = sha(c), sha(d)
+        self.data['canonicalSources'][ch] = 'test:closed'
+        self.data['counterparts'].append({'sourceSHA256': ch, 'detachedSHA256': dh})
+        self.data['sequences'].append({'id': 'closed', 'kind': 'action', 'action': 'idle-closed', 'frames': [{'source': str(c), 'sourceSHA256': ch, 'durationMs': 100}]})
+        self.data['nodes'] += [
+            {'id': 'closed-body', 'source': str(d), 'sourceSHA256': dh, 'durationMs': 10, 'gesture': {'entrySourceSha256': ch, 'grabNext': [], 'releaseNext': ['closed-seat'], 'embeddedStool': False, 'settled': False, 'restoreOnRelease': False, 'releaseViaFrames': True}},
+            {'id': 'closed-seat', 'source': str(c), 'sourceSHA256': ch, 'durationMs': 10, 'gesture': {'grabImmediate': 'closed-body', 'grabNext': [], 'releaseNext': [], 'embeddedStool': True, 'settled': True, 'restoreOnRelease': False}}]
+        self.data['endpoints'] = {'geometryReference': 'test-only', 'open': {'pose': 'test:rest', 'sourceSha256': self.sh}, 'closed': {'pose': 'test:closed', 'sourceSha256': ch}, 'closedSourceSha256': [ch]}
+        bad = copy.deepcopy(self.data); bad['endpoints']['closed']['sourceSha256'] = self.sh
+        with self.assertRaises(ValueError): self.build(bad)
+        self.assertFalse((self.root / 'out').exists())
+        self.build()
+        self.assertEqual(json.loads((self.root / 'out/bundle.json').read_text())['endpoints'], self.data['endpoints'])
+
     def test_bad_source_or_graph_rejected_before_output(self):
         cases = [
             lambda d: d['counterparts'].clear(),

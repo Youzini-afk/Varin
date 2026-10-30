@@ -4,7 +4,7 @@ import { createDirectorReviewFixtureSession, type DirectorReviewStep } from '@/c
 import { useCompanionDirector } from '@/components/companion/useCompanionDirector';
 import { useDirectorPortfolio } from '@/components/companion/useDirectorPortfolio';
 import { directorToolDetail } from '@/components/companion/directorPortfolio';
-import { companionLocalIdle, directorLocalResponse } from '@/components/companion/directorLocalInteraction';
+import { companionLocalIdle, companionClosedDrawing, companionClosedSequence, companionSafeOpenDrawing, directorLocalResponse } from '@/components/companion/directorLocalInteraction';
 import { directorBodyAction } from '@/components/companion/directorBody';
 import { useCompanionAttention } from '@/components/companion/useCompanionAttention';
 import { useCompanionVisualIntent } from '@/components/companion/useCompanionVisualIntent';
@@ -18,7 +18,7 @@ import { createRoot } from 'react-dom/client';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type DesktopCompanionDrawing, type RuntimeAPIs, type ThreadIdentity, type ThreadSnapshot, type ThreadSummary } from '@varin/application-client';
 import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
 import { invokeDesktop, isElectronShell } from '@/lib/desktop';
-import { readCompanionPackage, type CompanionPackage } from '@/components/companion/sequencePackage';
+import { readCompanionPackage, readCompanionEndpoints, type CompanionEndpoints, type CompanionPackage } from '@/components/companion/sequencePackage';
 import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
 import { route, type PlaybackAsset } from '@/components/companion/playback.mjs';
@@ -86,7 +86,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [error, setError] = React.useState('');
   const [asset, setAsset] = React.useState<CompanionPackage>();
   const [assetList, setAssetList] = React.useState<CompanionPackage[]>([]);
-  const directorMode = companionDirectorMode(assetList, review, directorReview);
+  const [bundleEndpoints, setBundleEndpoints] = React.useState<CompanionEndpoints | null>(null);
+  const directorMode = companionDirectorMode(assetList, review, directorReview, bundleEndpoints);
   const [imageLibrary, setImageLibrary] = React.useState<Record<string, ImageBitmap[]>>({});
   const imageCache = React.useRef<Record<string, ImageBitmap[]>>({});
   const atlasReader = React.useRef<((name: string) => Promise<ImageBitmap>) | null>(null);
@@ -214,16 +215,16 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const localDirectorResponse = (event: 'tap' | 'tap-repeat' | 'hover') => {
     const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
     const shownFrame = shown?.frames[displayedDrawing.current?.exposure ?? -1];
-    const decision = directorLocalResponse({ event, idle: localInteractionIdle, responsePlaying: !!directorLocalAction,
+    const decision = directorLocalResponse({ event, responseAvailable: usableDirectorExpression, idle: localInteractionIdle, responsePlaying: !!directorLocalAction,
       // A stable open listening hand pose first takes the existing actual-source
       // recovery bridge to the response's open-user entrance; it is never cut.
-      safeOpenEndpoint: !!shownFrame?.exitTo?.length && (shownFrame.pauseSafe === true || shownFrame.pose === 'upright-v2:open-user') && shown?.entryPose !== 'upright-v2:closed',
+      safeOpenEndpoint: companionSafeOpenDrawing(shown, shownFrame, bundleEndpoints),
       playfulAvailable: usableAction('tap-repeat-response'),
-      closedPlayfulAvailable: assetList.some(item => item.action === 'tap-repeat-response' && item.entryPose === 'upright-v2:closed' && item.exitPose === 'upright-v2:closed' && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate')), openHoverAvailable: usableAction('open-hover-response'), current: director.health === 'current', visible: !document.hidden,
+      closedPlayfulAvailable: assetList.some(item => item.action === 'tap-repeat-response' && companionClosedSequence(item, bundleEndpoints) && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate')), openHoverAvailable: usableAction('open-hover-response'), current: director.health === 'current', visible: !document.hidden,
       interacting: companionWindow.phase !== 'rest', blockedUI: controlsOpen || attentionOpen || manualReview,
       finiteHandover: ['director-intake', 'director-gather-present'].includes(directorBaseAction)
         || !!shown && ['director-intake', 'director-gather-present'].includes(shown.action ?? '') && (displayedDrawing.current?.exposure ?? 0) < shown.frames.length - 1,
-      closed: !!shown && (shown.entryPose === 'upright-v2:closed' && shown.exitPose === 'upright-v2:closed' || ['rest-sleep', 'relax-idle'].includes(shown.action ?? '')) });
+      closed: companionClosedDrawing(shown, shownFrame, bundleEndpoints) });
     if (!decision) return;
     // End this inspection sentence, not its project facts; do not replay LISTEN.
     if (usableAction(decision)) {
@@ -345,10 +346,11 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       if (!allowCandidates && data.candidateOnly === true) throw new Error('Review-only artwork cannot be installed for normal playback');
       const nextPackages = Array.isArray(data.packages) ? data.packages.map(value => readCompanionPackage(value, allowCandidates)) : [readCompanionPackage(raw, allowCandidates)];
       if (!nextPackages.length || new Set(nextPackages.map(item => item.id)).size !== nextPackages.length) throw new Error('Empty bundle or duplicate sequence identity');
+      const nextEndpoints = readCompanionEndpoints(data.endpoints, nextPackages);
       for (const page of decodedPages.current.values()) page.image?.close();
       decodedPages.current.clear();
       imageCache.current = {}; loadingImages.current.clear(); atlasReader.current = readImage;
-      setImageLibrary({}); setAssetList(nextPackages);
+      setImageLibrary({}); setAssetList(nextPackages); setBundleEndpoints(nextEndpoints);
       setAsset(manualSelection ? nextPackages[0] : undefined); setExposure(0);
     } catch (cause) { setError(String(cause)); }
   };
