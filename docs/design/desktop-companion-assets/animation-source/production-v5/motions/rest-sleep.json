@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "id": "v5-rest-sleep-working-phrase",
+  "action": "rest-sleep",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "entry": [
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 650
+    },
+    {
+      "sourceId": "sleep-08-low-approach-r2",
+      "durationMs": 120
+    },
+    {
+      "sourceId": "sleep-07-yawn-release-r2",
+      "durationMs": 140
+    },
+    {
+      "sourceId": "sleep-01-yawn-approach",
+      "durationMs": 160
+    },
+    {
+      "sourceId": "sleep-02-yawn-contact",
+      "durationMs": 380
+    },
+    {
+      "sourceId": "sleep-07-yawn-release-r2",
+      "durationMs": 160
+    },
+    {
+      "sourceId": "sleep-08-low-approach-r2",
+      "durationMs": 140
+    },
+    {
+      "sourceId": "sleep-03-return-droop",
+      "durationMs": 650
+    }
+  ],
+  "hold": {
+    "sourceId": "sleep-04-stable-sleep-r2",
+    "until": "explicit wake or interruption",
+    "indefinite": true,
+    "previewDurationMs": 1400
+  },
+  "wake": [
+    {
+      "sourceId": "sleep-04-stable-sleep-r2",
+      "durationMs": 450
+    },
+    {
+      "sourceId": "sleep-05-wake-eyes",
+      "durationMs": 450
+    },
+    {
+      "sourceId": "sleep-06-wake-support-r2",
+      "durationMs": 400
+    },
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 1000
+    }
+  ],
+  "routes": "sleep-routes.json",
+  "runtimeApproval": false,
+  "sleepPolicy": "Stable sleep FG holds until wake or interruption; no invented breathing. Wake never replays yawn. Interruption releases mouth contact before low hand, wakes eyes before carry. D recovery is finite even when asleep.",
+  "semantics": "No automatic wake after preview hold. Wake does not replay yawn; detached recovery remains finite. No task or approval side effects."
+}

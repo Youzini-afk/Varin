@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "status": "selected-source-checkpoint-not-runtime-admission",
+  "inputs": [
+    {
+      "reference": "local-review:studies/sleep-v5-sequence/paired-r3/compiler-handoff-r1.json",
+      "sha256": "b057bd069b41e06c58d1d6b743a507e08d6263e970174ecb5c2f60a7cc1a9f60"
+    },
+    {
+      "reference": "local-review:studies/failure-v5-sequence/frozen-timing-and-exits.json",
+      "sha256": "f036fccb1b4e2f101e7e644b3c50ed4366a2dc68ff33b1f4333cfd00ae2e87bc"
+    }
+  ],
+  "sourceAliases": {
+    "open-neutral": "neutral",
+    "brake-early": "failure-brake-early",
+    "concern-peak": "failure-concern-peak",
+    "contract-mid": "failure-contract-mid",
+    "release-first": "failure-release-first",
+    "recover-mid": "failure-recover-mid",
+    "recover-ready": "failure-recover-ready"
+  },
+  "selectedSources": [
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/sleep/08-low-approach-r2.png",
+      "sha256": "1af560cfd8c5e793aa54440662d914a61baa0c44e37d1d6f87325405331271ad",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/sleep/08-low-approach-r2.png",
+      "sha256": "135e70b4d144bb38f43ba58e4b6e1ef8f26c876708db0e1cf6abf102bacdcc54",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/sleep/07-yawn-release-r2.png",
+      "sha256": "4005bd51d022d4791471127bcc289b99e0851bb7807dc908753a1afd06c085e1",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/sleep/07-yawn-release-r2.png",
+      "sha256": "6ebf4cc42cccef45cb521323ec8749ee5679642e3f39ebd60f4d0a0ec46a3e4d",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/sleep/01-yawn-approach.png",
+      "sha256": "588766b01f045f50173c5fca05fa9bc00207350a7d44ef55f596de83e52c2951",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/sleep/01-yawn-approach.png",
+      "sha256": "e05f3cb6dc7eb507aeb790bee1292df7451ec46ad69f6cbb2bdc51d94551fba8",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/sleep/02-yawn-contact.png",
+      "sha256": "5dcdf88260ccc94507a9e623acd5df2131eaab7ce0ea5fdd7ebdc07a14ad7792",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/sleep/02-yawn-contact.png",
+      "sha256": "dc93d55ae92c93624e1a8bf870cb37a5ceba652d256ff9fb4e29ed611d74ba79",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/sleep/03-return-droop.png",
+      "sha256": "a799d7ef90f38a24b3d73f9403c856b795cb61e25ce3b9c33b757b5c66786aff",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/sleep/03-return-droop.png",
+      "sha256": "f2d61621b2e93007dba5116c7e38964857ed3500193b37d654d9927f2d7f3e0d",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/sleep/04-stable-sleep-r2.png",
+      "sha256": "cc3390513270c3b744d3b51d4fce3bbe50214a59962a9bb5b5720192df336a9f",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/sleep/04-stable-sleep-r2.png",
+      "sha256": "7c7131a735cf74c179b9d28c8e6c0f8cc03eced6987ee07882ddeb648647ebad",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/sleep/05-wake-eyes.png",
+      "sha256": "b20bff1937d8d409e4dfc344789561e0e9405c7f4303ab6ffaa1aa59385cd411",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/sleep/05-wake-eyes.png",
+      "sha256": "aecc91f5d7cf095387b330982db17d237a14bb984e81ce12326e16f787fb2f8e",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/sleep/06-wake-support-r2.png",
+      "sha256": "941485c0199bca0767057714d8061870c69294c732fc7c84fd739d5865b838fc",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/sleep/06-wake-support-r2.png",
+      "sha256": "6d909202e7b1adbbbd9bf95d3c20e5a4d190680982544dc78ff5d749526dbbf4",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+      "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+      "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/brake-early.png",
+      "sha256": "0811182f10eb613b1b36ab52145e81e87053c147cd46d0572aa8388d0b3de7b6",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/brake-early.png",
+      "sha256": "d13c09ebe6b2c2c27137ce240b3723924440d495a87d101f28f866362989666e",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/concern-peak.png",
+      "sha256": "5da241400ff0d08294d653ad1dfd817c19df1f4123fb7c427243ba183ed504fd",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/concern-peak.png",
+      "sha256": "5ff66f4bc85061d5e53ecbe828c01d6a62789048ded336da661f5f5752a288a3",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/contract-mid.png",
+      "sha256": "1d131c78aea90b21710f8c2b8bf7a65b191041e31ec49a2cc0a142d084d7532b",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/contract-mid.png",
+      "sha256": "03dc65ed379333aa32f10185d265cd65e151b81990dfc651a4ff5c6b91b884f9",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/release-first.png",
+      "sha256": "a1267550dbdf6ba6349ede9317e848f82cd6364d9b93dbc2d9969d0a00a65e0d",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/release-first.png",
+      "sha256": "2fbdc8dcfed6481e2a29e0195c1cdde597fa1898c8a1a52b3f8654644d25954a",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-mid.png",
+      "sha256": "e6230590e822f8a489a7dd07763bae33985a67409ba8e3468857cbfec5f8946e",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-mid.png",
+      "sha256": "5302bd0f2d1140421099fbdfea413705a21b870e390bb29921c49b76850376f6",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-ready.png",
+      "sha256": "32d17a3f63733ab62cfd2060e63a0f51dbf8d47f55f2786ea39e813083756525",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-ready.png",
+      "sha256": "78920f4e65c77cb701ed22ec38a1e9a28395b11ec00271b95905cd7f8aecbcf0",
+      "operation": "copy-selected"
+    }
+  ],
+  "selectionNotes": [
+    "stop-entry excluded: generator returned almost peak rather than early brake; brake-early replaces it.",
+    "contract-mid selected as actual peak due to stronger shoulder/chest contraction than file named concern-peak.",
+    "Body recovery returns availability, not success or resolution; authoritative known-failure state remains unchanged."
+  ],
+  "sleepPolicy": "Stable sleep FG holds until wake or interruption; no invented breathing. Wake never replays yawn. Interruption releases mouth contact before low hand, wakes eyes before carry. D recovery is finite even when asleep.",
+  "evidence": {
+    "parentReview": "Selected FG/D pairs reviewed at360; candidate review only.",
+    "runtimeBatch": "in progress at plan creation; no runtime result claimed."
+  },
+  "excluded": [
+    "Rejected failure stop-entry",
+    "Receipt/welcome families not ready",
+    "Proofs, raw tries and diagnostic runtime bundles"
+  ],
+  "limits": [
+    "Source-only checkpoint; no public installation or normal admission.",
+    "Native world-stool/root and temporal acceptance remain separate gates.",
+    "Original PNG hashes must not substitute for prepared display SHA."
+  ]
+}
