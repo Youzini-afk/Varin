@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "status": "selected-source-checkpoint",
+  "preparation": "Existing whole-canvas fixed-stool preparation; independent authored same-pose detached originals; no rig, face patch, warp or per-frame bbox alignment.",
+  "selectedSources": [
+    {
+      "id": "active-work-entry",
+      "foreground": "foreground/active-work/entry.png",
+      "foregroundSHA256": "ea1fdfecc5ef4f3483009cae63826ef1b7da01fe253c5abd8270c0df1f651930",
+      "detached": "detached/active-work/entry.png",
+      "detachedSHA256": "a25f1b5471112479913494af9592ab14c4ca34ae05e220fba50d6aaf95a033ee",
+      "prepared": {
+        "ordinary": "09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+        "detached": "70d596d1655aadae7a0e57ca2f8bbb17cb04d297bc7332efc5cf365d5191cc31"
+      }
+    },
+    {
+      "id": "active-work-engage",
+      "foreground": "foreground/active-work/engage.png",
+      "foregroundSHA256": "ff69e80edee7040e3907d796bfe9896a1245ea97527070d92fedca5a035eb1dc",
+      "detached": "detached/active-work/engage.png",
+      "detachedSHA256": "3d4dd107455a81a11d7bdcdc954b3bb4518503fce875a1e50a079b61165b1f02",
+      "prepared": {
+        "ordinary": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+        "detached": "3ca6a4757b5a1b3c308590282173c86d78d3bdee3f7047d5f15779588940178f"
+      }
+    },
+    {
+      "id": "active-work-key-left",
+      "foreground": "foreground/active-work/key-left.png",
+      "foregroundSHA256": "1fae75fc32e6390f505a10772b3bf4da2775ebbff5117cee4e51ca35e0db91b1",
+      "detached": "detached/active-work/key-left.png",
+      "detachedSHA256": "fec29310e03785d9979c9aaeeccea73baac9aa9c0e610d143cd606cf1a924c2f",
+      "prepared": {
+        "ordinary": "f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+        "detached": "90c5fde6613435a25030338de92f1804a122311d404ee511cbe193e720548f2c"
+      }
+    },
+    {
+      "id": "active-work-key-right",
+      "foreground": "foreground/active-work/key-right.png",
+      "foregroundSHA256": "9fdf4601f0e2fef6b73bc6392fe1752ce2054588e5c62f008aca6f1abf11743c",
+      "detached": "detached/active-work/key-right.png",
+      "detachedSHA256": "ff79c8f8503e06833f1c58d4075c986c5cc9117580febb702b37c0c5c4f6af39",
+      "prepared": {
+        "ordinary": "eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+        "detached": "f3411c1d948bb2df2cda9794dc3b0a641efa1da64d3b0dbaac364cf36d5f2e6a"
+      }
+    },
+    {
+      "id": "active-work-read",
+      "foreground": "foreground/active-work/read.png",
+      "foregroundSHA256": "d3217c237dbeee68a5969d4ced9e7b936cd1191759326e05812164a2dd4762bf",
+      "detached": "detached/active-work/read.png",
+      "detachedSHA256": "195f8fd49aa847734f2d11341a1cdb9b37be87c4ab1549a709b657d5f3686382",
+      "prepared": {
+        "ordinary": "d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+        "detached": "6460676469485113040cda24de3f868dbd19ef8ce1595a5207a5bde6961d7a37"
+      }
+    },
+    {
+      "id": "active-work-release",
+      "foreground": "foreground/active-work/release.png",
+      "foregroundSHA256": "856f282ebb81ca4d114d1af6afb2d5ceffc720cc4994900e7ee55334b90bf747",
+      "detached": "detached/active-work/release.png",
+      "detachedSHA256": "3639de1883115a0f61949f43b903c7ba4acab83da8edfa3a65f89ab5d1978ce4",
+      "prepared": {
+        "ordinary": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+        "detached": "f2152105c7b70166a67e7fb3cdb58c2a07f2dcf064cf83cd0d47195ef36c614f"
+      }
+    },
+    {
+      "id": "active-work-recover",
+      "foreground": "foreground/active-work/recover.png",
+      "foregroundSHA256": "9817955d1feacd8093656841243a3f3491162c45a1c6c3965bd8ed6d8e4c0b4c",
+      "detached": "detached/active-work/recover.png",
+      "detachedSHA256": "08b9c2d29969133d99c24f2bdaf420b0cb6017d7b475df8e162b080651a4c9fc",
+      "prepared": {
+        "ordinary": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+        "detached": "215eb1668f3c11fb5d2cf429238c1e8b6ec791143cd0dd2dd9922fcfb23b35b5"
+      }
+    }
+  ],
+  "existingSourcesUnchanged": true,
+  "reviewScope": [
+    "Parent assistant normal360 actual-player ordered loop and permission-exit review",
+    "Seven same-pose counterpart static360 review",
+    "Full source/package invariance and production-player interruption/regrab audit"
+  ],
+  "notClaimed": [
+    "User full motion acceptance",
+    "Native cross-platform acceptance",
+    "Task or tool execution proof"
+  ],
+  "candidateSHA256": "f1062fe37476af76c18302850c94ef0e90949ba992ede1699daec236a59b119b",
+  "selectedBundleSHA256": "255e32ff1fbdc3efc7418aaa3901d9304542e9e83c13989a1d35c2e38348b2ca"
+}

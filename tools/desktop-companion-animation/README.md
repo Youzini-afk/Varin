@@ -221,9 +221,9 @@ already-prepared baselines and the legacy default path remain unchanged.
 raw recipe identity and encoding. Different tool versions may produce different
 PNG bytes: a mismatch fails rather than silently changing pose identities. The
 selected reference build uses Python 3.12 / Pillow 12.3.0; its expected candidate
-bundle SHA with the committed `atlasSourceOrder` is `f01354e53d36d1596d64da99748e43b7b04c727ca439750ab25850da1ef49a34`.
+bundle SHA with the committed `atlasSourceOrder` is `f1062fe37476af76c18302850c94ef0e90949ba992ede1699daec236a59b119b`.
 Omitting that optional order uses SHA-sorted atlas layout instead.
-A full fresh build needs about165MiB for prepared PNGs plus atlases (pool entries
+A full fresh build needs about173MiB for prepared PNGs plus atlases (pool entries
 hardlink the prepared PNGs). No historical pool is required. Output stays
 `candidateOnly`; this command neither installs nor visually accepts a skin.
 

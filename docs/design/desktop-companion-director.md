@@ -141,7 +141,7 @@ Local attention and global idle eligibility use this same management mode. A col
 
 ## 当前功能分支产物与验证边界（2026-10-30）
 
-当前公共 selected bundle 为 `3b213acef56973b5c1d0f650bd24be8afdab0bafe7c667d398e06fd957173595`，对应v5候选 `f01354e53d36d1596d64da99748e43b7b04c727ca439750ab25850da1ef49a34`。闭盖共享端点采用用户选定C与同姿去凳重绘，其他245源保持不变。247张真实准备图与422个包经过独立可移植重复构建、RGBA/注册偏移和原有路线语义校核；图集按作者动作及直接提起依赖排布，不改变动作时长或事实触发。当前acceptance.json绑定本次精确选择、14秒播放器开合/提放审阅和未验证事项；旧原生观察不自动授予新源完整原生验收。**资源选择不是用户逐帧认可或最终完整视觉验收。** 开盖轻点使用已选短暂愉快眨眼；闭盖hover沿真实开盖路径进入注意，闭盖连续轻点没有独立动作时不伪装已覆盖。安静看护复用中立，不把后台工具状态凑成新身体动作。
+当前公共 selected bundle 为 `255e32ff1fbdc3efc7418aaa3901d9304542e9e83c13989a1d35c2e38348b2ca`，对应v5候选 `f1062fe37476af76c18302850c94ef0e90949ba992ede1699daec236a59b119b`。261张真实准备图与444个包由可移植精选原画独立构建；本次持续工作新增7组原画/同姿去凳，原247源与422包的完整画布像素、注册偏移和路线语义不变，用户选定闭盖C及开盖中立保留。`work-active`以5590ms交替敲键/读屏循环表达真实进行中的工作，注意事项优先，不从Bot模式本身或具体工具猜测工作。acceptance.json绑定精确选择、正常360px播放器循环/权限退出与同姿配对审阅和未验证事项；旧原生观察不自动授予新源完整原生验收。**资源选择不是用户逐帧认可或最终完整视觉验收。** 开盖轻点使用已选短暂愉快眨眼；闭盖hover沿真实开盖路径进入注意，闭盖连续轻点没有独立动作时不伪装已覆盖。安静看护继续复用中立。
 
 有限Linux正常入口已观察无需review控件加载、绝对坐标拖动精确跟随、悬空去凳/落座恢复与闭盖转开盖注意。既有候选还验证了权限/问题更新和单次装饰场景渲染进程丢失后恢复；拖动时小队隐藏，落座按最新事实恢复。所有动作完整时序、Windows/macOS及真实Host匹配回执到Agent动作端到端尚未证明；窗口截图偶发空白与全桌面连续可见样本存在差异，不能据此前者定性实际人物消失。查看、hover和轻点从不代替批准或回答。
 
@@ -152,3 +152,11 @@ The selected upright art capability does **not** determine the product role. The
 Thread `runtime: 'agent'`, parent/child links, the existence of a Bot, directory selection and task titles are not product-mode evidence. Missing/non-authoritative/custom shell state remains `unknown` and uses non-delegating notification semantics until a known role is restored. Endpoint generation and workbench revisions fence stale responses. Switching product roles clears transient intake/result choreography and establishes a new edge baseline; historical work is not replayed as a new delegation.
 
 The existing normal profile switch is the main window's **WorkbenchProfileSwitcher** (Agent / IDE / Varin bot), not the workspace directory selector. Offline coordination fixtures remain explicitly labelled and do not supply the real product mode. No Host protocol, execution authority, public art or native window geometry changes in this role-binding stage.
+
+### 正在执行的工作姿态边界（2026-10-30）
+
+`body.workActive` 只表达当前健康的原生执行观察：分支未归档/删除，`activeRunId` 与 `currentRun.id` 精确一致，Run 为 `generating` 或 `executing` 且未请求取消。Bot 使用已核验入口或精确派发关系，入口自己运行即使没有外部项目卡也可成立；Agent 使用已知未绑定 Bot 的真实任务关系。角色、归属或健康未知不借用别人的执行权。待回答/授权、失败、结果未知、取消信息优先于工作姿态；隐藏与抓放期间撤下工作意图，恢复只采用最新观察，不补播旧工作。
+
+原生同步工具批次在 `executing` 中执行，模型请求在 `generating` 中执行。`waiting` 则包括策略暂停、准备及注册的观察等待；其中 `wait_process` 可以只停放观察 Run，而独立进程仍在运行。当前紧凑 attention 不提供独立进程的实际运行 phase，`hasUnsettledWork` 同时包含等待、未结算和不确定效果，**不能据此补猜后台进程正在执行**。真实子任务自身的活跃 Run 仍可提供工作证据；单独 parked Run/未结算效果不能。此次不新增 native 遥测、调度器或写权限。
+
+`work-active` 是看屏幕、敲键、停下来阅读的表现性动作，不声称人物实际操作了键盘、文件或工具。只有已安装且有匹配姿态路线的动作可播放；资源缺席时保留原有中立看护。持续循环不作为一次性通知消费，变化的工具进度不重启动作；状态退出依照真实素材的安全收手路线，抓放使用同源去凳/恢复图。

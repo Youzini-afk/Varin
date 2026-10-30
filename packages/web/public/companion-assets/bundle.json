@@ -1235,8 +1235,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -1427,8 +1427,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -1536,8 +1536,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -1616,8 +1616,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -1718,8 +1718,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -1849,8 +1849,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -15520,8 +15520,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -15662,8 +15662,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -15774,8 +15774,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         },
         {
@@ -18828,6 +18828,1420 @@
       ]
     },
     {
+      "id": "v5-work-recovery-entry",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "bridge",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+      "exitPose": "v5:open-neutral",
+      "frames": [
+        {
+          "sha256": "09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+          "startMs": 0,
+          "durationMs": 60,
+          "pose": "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-entry",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1473,
+            511,
+            484,
+            504
+          ],
+          "offset": [
+            23,
+            0
+          ]
+        },
+        {
+          "sha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "startMs": 60,
+          "durationMs": 120,
+          "pose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            2,
+            488,
+            505
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        },
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 180,
+          "durationMs": 160,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 340,
+          "durationMs": 100,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 2,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        }
+      ],
+      "durationMs": 440,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        },
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        },
+        {
+          "file": "atlas-000.png",
+          "size": [
+            1995,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-recovery-engage",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "bridge",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+      "exitPose": "v5:open-neutral",
+      "frames": [
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 0,
+          "durationMs": 60,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "startMs": 60,
+          "durationMs": 120,
+          "pose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            2,
+            488,
+            505
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        },
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 180,
+          "durationMs": 160,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 340,
+          "durationMs": 100,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 2,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        }
+      ],
+      "durationMs": 440,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        },
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        },
+        {
+          "file": "atlas-000.png",
+          "size": [
+            1995,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-recovery-key-left",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "bridge",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+      "exitPose": "v5:open-neutral",
+      "frames": [
+        {
+          "sha256": "f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "startMs": 0,
+          "durationMs": 60,
+          "pose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-left",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1501,
+            1020,
+            512,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "startMs": 60,
+          "durationMs": 120,
+          "pose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            2,
+            488,
+            505
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        },
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 180,
+          "durationMs": 160,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 340,
+          "durationMs": 100,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 2,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        }
+      ],
+      "durationMs": 440,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        },
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        },
+        {
+          "file": "atlas-000.png",
+          "size": [
+            1995,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-recovery-key-right",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "bridge",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+      "exitPose": "v5:open-neutral",
+      "frames": [
+        {
+          "sha256": "eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "startMs": 0,
+          "durationMs": 60,
+          "pose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-right",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            500,
+            1528,
+            499,
+            504
+          ],
+          "offset": [
+            11,
+            0
+          ]
+        },
+        {
+          "sha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "startMs": 60,
+          "durationMs": 120,
+          "pose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            2,
+            488,
+            505
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        },
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 180,
+          "durationMs": 160,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 340,
+          "durationMs": 100,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 2,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        }
+      ],
+      "durationMs": 440,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        },
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        },
+        {
+          "file": "atlas-000.png",
+          "size": [
+            1995,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-recovery-read",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "bridge",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+      "exitPose": "v5:open-neutral",
+      "frames": [
+        {
+          "sha256": "d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "startMs": 0,
+          "durationMs": 60,
+          "pose": "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524"
+          ],
+          "pauseSafe": true,
+          "phase": "active-work-read",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1501,
+            1528,
+            492,
+            504
+          ],
+          "offset": [
+            18,
+            0
+          ]
+        },
+        {
+          "sha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "startMs": 60,
+          "durationMs": 120,
+          "pose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            2,
+            488,
+            505
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        },
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 180,
+          "durationMs": 160,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 340,
+          "durationMs": 100,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 2,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        }
+      ],
+      "durationMs": 440,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        },
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        },
+        {
+          "file": "atlas-000.png",
+          "size": [
+            1995,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-recovery-release",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "bridge",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+      "exitPose": "v5:open-neutral",
+      "frames": [
+        {
+          "sha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "startMs": 0,
+          "durationMs": 60,
+          "pose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            500,
+            2,
+            488,
+            505
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        },
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 60,
+          "durationMs": 160,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 220,
+          "durationMs": 100,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        }
+      ],
+      "durationMs": 320,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "pages": [
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        },
+        {
+          "file": "atlas-000.png",
+          "size": [
+            1995,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-recovery-recover",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "bridge",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+      "exitPose": "v5:open-neutral",
+      "frames": [
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 0,
+          "durationMs": 60,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 60,
+          "durationMs": 100,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        }
+      ],
+      "durationMs": 160,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "pages": [
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        },
+        {
+          "file": "atlas-000.png",
+          "size": [
+            1995,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-active",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "action",
+      "action": "work-active",
+      "sceneAction": "work-active",
+      "entryPose": "v5:open-neutral",
+      "exitPose": "v5:open-neutral",
+      "frames": [
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 0,
+          "durationMs": 1,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        },
+        {
+          "sha256": "09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+          "startMs": 1,
+          "durationMs": 200,
+          "pose": "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-entry",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1473,
+            511,
+            484,
+            504
+          ],
+          "offset": [
+            23,
+            0
+          ]
+        },
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 201,
+          "durationMs": 180,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "startMs": 381,
+          "durationMs": 120,
+          "pose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-left",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1501,
+            1020,
+            512,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 501,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "startMs": 601,
+          "durationMs": 150,
+          "pose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-right",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            1528,
+            499,
+            504
+          ],
+          "offset": [
+            11,
+            0
+          ]
+        },
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 751,
+          "durationMs": 90,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "startMs": 841,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-left",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1501,
+            1020,
+            512,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "startMs": 941,
+          "durationMs": 140,
+          "pose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-right",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            1528,
+            499,
+            504
+          ],
+          "offset": [
+            11,
+            0
+          ]
+        },
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 1081,
+          "durationMs": 200,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "startMs": 1281,
+          "durationMs": 1500,
+          "pose": "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524"
+          ],
+          "pauseSafe": true,
+          "phase": "active-work-read",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1501,
+            1528,
+            492,
+            504
+          ],
+          "offset": [
+            18,
+            0
+          ]
+        },
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 2781,
+          "durationMs": 180,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "startMs": 2961,
+          "durationMs": 140,
+          "pose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-right",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            1528,
+            499,
+            504
+          ],
+          "offset": [
+            11,
+            0
+          ]
+        },
+        {
+          "sha256": "f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "startMs": 3101,
+          "durationMs": 110,
+          "pose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-left",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1501,
+            1020,
+            512,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "startMs": 3211,
+          "durationMs": 130,
+          "pose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-right",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            500,
+            1528,
+            499,
+            504
+          ],
+          "offset": [
+            11,
+            0
+          ]
+        },
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 3341,
+          "durationMs": 90,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "startMs": 3431,
+          "durationMs": 160,
+          "pose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-left",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1501,
+            1020,
+            512,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 3591,
+          "durationMs": 300,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "startMs": 3891,
+          "durationMs": 1900,
+          "pose": "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524"
+          ],
+          "pauseSafe": true,
+          "phase": "active-work-read",
+          "cue": "RECOVERY_ONLY",
+          "page": 1,
+          "rect": [
+            1501,
+            1528,
+            492,
+            504
+          ],
+          "offset": [
+            18,
+            0
+          ]
+        },
+        {
+          "sha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "startMs": 5791,
+          "durationMs": 180,
+          "pose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 2,
+          "rect": [
+            500,
+            2,
+            488,
+            505
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        },
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 5971,
+          "durationMs": 220,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 2,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "sha256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "startMs": 6191,
+          "durationMs": 200,
+          "pose": "v5:open-neutral",
+          "exitTo": [
+            "v5:open-neutral"
+          ],
+          "pauseSafe": false,
+          "phase": "canonical",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            488,
+            503
+          ],
+          "offset": [
+            17,
+            0
+          ]
+        }
+      ],
+      "durationMs": 6391,
+      "loop": [
+        2,
+        19
+      ],
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "pages": [
+        {
+          "file": "atlas-000.png",
+          "size": [
+            1995,
+            2034
+          ]
+        },
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        },
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        }
+      ]
+    },
+    {
       "id": "v5-d-neutral",
       "canvas": [
         512,
@@ -20659,8 +22073,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         }
       ]
@@ -20860,8 +22274,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         }
       ]
@@ -20997,8 +22411,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         }
       ]
@@ -29231,8 +30645,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         }
       ]
@@ -29666,8 +31080,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         }
       ]
@@ -30081,8 +31495,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         }
       ]
@@ -34257,8 +35671,8 @@
         {
           "file": "atlas-015.png",
           "size": [
-            1957,
-            1018
+            2015,
+            2034
           ]
         }
       ]
@@ -38839,6 +40253,999 @@
           ]
         }
       ]
+    },
+    {
+      "id": "v5-work-d-entry",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:70d596d1655aadae7a0e57ca2f8bbb17cb04d297bc7332efc5cf365d5191cc31",
+      "exitPose": "varin-canonical-v5-study:draw:70d596d1655aadae7a0e57ca2f8bbb17cb04d297bc7332efc5cf365d5191cc31",
+      "frames": [
+        {
+          "sha256": "70d596d1655aadae7a0e57ca2f8bbb17cb04d297bc7332efc5cf365d5191cc31",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:70d596d1655aadae7a0e57ca2f8bbb17cb04d297bc7332efc5cf365d5191cc31",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:70d596d1655aadae7a0e57ca2f8bbb17cb04d297bc7332efc5cf365d5191cc31"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-entry",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            2,
+            1020,
+            485,
+            504
+          ],
+          "offset": [
+            23,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-entry",
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-s-entry",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+      "exitPose": "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+      "frames": [
+        {
+          "sha256": "09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-entry",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1473,
+            511,
+            484,
+            504
+          ],
+          "offset": [
+            23,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-work-d-entry"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-d-engage",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:3ca6a4757b5a1b3c308590282173c86d78d3bdee3f7047d5f15779588940178f",
+      "exitPose": "varin-canonical-v5-study:draw:3ca6a4757b5a1b3c308590282173c86d78d3bdee3f7047d5f15779588940178f",
+      "frames": [
+        {
+          "sha256": "3ca6a4757b5a1b3c308590282173c86d78d3bdee3f7047d5f15779588940178f",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:3ca6a4757b5a1b3c308590282173c86d78d3bdee3f7047d5f15779588940178f",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:3ca6a4757b5a1b3c308590282173c86d78d3bdee3f7047d5f15779588940178f"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1005,
+            1020,
+            492,
+            504
+          ],
+          "offset": [
+            18,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-engage",
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-s-engage",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+      "exitPose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+      "frames": [
+        {
+          "sha256": "b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:b05fd11b5861a06a76b20349e8977f8bed74fe6a815427fe112b8e4fb628a416"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-engage",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            491,
+            1020,
+            510,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-work-d-engage"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-d-key-left",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:90c5fde6613435a25030338de92f1804a122311d404ee511cbe193e720548f2c",
+      "exitPose": "varin-canonical-v5-study:draw:90c5fde6613435a25030338de92f1804a122311d404ee511cbe193e720548f2c",
+      "frames": [
+        {
+          "sha256": "90c5fde6613435a25030338de92f1804a122311d404ee511cbe193e720548f2c",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:90c5fde6613435a25030338de92f1804a122311d404ee511cbe193e720548f2c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:90c5fde6613435a25030338de92f1804a122311d404ee511cbe193e720548f2c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-left",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            2,
+            1528,
+            494,
+            504
+          ],
+          "offset": [
+            18,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-key-left",
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-s-key-left",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+      "exitPose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+      "frames": [
+        {
+          "sha256": "f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:f5daca303dd25b2d250f3f9dbc4b914fda15ac4a824ddfe804f9f64c87647b13"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-left",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1501,
+            1020,
+            512,
+            504
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-work-d-key-left"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-d-key-right",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:f3411c1d948bb2df2cda9794dc3b0a641efa1da64d3b0dbaac364cf36d5f2e6a",
+      "exitPose": "varin-canonical-v5-study:draw:f3411c1d948bb2df2cda9794dc3b0a641efa1da64d3b0dbaac364cf36d5f2e6a",
+      "frames": [
+        {
+          "sha256": "f3411c1d948bb2df2cda9794dc3b0a641efa1da64d3b0dbaac364cf36d5f2e6a",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:f3411c1d948bb2df2cda9794dc3b0a641efa1da64d3b0dbaac364cf36d5f2e6a",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:f3411c1d948bb2df2cda9794dc3b0a641efa1da64d3b0dbaac364cf36d5f2e6a"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-right",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1003,
+            1528,
+            494,
+            504
+          ],
+          "offset": [
+            18,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-key-right",
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-s-key-right",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+      "exitPose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+      "frames": [
+        {
+          "sha256": "eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:eeaae10ef8658e4bfc3d75851c858655adfd35f9ed450ae0585f726b6f3dabc1"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-key-right",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            500,
+            1528,
+            499,
+            504
+          ],
+          "offset": [
+            11,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-work-d-key-right"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-d-read",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:6460676469485113040cda24de3f868dbd19ef8ce1595a5207a5bde6961d7a37",
+      "exitPose": "varin-canonical-v5-study:draw:6460676469485113040cda24de3f868dbd19ef8ce1595a5207a5bde6961d7a37",
+      "frames": [
+        {
+          "sha256": "6460676469485113040cda24de3f868dbd19ef8ce1595a5207a5bde6961d7a37",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:6460676469485113040cda24de3f868dbd19ef8ce1595a5207a5bde6961d7a37",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:6460676469485113040cda24de3f868dbd19ef8ce1595a5207a5bde6961d7a37"
+          ],
+          "pauseSafe": true,
+          "phase": "active-work-read",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            494,
+            504
+          ],
+          "offset": [
+            18,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-read",
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524"
+      },
+      "pages": [
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-s-read",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+      "exitPose": "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+      "frames": [
+        {
+          "sha256": "d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524"
+          ],
+          "pauseSafe": true,
+          "phase": "active-work-read",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1501,
+            1528,
+            492,
+            504
+          ],
+          "offset": [
+            18,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-work-d-read"
+      },
+      "pages": [
+        {
+          "file": "atlas-015.png",
+          "size": [
+            2015,
+            2034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-d-release",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:f2152105c7b70166a67e7fb3cdb58c2a07f2dcf064cf83cd0d47195ef36c614f",
+      "exitPose": "varin-canonical-v5-study:draw:f2152105c7b70166a67e7fb3cdb58c2a07f2dcf064cf83cd0d47195ef36c614f",
+      "frames": [
+        {
+          "sha256": "f2152105c7b70166a67e7fb3cdb58c2a07f2dcf064cf83cd0d47195ef36c614f",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:f2152105c7b70166a67e7fb3cdb58c2a07f2dcf064cf83cd0d47195ef36c614f",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:f2152105c7b70166a67e7fb3cdb58c2a07f2dcf064cf83cd0d47195ef36c614f"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            992,
+            2,
+            489,
+            504
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-release",
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+      },
+      "pages": [
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-s-release",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+      "exitPose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+      "frames": [
+        {
+          "sha256": "a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:a9f130ab5d96a81ea0688608c51369549d1bf77382eb88dd4595a89f0e27767c"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-release",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            500,
+            2,
+            488,
+            505
+          ],
+          "offset": [
+            20,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-work-d-release"
+      },
+      "pages": [
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-d-recover",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:215eb1668f3c11fb5d2cf429238c1e8b6ec791143cd0dd2dd9922fcfb23b35b5",
+      "exitPose": "varin-canonical-v5-study:draw:215eb1668f3c11fb5d2cf429238c1e8b6ec791143cd0dd2dd9922fcfb23b35b5",
+      "frames": [
+        {
+          "sha256": "215eb1668f3c11fb5d2cf429238c1e8b6ec791143cd0dd2dd9922fcfb23b35b5",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:215eb1668f3c11fb5d2cf429238c1e8b6ec791143cd0dd2dd9922fcfb23b35b5",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:215eb1668f3c11fb5d2cf429238c1e8b6ec791143cd0dd2dd9922fcfb23b35b5"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            2,
+            511,
+            485,
+            504
+          ],
+          "offset": [
+            23,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-work-s-recover",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+      },
+      "pages": [
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v5-work-s-recover",
+      "canvas": [
+        512,
+        512
+      ],
+      "geometryReference": "varin-canonical-v5-study",
+      "reviewStatus": "accepted",
+      "stage": "motion-candidate",
+      "kind": "gesture",
+      "action": null,
+      "sceneAction": null,
+      "entryPose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+      "exitPose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+      "frames": [
+        {
+          "sha256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "startMs": 0,
+          "durationMs": 100,
+          "pose": "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "exitTo": [
+            "varin-canonical-v5-study:draw:1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4"
+          ],
+          "pauseSafe": false,
+          "phase": "active-work-recover",
+          "cue": "RECOVERY_ONLY",
+          "page": 0,
+          "rect": [
+            1485,
+            2,
+            508,
+            503
+          ],
+          "offset": [
+            0,
+            0
+          ]
+        }
+      ],
+      "durationMs": 100,
+      "loop": null,
+      "warning": "Assistant-selected exact feature-branch source set; bounded review scope and unverified behavior are recorded in acceptance.json.",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-work-d-release",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-work-d-recover"
+      },
+      "pages": [
+        {
+          "file": "atlas-016.png",
+          "size": [
+            1995,
+            1017
+          ]
+        }
+      ]
     }
   ],
   "worldStool": {
@@ -38895,11 +41302,11 @@
     ]
   },
   "selection": {
-    "candidateSHA256": "f01354e53d36d1596d64da99748e43b7b04c727ca439750ab25850da1ef49a34",
-    "baselineSHA256": "07e5f9b470388dd16268604fe43585f0bd8772f17d2d7e88bcd1997b4e4e863f",
-    "buildReceiptSHA256": "0aebb2e026841d89e27fd347953ac592abb0f6f30bd7baa4b7e24bdb8cbd7ed2",
-    "rebuildReceiptSHA256": "00be7bbf7684c8f5fa178e827a8040bd402e423506677466fe46298f2d18c3db",
-    "reviewRecordSha256": "8f2592261a6cddafae3446eeb118fb9bc6f5d4c1e4944fd107f39cb1ce574069",
+    "candidateSHA256": "f1062fe37476af76c18302850c94ef0e90949ba992ede1699daec236a59b119b",
+    "baselineSHA256": "1990d2c43e41915305ce77445be27838605b9d8279157e98aa1a1d34633e4a47",
+    "buildReceiptSHA256": "3c8cd15ff6a18932a0961889af94b2af3b3fae29e5ba177cfbf6215254dca003",
+    "rebuildReceiptSHA256": "8b9c8650ce096dabc4421b01851251e2717620049ed1745f8d3b1334ab217d7e",
+    "reviewRecordSha256": "1ab3d2786c5f0e495bbb395992c940e82de8972f001662ac4224fbec7ebbf515",
     "scope": "feature-branch default candidate"
   }
 }

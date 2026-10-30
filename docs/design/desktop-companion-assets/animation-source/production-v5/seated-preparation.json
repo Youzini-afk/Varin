@@ -1102,6 +1102,69 @@
         "source": "detached/welcome/lowering-ready.png",
         "sha256": "08d97384eb453233d160b734fffaf1e010b86538bc9909b72cb71112ca0bb258"
       }
+    },
+    {
+      "id": "active-work-entry",
+      "source": "foreground/active-work/entry.png",
+      "sha256": "ea1fdfecc5ef4f3483009cae63826ef1b7da01fe253c5abd8270c0df1f651930",
+      "detached": {
+        "source": "detached/active-work/entry.png",
+        "sha256": "a25f1b5471112479913494af9592ab14c4ca34ae05e220fba50d6aaf95a033ee"
+      }
+    },
+    {
+      "id": "active-work-engage",
+      "source": "foreground/active-work/engage.png",
+      "sha256": "ff69e80edee7040e3907d796bfe9896a1245ea97527070d92fedca5a035eb1dc",
+      "detached": {
+        "source": "detached/active-work/engage.png",
+        "sha256": "3d4dd107455a81a11d7bdcdc954b3bb4518503fce875a1e50a079b61165b1f02"
+      }
+    },
+    {
+      "id": "active-work-key-left",
+      "source": "foreground/active-work/key-left.png",
+      "sha256": "1fae75fc32e6390f505a10772b3bf4da2775ebbff5117cee4e51ca35e0db91b1",
+      "detached": {
+        "source": "detached/active-work/key-left.png",
+        "sha256": "fec29310e03785d9979c9aaeeccea73baac9aa9c0e610d143cd606cf1a924c2f"
+      }
+    },
+    {
+      "id": "active-work-key-right",
+      "source": "foreground/active-work/key-right.png",
+      "sha256": "9fdf4601f0e2fef6b73bc6392fe1752ce2054588e5c62f008aca6f1abf11743c",
+      "detached": {
+        "source": "detached/active-work/key-right.png",
+        "sha256": "ff79c8f8503e06833f1c58d4075c986c5cc9117580febb702b37c0c5c4f6af39"
+      }
+    },
+    {
+      "id": "active-work-read",
+      "source": "foreground/active-work/read.png",
+      "sha256": "d3217c237dbeee68a5969d4ced9e7b936cd1191759326e05812164a2dd4762bf",
+      "detached": {
+        "source": "detached/active-work/read.png",
+        "sha256": "195f8fd49aa847734f2d11341a1cdb9b37be87c4ab1549a709b657d5f3686382"
+      }
+    },
+    {
+      "id": "active-work-release",
+      "source": "foreground/active-work/release.png",
+      "sha256": "856f282ebb81ca4d114d1af6afb2d5ceffc720cc4994900e7ee55334b90bf747",
+      "detached": {
+        "source": "detached/active-work/release.png",
+        "sha256": "3639de1883115a0f61949f43b903c7ba4acab83da8edfa3a65f89ab5d1978ce4"
+      }
+    },
+    {
+      "id": "active-work-recover",
+      "source": "foreground/active-work/recover.png",
+      "sha256": "9817955d1feacd8093656841243a3f3491162c45a1c6c3965bd8ed6d8e4c0b4c",
+      "detached": {
+        "source": "detached/active-work/recover.png",
+        "sha256": "08b9c2d29969133d99c24f2bdaf420b0cb6017d7b475df8e162b080651a4c9fc"
+      }
     }
   ]
 }

@@ -167,6 +167,10 @@ it('expresses observed Agent execution, not preparation, waits, unsettled effect
  expect(observe(facts([cancelling]))).toBe(false);
  const settling=branch('A','completed');settling.hasUnsettledWork=true;
  expect(observe(facts([settling]))).toBe(false);
+ // A parked process observer may outlive its executor. Compact attention has
+ // no independent process phase: unsettled work alone is not active execution.
+ const parked=branch('A','waiting');parked.hasUnsettledWork=true;
+ expect(observe(facts([parked]))).toBe(false);
 });
 
 it('uses verified Bot entry execution without inventing an external project or child', () => {

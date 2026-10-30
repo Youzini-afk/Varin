@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { expect, test, vi } from 'vitest';
 import { applyCompanionAccentPixels, CompanionAccentMaterial, validAccentSourceRegions } from './companionAccentMaterial';
 import profile from './companionAccentProfile.json';
@@ -35,7 +37,10 @@ test('fixed tonal response is deterministic, retains shadow order and does not n
 
 test('only frozen bundle/source identity is treated; two-frame cache reuses pixels and invalidates new bitmap generation', () => {
   const sources = Object.keys(profile.sources);
-  expect(sources).toHaveLength(247);
+  const raw = readFileSync(new URL('../../../../web/public/companion-assets/bundle.json', import.meta.url));
+  const selected = JSON.parse(raw.toString()) as { packages: CompanionPackage[] };
+  expect(profile.bundleSHA256).toBe(createHash('sha256').update(raw).digest('hex'));
+  expect(sources.sort()).toEqual([...new Set(selected.packages.flatMap(asset => asset.frames.map(frame => frame.sha256)))].sort());
   const material = new CompanionAccentMaterial();
   const stage = { getImageData: vi.fn(() => ({ width: 512, height: 512, data: data() })), putImageData: vi.fn() } as unknown as CanvasRenderingContext2D;
   const bitmap = {} as ImageBitmap;
