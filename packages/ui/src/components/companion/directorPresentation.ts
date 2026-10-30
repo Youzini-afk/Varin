@@ -34,7 +34,7 @@ export interface DirectorPresentation {
   inspectionRoute: DirectorInteractionRoute;
   source: { epoch: number; eventCursor: number } | null;
   health: 'current' | 'unknown' | 'synchronizing';
-  body: { subjectRoute: DirectorInteractionRoute; verb: DirectorVerb; subject: ThreadIdentity | null; attentionOwner: ThreadIdentity | null; attentionMode: 'single' | 'multiple' | null; attentionItem: ThreadAttentionItem | null; edge: DirectorEdge | null };
+  body: { /** Expressive work, never evidence of keyboard/tool execution. */ workActive?: boolean; subjectRoute: DirectorInteractionRoute; verb: DirectorVerb; subject: ThreadIdentity | null; attentionOwner: ThreadIdentity | null; attentionMode: 'single' | 'multiple' | null; attentionItem: ThreadAttentionItem | null; edge: DirectorEdge | null };
   cards: DirectorProjectCard[];
   /** Additional factual cards, not a count of independent business Projects. */
   overflowCards: number;
@@ -166,6 +166,18 @@ export class CompanionDirector {
     this.previousRuns = current ? runs : new Map();
     this.previousCursor = current && options.visible && !options.interacting ? snapshot!.eventCursor : null;
     this.previousRoots = current && options.visible && !options.interacting ? new Map(relations.roots) : new Map();
+    // Only observed execution is a working pose. Unsettled effects, preparation,
+    // scheduling and waits are not execution; role/ancestry cannot be guessed.
+    const workActive = current && options.visible && !options.interacting
+      && needsUser.length === 0 && !items.some(item => item.kind === 'cancelling')
+      && snapshot!.counts.actionRequired === 0 && snapshot!.counts.unknownEffects === 0
+      && branches.some(branch => {
+        const run = branch.currentRun, key = branchKey(branch);
+        if (!run || branch.activeRunId !== run.id || run.cancelRequested || branch.archived || branch.deleted
+          || !['generating', 'executing'].includes(run.state) || !relations.proven.has(key)) return false;
+        return route === 'coordination-review' || route === 'agent-companion' && branch.botId === null
+          || route === 'bot-coordinator' && typeof branch.botId === 'string' && branch.botId.length > 0;
+      });
     const workingProjects = portfolio.filter(branch => active(branch) || branches.some(child => projectKey(child) === branchKey(branch) && active(child)));
     const subject = needsUser.length ? this.attentionSubject && cards.get(this.attentionSubject)?.identity : this.edge?.project;
     const attentionItem = needsUser.find(item => projectKey(item) === this.attentionSubject) ?? null;
@@ -188,7 +200,7 @@ export class CompanionDirector {
     for (const key of this.order) take(key);
     const capacity = Number.isFinite(options.cardCapacity) ? Math.max(1, Math.floor(options.cardCapacity)) : 3;
     const visible = selected.slice(0, capacity).map(key => cards.get(key)!);
-    return { interactionRoute: route, inspectionRoute, source: snapshot ? { epoch: snapshot.epoch, eventCursor: snapshot.eventCursor } : null, health, body: { subjectRoute, verb, subject: subject || null, attentionOwner: attentionItem ? identity(attentionItem) : null,
+    return { interactionRoute: route, inspectionRoute, source: snapshot ? { epoch: snapshot.epoch, eventCursor: snapshot.eventCursor } : null, health, body: { workActive, subjectRoute, verb, subject: subject || null, attentionOwner: attentionItem ? identity(attentionItem) : null,
       attentionMode: needsUser.length > 1 ? 'multiple' : needsUser.length ? 'single' : null, attentionItem, edge: this.edge }, cards: visible, overflowCards: Math.max(0, candidates.size - visible.length), inspectedProjectKey: inspected ? projectKey(inspected) : null, inspection,
       counts: current ? { actionRequired: snapshot!.counts.actionRequired, uncertain: snapshot!.counts.unknownEffects,
         activeProjectTasks: workingProjects.filter(branch => relations.leadKeys.has(branchKey(branch))).length } : null,

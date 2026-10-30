@@ -1,6 +1,6 @@
 import type { DirectorPresentation } from './directorPresentation';
 
-type DirectorExpression = 'query' | 'permission' | 'completion' | 'failure' | 'unknown-effect-check' | 'director-inspect';
+type DirectorExpression = 'query' | 'permission' | 'completion' | 'failure' | 'unknown-effect-check' | 'director-inspect' | 'work-active';
 
 /** Product mode alone is not authority to coordinate every project in the Host. */
 export function directorBodyAction(view: DirectorPresentation, _side: 'left' | 'right' | null, notificationAvailable = false, expressionAvailable: (action: DirectorExpression) => boolean = () => false): string {
@@ -29,6 +29,7 @@ export function directorBodyAction(view: DirectorPresentation, _side: 'left' | '
     const expression = result === 'completed' ? 'completion' : result === 'failed' ? 'failure' : null;
     return expression && expressionAvailable(expression) ? expression : notification;
   }
+  if (view.body.workActive && expressionAvailable('work-active')) return 'work-active';
   // Inspection is attention to an actual project, not a report receipt or a layout direction.
   // Old left/right artwork cannot masquerade as a forward, non-spatial sentence.
   if (productCoordinates && coordinates(view.inspectionRoute) && view.inspectedProjectKey !== null

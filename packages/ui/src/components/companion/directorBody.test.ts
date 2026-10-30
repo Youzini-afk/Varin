@@ -95,3 +95,13 @@ it('gives Bot pending attention priority over a completed result without consumi
     expect(directorBodyAction({ ...view, body: { ...view.body, verb: 'receive-result', edge: { ...completed, outcome } } }, null, true, () => true)).toBe(expected);
   }
 });
+
+it('uses working art only for explicit observed work; notices and results still win', () => {
+ const working={...view,body:{...view.body,workActive:true}};
+ expect(directorBodyAction(working,null,true,()=>true)).toBe('work-active');
+ expect(directorBodyAction(working,null,true,()=>false)).toBe('director-supervise');
+ expect(directorBodyAction({...working,health:'unknown'},null,true,()=>true)).toBe('director-supervise');
+ expect(directorBodyAction({...working,body:{...working.body,verb:'notify-attention'}},null,true,()=>true)).toBe('director-notify-attention');
+ expect(directorBodyAction({...working,body:{...working.body,verb:'receive-result',edge:completed}},null,true,()=>true)).toBe('director-gather-present');
+ expect(directorBodyAction({...working,cards:[],body:{...working.body,subject:null}},null,true,()=>true)).toBe('work-active');
+});

@@ -156,3 +156,46 @@ it('does not guess roles or coordination with absent/conflicting root evidence',
  const view=new CompanionDirector().observe(conflicting,'current',id('A'),botOptions);
  expect(view.body.subjectRoute).toBe('unknown');expect(view.cards.some(card=>card.identity.threadId==='A')).toBe(true);
 });
+
+it('expresses observed Agent execution, not preparation, waits, unsettled effects or unknown ownership', () => {
+ const director = new CompanionDirector(), agent = {...options, interactionRoute:'agent-companion' as const};
+ const observe = (data:ThreadAttentionSnapshot) => director.observe(data,'current',null,agent).body.workActive;
+ for (const state of ['generating','executing'] as const) expect(observe(facts([branch('A',state)]))).toBe(true);
+ for (const state of ['accepted','preparing','runnable','waiting','completed','failed','cancelled'] as const) expect(observe(facts([branch('A',state)]))).toBe(false);
+ for (const patch of [{botId:undefined},{botId:'bot'},{parentThreadId:'missing'}, {archived:true},{deleted:true}, {activeRunId:null},{activeRunId:'another'},{currentRun:null}]) expect(observe(facts([{...branch('A'),...patch}]))).toBe(false);
+ const cancelling=branch('A');cancelling.currentRun!.cancelRequested=true;
+ expect(observe(facts([cancelling]))).toBe(false);
+ const settling=branch('A','completed');settling.hasUnsettledWork=true;
+ expect(observe(facts([settling]))).toBe(false);
+});
+
+it('uses verified Bot entry execution without inventing an external project or child', () => {
+ const director = new CompanionDirector(), bot={...options,interactionRoute:'bot-coordinator' as const};
+ const root={...branch('root'),botId:'bot'}, data=facts([root]);
+ expect(director.observe(data,'current',null,bot).body.workActive).toBe(false);
+ data.botEntries=[{botId:'bot',threadId:'root',branchId:'branch-root',profileRevision:1}];
+ const result=director.observe(data,'current',null,bot);
+ expect(result.body.workActive).toBe(true);expect(result.cards).toEqual([]);expect(result.body.edge).toBeNull();
+ const child={...branch('child'),botId:'bot',parentThreadId:'root'};
+ data.branches=[{...root,currentRun:null,activeRunId:null,hasUnsettledWork:false},child];
+ expect(director.observe(data,'current',null,bot).body.workActive).toBe(false);
+ data.delegations=[{operationId:'dispatch',parentThreadId:'root',parentBranchId:'branch-root',parentRunId:'run-root',childThreadId:'child',childBranchId:'branch-child',acceptedCursor:1}];
+ expect(director.observe(data,'current',null,bot).body.workActive).toBe(true);
+});
+
+it('exits expressive work on attention, lost health, hidden/drag and resumes only the newest facts', () => {
+ const director=new CompanionDirector(),agent={...options,interactionRoute:'agent-companion' as const};
+ const data=facts([branch('A')]);
+ const observe=(value=data,health:'current'|'unknown'|'synchronizing'='current',opts=agent)=>director.observe(value,health,null,opts).body.workActive;
+ expect(observe()).toBe(true);
+ for (const kind of ['permission','question','computer_permission','mcp_elicitation','mcp_sampling_request','mcp_sampling_output','run_failed','preparation_failed','mcp_error','effect_unknown','cancelling'] as const) {
+  const item={...request('A'),kind,actionable:!['run_failed','preparation_failed','mcp_error','effect_unknown','cancelling'].includes(kind)};
+  expect(observe(facts([branch('A')],[item]))).toBe(false);
+ }
+ expect(observe(data,'unknown')).toBe(false);expect(observe(data,'synchronizing')).toBe(false);
+ expect(observe(data,'current',{...agent,visible:false})).toBe(false);
+ expect(observe(data,'current',{...agent,interacting:true})).toBe(false);
+ expect(observe(facts([branch('A','waiting')]))).toBe(false);
+ expect(observe()).toBe(true);
+ expect(director.observe(data,'current',null,{...agent,interactionRoute:'unknown'}).body.workActive).toBe(false);
+});

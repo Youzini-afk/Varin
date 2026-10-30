@@ -198,7 +198,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const rawScene = sceneForIntent(sceneFact, intent.state);
   const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation)
     : stableIntent.state !== intent.state && rawScene.phase === 'active' ? { kind: null, phase: 'withdraw', outcome: null, count: null } as SceneFact : rawScene;
-  const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.interactionRoute, director.body.subjectRoute, director.inspectionRoute, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
+  const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.interactionRoute, director.body.subjectRoute, director.inspectionRoute, director.body.verb, director.body.workActive, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
   useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
     companionWindow.phase !== 'rest' || (!directorMode && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorMode || reviewRoute ? undefined : team, directorMode ? portfolioProjection.portfolio : undefined, directorMode ? directorContextKey : null, visibleDrawing, directorMode);
   const usableAction = (action: string) => assetList.some(item => item.action === action && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate'));
@@ -216,7 +216,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     && route(shownDirectorAsset, item, directorAssets, directorReview).status === 'ready');
   const directorRequestedAction = directorBodyAction(director, null, usableAction('director-notify-attention'), usableDirectorExpression);
   const directorSentenceKey = directorContextKey;
-  const directorBaseAction = finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction;
+  const directorBaseAction = finishedDirectorSentence === directorSentenceKey && !['idle-closed', 'work-active'].includes(directorRequestedAction) ? 'director-supervise' : directorRequestedAction;
   const directorLocalAction = directorLocal?.context === directorContextKey && director.health === 'current' && companionWindow.phase === 'rest' && !manualReview ? directorLocal.action : null;
   const directorWelcome = directorMode && localAction === 'welcome' && director.health === 'current' && director.body.verb === 'available' && usableAction('welcome');
   const finiteReceiptHandover = !!director.body.edge || ['director-intake', 'director-gather-present', 'completion', 'failure'].includes(directorBaseAction)
@@ -280,7 +280,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const displayedDrawing = React.useRef<{ packageId: string; exposure: number; context: string | null } | null>(null);
   const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current }, { allowCandidates: directorReview, presentationKey: receiptAction && displayAction === receiptAction ? currentReceipt?.key : directorMode ? directorContextKey : null });
   React.useEffect(() => {
-    if (directorMode && automatic.context === directorContextKey && automatic.finished && directorRequestedAction !== 'director-supervise'
+    if (directorMode && automatic.context === directorContextKey && automatic.finished && !['director-supervise', 'work-active'].includes(directorRequestedAction)
       && assetList.find(item => item.id === automatic.packageId)?.action === directorRequestedAction) {
       setFinishedDirectorSentence(directorSentenceKey);
       if (director.body.edge) director.consumeEdge(director.body.edge.key);
