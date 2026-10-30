@@ -52,6 +52,7 @@ it('follows Bot notification links using Catalog ownership and the exact target 
   expect(state.select).toHaveBeenCalledWith('varin.bot', undefined, expect.objectContaining({ enableShell: true, beforeCommit: expect.any(Function) }));
   expect(useBotNavigation.getState()).toMatchObject({ botId: bot.id, entry: { threadId: 'child', branchId: 'child:review' } });
   expect(useThreadStore.getState().selectedIdentity?.threadId).toBe('ordinary');
+  expect(state.directory).not.toHaveBeenCalled();
   expect(get).toHaveBeenCalledWith(bot.id, undefined);
 });
 it('leaves the Bot shell before selecting an ordinary deep link, without remaining on the restored old branch', async () => {

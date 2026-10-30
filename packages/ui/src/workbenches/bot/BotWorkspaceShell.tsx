@@ -197,7 +197,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       const { bot, entry, model } = inactive ? { bot: known, model: known.model, entry: known.entry } : await ensureBotEntry(botId, controller.signal);
       if (controller.signal.aborted || getRuntimeEndpointGeneration() !== host) return;
       setBots((list) => list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
-      await openBotConversation(bot.id, entry, bot.homeDir, model);
+      await openBotConversation(bot.id, entry, model);
     } catch (cause) {
       if (!controller.signal.aborted) setError(message(cause));
     } finally {
@@ -357,7 +357,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     noteSwitchDirection(order.indexOf(identity.threadId) - order.indexOf(selectedEntry?.threadId ?? ''));
     if (floating) setNarrowPanelOpen(false);
     if (floatingSidebar) useUIStore.getState().setSidebarOpen(false);
-    void openBotConversation(selected.id, identity, selected.homeDir).catch((cause: unknown) => setError(message(cause)));
+    void openBotConversation(selected.id, identity).catch((cause: unknown) => setError(message(cause)));
   }, [selected, sessionsWithWork, selectedEntry, floating, floatingSidebar]);
 
   const openWork = React.useCallback((identity: ThreadIdentity, origin?: BotReturnPoint['focus']) => {
@@ -430,7 +430,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       if (!alive.current || host !== getRuntimeEndpointGeneration()) return;
       setSessionResult(current => current?.botId === bot.id && 'items' in current ? { botId: bot.id, items: [...current.items, session] } : current);
       noteSwitchDirection(1);
-      await openBotConversation(bot.id, session.identity, bot.homeDir);
+      await openBotConversation(bot.id, session.identity);
       void useThreadStore.getState().loadCatalog().catch(() => {});
       refreshWork();
     } catch (cause) {
@@ -518,7 +518,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     {sessionsError ? <p role="alert" className="border-b border-border px-4 py-2 typography-meta text-destructive">{sessionsError}</p> : null}
     {ownsConversation && !busy && active ? <div className="min-h-0 flex-1">{selectedEntry && threads
       ? <ChildNavigationContext.Provider value={childNavigation}><MemoryNavigationContext.Provider value={memoryNavigation}>
-        <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} api={threads} identity={selectedEntry} initialWorkspacePath={selected?.homeDir} onWorkChanged={refreshWork}
+        <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} surface="bot" api={threads} identity={selectedEntry} onWorkChanged={refreshWork}
           preferredModel={selected && entryModel?.botId === selected.id && entryModel.profileModelKey === profileModelKey ? entryModel.model : null} readOnly={readOnly}
           emptyHero={selected ? { visual: <BotFigure state={figure} size={64} />, title: t('bot.hero.title', { name: selected.name }) } : undefined}
           onBranchCreated={entry => { if (selected) void openBotConversation(selected.id, entry); refreshWork(); }} />

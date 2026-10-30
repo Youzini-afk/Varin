@@ -44,7 +44,7 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
   const select = () => { void useThreadStore.getState().selectThread(identity).catch(() => {}); };
   await selectConversationShell(botConversation, current, select);
   current();
-  if (bot && botConversation) await openBotConversation(bot.id, identity, target.directory ?? bot.homeDir, null, bot.archived);
+  if (bot && botConversation) await openBotConversation(bot.id, identity, null, bot.archived);
   else {
     await useThreadStore.getState().selectThread(identity);
     current();

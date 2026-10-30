@@ -53,7 +53,7 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 
-function Harness({ initial = '' }: { initial?: string }) {
+function Harness({ initial = '', workspace = true }: { initial?: string; workspace?: boolean }) {
   const [value, setValue] = React.useState(initial);
   const [suggestion, setSuggestion] = React.useState<string | undefined>('好，继续完善吧');
   return <form ref={form => { if (form) form.requestSubmit = () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }; }}
@@ -62,7 +62,7 @@ function Harness({ initial = '' }: { initial?: string }) {
       models={[]} providerId="provider" modelId="model" thinkingLevel="off" onModelChange={() => {}}
       modelDisabled={false} attachmentDisabled={false} imageDisabled={false} sendDisabled={false} pending={false} active={false} retrying={false}
       onFiles={() => {}} onAttachImages={() => {}} onAttachPdfs={() => {}}
-      onGoal={() => {}} hasInput={Boolean(value.trim())} onWorkspace={() => {}} workspaceLabel="Project" attachmentNames={[]} skills={[]} />
+      onGoal={() => {}} hasInput={Boolean(value.trim())} onWorkspace={workspace ? () => {} : undefined} workspaceLabel="Project" attachmentNames={[]} skills={[]} />
   </form>;
 }
 async function key(key: string, extra: Partial<KeyboardEvent> = {}) {
@@ -70,6 +70,13 @@ async function key(key: string, extra: Partial<KeyboardEvent> = {}) {
   await act(async () => { handled = editor.props!.onKeyDown!({ key, preventDefault() {}, stopPropagation() {}, ...extra } as KeyboardEvent); });
   return handled;
 }
+
+it('omits the workspace action when the conversation does not offer project selection', async () => {
+  await act(async () => root.render(<Harness workspace={false} />));
+  expect(container.querySelector('button[title="Project"]')).toBeNull();
+  await act(async () => root.render(<Harness />));
+  expect(container.querySelector('button[title="Project"]')).not.toBeNull();
+});
 
 it('keeps the suggestion out of the draft until Tab accepts it', async () => {
   await act(async () => root.render(<Harness />));

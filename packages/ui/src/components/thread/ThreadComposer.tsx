@@ -37,8 +37,8 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void;
   modelDisabled: boolean; attachmentDisabled: boolean; imageDisabled: boolean; sendDisabled: boolean;
   pending: boolean; active: boolean; retrying: boolean;
-  onFiles(files: File[]): void; onAttachImages(): void; onAttachPdfs(): void; onStop?(): void; onGoal(): void;
-  hasInput: boolean; onWorkspace(): void; workspaceLabel: string;
+  onFiles(files: File[]): void; onAttachImages(): void; onAttachPdfs(): void; onStop?(): void; onGoal?(): void;
+  hasInput: boolean; onWorkspace?(): void; workspaceLabel: string;
   goalArmed?: boolean;
   workspacePath?: string;
   permissionWorkspacePath?: string;
@@ -451,8 +451,8 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
                 </DropdownMenuContent>
               </DropdownMenu>
               {backendControls === undefined && <ThreadPermissionControl workspacePath={permissionWorkspacePath} className={footerIconButtonClass} />}
-              {backendControls === undefined && goalEnabled && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
-              <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>
+              {backendControls === undefined && goalEnabled && onGoal && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
+              {onWorkspace && <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>}
               <WorkbenchContributionSlot kind="composer-action" slot="chat.composer.actions.leading" props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
             </div>
 

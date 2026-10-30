@@ -405,6 +405,26 @@ it('sends a new conversation from its captured project workspace, independent of
   expect(useThreadDraftStore.getState().drafts[key]?.text).toBe('');
 });
 
+it('keeps Bot conversation independent of workspace drafts and saved work-overview disclosure', async () => {
+  const f = fixture();
+  f.view.thread.bot_id = 'bot';
+  const key = threadComposerKey(threadHostKey(), identity);
+  useWorkOverviewStore.setState({ bySession: { [key]: { overview: true, compact: true } } });
+  const source = { resourceOwner: { kind: 'local' as const }, workspaceId: 'previous-project', executionWorkspaceId: 'previous-project', mode: 'live_root' as const,
+    liveRoot: { hostId: 'host-a', canonicalRoot: '/previous-project', rootId: 'root' }, tools: [] };
+  useThreadDraftStore.getState().patch(key, { workspacePath: '/previous-project', preparedSource: { path: '/previous-project', source }, text: 'Help me arrange this', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  f.api.sources.resolve = vi.fn(f.api.sources.resolve);
+  f.api.prepareSource = vi.fn(f.api.prepareSource);
+  await act(async () => root.render(<ThreadConversation surface="bot" api={f.api} identity={identity} />));
+  expect(container.querySelector('[data-harness-overview-panel], [data-harness-overview-peek]')).toBeNull();
+  await submitForm(composerForm());
+  expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'Help me arrange this' }));
+  expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('source');
+  expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('agent');
+  expect(f.api.sources.resolve).not.toHaveBeenCalled();
+  expect(f.api.prepareSource).not.toHaveBeenCalled();
+});
+
 it('keeps an existing physical conversation on its source without automatically requiring a mount backend', async () => {
   const f = fixture(true); pauseView(f.view);
   const previous = { ...f.view.activeRun!, state: 'completed' as const };

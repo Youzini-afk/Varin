@@ -38,7 +38,7 @@ vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: {} 
 // Shell navigation is driven by the Bot API fixture; stream transport has its
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
-vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null }) => <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} /> }));
+vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel, surface }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null; surface?: 'workbench' | 'bot' }) => <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} data-surface={surface} /> }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ setDirectory: () => {} }) } }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
@@ -169,6 +169,7 @@ describe('Bot workbench', () => {
     expect(state.ensure).toHaveBeenCalledWith('b', expect.any(AbortSignal));
     expect(useBotNavigation.getState().entry).toEqual(bot('b').entry);
     expect(centre()).not.toBeNull();
+    expect(centre()?.getAttribute('data-surface')).toBe('bot');
     await click('Bot a');
     expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
     expect(state.create).not.toHaveBeenCalled();
