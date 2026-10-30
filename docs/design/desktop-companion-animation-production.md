@@ -296,3 +296,48 @@ U0的公共源、各组动作卡及连接关系完整登记后，U1/U2/U4可并�
 - [Rive runtime许可](https://github.com/rive-app/rive-runtime/blob/main/LICENSE)、[当前价格页](https://rive.app/pricing)、[角色功能](https://rive.app/use-cases/character-animation)：位图可动能力与MIT runtime是候选依据，编辑器与导出限制独立；没有声称已完成本项目集成。
 - [Inochi2D SDK](https://github.com/Inochi2D/inochi2d)、[许可证](https://github.com/Inochi2D/inochi2d/blob/main/LICENSE)、[下载说明](https://inochi2d.com/download/)：开放位图puppet候选，开发分支、官方二进制与跨平台接入仍需分别确认。
 - [Blender动画功能](https://www.blender.org/features/animation/)和[Shape Keys手册](https://docs.blender.org/manual/en/4.5/animation/shape_keys/introduction.html)：候选离线制作能力依据，手册版本不代替实际4.3.2 API验证；工具能力不是已达到角色动画质量的证明。
+
+## 当前 v5 整套动作与历史32语义的对应（2026-10-30）
+
+旧32目录是用户体验意图清单，不是32条独立全身动画。`coverage.json` 保留历史 `requires` 词汇，新增逐项 `currentV5` 解释；不得为了让旧别名计数变绿而复制同一动画。最新 W/L 编号与旧编号不同，例如旧 L01 是欢迎，最新 L01 是局部生命感。
+
+| 历史范围 | 当前真实身体/路线 | 事实与边界 |
+|---|---|---|
+| C01 待命 | idle-closed、director-supervise、director-open-attention | 原画局部胸衣变化、偶发指尖释放与独立眨眼；不是整图缩放 |
+| C02–C04 接单/准备/思考 | director-intake、bot-prepare、bot-think | 新 Bot root run 接单边沿；当前 root 的 preparing/runnable；真实 generation reasoning/request/revision。产品模式或 Agent 推理本身不够 |
+| C05、T01–T07 屏幕/工具工作 | work-active、director-supervise | 实际运行时看电脑敲键盘；工具类别由真实 scene/squad 信息区分，不伪造七条工具身体 |
+| C06 完成 | completion、director-gather-present | 绑定确切完成/汇总结果，不由动作创建完成事实 |
+| T08 协作委派 | bot-dispatch | 新 acceptedCursor + operationId 的已验证委派边沿；仅一次 DISPATCH_DOWN，不表示左右布局方向 |
+| W01/W04/W05 排队/外部/退避 | external-wait | 共享低手安放、稀疏眨眼与安全退出；事实未结束时保持等待，不数作三条原画 |
+| W02/W03 授权/问题 | permission、query | 已有完整收手/询问/稳定保持/恢复；稳定并非遗漏，交互不批准、不代答 |
+| E01 失败 | failure | 仅已知失败，不能用它代替未知 |
+| E02/E03 取消/停止 | 当前源收束、监督/相容稳态 | 取消请求不等于确认停止；单执行器停止不等于整任务停止；落位后接最新事实 |
+| E04–E06 断联/同步/未知效果 | disconnected、unknown-effect-check | 两个显式路由完全共享一套谨慎离键/看屏/看用户身体；稳定保持时不反复检查 |
+| 旧 L01 欢迎 | welcome、既有开闭盖桥 | 不另造 open/closed 欢迎别名来增加数量 |
+| 旧 L02 陪伴微动 | 三个中立循环、rest-sleep | 中立局部生命感与睡姿极弱呼吸；权限/问题稳定，不能宣称所有姿态都循环呼吸 |
+| L03 本地回应 | open-hover-response、tap-response、tap-repeat-response | 不改变业务批准或结果 |
+| L04/L05 提放 | 源 SHA 精确配对的立即去凳、收手、承托、悬空、落位、再抓图 | 桥/gesture 节点是接触路线，不是额外独立动画 |
+| L06/L07 休息/安静动作 | quiet-stretch、rest-sleep、quiet-hair-smooth、quiet-sleeve-smooth、quiet-seat-adjust | 原有入睡与眼先醒顺序保留；新增侧握保护、重心调整、回稳后放手，不增加新道具 |
+
+实际业务路由依据 `directorPresentation.ts` / `directorBody.ts`，场景拍点依据 `sceneCues.ts`；`useCompanionLeisure.ts` 只在可休闲条件下轮换真实可用动作。review 下拉的事实场景是明确标注的模拟数据，不是假装真实后端事件。生产身体绑定优先于审阅菜单展示。
+
+### 原画、颜色与中断合同
+
+- 新增源均为完整1254方形RGBA原画及独立补齐后发的同姿去凳图；512准备只做整幅Lanczos缩放与冻结世界凳底图合成。没有逐帧包围框归一化、贴脸或全身缩放呼吸。
+- 每个新显示SHA有唯一立即去凳入口、普通收束、提前放下和落座中再抓路径。普通收束不重播未来峰值，recovery cue 不重发业务事件。睡姿中断眼先醒，不要求先呼吸完。
+- 新来源逐项设置发饰允许区与眼睛/胸牌保护区，旧269来源的颜色掩码保持原样。默认与主题色只改变符合条件的服装RGB，不改变alpha、脸/眼/发/皮肤、电脑和胸牌。像素不变式测试与视觉审阅分别记录。
+- 保留原闭盖C与开盖中立端点和固定世界凳。仅替换等待、三个中立、睡眠循环，以及两条既有query-low-hand提起边；后者直接进入180ms侧握接近，不先碰键盘。这个同源时长变体不是新画、不是第二个pickup入口。
+
+### 验证与限制
+
+`check_completion_routes.mjs` 使用真实 `CompanionPlayback` 逐曝光检查普通退出、即时匹配去凳、最新意图、早放/重抓、稳定循环与减少动态暂停点；另外检查共享谨慎身体、单次下拍、安静cue一致性和180ms侧握例外。源/atlas SHA、原画保护、palette pixel audit、实际有序播放审片各有独立证据。
+
+离屏像素和播放器测试不等于所有平台的native输入/世界凳跟随或常驻性能验收。审阅轨迹使用实际播放器的5ms采样，没有生成中间画；图集接触表只能证明所列姿态，不能冒充完整连续观影。最终选定包及限制见随包 `acceptance.json`，原画来源与准备参数见 `production-v5/completion-provenance.json`。
+
+### 最终集成检查（2026-10-30）
+
+最终选定包为 `e69fb1bedfaaa16ed4b04483929a59b305561bbb3898595d07095bf135df0d97`，材质 profile 为 `0980363b0fa19af06abf39e685ef92f8cb5175f5a08afb0be166c5450ffdb3c9`。选定资源的实际播放器检查通过3898次退出、1084次提起、23456次恢复中重抓和106次暂停点检查；58个新增来源覆盖42个主题的2436项材质检查通过。UI 237项、Web 26项、Rust关注事实11项及子任务投递26项、编译/来源12项测试通过，最终类型检查与Web生产构建通过；此前内存不足的尝试不计作通过，也未声称完整Rust巨型单测可执行文件通过。
+
+完整228秒、30fps身体演示使用实际播放器与材质，覆盖28个动作入口、8种代表配色、睡醒、退出及提放/重抓，6840帧完整解码与独立播放覆盖检查通过。输入与指针为模拟数据；它不是完整场景、Windows实机或真实Host端到端录屏。
+
+Linux Electron隔离配置烟雾检查观察到准备、托腮、低手等待与未知身体；实际指针拖动出现去凳身体、移动窗口并恢复落座，重复拖动正常。通过正常外观设置切到Mono后，角色重点色同步、脸和头发保留；关闭审阅窗口后，经正常设置重新开启的360×480正式窗口恢复位置及主题，未残留模拟任务。原始配置207个文件校验不变，隔离进程正常退出。本次未直接验证独立装饰凳100–150ms淡入淡出/ready信号、原生暂停计时、Windows及新Host端到端事实链；这些不应由上述烟雾检查或离屏路线测试推定通过。

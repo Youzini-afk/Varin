@@ -19,6 +19,12 @@ export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: 
 /** One transaction-consistent, content-free view of the authenticated Host's native work. */
 export interface ThreadAttentionRun {
   id: string; state: Run['state']; revision: number; cancelRequested: boolean;
+  /** Actual current provider callback kind, never inferred from generating or provider text.
+   * Absent on older Hosts and before a phase is observed; revision is its durable event cursor. */
+  generation?: { requestId: string; phase: 'reasoning' | 'output' | 'tool-call'; revision: number };
+  /** Actual scheduled provider retry; deadline expiration does not imply resumed execution. */
+  retry?: { requestId: string; attempt: number; scheduledAtMs: number; retryAtMs: number; revision: number };
+
 }
 export interface ThreadAttentionBranch {
   threadId: string; branchId: string; title: string; avatar?: string;
@@ -26,6 +32,8 @@ export interface ThreadAttentionBranch {
   /** Catalog ownership (including child ancestry). Null is unbound; absent on older Hosts is unknown. */
   botId?: string | null;
   activeRunId: string | null; currentRun: ThreadAttentionRun | null; latestRun: ThreadAttentionRun | null;
+  /** Distinct live, current-owner next_run admissions in the canonical input queue. */
+  queuedRunCount?: number;
   hasUnsettledWork: boolean;
 }
 export interface ThreadAttentionItem {
@@ -54,10 +62,25 @@ export interface ThreadAttentionDelegation {
 export interface ThreadAttentionBotEntry {
   botId: string; threadId: string; branchId: string; profileRevision: number;
 }
+/** Exact original executor-stop evidence, never inferred from Run cancellation/outcome. */
+export interface ThreadAttentionStoppedExecutor {
+  threadId: string; branchId: string; runId: string; operationId: string;
+  revision: number; stoppedCursor: number;
+}
+/** Committed receipt by a parent Run, not merely report readiness or model comprehension. */
+export interface ThreadAttentionDeliveredReport {
+  parentThreadId: string; parentBranchId: string; parentRunId: string; receivingRunId: string;
+  childOperationId: string; executionId: string; childThreadId: string; childBranchId: string;
+  deliveredCursor: number;
+}
 export interface ThreadAttentionSnapshot {
   epoch: number; eventCursor: number;
   coverage: { native: 'complete'; external: 'unsupported'; scope: 'host' };
   branches: ThreadAttentionBranch[]; items: ThreadAttentionItem[];
+  /** Newest proven stop per visible branch, retaining an older independent operation’s original Run. */
+  stoppedExecutors?: ThreadAttentionStoppedExecutor[];
+  /** Newest committed delivery per parent branch/current or latest receiving Run. */
+  deliveredReports?: ThreadAttentionDeliveredReport[];
   teamExecutions: ThreadAttentionTeamExecution[];
   /** Absent on older Hosts. Only visible work and its necessary ancestry are included. */
   delegations?: ThreadAttentionDelegation[];

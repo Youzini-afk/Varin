@@ -45,3 +45,14 @@ it('uses the drawn subject and acknowledged native listening side, not the reque
  expect(directorCueMatchesPresentation(listening,'B','left')).toBe(false);
  expect(directorCueMatchesPresentation(listening,'B','right')).toBe(true);
 });
+
+it('maps a Bot vertical dispatch beat without inventing spatial direction or physical organizing', () => {
+ expect(sceneCue('DISPATCH_DOWN','bot-dispatch')).toBe('management-delegate');
+ expect(sceneCue('DISPATCH_A','bot-dispatch')).toBe('transition');
+ expect(sceneCue('ORGANIZE_ALIGN','bot-prepare')).toBe('transition');
+ expect(sceneCue('WATCH','bot-think')).toBe('watch');
+ expect(cueMatchesScene('portfolio','bot-dispatch')).toBe(true);
+ expect(directorCueMatchesPresentation({action:'bot-dispatch',cue:'management-delegate',context:'current'},'current',null)).toBe(true);
+ expect(directorCueMatchesPresentation({action:'bot-dispatch',cue:'management-delegate',context:'old'},'current',null)).toBe(false);
+ expect(cueMatchesScene('organize','bot-prepare')).toBe(false);
+});

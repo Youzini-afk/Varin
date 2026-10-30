@@ -22,6 +22,26 @@ it('decorates the exact entry only with a matching cross-owner proof and keeps r
   expect(result.items).toBe(f.native.items); expect(result.counts).toBe(f.native.counts);
   expect(f.read).toHaveBeenCalledTimes(1);
 });
+it.each(['generation', 'retry'] as const)('preserves native %s and exact queue/receipt facts across role decoration', async phase => {
+  const f = fixture();
+  const branch = f.native.branches[0]!;
+  branch.activeRunId = 'current-run';
+  branch.currentRun = { id: 'current-run', state: 'generating', revision: 4, cancelRequested: false };
+  branch.queuedRunCount = 1;
+  if (phase === 'generation') branch.currentRun.generation = { requestId: 'request', phase: 'reasoning', revision: 19 };
+  else branch.currentRun.retry = { requestId: 'request', attempt: 2, scheduledAtMs: 1000, retryAtMs: 2000, revision: 19 };
+  f.native.items = [];
+  f.native.counts = { actionRequired: 0, affectedBranches: 0, unknownEffects: 0 };
+  f.native.stoppedExecutors = [{ threadId: 'entry', branchId: 'entry-branch', runId: 'older-run', operationId: 'original-operation', revision: 2, stoppedCursor: 17 }];
+  f.native.deliveredReports = [{ parentThreadId: 'entry', parentBranchId: 'entry-branch', parentRunId: 'original-parent-run', receivingRunId: 'current-run', childOperationId: 'child-operation', executionId: 'execution', childThreadId: 'child', childBranchId: 'child-branch', deliveredCursor: 18 }];
+  const result = await readThreadAttention(f.read, async () => [f.profile]);
+  expect(result.branches).toBe(f.native.branches);
+  expect(result.branches[0]?.currentRun?.[phase]).toBe(branch.currentRun[phase]);
+  expect(result.branches[0]?.queuedRunCount).toBe(1);
+  expect(result.stoppedExecutors).toBe(f.native.stoppedExecutors);
+  expect(result.deliveredReports).toBe(f.native.deliveredReports);
+  expect(result).not.toHaveProperty('botGates');
+});
 it.each(['revision', 'epoch', 'ownership', 'unavailable'] as const)('leaves original facts intact on %s proof failure', async cause => {
   const f = fixture();
   if (cause === 'revision') f.profile.recordRevision++;

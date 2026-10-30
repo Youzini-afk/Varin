@@ -1,0 +1,2321 @@
+{
+  "sources": {
+    "l08-01-protect": {
+      "foreground": "foreground/completion/l08-01-protect.png",
+      "foregroundSHA256": "360a497a103ae3de36b142dbcfb9269f5073677092c47241b7a77b1b56142e60",
+      "detached": "detached/completion/l08-01-protect.png",
+      "detachedSHA256": "30732fb509fb89df15b12e690f726769950ce0133d21d3b9935dfb148d43b487",
+      "normalRecovery": [
+        "l08-05-release",
+        "closed-neutral"
+      ],
+      "grabRecovery": [],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-01-protect",
+      "gestureDurationMs": 100,
+      "recoveryDurationMs": 100,
+      "recoveryDurationsMs": {
+        "l08-04-reseat": 140,
+        "l08-01-protect": 100,
+        "l08-05-release": 130,
+        "closed-neutral": 160
+      }
+    },
+    "l08-02-unweight": {
+      "foreground": "foreground/completion/l08-02-unweight.png",
+      "foregroundSHA256": "d90714e9260df29ead05320a28b3fed74e2e397714c29a8b2fd45bb304f8a9c2",
+      "detached": "detached/completion/l08-02-unweight.png",
+      "detachedSHA256": "a4c9a040c57a4a6cf0ef7bd2fdf0b8fc94317a9680145d1d2556a92b29b0fd16",
+      "normalRecovery": [
+        "l08-04-reseat",
+        "l08-01-protect",
+        "l08-05-release",
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "l08-04-reseat",
+        "l08-01-protect"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-02-unweight",
+      "gestureDurationMs": 150,
+      "recoveryDurationMs": 150,
+      "recoveryDurationsMs": {
+        "l08-04-reseat": 140,
+        "l08-01-protect": 100,
+        "l08-05-release": 130,
+        "closed-neutral": 160
+      }
+    },
+    "l08-03-shift": {
+      "foreground": "foreground/completion/l08-03-shift.png",
+      "foregroundSHA256": "f1677c6fd427ebc3b1e87fdf0dc48ae261b2dce9fab4277feb221fd210c024af",
+      "detached": "detached/completion/l08-03-shift.png",
+      "detachedSHA256": "ac6f6ed0fdbd58033cb68b88f414f72fc19493062dcf37f0d5ab4100c0246537",
+      "normalRecovery": [
+        "l08-04-reseat",
+        "l08-01-protect",
+        "l08-05-release",
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "l08-04-reseat",
+        "l08-01-protect"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-03-shift",
+      "gestureDurationMs": 260,
+      "recoveryDurationMs": 260,
+      "recoveryDurationsMs": {
+        "l08-04-reseat": 140,
+        "l08-01-protect": 100,
+        "l08-05-release": 130,
+        "closed-neutral": 160
+      }
+    },
+    "l08-04-reseat": {
+      "foreground": "foreground/completion/l08-04-reseat.png",
+      "foregroundSHA256": "4a834ec1437d703f364b3eac7a75753902d73c45045a588a88abced34984c61b",
+      "detached": "detached/completion/l08-04-reseat.png",
+      "detachedSHA256": "40956ee8657a1e1c29fa22c2fc67931265af68d718a414e030867b50d80f8969",
+      "normalRecovery": [
+        "l08-01-protect",
+        "l08-05-release",
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "l08-01-protect"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-04-reseat",
+      "gestureDurationMs": 140,
+      "recoveryDurationMs": 140,
+      "recoveryDurationsMs": {
+        "l08-04-reseat": 140,
+        "l08-01-protect": 100,
+        "l08-05-release": 130,
+        "closed-neutral": 160
+      }
+    },
+    "l08-05-release": {
+      "foreground": "foreground/completion/l08-05-release.png",
+      "foregroundSHA256": "c79d8c9d4bbc50a8e4169be2cb719f6a93c4239add7ed8e3469eed60c22b348c",
+      "detached": "detached/completion/l08-05-release.png",
+      "detachedSHA256": "aa21262be9ca7ae0834bc27d0473b6acb0d2582caddb984451a43d6a8be1f293",
+      "normalRecovery": [
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "l08-01-protect"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-05-release",
+      "gestureDurationMs": 130,
+      "recoveryDurationMs": 130,
+      "recoveryDurationsMs": {
+        "l08-04-reseat": 140,
+        "l08-01-protect": 100,
+        "l08-05-release": 130,
+        "closed-neutral": 160
+      }
+    },
+    "l01-closed-onset-r2": {
+      "foreground": "foreground/completion/l01-closed-onset-r2.png",
+      "foregroundSHA256": "8ab0d05d8689dca7f74481521a46210841f9d0d4910a676dbcb95d989abfebfd",
+      "detached": "detached/completion/l01-closed-onset-r2.png",
+      "detachedSHA256": "07c0f173d55a487b1d93cb78c376ce18931ef57c18c22440f99638d4966d5731",
+      "normalRecovery": [
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "closed-neutral"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-onset-r2",
+      "gestureDurationMs": 180,
+      "recoveryDurationMs": 180,
+      "recoveryDurationsMs": {
+        "neutral": 160,
+        "closed-neutral": 160
+      }
+    },
+    "l01-closed-breath": {
+      "foreground": "foreground/completion/l01-closed-breath.png",
+      "foregroundSHA256": "f896415d5a2726a99437fa8ede98c0ceb8876bca11d17d1b5c5e75174b7932c3",
+      "detached": "detached/completion/l01-closed-breath.png",
+      "detachedSHA256": "ff256bbcdadfc5084d0161719f319110f14cf450deff9cc299effe40f90fe4db",
+      "normalRecovery": [
+        "l01-closed-onset-r2",
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "l01-closed-onset-r2",
+        "closed-neutral"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-breath",
+      "gestureDurationMs": 180,
+      "recoveryDurationMs": 180,
+      "recoveryDurationsMs": {
+        "neutral": 160,
+        "closed-neutral": 160
+      }
+    },
+    "l01-closed-fingers": {
+      "foreground": "foreground/completion/l01-closed-fingers.png",
+      "foregroundSHA256": "a35c5fdc02415bcdb8074289c9d776caa8d4fe62c8e9bc1d78644dda513d2d76",
+      "detached": "detached/completion/l01-closed-fingers.png",
+      "detachedSHA256": "005d572b0938add01796abd8a83b7fcc7110115750c75995150d406df45b0f1e",
+      "normalRecovery": [
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "closed-neutral"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-fingers",
+      "gestureDurationMs": 120,
+      "recoveryDurationMs": 120,
+      "recoveryDurationsMs": {
+        "neutral": 160,
+        "closed-neutral": 160
+      }
+    },
+    "l01-open-onset-r2": {
+      "foreground": "foreground/completion/l01-open-onset-r2.png",
+      "foregroundSHA256": "a309b7242a301e2265482e4ef0e03fba94c9f7553f23ff16cb127228ea6b5b96",
+      "detached": "detached/completion/l01-open-onset-r2.png",
+      "detachedSHA256": "a92e8e6e5798cb08453ae8ebbd4fad93d802f89d4203879f973643001e7b86c5",
+      "normalRecovery": [
+        "neutral"
+      ],
+      "grabRecovery": [
+        "neutral"
+      ],
+      "grabTail": [
+        "v5-d-side",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-onset-r2",
+      "gestureDurationMs": 180,
+      "recoveryDurationMs": 180,
+      "recoveryDurationsMs": {
+        "neutral": 160,
+        "closed-neutral": 160
+      }
+    },
+    "l01-open-breath": {
+      "foreground": "foreground/completion/l01-open-breath.png",
+      "foregroundSHA256": "c447fc8f044405b3c689053c0c6c5a6f4bb372a4419f7d3367a75fea344ca8f4",
+      "detached": "detached/completion/l01-open-breath.png",
+      "detachedSHA256": "c46cf8dd49517ed3a47f19c479b25c76c5bc37ccab2e510c23deb069a68a4998",
+      "normalRecovery": [
+        "l01-open-onset-r2",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "l01-open-onset-r2",
+        "neutral"
+      ],
+      "grabTail": [
+        "v5-d-side",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-breath",
+      "gestureDurationMs": 180,
+      "recoveryDurationMs": 180,
+      "recoveryDurationsMs": {
+        "neutral": 160,
+        "closed-neutral": 160
+      }
+    },
+    "l01-open-fingers": {
+      "foreground": "foreground/completion/l01-open-fingers.png",
+      "foregroundSHA256": "03e19a3249012461d210f369341cb9fc4a31e27dfe69b0703d0c58397e289970",
+      "detached": "detached/completion/l01-open-fingers.png",
+      "detachedSHA256": "25c4d00dd703f8ca2c4a0c366e29a2459ebd5dd919c33d27f1fba7a96a355f9a",
+      "normalRecovery": [
+        "neutral"
+      ],
+      "grabRecovery": [
+        "neutral"
+      ],
+      "grabTail": [
+        "v5-d-side",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-fingers",
+      "gestureDurationMs": 120,
+      "recoveryDurationMs": 120,
+      "recoveryDurationsMs": {
+        "neutral": 160,
+        "closed-neutral": 160
+      }
+    },
+    "wait-entry": {
+      "foreground": "foreground/completion/wait-entry.png",
+      "foregroundSHA256": "8b9e2d149990688fe2493c721e6ca0a6bb1f12e757aaa6825beb104e88e3ea00",
+      "detached": "detached/completion/wait-entry.png",
+      "detachedSHA256": "c3ff26807ae64fb3dc4004e286734f75ff0d806f65d8579349378ed998e6736f",
+      "normalRecovery": [
+        "neutral"
+      ],
+      "grabRecovery": [],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-entry",
+      "gestureDurationMs": 180,
+      "recoveryDurationMs": 180,
+      "recoveryDurationsMs": {
+        "wait-half": 70,
+        "wait-shut": 70,
+        "wait-hold": 80,
+        "wait-settle": 180,
+        "wait-entry": 180,
+        "unknown-release": 140,
+        "unknown-rest": 140,
+        "query-low-hand": 120,
+        "neutral": 200
+      }
+    },
+    "wait-settle": {
+      "foreground": "foreground/completion/wait-settle.png",
+      "foregroundSHA256": "36169db3736d92172f7f4fa93dde19238eea88a4fbf571a2a53b48a37929596b",
+      "detached": "detached/completion/wait-settle.png",
+      "detachedSHA256": "fe697dbcaa1cf8ce764606cedaa7ec0ceb0ea11832e40f07946ae1e933110b1c",
+      "normalRecovery": [
+        "wait-entry",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "wait-entry"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-settle",
+      "gestureDurationMs": 180,
+      "recoveryDurationMs": 180,
+      "recoveryDurationsMs": {
+        "wait-half": 70,
+        "wait-shut": 70,
+        "wait-hold": 80,
+        "wait-settle": 180,
+        "wait-entry": 180,
+        "unknown-release": 140,
+        "unknown-rest": 140,
+        "query-low-hand": 120,
+        "neutral": 200
+      }
+    },
+    "wait-hold": {
+      "foreground": "foreground/completion/wait-hold.png",
+      "foregroundSHA256": "24865a24a79b34f888426350917513a1b7edbe03b3da313eaba189c5154375e1",
+      "detached": "detached/completion/wait-hold.png",
+      "detachedSHA256": "2f58c30881ea35ec581bb3f9a535b21e250161b7d40ae5fc527f3ae3a5086968",
+      "normalRecovery": [
+        "wait-settle",
+        "wait-entry",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "wait-settle",
+        "wait-entry"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": true,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-hold",
+      "gestureDurationMs": 80,
+      "recoveryDurationMs": 80,
+      "recoveryDurationsMs": {
+        "wait-half": 70,
+        "wait-shut": 70,
+        "wait-hold": 80,
+        "wait-settle": 180,
+        "wait-entry": 180,
+        "unknown-release": 140,
+        "unknown-rest": 140,
+        "query-low-hand": 120,
+        "neutral": 200
+      }
+    },
+    "wait-half": {
+      "foreground": "foreground/completion/wait-half.png",
+      "foregroundSHA256": "9d9e8f66674ac14b3dfbcb40b9867f213404895c9809954452822f877093322d",
+      "detached": "detached/completion/wait-half.png",
+      "detachedSHA256": "1371097b6286f91807dee43d6f4c7e68e34aabcfcac65c212e437877aafe5830",
+      "normalRecovery": [
+        "wait-hold",
+        "wait-settle",
+        "wait-entry",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "wait-hold",
+        "wait-settle",
+        "wait-entry"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-half",
+      "gestureDurationMs": 70,
+      "recoveryDurationMs": 70,
+      "recoveryDurationsMs": {
+        "wait-half": 70,
+        "wait-shut": 70,
+        "wait-hold": 80,
+        "wait-settle": 180,
+        "wait-entry": 180,
+        "unknown-release": 140,
+        "unknown-rest": 140,
+        "query-low-hand": 120,
+        "neutral": 200
+      }
+    },
+    "wait-shut": {
+      "foreground": "foreground/completion/wait-shut.png",
+      "foregroundSHA256": "bb351fc998a7fb63f76e6f8cf33bb7d661c901fda41ab528744f310de37e23b8",
+      "detached": "detached/completion/wait-shut.png",
+      "detachedSHA256": "4428f226e8b25186b0cf2d769ad61cc9c7f4b272ea1f48786dfe78fbe97a1791",
+      "normalRecovery": [
+        "wait-half",
+        "wait-hold",
+        "wait-settle",
+        "wait-entry",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "wait-half",
+        "wait-hold",
+        "wait-settle",
+        "wait-entry"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-shut",
+      "gestureDurationMs": 70,
+      "recoveryDurationMs": 70,
+      "recoveryDurationsMs": {
+        "wait-half": 70,
+        "wait-shut": 70,
+        "wait-hold": 80,
+        "wait-settle": 180,
+        "wait-entry": 180,
+        "unknown-release": 140,
+        "unknown-rest": 140,
+        "query-low-hand": 120,
+        "neutral": 200
+      }
+    },
+    "unknown-release": {
+      "foreground": "foreground/completion/unknown-release.png",
+      "foregroundSHA256": "124a50b2fa5dedca06af9c118dc7a573c64c4aa68bad1642ab811e98a855a2a1",
+      "detached": "detached/completion/unknown-release.png",
+      "detachedSHA256": "883651775b8c7b723195fdd410096ba98b5ee317726c3563c2419bad5ef59262",
+      "normalRecovery": [
+        "unknown-rest",
+        "query-low-hand",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "unknown-rest"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "unknown-release",
+      "gestureDurationMs": 140,
+      "recoveryDurationMs": 140,
+      "recoveryDurationsMs": {
+        "wait-half": 70,
+        "wait-shut": 70,
+        "wait-hold": 80,
+        "wait-settle": 180,
+        "wait-entry": 180,
+        "unknown-release": 140,
+        "unknown-rest": 140,
+        "query-low-hand": 120,
+        "neutral": 200
+      }
+    },
+    "unknown-rest": {
+      "foreground": "foreground/completion/unknown-rest.png",
+      "foregroundSHA256": "cc7fba5d1751f8092a93c1ac696871169babe27199b50a05bac3a9896e093e86",
+      "detached": "detached/completion/unknown-rest.png",
+      "detachedSHA256": "7c6ab48e38e172c850137d143e329ea7a6401b7587fbe25c1d7189ae8b51a7ab",
+      "normalRecovery": [
+        "query-low-hand",
+        "neutral"
+      ],
+      "grabRecovery": [],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "unknown-rest",
+      "gestureDurationMs": 140,
+      "recoveryDurationMs": 140,
+      "recoveryDurationsMs": {
+        "wait-half": 70,
+        "wait-shut": 70,
+        "wait-hold": 80,
+        "wait-settle": 180,
+        "wait-entry": 180,
+        "unknown-release": 140,
+        "unknown-rest": 140,
+        "query-low-hand": 120,
+        "neutral": 200
+      }
+    },
+    "bot-think-low": {
+      "foreground": "foreground/completion/bot-think-low.png",
+      "foregroundSHA256": "ec94678eb8e6c287ae1dc52c811fc0936c0f54aed296eaad74d73214adf1b514",
+      "detached": "detached/completion/bot-think-low.png",
+      "detachedSHA256": "7136b719163a60ac32db893c3d7d4d9f2fc2779aca223d65bb5af18246be6a2a",
+      "normalRecovery": [
+        "bot-think-lower",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "bot-think-lower"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-low",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "bot-think-lower": 90,
+        "neutral": 120
+      }
+    },
+    "bot-think-approach": {
+      "foreground": "foreground/completion/bot-think-approach.png",
+      "foregroundSHA256": "7c91099a17b30847c112f0d965aab2f4c58187928e7c6169926daa3bc7134b25",
+      "detached": "detached/completion/bot-think-approach.png",
+      "detachedSHA256": "e124f8093d3a250fb2cd626b3e5ccb3f6f1be2d94de08f4618b11db8d4c75752",
+      "normalRecovery": [
+        "bot-think-low",
+        "bot-think-lower",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "bot-think-low",
+        "bot-think-lower"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-approach",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "bot-think-low": 90,
+        "bot-think-lower": 90,
+        "neutral": 120
+      }
+    },
+    "bot-think-contact": {
+      "foreground": "foreground/completion/bot-think-contact.png",
+      "foregroundSHA256": "94ecf1836a04b432980ce0f81e42f9a4e4dd05dba766e1c591968765088a3e30",
+      "detached": "detached/completion/bot-think-contact.png",
+      "detachedSHA256": "dfcfd26f930dc5cfab5d4ed4764c37ae080473b586d75806bddc8d594fc2c47a",
+      "normalRecovery": [
+        "bot-think-release",
+        "bot-think-approach",
+        "bot-think-low",
+        "bot-think-lower",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "bot-think-release",
+        "bot-think-approach",
+        "bot-think-low",
+        "bot-think-lower"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": true,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-contact",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "bot-think-release": 90,
+        "bot-think-approach": 90,
+        "bot-think-low": 90,
+        "bot-think-lower": 90,
+        "neutral": 120
+      }
+    },
+    "bot-think-release": {
+      "foreground": "foreground/completion/bot-think-release.png",
+      "foregroundSHA256": "bee9e1aea541de736434030c111bd24696dde3efea67662c5ab9046db9df0012",
+      "detached": "detached/completion/bot-think-release.png",
+      "detachedSHA256": "7a4f0050245fd0e464c7f32dcd6b8f0280ca1cf1899656a54fa9ebd2682d9ee0",
+      "normalRecovery": [
+        "bot-think-approach",
+        "bot-think-low",
+        "bot-think-lower",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "bot-think-approach",
+        "bot-think-low",
+        "bot-think-lower"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-release",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "bot-think-approach": 90,
+        "bot-think-low": 90,
+        "bot-think-lower": 90,
+        "neutral": 120
+      }
+    },
+    "bot-think-lower": {
+      "foreground": "foreground/completion/bot-think-lower.png",
+      "foregroundSHA256": "fde65b9161981887009b9297d9bc43472053ba1ddece9643b6f00efb70349475",
+      "detached": "detached/completion/bot-think-lower.png",
+      "detachedSHA256": "4094502d88ed52463bf41a81694fdd65277453d9735205e5d8abb7231a64b558",
+      "normalRecovery": [
+        "neutral"
+      ],
+      "grabRecovery": [],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-lower",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "neutral": 120
+      }
+    },
+    "bot-dispatch-high": {
+      "foreground": "foreground/completion/bot-dispatch-high.png",
+      "foregroundSHA256": "cee2db70b6dba0428dd73853818bac5da9dfe5de49483a5d44c88327a08a7d57",
+      "detached": "detached/completion/bot-dispatch-high.png",
+      "detachedSHA256": "648b0aae525b1bb7dd45f581a78921a02bc8671b6a64a56b33fab8418d5f7726",
+      "normalRecovery": [
+        "bot-dispatch-down",
+        "bot-think-lower",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "bot-dispatch-down",
+        "bot-think-lower"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-dispatch-high",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "bot-dispatch-down": 90,
+        "bot-think-lower": 90,
+        "neutral": 120
+      }
+    },
+    "bot-dispatch-down": {
+      "foreground": "foreground/completion/bot-dispatch-down.png",
+      "foregroundSHA256": "f92bfa283d004669db561f0dd73417567847aaeac3ad147bc2050418783ccc11",
+      "detached": "detached/completion/bot-dispatch-down.png",
+      "detachedSHA256": "f40bc62721fdf84332a25823e3ad3342fa8be8ee80310892769d9e00fd464527",
+      "normalRecovery": [
+        "bot-think-lower",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "bot-think-lower"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-dispatch-down",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "bot-think-lower": 90,
+        "neutral": 120
+      }
+    },
+    "bot-prepare-mid": {
+      "foreground": "foreground/completion/bot-prepare-mid.png",
+      "foregroundSHA256": "a413c6eb2be71d4d854784b765227e9e8eb54748a3afa0e4d8a66b42dbb6425e",
+      "detached": "detached/completion/bot-prepare-mid.png",
+      "detachedSHA256": "2d34428a6f5974cf1d137676b485fe2a8c09207d57b39d5ec9b35dfdadbc458e",
+      "normalRecovery": [
+        "lift-side",
+        "lift-return",
+        "neutral"
+      ],
+      "grabRecovery": [],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-prepare-mid",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "lift-side": 90,
+        "lift-return": 90,
+        "neutral": 120
+      }
+    },
+    "bot-prepare-press": {
+      "foreground": "foreground/completion/bot-prepare-press.png",
+      "foregroundSHA256": "7a6b2e4aefa60accd9dbb504dfe9b82503b84da302b01a3bf4c121d6b6a818e5",
+      "detached": "detached/completion/bot-prepare-press.png",
+      "detachedSHA256": "d61786d2d16a2fda3c0f892f3df9c8a44383faa382b57f852b6f1e39b5d2b6fb",
+      "normalRecovery": [
+        "bot-prepare-mid",
+        "lift-side",
+        "lift-return",
+        "neutral"
+      ],
+      "grabRecovery": [
+        "bot-prepare-mid"
+      ],
+      "grabTail": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "closed": false,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-prepare-press",
+      "exitStartMs": 90,
+      "gestureDurationMs": 90,
+      "recoveryDurationMs": 90,
+      "recoveryDurationsMs": {
+        "bot-prepare-mid": 90,
+        "lift-side": 90,
+        "lift-return": 90,
+        "neutral": 120
+      }
+    },
+    "sleep-breath-onset": {
+      "foreground": "foreground/completion/sleep-breath-onset.png",
+      "foregroundSHA256": "af45b804985628b1f614a3c2b2aa0ddaee9aa840609b51e504033b16a7145371",
+      "detached": "detached/completion/sleep-breath-onset.png",
+      "detachedSHA256": "363fc7ea1459394cdfa1ad7a54b40a53af5b22f855b5e8b22a4b7979f8f889b0",
+      "normalRecovery": [
+        "sleep-05-wake-eyes",
+        "sleep-06-wake-support-r2",
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "sleep-05-wake-eyes",
+        "sleep-06-wake-support-r2",
+        "closed-neutral"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "sleep-local-breath",
+      "exitStartMs": 1,
+      "gestureDurationMs": 80,
+      "recoveryDurationsMs": {
+        "sleep-05-wake-eyes": 450,
+        "sleep-06-wake-support-r2": 400,
+        "closed-neutral": 120
+      }
+    },
+    "sleep-breath-inhale": {
+      "foreground": "foreground/completion/sleep-breath-inhale.png",
+      "foregroundSHA256": "93ed2c9d048c1c764e7fc92f5eb90632c27df430d57d5c13e707c8e8ce420c02",
+      "detached": "detached/completion/sleep-breath-inhale.png",
+      "detachedSHA256": "0aa99e4085890222a2909692d47fe80b4382e3ca3249b60f2c211672f52e8365",
+      "normalRecovery": [
+        "sleep-05-wake-eyes",
+        "sleep-06-wake-support-r2",
+        "closed-neutral"
+      ],
+      "grabRecovery": [
+        "sleep-05-wake-eyes",
+        "sleep-06-wake-support-r2",
+        "closed-neutral"
+      ],
+      "grabTail": [
+        "v5-m01-lid-closed-side-d",
+        "v5-m01-lid-closed-secure-d",
+        "v5-m01-lid-closed-relax-d"
+      ],
+      "closed": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "sleep-local-breath",
+      "exitStartMs": 1,
+      "gestureDurationMs": 80,
+      "recoveryDurationsMs": {
+        "sleep-05-wake-eyes": 450,
+        "sleep-06-wake-support-r2": 400,
+        "closed-neutral": 120
+      }
+    }
+  },
+  "sequences": [
+    {
+      "id": "v5-quiet-seat-adjust",
+      "kind": "action",
+      "action": "quiet-seat-adjust",
+      "frames": [
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 650,
+          "phase": "anticipation"
+        },
+        {
+          "sourceId": "l08-01-protect",
+          "durationMs": 160,
+          "phase": "anticipation"
+        },
+        {
+          "sourceId": "l08-02-unweight",
+          "durationMs": 150,
+          "phase": "enter"
+        },
+        {
+          "sourceId": "l08-03-shift",
+          "durationMs": 260,
+          "phase": "act"
+        },
+        {
+          "sourceId": "l08-04-reseat",
+          "durationMs": 180,
+          "phase": "recover"
+        },
+        {
+          "sourceId": "l08-05-release",
+          "durationMs": 160,
+          "phase": "recover"
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 900,
+          "phase": "settled"
+        }
+      ]
+    },
+    {
+      "id": "v5-idle-closed",
+      "kind": "action",
+      "action": "idle-closed",
+      "loop": [
+        0,
+        28
+      ],
+      "replaces": true,
+      "frames": [
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 2500,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-closed-onset-r2",
+          "durationMs": 480,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-closed-breath",
+          "durationMs": 600,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-closed-onset-r2",
+          "durationMs": 650,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 2170,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-half",
+          "durationMs": 55,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-shut",
+          "durationMs": 85,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-half",
+          "durationMs": 70,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 8300,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-half",
+          "durationMs": 50,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-shut",
+          "durationMs": 80,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-half",
+          "durationMs": 75,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 200,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 1700,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-closed-onset-r2",
+          "durationMs": 520,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-closed-breath",
+          "durationMs": 650,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-closed-onset-r2",
+          "durationMs": 700,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 2830,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-half",
+          "durationMs": 55,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-shut",
+          "durationMs": 85,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-half",
+          "durationMs": 70,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 4300,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-closed-fingers",
+          "durationMs": 400,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 3600,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-half",
+          "durationMs": 50,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-shut",
+          "durationMs": 80,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-closed-half",
+          "durationMs": 75,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "closed-neutral",
+          "durationMs": 200,
+          "phase": "hold",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": true,
+          "exitSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-supervise",
+      "kind": "action",
+      "action": "director-supervise",
+      "loop": [
+        0,
+        32
+      ],
+      "replaces": true,
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 2500,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-onset-r2",
+          "durationMs": 480,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-breath",
+          "durationMs": 600,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-onset-r2",
+          "durationMs": 650,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 2170,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 55,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-shut",
+          "durationMs": 85,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 70,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 3490,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "active-work-entry",
+          "durationMs": 200,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "active-work-read",
+          "durationMs": 900,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "active-work-recover",
+          "durationMs": 220,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 3490,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 50,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-shut",
+          "durationMs": 80,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 75,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 200,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 1700,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-onset-r2",
+          "durationMs": 520,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-breath",
+          "durationMs": 650,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-onset-r2",
+          "durationMs": 700,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 2830,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 55,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-shut",
+          "durationMs": 85,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 70,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 4300,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-fingers",
+          "durationMs": 400,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 3600,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 50,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-shut",
+          "durationMs": 80,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 75,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 200,
+          "phase": "intentional-canonical-rest",
+          "cue": "REST",
+          "pauseSafe": true,
+          "exitSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-open-attention",
+      "kind": "action",
+      "action": "director-open-attention",
+      "loop": [
+        0,
+        28
+      ],
+      "replaces": true,
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 2500,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-onset-r2",
+          "durationMs": 480,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-breath",
+          "durationMs": 600,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-onset-r2",
+          "durationMs": 650,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 2170,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 55,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-shut",
+          "durationMs": 85,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 70,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 8300,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 50,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-shut",
+          "durationMs": 80,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 75,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 200,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 1700,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-onset-r2",
+          "durationMs": 520,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-breath",
+          "durationMs": 650,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-onset-r2",
+          "durationMs": 700,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 2830,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 55,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-shut",
+          "durationMs": 85,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 70,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 4300,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "l01-open-fingers",
+          "durationMs": 400,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 3600,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 50,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-shut",
+          "durationMs": 80,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral-blink-open-half",
+          "durationMs": 75,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": false,
+          "exitSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 200,
+          "phase": "intentional-canonical-rest",
+          "cue": "LOCAL_ATTENTION",
+          "pauseSafe": true,
+          "exitSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-idle",
+      "kind": "action",
+      "action": "external-wait",
+      "loop": [
+        3,
+        12
+      ],
+      "replaces": true,
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 1,
+          "phase": "canonical",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "wait-entry",
+          "durationMs": 180,
+          "phase": "hands-leave-keys",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-settle",
+          "durationMs": 220,
+          "phase": "hands-join-low",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-hold",
+          "durationMs": 6400,
+          "phase": "quiet-hold",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "wait-half",
+          "durationMs": 55,
+          "phase": "blink-half",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-shut",
+          "durationMs": 85,
+          "phase": "blink-shut",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-half",
+          "durationMs": 70,
+          "phase": "blink-reopen",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-hold",
+          "durationMs": 8300,
+          "phase": "quiet-hold",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "wait-half",
+          "durationMs": 50,
+          "phase": "blink-half",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-shut",
+          "durationMs": 80,
+          "phase": "blink-shut",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-half",
+          "durationMs": 75,
+          "phase": "blink-reopen",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-hold",
+          "durationMs": 1000,
+          "phase": "quiet-hold",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "wait-settle",
+          "durationMs": 180,
+          "phase": "hands-separate",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "wait-entry",
+          "durationMs": 180,
+          "phase": "hands-return",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 200,
+          "phase": "canonical",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-unknown-check",
+      "kind": "action",
+      "action": "unknown-effect-check",
+      "loop": [
+        4,
+        5
+      ],
+      "replaces": false,
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 1,
+          "phase": "canonical",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "unknown-release",
+          "durationMs": 190,
+          "phase": "stop-input",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "unknown-rest",
+          "durationMs": 480,
+          "phase": "check-screen",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "query-low-hand",
+          "durationMs": 650,
+          "phase": "look-to-user",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "query-low-hand",
+          "durationMs": 1800,
+          "phase": "cautious-hold",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 220,
+          "phase": "canonical",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-disconnected-check",
+      "kind": "action",
+      "action": "disconnected",
+      "loop": [
+        4,
+        5
+      ],
+      "replaces": false,
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 1,
+          "phase": "canonical",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "unknown-release",
+          "durationMs": 190,
+          "phase": "stop-input",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "unknown-rest",
+          "durationMs": 480,
+          "phase": "check-screen",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "query-low-hand",
+          "durationMs": 650,
+          "phase": "look-to-user",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "query-low-hand",
+          "durationMs": 1800,
+          "phase": "cautious-hold",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 220,
+          "phase": "canonical",
+          "cue": null,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-bot-think",
+      "kind": "action",
+      "action": "bot-think",
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 130,
+          "phase": "canonical",
+          "cue": "WATCH",
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "bot-think-low",
+          "durationMs": 140,
+          "phase": "entry",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-think-approach",
+          "durationMs": 150,
+          "phase": "entry",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-think-contact",
+          "durationMs": 1600,
+          "phase": "hold",
+          "cue": "WATCH",
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "bot-think-release",
+          "durationMs": 120,
+          "phase": "release",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-think-approach",
+          "durationMs": 130,
+          "phase": "lowering",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-think-low",
+          "durationMs": 150,
+          "phase": "lowering",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-think-lower",
+          "durationMs": 140,
+          "phase": "return",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "phase": "canonical",
+          "cue": "WATCH",
+          "pauseSafe": true
+        }
+      ],
+      "loop": [
+        3,
+        4
+      ]
+    },
+    {
+      "id": "v5-bot-dispatch",
+      "kind": "action",
+      "action": "bot-dispatch",
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 130,
+          "phase": "canonical",
+          "cue": "WATCH",
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "bot-think-low",
+          "durationMs": 140,
+          "phase": "entry",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-dispatch-down",
+          "durationMs": 130,
+          "phase": "entry",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-dispatch-high",
+          "durationMs": 170,
+          "phase": "crest",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-dispatch-down",
+          "durationMs": 130,
+          "phase": "downbeat",
+          "cue": "DISPATCH_DOWN",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-think-lower",
+          "durationMs": 180,
+          "phase": "return",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 170,
+          "phase": "canonical",
+          "cue": "WATCH",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-bot-prepare",
+      "kind": "action",
+      "action": "bot-prepare",
+      "frames": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 130,
+          "phase": "canonical",
+          "cue": "WATCH",
+          "pauseSafe": true
+        },
+        {
+          "sourceId": "lift-return",
+          "durationMs": 150,
+          "phase": "entry",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "lift-side",
+          "durationMs": 140,
+          "phase": "contact",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-prepare-mid",
+          "durationMs": 150,
+          "phase": "settling",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-prepare-press",
+          "durationMs": 220,
+          "phase": "settling",
+          "cue": "TRANSITION",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "bot-prepare-mid",
+          "durationMs": 150,
+          "phase": "release",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "lift-side",
+          "durationMs": 120,
+          "phase": "release",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "lift-return",
+          "durationMs": 150,
+          "phase": "return",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "phase": "canonical",
+          "cue": "WATCH",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-rest-sleep",
+      "kind": "action",
+      "action": "rest-sleep",
+      "loop": [
+        8,
+        13
+      ],
+      "replaces": true,
+      "frames": [
+        {
+          "durationMs": 650,
+          "exitSafe": true,
+          "cue": "RECOVERY_ONLY",
+          "sourceId": "closed-neutral"
+        },
+        {
+          "durationMs": 120,
+          "exitSafe": true,
+          "cue": "RECOVERY_ONLY",
+          "sourceId": "sleep-08-low-approach-r2"
+        },
+        {
+          "durationMs": 140,
+          "exitSafe": true,
+          "cue": "RECOVERY_ONLY",
+          "sourceId": "sleep-07-yawn-release-r2"
+        },
+        {
+          "durationMs": 160,
+          "exitSafe": true,
+          "cue": "RECOVERY_ONLY",
+          "sourceId": "sleep-01-yawn-approach"
+        },
+        {
+          "durationMs": 380,
+          "exitSafe": true,
+          "cue": "RECOVERY_ONLY",
+          "sourceId": "sleep-02-yawn-contact"
+        },
+        {
+          "durationMs": 160,
+          "exitSafe": true,
+          "cue": "RECOVERY_ONLY",
+          "sourceId": "sleep-07-yawn-release-r2"
+        },
+        {
+          "durationMs": 140,
+          "exitSafe": true,
+          "cue": "RECOVERY_ONLY",
+          "sourceId": "sleep-08-low-approach-r2"
+        },
+        {
+          "durationMs": 650,
+          "exitSafe": true,
+          "cue": "RECOVERY_ONLY",
+          "sourceId": "sleep-03-return-droop"
+        },
+        {
+          "sourceId": "sleep-04-stable-sleep-r2",
+          "durationMs": 3200,
+          "exitSafe": true,
+          "pauseSafe": true,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "sourceId": "sleep-breath-onset",
+          "durationMs": 700,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "sourceId": "sleep-breath-inhale",
+          "durationMs": 950,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "sourceId": "sleep-breath-onset",
+          "durationMs": 900,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "sourceId": "sleep-04-stable-sleep-r2",
+          "durationMs": 2200,
+          "exitSafe": true,
+          "pauseSafe": true,
+          "cue": "RECOVERY_ONLY"
+        }
+      ]
+    }
+  ],
+  "gestureVariants": [
+    {
+      "id": "v5-completion-open-side-approach",
+      "from": "v5-d-side",
+      "durationMs": 180
+    }
+  ],
+  "nodePatches": [
+    {
+      "id": "v5-d-question-05-wait-r1",
+      "expectedGrabNext": [
+        "v5-d-neutral",
+        "v5-d-side",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "grabNext": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ]
+    },
+    {
+      "id": "v5-s-question-05-wait-r1",
+      "expectedGrabNext": [
+        "v5-d-neutral",
+        "v5-d-side",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ],
+      "grabNext": [
+        "v5-completion-open-side-approach",
+        "v5-d-support",
+        "v5-d-bridge",
+        "v5-d-float"
+      ]
+    }
+  ],
+  "excludedScope": [
+    "Candidate only; production selection and visual admission are separately artifact-bound.",
+    "Exact SHA-driven pickup/landing; native temporal acceptance remains separate.",
+    "W12 requires genuine matched Agent selected-thread receipt; no Bot-global inferred approval.",
+    "Quiet neutral life and faint sleeping breath are authored; permission/query holds intentionally stable. Shared semantic intents are not independent drawing families."
+  ],
+  "scope": "Authoring and graph integration contract. Runtime consumer is runtime-baseline.json, rebuilt from exact portable raw sources."
+}

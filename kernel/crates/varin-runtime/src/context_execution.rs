@@ -340,7 +340,7 @@ fn execute_node(
         return Err(failure);
     }
     let (items, deltas, usage, mut result) =
-        engine.generate(&input.run_id, &snapshot, cancel, None);
+        engine.generate(&input.run_id, input.owner_generation, &snapshot, cancel, None);
     if result.is_ok() {
         if let Err(error) = validate_model_items(&items, &snapshot) {
             result = Err(ModelFailure {

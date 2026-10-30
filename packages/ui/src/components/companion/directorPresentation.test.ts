@@ -72,6 +72,7 @@ it('labels a failed or cancelled round as that outcome, never a successful proje
   const result=director.observe(facts([ended]),'current',null,options);
   expect(result.body.edge).toMatchObject({kind:'receive-result',outcome:state,workRemains:true});
   expect(result.cards[0]?.status).toBe('settling');
+
  }
 });
 
@@ -120,7 +121,7 @@ it('detects new dispatch cursor even after execution starts, once, not initial/r
  const director=new CompanionDirector();director.observe(botFacts(10,[]),'current',null,botOptions);
  const data=botFacts(20,[branch('A','executing')],[],15);
  const incoming=director.observe(data,'current',id('A'),botOptions);
- expect(incoming.body.verb).toBe('receive-work');expect(incoming.body.edge).toMatchObject({dispatchOperationId:'op-A',runId:'run-A'});
+ expect(incoming.body.verb).toBe('dispatch-work');expect(incoming.body.edge).toMatchObject({dispatchOperationId:'op-A',runId:'run-A'});
  director.consumeEdge(incoming.body.edge!.key);expect(director.observe(data,'current',null,botOptions).body.edge).toBeNull();
  director.observe(data,'unknown',null,botOptions);expect(director.observe(data,'current',null,botOptions).body.edge).toBeNull();
  const fresh=new CompanionDirector();expect(fresh.observe(data,'current',null,botOptions).body.edge).toBeNull();
@@ -129,10 +130,10 @@ it('detects new dispatch cursor even after execution starts, once, not initial/r
  const finished=new CompanionDirector();finished.observe(botFacts(10,[]),'current',null,botOptions);
  expect(finished.observe(botFacts(20,[branch('A','completed')],[],15),'current',null,botOptions).body.edge).toBeNull();
 });
-it('allows dispatch intake before a child Run exists without borrowing the parent Run identity',()=>{
+it('allows a dispatch beat before a child Run exists without borrowing the parent Run identity',()=>{
  const director=new CompanionDirector();director.observe(botFacts(10,[]),'current',null,botOptions);
  const next=botFacts(20,[{...branch('A'),currentRun:null,latestRun:null,activeRunId:null}],[],15);
- expect(director.observe(next,'current',null,botOptions).body.edge).toMatchObject({kind:'receive-work',dispatchOperationId:'op-A',runId:null});
+ expect(director.observe(next,'current',null,botOptions).body.edge).toMatchObject({kind:'dispatch-work',dispatchOperationId:'op-A',runId:null});
 });
 it('keeps root requests exact and visible to the body without rendering another Varin lead',()=>{
  const view=new CompanionDirector().observe(botFacts(10,[branch('A')],[request('E')]),'current',null,botOptions);
@@ -202,4 +203,127 @@ it('exits expressive work on attention, lost health, hidden/drag and resumes onl
  expect(observe(facts([branch('A','waiting')]))).toBe(false);
  expect(observe()).toBe(true);
  expect(director.observe(data,'current',null,{...agent,interactionRoute:'unknown'}).body.workActive).toBe(false);
+});
+
+it('separates new Bot-root intake from child dispatch without replaying restored roots or hidden work', () => {
+ const start=botFacts(10,[]); const next=botFacts(20,[]);
+ next.branches[0]={...next.branches[0]!,activeRunId:'new-root',currentRun:{id:'new-root',state:'preparing',revision:2,cancelRequested:false}};
+ const director=new CompanionDirector();director.observe(start,'current',null,botOptions);
+ const view=director.observe(next,'current',null,botOptions);
+ expect(view.body.verb).toBe('receive-work');expect(view.body.subject).toEqual(id('E'));
+ expect(view.body.edge).toMatchObject({kind:'receive-work',runId:'new-root',rootProfileRevision:expect.any(String)});
+ expect(view.body.subjectRoute).toBe('bot-coordinator');expect(view.cards).toEqual([]);
+ director.consumeEdge(view.body.edge!.key);expect(director.observe(next,'current',null,botOptions).body.edge).toBeNull();
+ const restored=new CompanionDirector();restored.observe({...start,botEntries:[]},'current',null,botOptions);
+ expect(restored.observe(next,'current',null,botOptions).body.edge).toBeNull();
+ const hidden=new CompanionDirector();hidden.observe(start,'current',null,botOptions);hidden.observe(next,'current',null,{...botOptions,visible:false});
+ expect(hidden.observe(next,'current',null,botOptions).body.edge).toBeNull();
+ const changedProfile=new CompanionDirector();changedProfile.observe(start,'current',null,botOptions);
+ expect(changedProfile.observe({...next,botEntries:[{...next.botEntries![0]!,profileRevision:2}]},'current',null,botOptions).body.edge).toBeNull();
+});
+
+it('uses content-free reasoning phase only for the exact Bot root, not generic generation or a child', () => {
+ const data=botFacts(20,[branch('A','generating')]); const root=data.branches[0]!;
+ root.currentRun={id:root.activeRunId!,state:'generating',revision:2,cancelRequested:false,generation:{requestId:'request-current',phase:'reasoning',revision:19}};
+ const observe=(value:ThreadAttentionSnapshot, route=botOptions)=>new CompanionDirector().observe(value,'current',null,route);
+ expect(observe(data).body.activity).toMatchObject({kind:'thinking',subject:id('E')});
+ for(const phase of ['output','tool-call'] as const) {
+  const copy=structuredClone(data);copy.branches[0]!.currentRun!.generation!.phase=phase;
+  expect(observe(copy).body.activity).toBeUndefined();expect(observe(copy).body.workActive).toBe(true);
+ }
+ for(const patch of [{generation:undefined},{generation:{requestId:'stale',phase:'reasoning' as const,revision:21}},{cancelRequested:true},{state:'executing' as const}]) {
+  const copy=structuredClone(data);Object.assign(copy.branches[0]!.currentRun!,patch);expect(observe(copy).body.activity).toBeUndefined();
+ }
+ const child=structuredClone(data);delete child.branches[0]!.currentRun!.generation;
+ child.branches[1]!.currentRun!.generation={requestId:'child-request',phase:'reasoning',revision:19};expect(observe(child).body.activity).toBeUndefined();
+ expect(new CompanionDirector().observe(data,'unknown',null,botOptions).body.activity).toBeUndefined();
+ expect(observe({...data,items:[request('A')],counts:{actionRequired:1,affectedBranches:1,unknownEffects:0}}).body.activity).toBeUndefined();
+});
+
+it('presents generic root readiness and actual waits without turning preparation into work or parked uncertainty into execution', () => {
+ const preparing=botFacts(20,[]);preparing.branches[0]!.currentRun!.state='preparing';
+ const view=new CompanionDirector().observe(preparing,'current',null,botOptions);
+ expect(view.body.activity?.kind).toBe('preparing');expect(view.body.workActive).toBe(false);
+ const childPreparation=botFacts(20,[branch('A','preparing')]);expect(new CompanionDirector().observe(childPreparation,'current',null,botOptions).body.activity).toBeUndefined();
+ const agentOptions={...options,interactionRoute:'agent-companion' as const};
+ expect(new CompanionDirector().observe(facts([branch('A','waiting')]),'current',null,agentOptions).body.activity?.kind).toBe('waiting');
+ expect(new CompanionDirector().observe(facts([branch('A','waiting'),branch('B')]),'current',null,agentOptions).body.activity).toBeUndefined();
+ const unsettled=branch('A','completed');unsettled.hasUnsettledWork=true;
+ expect(new CompanionDirector().observe(facts([unsettled]),'current',null,agentOptions).body.activity).toBeUndefined();
+});
+
+it('keeps a proven retry in waiting until its owner clears it, not until the clock reaches its deadline', () => {
+ const data=botFacts(50,[]);const run=data.branches[0]!.currentRun!;run.state='generating';
+ run.retry={requestId:'request-retry',attempt:2,scheduledAtMs:1,retryAtMs:2,revision:40};
+ const director=new CompanionDirector();const view=director.observe(data,'current',null,botOptions);
+ expect(view.body.activity?.kind).toBe('retry');expect(view.body.workActive).toBe(false);
+ const concurrent=botFacts(50,[branch('A')]);concurrent.branches[0]!.currentRun=structuredClone(run);
+ const working=new CompanionDirector().observe(concurrent,'current',null,botOptions);
+ expect(working.body.workActive).toBe(true);expect(working.body.activity).toBeUndefined();
+ expect(director.observe(data,'current',null,botOptions).body.activity?.key).toBe(view.body.activity?.key);
+ delete run.retry;expect(director.observe({...data,eventCursor:51},'current',null,botOptions).body.activity).toBeUndefined();
+ run.retry={requestId:'future-unseen',attempt:3,scheduledAtMs:1,retryAtMs:2,revision:52};
+ expect(director.observe(data,'current',null,botOptions).body.activity).toBeUndefined();
+});
+
+it('hears only a fresh delivered report for the exact receiving root Run, never a ready or restored report', () => {
+ const initial=botFacts(10,[branch('A')]);const delivered=botFacts(20,[branch('A','completed')]);
+ delivered.deliveredReports=[{parentThreadId:'E',parentBranchId:'branch-E',parentRunId:'run-E',receivingRunId:'run-E',childOperationId:'op-A',executionId:'execution-A',childThreadId:'A',childBranchId:'branch-A',deliveredCursor:15}];
+ const director=new CompanionDirector();director.observe(initial,'current',null,botOptions);
+ const view=director.observe(delivered,'current',null,botOptions);
+ expect(view.body.verb).toBe('receive-report');expect(view.body.edge).toMatchObject({kind:'receive-report',receiptOperationId:'op-A',receivingRunId:'run-E',outcome:null});
+ director.consumeEdge(view.body.edge!.key);expect(director.observe(delivered,'current',null,botOptions).body.edge).toBeNull();
+ expect(new CompanionDirector().observe(delivered,'current',null,botOptions).body.edge).toBeNull();
+ for(const patch of [{receivingRunId:'old-root'},{parentRunId:'wrong-original'},{childOperationId:'wrong-op'},{deliveredCursor:10},{deliveredCursor:21}]) {
+  const copy=structuredClone(delivered);Object.assign(copy.deliveredReports![0]!,patch);
+  const fresh=new CompanionDirector();fresh.observe(initial,'current',null,botOptions);
+  expect(fresh.observe(copy,'current',null,botOptions).body.edge?.kind).not.toBe('receive-report');
+ }
+});
+
+it('reacts only to original fresh executor-stop receipts and never treats a cancelled Run as stop proof', () => {
+ const agentOptions={...options,interactionRoute:'agent-companion' as const};
+ const initial={...facts([branch('A')]),eventCursor:10};
+ const stopped={...facts([branch('A','cancelled')]),eventCursor:20,stoppedExecutors:[{threadId:'A',branchId:'branch-A',runId:'run-A',operationId:'operation-A',revision:3,stoppedCursor:15}]};
+ stopped.branches[0]!.hasUnsettledWork=true;
+ const director=new CompanionDirector();director.observe(initial,'current',null,agentOptions);
+ const result=director.observe(stopped,'current',null,agentOptions);
+ expect(result.body.verb).toBe('executor-stopped');expect(result.body.edge).toMatchObject({receiptOperationId:'operation-A',outcome:null,workRemains:true});
+ expect(result.cards[0]?.status).toBe('settling');
+ const resumed=director.observe({...stopped,eventCursor:21,branches:[branch('A','generating','new-run')]},'current',null,agentOptions);
+ expect(resumed.body.edge).toBeNull();expect(resumed.body.workActive).toBe(true);
+ expect(director.observe({...stopped,eventCursor:22},'current',null,agentOptions).body.edge?.kind).not.toBe('executor-stopped');
+ expect(new CompanionDirector().observe(stopped,'current',null,agentOptions).body.edge).toBeNull();
+ const stillRunning=new CompanionDirector();stillRunning.observe(initial,'current',null,agentOptions);
+ const active={...stopped,branches:[stopped.branches[0]!,branch('B')]};
+ expect(stillRunning.observe(active,'current',null,agentOptions).body.edge?.kind).not.toBe('executor-stopped');
+ const noReceipt=new CompanionDirector();noReceipt.observe(initial,'current',null,agentOptions);
+ expect(noReceipt.observe({...stopped,stoppedExecutors:[]},'current',null,agentOptions).body.edge?.kind).not.toBe('executor-stopped');
+});
+
+it('shows the real next-run queue without confusing its predecessor or accepted-but-unqueued runs', () => {
+ const agentOptions={...options,interactionRoute:'agent-companion' as const};
+ const queued={...branch('A','completed'),activeRunId:null,currentRun:null,queuedRunCount:2};
+ const value=new CompanionDirector().observe(facts([queued]),'current',null,agentOptions);
+ expect(value.body.verb).toBe('review-portfolio');expect(value.body.activity?.kind).toBe('queued');expect(value.body.workActive).toBe(false);
+ expect(value.cards[0]?.status).toBe('active');
+ const live={...branch('A'),queuedRunCount:2};
+ const current=new CompanionDirector().observe(facts([live]),'current',null,agentOptions);
+ expect(current.body.workActive).toBe(true);expect(current.body.activity).toBeUndefined();
+ const cleared=new CompanionDirector().observe(facts([{...queued,queuedRunCount:0}]),'current',null,agentOptions);
+ expect(cleared.body.verb).toBe('available');expect(cleared.body.activity).toBeUndefined();
+});
+
+
+it('receives a promoted Bot root task once even when the queued successor was already the latest Run', () => {
+ const queued=botFacts(10,[]);queued.branches[0]!.queuedRunCount=1;
+ queued.branches[0]!.latestRun={id:'queued-successor',state:'accepted',revision:1,cancelRequested:false};
+ const director=new CompanionDirector();director.observe(queued,'current',null,botOptions);
+ const promoted=structuredClone(queued);promoted.eventCursor=20;promoted.branches[0]!.queuedRunCount=0;
+ promoted.branches[0]!.activeRunId='queued-successor';promoted.branches[0]!.currentRun=promoted.branches[0]!.latestRun;
+ const next=director.observe(promoted,'current',null,botOptions);
+ expect(next.body.edge).toMatchObject({kind:'receive-work',runId:'queued-successor'});
+ const restored=new CompanionDirector();restored.observe(queued,'current',null,botOptions);restored.observe(promoted,'unknown',null,botOptions);
+ expect(restored.observe(promoted,'current',null,botOptions).body.edge).toBeNull();
+ director.consumeEdge(next.body.edge!.key);expect(director.observe(promoted,'current',null,botOptions).body.edge).toBeNull();
 });

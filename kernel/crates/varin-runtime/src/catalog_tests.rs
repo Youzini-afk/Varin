@@ -4452,3 +4452,129 @@ fn question_history_projects_answer_without_accepting_receipt_metadata_as_user_i
         assert!(execution_persistence::history_input_items(id, HistorySource::User, &body).is_err());
     }
 }
+
+#[test]
+fn generation_phase_attention_is_current_fenced_content_free_and_observed() {
+    use crate::execution::*;
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    let receipt = submit(&mut db);
+    let epoch = db.epoch();
+    independent_prepare(&mut db, &receipt, request_snapshot(&receipt));
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Generating, waiting_on: None }).unwrap();
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    let _subscription = db.subscribe_events(send);
+    let generation = |db: &Catalog| {
+        let snapshot = db.capture_attention_read().load(&|| false).unwrap();
+        let wire = serde_json::to_value(snapshot).unwrap();
+        wire["branches"].as_array().unwrap().iter().find(|branch| branch["branchId"] == "main").unwrap()["currentRun"]["generation"].clone()
+    };
+    assert!(generation(&db).is_null());
+    db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Reasoning)).unwrap();
+    receive.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+    let first = generation(&db);
+    assert_eq!(first["phase"], "reasoning");
+    assert_eq!(first["requestId"], "model-1");
+    let cursor = db.event_cursor().unwrap();
+    assert_eq!(first["revision"], cursor);
+    db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Reasoning)).unwrap();
+    assert_eq!(db.event_cursor().unwrap(), cursor);
+    assert!(db.record_generation_phase(&receipt.run_id, epoch + 1, "model-1", Some(GenerationPhase::Output)).is_err());
+    assert!(db.record_generation_phase(&receipt.run_id, epoch, "foreign", Some(GenerationPhase::Output)).is_err());
+    assert_eq!(generation(&db), first);
+    db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Output)).unwrap();
+    assert_eq!(generation(&db)["phase"], "output");
+    db.record_generation_phase(&receipt.run_id, epoch, "model-1", None).unwrap();
+    assert!(generation(&db).is_null());
+    db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Reasoning)).unwrap();
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ModelFinished {
+        request_id: "model-1".into(), outcome: ModelOutcome::Failed, finish_reason: None, items: vec![],
+        interrupted_deltas: vec![], usage: UsageReceipt::default(), failure: Some(ModelFailure {
+            code: "transport_error".into(), message: "fixture".into(), tool_name: None, retry_after_ms: None, provider_request_id: None,
+        }),
+    }).unwrap();
+    assert!(generation(&db).is_null());
+    let mut retry = request_snapshot(&receipt); retry.view.request_id = "model-2".into();
+    independent_prepare(&mut db, &receipt, retry);
+    assert!(generation(&db).is_null()); // Never replay previous request's last phase.
+    assert!(db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Reasoning)).is_err());
+    db.record_generation_phase(&receipt.run_id, epoch, "model-2", Some(GenerationPhase::ToolCall)).unwrap();
+    assert_eq!(generation(&db)["phase"], "tool-call");
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Executing, waiting_on: None }).unwrap();
+    assert!(generation(&db).is_null());
+    assert!(db.record_generation_phase(&receipt.run_id, epoch, "model-2", Some(GenerationPhase::Reasoning)).is_err());
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Generating, waiting_on: None }).unwrap();
+    assert!(generation(&db).is_null()); // State re-entry cannot revive a pre-exit phase.
+    db.record_generation_phase(&receipt.run_id, epoch, "model-2", Some(GenerationPhase::Reasoning)).unwrap();
+    db.request_cancel_run(&receipt.run_id).unwrap();
+    assert!(generation(&db).is_null());
+    assert!(db.record_generation_phase(&receipt.run_id, epoch, "model-2", Some(GenerationPhase::Reasoning)).is_err());
+    let events = db.events_after(0, 1000).unwrap();
+    for entry in events.iter().filter(|event| event.kind == "generation.phase_changed") {
+        assert_eq!(entry.data.as_object().unwrap().len(), 4);
+        assert!(entry.data.get("text").is_none());
+    }
+    drop(db);
+    let db = fixture.open();
+    assert!(generation(&db).is_null());
+}
+
+#[test]
+fn retry_attention_requires_original_scheduled_wait_and_never_infers_resume_from_time() {
+    use crate::execution::*;
+    let fixture = Fixture::new(); let mut db = fixture.open(); let receipt = submit(&mut db); let epoch = db.epoch();
+    independent_prepare(&mut db, &receipt, request_snapshot(&receipt));
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Generating, waiting_on: None }).unwrap();
+    assert!(db.record_retry_schedule(&receipt.run_id, epoch, "model-1", Some((1, 0))).is_err()); // still dispatched
+    db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ModelFinished {
+        request_id: "model-1".into(), outcome: ModelOutcome::Failed, finish_reason: None, items: vec![], interrupted_deltas: vec![],
+        usage: UsageReceipt::default(), failure: Some(ModelFailure { code: "transport_error".into(), message: "private failure body".into(), tool_name: None, retry_after_ms: None, provider_request_id: None }),
+    }).unwrap();
+    let retry = |db: &Catalog| {
+        let snapshot = serde_json::to_value(db.capture_attention_read().load(&|| false).unwrap()).unwrap();
+        snapshot["branches"][0]["currentRun"]["retry"].clone()
+    };
+    assert!(retry(&db).is_null());
+    db.record_retry_schedule(&receipt.run_id, epoch, "model-1", Some((1, 0))).unwrap();
+    let observed = retry(&db); assert_eq!(observed["attempt"], 1); assert_eq!(observed["requestId"], "model-1");
+    assert_eq!(observed["scheduledAtMs"], observed["retryAtMs"]);
+    assert!(!retry(&db).is_null()); // An elapsed deadline is not execution evidence.
+    assert!(db.record_retry_schedule(&receipt.run_id, epoch + 1, "model-1", Some((2, 1))).is_err());
+    assert!(db.record_retry_schedule(&receipt.run_id, epoch, "wrong-request", Some((2, 1))).is_err());
+    db.record_retry_schedule(&receipt.run_id, epoch, "model-1", None).unwrap(); assert!(retry(&db).is_null());
+    db.record_retry_schedule(&receipt.run_id, epoch, "model-1", Some((2, 100))).unwrap();
+    let mut next = request_snapshot(&receipt); next.view.request_id = "model-2".into(); independent_prepare(&mut db, &receipt, next);
+    assert!(retry(&db).is_null());
+    assert!(db.record_retry_schedule(&receipt.run_id, epoch, "model-1", Some((3, 100))).is_err());
+    assert!(!serde_json::to_string(&db.capture_attention_read().load(&|| false).unwrap()).unwrap().contains("private failure body"));
+}
+
+#[test]
+fn attention_executor_stop_requires_exact_receipt_not_cancellation_or_outcome() {
+    let fixture = Fixture::new(); let mut db = fixture.open(); let receipt = submit(&mut db); let epoch = db.epoch();
+    for id in ["stopping-job", "still-running"] {
+        db.admit_operation(id, &receipt.run_id, epoch, Lifetime::Thread, json!({"command":"private command"})).unwrap();
+        db.dispatch_operation(id, epoch, "process-executor", true).unwrap();
+    }
+    db.request_cancel_operation("stopping-job").unwrap();
+    db.request_cancel_run(&receipt.run_id).unwrap();
+    assert!(db.capture_attention_read().load(&|| false).unwrap().stopped_executors.is_empty());
+    let original = external("stopping-job", Outcome::Cancelled, Effect::Partial);
+    db.record_external_receipt_with_stop("stopping-job", original.clone(), false).unwrap();
+    assert!(db.capture_attention_read().load(&|| false).unwrap().stopped_executors.is_empty());
+    let mut foreign = original.clone(); foreign.epoch = "wrong-original-epoch".into();
+    assert!(db.record_external_receipt_with_stop("stopping-job", foreign, true).is_err());
+    db.record_external_receipt_with_stop("stopping-job", original.clone(), true).unwrap();
+    let snapshot = db.capture_attention_read().load(&|| false).unwrap();
+    assert_eq!(snapshot.stopped_executors.len(), 1);
+    let stopped = &snapshot.stopped_executors[0]; assert_eq!(stopped.operation_id, "stopping-job"); assert_eq!(stopped.run_id, receipt.run_id);
+    assert!(stopped.stopped_cursor <= snapshot.event_cursor);
+    assert!(snapshot.branches[0].has_unsettled_work); // Other executor still owns its work.
+    assert!(!serde_json::to_string(stopped).unwrap().contains("private command"));
+    let cursor = stopped.stopped_cursor;
+    db.record_external_receipt_with_stop("stopping-job", original, true).unwrap();
+    assert_eq!(db.capture_attention_read().load(&|| false).unwrap().stopped_executors[0].stopped_cursor, cursor);
+}

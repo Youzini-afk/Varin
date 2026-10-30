@@ -9,6 +9,10 @@ pub struct AttentionRun {
     pub state: RunState,
     pub revision: u64,
     pub cancel_requested: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<super::generation::AttentionGeneration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<super::generation::AttentionRetry>,
 }
 impl From<&Run> for AttentionRun {
     fn from(r: &Run) -> Self {
@@ -17,6 +21,8 @@ impl From<&Run> for AttentionRun {
             state: r.state,
             revision: r.revision,
             cancel_requested: r.cancel_requested,
+            generation: None,
+            retry: None,
         }
     }
 }
@@ -36,6 +42,8 @@ pub struct AttentionBranch {
     pub active_run_id: Option<String>,
     pub current_run: Option<AttentionRun>,
     pub latest_run: Option<AttentionRun>,
+    /// Distinct live next-run admissions in the canonical input queue.
+    pub queued_run_count: usize,
     pub has_unsettled_work: bool,
 }
 #[derive(Debug, Serialize)]
@@ -116,6 +124,8 @@ pub struct AttentionSnapshot {
     pub team_executions: Vec<AttentionTeamExecution>,
     pub delegations: Vec<AttentionDelegation>,
     pub bot_gates: Vec<AttentionBotGate>,
+    pub stopped_executors: Vec<super::attention_facts::AttentionStoppedExecutor>,
+    pub delivered_reports: Vec<super::attention_facts::AttentionDeliveredReport>,
     pub counts: AttentionCounts,
 }
 /// Capture only location/owner under the Catalog mutex. SQL and serialization run on a worker.
@@ -246,13 +256,20 @@ impl AttentionRead {
                 .as_deref()
                 .map(|id| record(&db, "runs", id))
                 .transpose()?;
-            let has_unsettled_work = active.as_ref().is_some_and(|r| !r.state.terminal());
+            let queued_run_count = db.query_row("SELECT count(DISTINCT r.id) FROM input_queue q JOIN runs r ON r.id=q.run_id WHERE q.branch_id=?1 AND r.branch_id=?1 AND json_extract(r.body,'$.thread_id')=?2 AND q.state='queued' AND q.mode='next_run' AND json_extract(r.body,'$.epoch')=?3 AND json_extract(r.body,'$.cancel_requested')=0 AND json_extract(r.body,'$.state') NOT IN ('completed','failed','cancelled')", params![branch_id, thread_id, sql_number(epoch)?], |row| row.get::<_, i64>(0))? as usize;
+            let has_unsettled_work = queued_run_count > 0 || active.as_ref().is_some_and(|r| !r.state.terminal());
             if let Some(run) = active.as_ref() {
                 runs.insert(run.id.clone(), run.clone());
             }
             if let Some(run) = latest.as_ref() {
                 runs.insert(run.id.clone(), run.clone());
             }
+            let current_run = active.as_ref().map(|run| {
+                let mut view = AttentionRun::from(run);
+                view.generation = super::generation::read_generation(&db, run, epoch)?;
+                view.retry = super::generation::read_retry(&db, run, epoch)?;
+                Ok::<_, RuntimeError>(view)
+            }).transpose()?;
             branches.insert(
                 branch_id.clone(),
                 AttentionBranch {
@@ -265,8 +282,9 @@ impl AttentionRead {
                     archived,
                     deleted,
                     active_run_id,
-                    current_run: active.as_ref().map(Into::into),
+                    current_run,
                     latest_run: latest.as_ref().map(Into::into),
+                    queued_run_count,
                     has_unsettled_work,
                 },
             );
@@ -584,6 +602,9 @@ impl AttentionRead {
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let branch_ids = serde_json::to_string(&branches.keys().collect::<Vec<_>>())?;
+        let stopped_executors = super::attention_facts::stopped_executors(&db, &branch_ids, cancel)?;
+        let delivered_reports = super::attention_facts::delivered_reports(&db, &branch_ids, cancel)?;
         items.retain(|i| branches.contains_key(&i.branch_id));
         items.sort_by(|a, b| a.key.cmp(&b.key));
         let counts = AttentionCounts {
@@ -611,6 +632,8 @@ impl AttentionRead {
             team_executions,
             delegations,
             bot_gates,
+            stopped_executors,
+            delivered_reports,
             counts,
         })
     }

@@ -499,6 +499,7 @@ impl Catalog {
             // acknowledgement proves append/ancestry visibility, never model understanding.
             tx.execute("INSERT INTO deliveries(observer,fact_cursor,request,state) VALUES(?1,?2,?3,'\"committed\"')",
                     params![format!("child-report-history:{}",child.operation_id),sql_number(fact_cursor)?,item_id])?;
+            super::attention_facts::record_report_delivery(&tx, &run, &child.execution_id)?;
         }
         let mut op: Operation = record(&tx, "operations", operation_id)?;
         op.phase = OperationPhase::Terminal;

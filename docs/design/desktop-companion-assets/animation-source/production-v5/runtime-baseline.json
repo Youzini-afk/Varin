@@ -19,69 +19,141 @@
       "kind": "action",
       "action": "external-wait",
       "loop": [
-        0,
-        9
+        3,
+        12
       ],
       "frames": [
         {
           "source": "prepared/neutral-ordinary.png",
           "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": null,
+          "phase": "canonical",
+          "durationMs": 1,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/wait-entry-ordinary.png",
+          "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "hands-leave-keys"
+        },
+        {
+          "source": "prepared/wait-settle-ordinary.png",
+          "sourceSHA256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+          "durationMs": 220,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "hands-join-low"
+        },
+        {
+          "source": "prepared/wait-hold-ordinary.png",
+          "sourceSHA256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
           "durationMs": 6400,
           "exitSafe": true,
-          "pauseSafe": true
+          "pauseSafe": true,
+          "cue": null,
+          "phase": "quiet-hold"
         },
         {
-          "source": "prepared/neutral-blink-open-half-ordinary.png",
-          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "source": "prepared/wait-half-ordinary.png",
+          "sourceSHA256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
           "durationMs": 55,
           "exitSafe": true,
-          "pauseSafe": false
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "blink-half"
         },
         {
-          "source": "prepared/neutral-blink-open-shut-ordinary.png",
-          "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "source": "prepared/wait-shut-ordinary.png",
+          "sourceSHA256": "e27e0d22d15e7bff635a20a7cc2b02f2e1f87582925689f5d712bb36778b9b4c",
           "durationMs": 85,
           "exitSafe": true,
-          "pauseSafe": false
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "blink-shut"
         },
         {
-          "source": "prepared/neutral-blink-open-half-ordinary.png",
-          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "source": "prepared/wait-half-ordinary.png",
+          "sourceSHA256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
           "durationMs": 70,
           "exitSafe": true,
-          "pauseSafe": false
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "blink-reopen"
         },
         {
-          "source": "prepared/neutral-ordinary.png",
-          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "source": "prepared/wait-hold-ordinary.png",
+          "sourceSHA256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
           "durationMs": 8300,
           "exitSafe": true,
-          "pauseSafe": true
+          "pauseSafe": true,
+          "cue": null,
+          "phase": "quiet-hold"
         },
         {
-          "source": "prepared/neutral-blink-open-half-ordinary.png",
-          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "source": "prepared/wait-half-ordinary.png",
+          "sourceSHA256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
           "durationMs": 50,
           "exitSafe": true,
-          "pauseSafe": false
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "blink-half"
         },
         {
-          "source": "prepared/neutral-blink-open-shut-ordinary.png",
-          "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "source": "prepared/wait-shut-ordinary.png",
+          "sourceSHA256": "e27e0d22d15e7bff635a20a7cc2b02f2e1f87582925689f5d712bb36778b9b4c",
           "durationMs": 80,
           "exitSafe": true,
-          "pauseSafe": false
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "blink-shut"
         },
         {
-          "source": "prepared/neutral-blink-open-half-ordinary.png",
-          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "source": "prepared/wait-half-ordinary.png",
+          "sourceSHA256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
           "durationMs": 75,
           "exitSafe": true,
-          "pauseSafe": false
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "blink-reopen"
+        },
+        {
+          "source": "prepared/wait-hold-ordinary.png",
+          "sourceSHA256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
+          "durationMs": 1000,
+          "exitSafe": true,
+          "pauseSafe": true,
+          "cue": null,
+          "phase": "quiet-hold"
+        },
+        {
+          "source": "prepared/wait-settle-ordinary.png",
+          "sourceSHA256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "hands-separate"
+        },
+        {
+          "source": "prepared/wait-entry-ordinary.png",
+          "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "hands-return"
         },
         {
           "source": "prepared/neutral-ordinary.png",
           "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": null,
+          "phase": "canonical",
           "durationMs": 200,
           "exitSafe": true,
           "pauseSafe": true
@@ -1860,83 +1932,263 @@
       "id": "v5-idle-closed",
       "kind": "action",
       "action": "idle-closed",
+      "loop": [
+        0,
+        28
+      ],
       "frames": [
         {
           "source": "prepared/closed-neutral-ordinary.png",
           "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
-          "durationMs": 6400,
-          "exitSafe": true,
           "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 2500,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-closed-onset-r2-ordinary.png",
+          "sourceSHA256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+          "durationMs": 480,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold"
+        },
+        {
+          "source": "prepared/l01-closed-breath-ordinary.png",
+          "sourceSHA256": "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1",
+          "durationMs": 600,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold"
+        },
+        {
+          "source": "prepared/l01-closed-onset-r2-ordinary.png",
+          "sourceSHA256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 2170,
+          "exitSafe": true,
           "pauseSafe": true
         },
         {
           "source": "prepared/neutral-blink-closed-half-ordinary.png",
           "sourceSHA256": "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
           "durationMs": 55,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-closed-shut-ordinary.png",
           "sourceSHA256": "1387a3abdbe40c321685ef9a09e2ae303a9adf49a51b2d586cf1a587ea314d5a",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
           "durationMs": 85,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-closed-half-ordinary.png",
           "sourceSHA256": "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
           "durationMs": 70,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": false
         },
         {
           "source": "prepared/closed-neutral-ordinary.png",
           "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
           "durationMs": 8300,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY",
           "pauseSafe": true
         },
         {
           "source": "prepared/neutral-blink-closed-half-ordinary.png",
           "sourceSHA256": "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
           "durationMs": 50,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-closed-shut-ordinary.png",
           "sourceSHA256": "1387a3abdbe40c321685ef9a09e2ae303a9adf49a51b2d586cf1a587ea314d5a",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
           "durationMs": 80,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-closed-half-ordinary.png",
           "sourceSHA256": "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
           "durationMs": 75,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": false
         },
         {
           "source": "prepared/closed-neutral-ordinary.png",
           "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
           "durationMs": 200,
           "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
           "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 1700,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-closed-onset-r2-ordinary.png",
+          "sourceSHA256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+          "durationMs": 520,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold"
+        },
+        {
+          "source": "prepared/l01-closed-breath-ordinary.png",
+          "sourceSHA256": "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold"
+        },
+        {
+          "source": "prepared/l01-closed-onset-r2-ordinary.png",
+          "sourceSHA256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+          "durationMs": 700,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 2830,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/neutral-blink-closed-half-ordinary.png",
+          "sourceSHA256": "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 55,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-closed-shut-ordinary.png",
+          "sourceSHA256": "1387a3abdbe40c321685ef9a09e2ae303a9adf49a51b2d586cf1a587ea314d5a",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 85,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-closed-half-ordinary.png",
+          "sourceSHA256": "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 70,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 4300,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-closed-fingers-ordinary.png",
+          "sourceSHA256": "a7fa9986c36df17bb2b162a0be44b9107504f813069faca1a14b3eda52d5a9e8",
+          "durationMs": 400,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 3600,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/neutral-blink-closed-half-ordinary.png",
+          "sourceSHA256": "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 50,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-closed-shut-ordinary.png",
+          "sourceSHA256": "1387a3abdbe40c321685ef9a09e2ae303a9adf49a51b2d586cf1a587ea314d5a",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 80,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-closed-half-ordinary.png",
+          "sourceSHA256": "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 75,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "hold",
+          "durationMs": 200,
+          "exitSafe": true,
           "pauseSafe": true
         }
-      ],
-      "loop": [
-        0,
-        9
       ]
     },
     {
@@ -4343,148 +4595,314 @@
       "id": "v5-rest-sleep",
       "kind": "action",
       "action": "rest-sleep",
+      "loop": [
+        8,
+        13
+      ],
       "frames": [
         {
           "source": "prepared/closed-neutral-ordinary.png",
           "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "canonical",
           "durationMs": 650,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
         },
         {
           "source": "prepared/sleep-08-low-approach-r2-ordinary.png",
           "sourceSHA256": "f240485801d032509fd8217d1ef17d07f893462618ea7bea286b5f8efa3e8914",
+          "cue": "RECOVERY_ONLY",
           "durationMs": 120,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
         },
         {
           "source": "prepared/sleep-07-yawn-release-r2-ordinary.png",
           "sourceSHA256": "8f4d65c557cd4bf7a37506910118cba4488573861e2b8cb3636cad18c43120f6",
+          "cue": "RECOVERY_ONLY",
           "durationMs": 140,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
         },
         {
           "source": "prepared/sleep-01-yawn-approach-ordinary.png",
           "sourceSHA256": "cb87c194ec53583c620e3b4f47c18c006034250db7a7785be3b111b4195a3e99",
+          "cue": "RECOVERY_ONLY",
           "durationMs": 160,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
         },
         {
           "source": "prepared/sleep-02-yawn-contact-ordinary.png",
           "sourceSHA256": "aae9a2797089228837763cf10d07acc60b7744d05e7e19d833d3d26f3c43ea5e",
+          "cue": "RECOVERY_ONLY",
           "durationMs": 380,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
         },
         {
           "source": "prepared/sleep-07-yawn-release-r2-ordinary.png",
           "sourceSHA256": "8f4d65c557cd4bf7a37506910118cba4488573861e2b8cb3636cad18c43120f6",
+          "cue": "RECOVERY_ONLY",
           "durationMs": 160,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
         },
         {
           "source": "prepared/sleep-08-low-approach-r2-ordinary.png",
           "sourceSHA256": "f240485801d032509fd8217d1ef17d07f893462618ea7bea286b5f8efa3e8914",
+          "cue": "RECOVERY_ONLY",
           "durationMs": 140,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
         },
         {
           "source": "prepared/sleep-03-return-droop-ordinary.png",
           "sourceSHA256": "9d04b08a53472c6ae59d2ac24364cc60622e69bb687ce4468418f9ff04a4c75f",
+          "cue": "RECOVERY_ONLY",
           "durationMs": 650,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
         },
         {
           "source": "prepared/sleep-04-stable-sleep-r2-ordinary.png",
           "sourceSHA256": "4194a12312a6b9ddf3f6cc47dab79977b40c6977f30b73f35d3a41ac77cdc70c",
-          "durationMs": 450,
+          "cue": "RECOVERY_ONLY",
+          "durationMs": 3200,
           "exitSafe": true,
-          "cue": "RECOVERY_ONLY"
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/sleep-breath-onset-ordinary.png",
+          "sourceSHA256": "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340",
+          "durationMs": 700,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "sleep-local-breath"
+        },
+        {
+          "source": "prepared/sleep-breath-inhale-ordinary.png",
+          "sourceSHA256": "c6b80e02fd55b8f53af3f46045d6df83a5db58fb4be583b00de6581acf4b695b",
+          "durationMs": 950,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "sleep-local-breath"
+        },
+        {
+          "source": "prepared/sleep-breath-onset-ordinary.png",
+          "sourceSHA256": "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340",
+          "durationMs": 900,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "sleep-local-breath"
+        },
+        {
+          "source": "prepared/sleep-04-stable-sleep-r2-ordinary.png",
+          "sourceSHA256": "4194a12312a6b9ddf3f6cc47dab79977b40c6977f30b73f35d3a41ac77cdc70c",
+          "cue": "RECOVERY_ONLY",
+          "durationMs": 2200,
+          "exitSafe": true,
+          "pauseSafe": true
         }
-      ],
-      "loop": [
-        8,
-        9
       ]
     },
     {
       "id": "v5-supervise",
       "kind": "action",
       "action": "director-supervise",
+      "loop": [
+        0,
+        32
+      ],
       "frames": [
         {
           "source": "prepared/neutral-ordinary.png",
           "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
-          "durationMs": 6400,
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 2500,
           "exitSafe": true,
-          "pauseSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 480,
+          "exitSafe": true,
+          "pauseSafe": false,
           "cue": "REST",
           "phase": "intentional-canonical-rest"
         },
         {
+          "source": "prepared/l01-open-breath-ordinary.png",
+          "sourceSHA256": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+          "durationMs": 600,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "REST",
+          "phase": "intentional-canonical-rest"
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "REST",
+          "phase": "intentional-canonical-rest"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 2170,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
           "source": "prepared/neutral-blink-open-half-ordinary.png",
           "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
           "durationMs": 55,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "REST",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-open-shut-ordinary.png",
           "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
           "durationMs": 85,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "REST",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-open-half-ordinary.png",
           "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
           "durationMs": 70,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "REST",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-ordinary.png",
           "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
-          "durationMs": 8300,
-          "exitSafe": true,
-          "pauseSafe": true,
           "cue": "REST",
-          "phase": "intentional-canonical-rest"
+          "phase": "intentional-canonical-rest",
+          "durationMs": 3490,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/active-work-entry-ordinary.png",
+          "sourceSHA256": "09c99b94e661b1f5e4ea0086f0e4950a6a945e8156ee918e9597c340d0510853",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/active-work-read-ordinary.png",
+          "sourceSHA256": "d0db7f8fa376e5f46dac301a88ea53e732cdf6596db23c679bbae6a3cbbbd524",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 900,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/active-work-recover-ordinary.png",
+          "sourceSHA256": "1df58f8ec1b0f52645c979dd97d862149f9b5f4110765d10be15fa55115b75e4",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 220,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 3490,
+          "exitSafe": true,
+          "pauseSafe": true
         },
         {
           "source": "prepared/neutral-blink-open-half-ordinary.png",
           "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
           "durationMs": 50,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "REST",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-open-shut-ordinary.png",
           "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
           "durationMs": 80,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 75,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 1700,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 520,
           "exitSafe": true,
           "pauseSafe": false,
           "cue": "REST",
           "phase": "intentional-canonical-rest"
         },
         {
-          "source": "prepared/neutral-blink-open-half-ordinary.png",
-          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
-          "durationMs": 75,
+          "source": "prepared/l01-open-breath-ordinary.png",
+          "sourceSHA256": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "REST",
+          "phase": "intentional-canonical-rest"
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 700,
           "exitSafe": true,
           "pauseSafe": false,
           "cue": "REST",
@@ -4493,90 +4911,261 @@
         {
           "source": "prepared/neutral-ordinary.png",
           "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
-          "durationMs": 200,
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 2830,
           "exitSafe": true,
-          "pauseSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 55,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-shut-ordinary.png",
+          "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 85,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 70,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 4300,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-open-fingers-ordinary.png",
+          "sourceSHA256": "5ec81daa0183f0b16913a4663e15b679831889d4e052320beebb9ddaf0f2bd4a",
+          "durationMs": 400,
+          "exitSafe": true,
+          "pauseSafe": false,
           "cue": "REST",
           "phase": "intentional-canonical-rest"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 3600,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 50,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-shut-ordinary.png",
+          "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 80,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 75,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "REST",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": true
         }
-      ],
-      "loop": [
-        0,
-        9
       ]
     },
     {
       "id": "v5-open-attention",
       "kind": "action",
       "action": "director-open-attention",
+      "loop": [
+        0,
+        28
+      ],
       "frames": [
         {
           "source": "prepared/neutral-ordinary.png",
           "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
-          "durationMs": 6400,
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 2500,
           "exitSafe": true,
-          "pauseSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 480,
+          "exitSafe": true,
+          "pauseSafe": false,
           "cue": "LOCAL_ATTENTION",
           "phase": "intentional-canonical-rest"
         },
         {
+          "source": "prepared/l01-open-breath-ordinary.png",
+          "sourceSHA256": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+          "durationMs": 600,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest"
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 2170,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
           "source": "prepared/neutral-blink-open-half-ordinary.png",
           "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
           "durationMs": 55,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "LOCAL_ATTENTION",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-open-shut-ordinary.png",
           "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
           "durationMs": 85,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "LOCAL_ATTENTION",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-open-half-ordinary.png",
           "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
           "durationMs": 70,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "LOCAL_ATTENTION",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-ordinary.png",
           "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
           "durationMs": 8300,
           "exitSafe": true,
-          "pauseSafe": true,
-          "cue": "LOCAL_ATTENTION",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": true
         },
         {
           "source": "prepared/neutral-blink-open-half-ordinary.png",
           "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
           "durationMs": 50,
           "exitSafe": true,
-          "pauseSafe": false,
-          "cue": "LOCAL_ATTENTION",
-          "phase": "intentional-canonical-rest"
+          "pauseSafe": false
         },
         {
           "source": "prepared/neutral-blink-open-shut-ordinary.png",
           "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
           "durationMs": 80,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 75,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 1700,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 520,
           "exitSafe": true,
           "pauseSafe": false,
           "cue": "LOCAL_ATTENTION",
           "phase": "intentional-canonical-rest"
         },
         {
-          "source": "prepared/neutral-blink-open-half-ordinary.png",
-          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
-          "durationMs": 75,
+          "source": "prepared/l01-open-breath-ordinary.png",
+          "sourceSHA256": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest"
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 700,
           "exitSafe": true,
           "pauseSafe": false,
           "cue": "LOCAL_ATTENTION",
@@ -4585,16 +5174,102 @@
         {
           "source": "prepared/neutral-ordinary.png",
           "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
-          "durationMs": 200,
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 2830,
           "exitSafe": true,
-          "pauseSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 55,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-shut-ordinary.png",
+          "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 85,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 70,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 4300,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l01-open-fingers-ordinary.png",
+          "sourceSHA256": "5ec81daa0183f0b16913a4663e15b679831889d4e052320beebb9ddaf0f2bd4a",
+          "durationMs": 400,
+          "exitSafe": true,
+          "pauseSafe": false,
           "cue": "LOCAL_ATTENTION",
           "phase": "intentional-canonical-rest"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 3600,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 50,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-shut-ordinary.png",
+          "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 80,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-blink-open-half-ordinary.png",
+          "sourceSHA256": "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 75,
+          "exitSafe": true,
+          "pauseSafe": false
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "LOCAL_ATTENTION",
+          "phase": "intentional-canonical-rest",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": true
         }
-      ],
-      "loop": [
-        0,
-        9
       ]
     },
     {
@@ -5940,6 +6615,1566 @@
           "phase": "canonical"
         }
       ]
+    },
+    {
+      "id": "v5-completion-recovery-l08-01-protect",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l08-01-protect-ordinary.png",
+          "sourceSHA256": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-05-release-ordinary.png",
+          "sourceSHA256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l08-02-unweight",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l08-02-unweight-ordinary.png",
+          "sourceSHA256": "6581c00b090a3ceee05fbd127034a3f1b6e83ae6b423ae6f06654876fbe8ca19",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-04-reseat-ordinary.png",
+          "sourceSHA256": "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+          "durationMs": 140,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-01-protect-ordinary.png",
+          "sourceSHA256": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+          "durationMs": 100,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-05-release-ordinary.png",
+          "sourceSHA256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l08-03-shift",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l08-03-shift-ordinary.png",
+          "sourceSHA256": "5ef9698df90cfb09a21e5e0414e8ce7b6ea8ca783e96e589867d8aec7a596e4f",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-04-reseat-ordinary.png",
+          "sourceSHA256": "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+          "durationMs": 140,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-01-protect-ordinary.png",
+          "sourceSHA256": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+          "durationMs": 100,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-05-release-ordinary.png",
+          "sourceSHA256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l08-04-reseat",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l08-04-reseat-ordinary.png",
+          "sourceSHA256": "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-01-protect-ordinary.png",
+          "sourceSHA256": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+          "durationMs": 100,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l08-05-release-ordinary.png",
+          "sourceSHA256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l08-05-release",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l08-05-release-ordinary.png",
+          "sourceSHA256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l01-closed-onset-r2",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l01-closed-onset-r2-ordinary.png",
+          "sourceSHA256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l01-closed-breath",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l01-closed-breath-ordinary.png",
+          "sourceSHA256": "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l01-closed-onset-r2-ordinary.png",
+          "sourceSHA256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l01-closed-fingers",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l01-closed-fingers-ordinary.png",
+          "sourceSHA256": "a7fa9986c36df17bb2b162a0be44b9107504f813069faca1a14b3eda52d5a9e8",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l01-open-onset-r2",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l01-open-breath",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l01-open-breath-ordinary.png",
+          "sourceSHA256": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/l01-open-onset-r2-ordinary.png",
+          "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-l01-open-fingers",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/l01-open-fingers-ordinary.png",
+          "sourceSHA256": "5ec81daa0183f0b16913a4663e15b679831889d4e052320beebb9ddaf0f2bd4a",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-wait-entry",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/wait-entry-ordinary.png",
+          "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-wait-settle",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/wait-settle-ordinary.png",
+          "sourceSHA256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-entry-ordinary.png",
+          "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-wait-hold",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/wait-hold-ordinary.png",
+          "sourceSHA256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-settle-ordinary.png",
+          "sourceSHA256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-entry-ordinary.png",
+          "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-wait-half",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/wait-half-ordinary.png",
+          "sourceSHA256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-hold-ordinary.png",
+          "sourceSHA256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
+          "durationMs": 80,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-settle-ordinary.png",
+          "sourceSHA256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-entry-ordinary.png",
+          "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-wait-shut",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/wait-shut-ordinary.png",
+          "sourceSHA256": "e27e0d22d15e7bff635a20a7cc2b02f2e1f87582925689f5d712bb36778b9b4c",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-half-ordinary.png",
+          "sourceSHA256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
+          "durationMs": 70,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-hold-ordinary.png",
+          "sourceSHA256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
+          "durationMs": 80,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-settle-ordinary.png",
+          "sourceSHA256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/wait-entry-ordinary.png",
+          "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-unknown-release",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/unknown-release-ordinary.png",
+          "sourceSHA256": "9a6694dd3f00526948f68b71270f46be473b05551057cb1dcd3c2c767bcb2373",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/unknown-rest-ordinary.png",
+          "sourceSHA256": "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55",
+          "durationMs": 140,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/query-low-hand-ordinary.png",
+          "sourceSHA256": "17513828d1c27ba9862bf71cc8306209bcee3f4ebc94f2610eef9e8077f640f7",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-unknown-rest",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/unknown-rest-ordinary.png",
+          "sourceSHA256": "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55",
+          "durationMs": 60,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/query-low-hand-ordinary.png",
+          "sourceSHA256": "17513828d1c27ba9862bf71cc8306209bcee3f4ebc94f2610eef9e8077f640f7",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 200,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-think-low",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-think-low-ordinary.png",
+          "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-think-approach",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-think-approach-ordinary.png",
+          "sourceSHA256": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-low-ordinary.png",
+          "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-think-contact",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-think-contact-ordinary.png",
+          "sourceSHA256": "c4b59b31ed7e9a056835941facfe51cbebe8bf7b1009abc3d54152075c6c324c",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-release-ordinary.png",
+          "sourceSHA256": "4725a1259009826f6a1a15fce2e33fe1cd73217810e403e4ba4f48d3acbe974e",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-approach-ordinary.png",
+          "sourceSHA256": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-low-ordinary.png",
+          "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-think-release",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-think-release-ordinary.png",
+          "sourceSHA256": "4725a1259009826f6a1a15fce2e33fe1cd73217810e403e4ba4f48d3acbe974e",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-approach-ordinary.png",
+          "sourceSHA256": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-low-ordinary.png",
+          "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-think-lower",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-dispatch-high",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-dispatch-high-ordinary.png",
+          "sourceSHA256": "6850eb482f15290aa2cc121dd541e6011a7f917c486f3de3c20796563dd886de",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-dispatch-down-ordinary.png",
+          "sourceSHA256": "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-dispatch-down",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-dispatch-down-ordinary.png",
+          "sourceSHA256": "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-prepare-mid",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-prepare-mid-ordinary.png",
+          "sourceSHA256": "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/lift-side-ordinary.png",
+          "sourceSHA256": "9154929f71d5bbbec5a831b52fbbd9b2357112fc021d8e01753cd911ccd0385f",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/lift-return-ordinary.png",
+          "sourceSHA256": "738588f9d056f756f5b3a99fcc8fc19fc215c5a84f0d7c90f26af5ad784829e9",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-bot-prepare-press",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/bot-prepare-press-ordinary.png",
+          "sourceSHA256": "0961d2682619f6649bdd9041df353f59abb303c2deaaef1c402a66869fb40fc8",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/bot-prepare-mid-ordinary.png",
+          "sourceSHA256": "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/lift-side-ordinary.png",
+          "sourceSHA256": "9154929f71d5bbbec5a831b52fbbd9b2357112fc021d8e01753cd911ccd0385f",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/lift-return-ordinary.png",
+          "sourceSHA256": "738588f9d056f756f5b3a99fcc8fc19fc215c5a84f0d7c90f26af5ad784829e9",
+          "durationMs": 90,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-sleep-breath-onset",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/sleep-breath-onset-ordinary.png",
+          "sourceSHA256": "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340",
+          "durationMs": 1,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/sleep-05-wake-eyes-ordinary.png",
+          "sourceSHA256": "d9e59fe8a31fb0ee05279fff1a490cad38ebb7ee305847179044a0a3584e4663",
+          "cue": "RECOVERY_ONLY",
+          "durationMs": 450,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/sleep-06-wake-support-r2-ordinary.png",
+          "sourceSHA256": "828fa4a41d2696ff1dd782f97336e3e2b2507993a82dfb3b72ed8f073f89c1b5",
+          "cue": "RECOVERY_ONLY",
+          "durationMs": 400,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-completion-recovery-sleep-breath-inhale",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "prepared/sleep-breath-inhale-ordinary.png",
+          "sourceSHA256": "c6b80e02fd55b8f53af3f46045d6df83a5db58fb4be583b00de6581acf4b695b",
+          "durationMs": 1,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/sleep-05-wake-eyes-ordinary.png",
+          "sourceSHA256": "d9e59fe8a31fb0ee05279fff1a490cad38ebb7ee305847179044a0a3584e4663",
+          "cue": "RECOVERY_ONLY",
+          "durationMs": 450,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/sleep-06-wake-support-r2-ordinary.png",
+          "sourceSHA256": "828fa4a41d2696ff1dd782f97336e3e2b2507993a82dfb3b72ed8f073f89c1b5",
+          "cue": "RECOVERY_ONLY",
+          "durationMs": 400,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "recovery"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "recovery",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false
+        }
+      ]
+    },
+    {
+      "id": "v5-quiet-seat-adjust",
+      "kind": "action",
+      "action": "quiet-seat-adjust",
+      "frames": [
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "anticipation",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/l08-01-protect-ordinary.png",
+          "sourceSHA256": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "anticipation"
+        },
+        {
+          "source": "prepared/l08-02-unweight-ordinary.png",
+          "sourceSHA256": "6581c00b090a3ceee05fbd127034a3f1b6e83ae6b423ae6f06654876fbe8ca19",
+          "durationMs": 150,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "enter"
+        },
+        {
+          "source": "prepared/l08-03-shift-ordinary.png",
+          "sourceSHA256": "5ef9698df90cfb09a21e5e0414e8ce7b6ea8ca783e96e589867d8aec7a596e4f",
+          "durationMs": 260,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act"
+        },
+        {
+          "source": "prepared/l08-04-reseat-ordinary.png",
+          "sourceSHA256": "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recover"
+        },
+        {
+          "source": "prepared/l08-05-release-ordinary.png",
+          "sourceSHA256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "recover"
+        },
+        {
+          "source": "prepared/closed-neutral-ordinary.png",
+          "sourceSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0",
+          "cue": "RECOVERY_ONLY",
+          "phase": "settled",
+          "durationMs": 900,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-unknown-check",
+      "kind": "action",
+      "action": "unknown-effect-check",
+      "loop": [
+        4,
+        5
+      ],
+      "frames": [
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": null,
+          "phase": "canonical",
+          "durationMs": 1,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/unknown-release-ordinary.png",
+          "sourceSHA256": "9a6694dd3f00526948f68b71270f46be473b05551057cb1dcd3c2c767bcb2373",
+          "durationMs": 190,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "stop-input"
+        },
+        {
+          "source": "prepared/unknown-rest-ordinary.png",
+          "sourceSHA256": "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55",
+          "durationMs": 480,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "check-screen"
+        },
+        {
+          "source": "prepared/query-low-hand-ordinary.png",
+          "sourceSHA256": "17513828d1c27ba9862bf71cc8306209bcee3f4ebc94f2610eef9e8077f640f7",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "look-to-user",
+          "cue": null
+        },
+        {
+          "source": "prepared/query-low-hand-ordinary.png",
+          "sourceSHA256": "17513828d1c27ba9862bf71cc8306209bcee3f4ebc94f2610eef9e8077f640f7",
+          "durationMs": 1800,
+          "exitSafe": true,
+          "pauseSafe": true,
+          "phase": "cautious-hold",
+          "cue": null
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": null,
+          "phase": "canonical",
+          "durationMs": 220,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-disconnected-check",
+      "kind": "action",
+      "action": "disconnected",
+      "loop": [
+        4,
+        5
+      ],
+      "frames": [
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": null,
+          "phase": "canonical",
+          "durationMs": 1,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/unknown-release-ordinary.png",
+          "sourceSHA256": "9a6694dd3f00526948f68b71270f46be473b05551057cb1dcd3c2c767bcb2373",
+          "durationMs": 190,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "stop-input"
+        },
+        {
+          "source": "prepared/unknown-rest-ordinary.png",
+          "sourceSHA256": "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55",
+          "durationMs": 480,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": null,
+          "phase": "check-screen"
+        },
+        {
+          "source": "prepared/query-low-hand-ordinary.png",
+          "sourceSHA256": "17513828d1c27ba9862bf71cc8306209bcee3f4ebc94f2610eef9e8077f640f7",
+          "durationMs": 650,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "look-to-user",
+          "cue": null
+        },
+        {
+          "source": "prepared/query-low-hand-ordinary.png",
+          "sourceSHA256": "17513828d1c27ba9862bf71cc8306209bcee3f4ebc94f2610eef9e8077f640f7",
+          "durationMs": 1800,
+          "exitSafe": true,
+          "pauseSafe": true,
+          "phase": "cautious-hold",
+          "cue": null
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": null,
+          "phase": "canonical",
+          "durationMs": 220,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-bot-think",
+      "kind": "action",
+      "action": "bot-think",
+      "loop": [
+        3,
+        4
+      ],
+      "frames": [
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "WATCH",
+          "phase": "canonical",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/bot-think-low-ordinary.png",
+          "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+          "durationMs": 140,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "TRANSITION",
+          "phase": "entry"
+        },
+        {
+          "source": "prepared/bot-think-approach-ordinary.png",
+          "sourceSHA256": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+          "durationMs": 150,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "TRANSITION",
+          "phase": "entry"
+        },
+        {
+          "source": "prepared/bot-think-contact-ordinary.png",
+          "sourceSHA256": "c4b59b31ed7e9a056835941facfe51cbebe8bf7b1009abc3d54152075c6c324c",
+          "durationMs": 1600,
+          "exitSafe": true,
+          "pauseSafe": true,
+          "cue": "WATCH",
+          "phase": "hold"
+        },
+        {
+          "source": "prepared/bot-think-release-ordinary.png",
+          "sourceSHA256": "4725a1259009826f6a1a15fce2e33fe1cd73217810e403e4ba4f48d3acbe974e",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "release"
+        },
+        {
+          "source": "prepared/bot-think-approach-ordinary.png",
+          "sourceSHA256": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "lowering"
+        },
+        {
+          "source": "prepared/bot-think-low-ordinary.png",
+          "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+          "durationMs": 150,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "lowering"
+        },
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 140,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "return"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "WATCH",
+          "phase": "canonical",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-bot-dispatch",
+      "kind": "action",
+      "action": "bot-dispatch",
+      "frames": [
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "WATCH",
+          "phase": "canonical",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/bot-think-low-ordinary.png",
+          "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+          "durationMs": 140,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "TRANSITION",
+          "phase": "entry"
+        },
+        {
+          "source": "prepared/bot-dispatch-down-ordinary.png",
+          "sourceSHA256": "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "TRANSITION",
+          "phase": "entry"
+        },
+        {
+          "source": "prepared/bot-dispatch-high-ordinary.png",
+          "sourceSHA256": "6850eb482f15290aa2cc121dd541e6011a7f917c486f3de3c20796563dd886de",
+          "durationMs": 170,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "TRANSITION",
+          "phase": "crest"
+        },
+        {
+          "source": "prepared/bot-dispatch-down-ordinary.png",
+          "sourceSHA256": "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "DISPATCH_DOWN",
+          "phase": "downbeat"
+        },
+        {
+          "source": "prepared/bot-think-lower-ordinary.png",
+          "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+          "durationMs": 180,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "return"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "WATCH",
+          "phase": "canonical",
+          "durationMs": 170,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v5-bot-prepare",
+      "kind": "action",
+      "action": "bot-prepare",
+      "frames": [
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "WATCH",
+          "phase": "canonical",
+          "durationMs": 130,
+          "exitSafe": true,
+          "pauseSafe": true
+        },
+        {
+          "source": "prepared/lift-return-ordinary.png",
+          "sourceSHA256": "738588f9d056f756f5b3a99fcc8fc19fc215c5a84f0d7c90f26af5ad784829e9",
+          "durationMs": 150,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "entry",
+          "cue": "TRANSITION"
+        },
+        {
+          "source": "prepared/lift-side-ordinary.png",
+          "sourceSHA256": "9154929f71d5bbbec5a831b52fbbd9b2357112fc021d8e01753cd911ccd0385f",
+          "durationMs": 140,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "contact",
+          "cue": "TRANSITION"
+        },
+        {
+          "source": "prepared/bot-prepare-mid-ordinary.png",
+          "sourceSHA256": "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353",
+          "durationMs": 150,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "TRANSITION",
+          "phase": "settling"
+        },
+        {
+          "source": "prepared/bot-prepare-press-ordinary.png",
+          "sourceSHA256": "0961d2682619f6649bdd9041df353f59abb303c2deaaef1c402a66869fb40fc8",
+          "durationMs": 220,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "TRANSITION",
+          "phase": "settling"
+        },
+        {
+          "source": "prepared/bot-prepare-mid-ordinary.png",
+          "sourceSHA256": "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353",
+          "durationMs": 150,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "cue": "RECOVERY_ONLY",
+          "phase": "release"
+        },
+        {
+          "source": "prepared/lift-side-ordinary.png",
+          "sourceSHA256": "9154929f71d5bbbec5a831b52fbbd9b2357112fc021d8e01753cd911ccd0385f",
+          "durationMs": 120,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "release",
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "prepared/lift-return-ordinary.png",
+          "sourceSHA256": "738588f9d056f756f5b3a99fcc8fc19fc215c5a84f0d7c90f26af5ad784829e9",
+          "durationMs": 150,
+          "exitSafe": true,
+          "pauseSafe": false,
+          "phase": "return",
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "prepared/neutral-ordinary.png",
+          "sourceSHA256": "787d2c096f32727639767350bc3d1dad97a2a4919c2a4dab86d7ea3a7b7c240e",
+          "cue": "WATCH",
+          "phase": "canonical",
+          "durationMs": 160,
+          "exitSafe": true,
+          "pauseSafe": true
+        }
+      ]
     }
   ],
   "nodes": [
@@ -7034,8 +9269,7 @@
       "gesture": {
         "entrySourceSha256": "17513828d1c27ba9862bf71cc8306209bcee3f4ebc94f2610eef9e8077f640f7",
         "grabNext": [
-          "v5-d-neutral",
-          "v5-d-side",
+          "v5-completion-open-side-approach",
           "v5-d-support",
           "v5-d-bridge",
           "v5-d-float"
@@ -7058,8 +9292,7 @@
       "gesture": {
         "grabImmediate": "v5-d-question-05-wait-r1",
         "grabNext": [
-          "v5-d-neutral",
-          "v5-d-side",
+          "v5-completion-open-side-approach",
           "v5-d-support",
           "v5-d-bridge",
           "v5-d-float"
@@ -14157,6 +16390,1727 @@
         ],
         "entrySourceSha256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67"
       }
+    },
+    {
+      "id": "v5-completion-open-side-approach",
+      "source": "prepared/lift-side-detached.png",
+      "sourceSHA256": "7885f2041b86f208e669b895b850a341442eeea29e800d2153ab8d1813877d6e",
+      "durationMs": 180,
+      "gesture": {
+        "grabNext": [
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-s-side",
+          "v5-s-return",
+          "v5-s-neutral"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    },
+    {
+      "id": "v5-completion-l08-01-protect-s",
+      "source": "prepared/l08-01-protect-ordinary.png",
+      "sourceSHA256": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+      "durationMs": 100,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-01-protect",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-l08-01-protect-d"
+      }
+    },
+    {
+      "id": "v5-completion-l08-01-protect-d",
+      "source": "prepared/l08-01-protect-detached.png",
+      "sourceSHA256": "3d0edf6805ca75a251af9f76619dc237e83c7bdeed85d372af741d8e30a65dee",
+      "durationMs": 100,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-01-protect",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-01-protect-s",
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a"
+      }
+    },
+    {
+      "id": "v5-completion-l08-02-unweight-s",
+      "source": "prepared/l08-02-unweight-ordinary.png",
+      "sourceSHA256": "6581c00b090a3ceee05fbd127034a3f1b6e83ae6b423ae6f06654876fbe8ca19",
+      "durationMs": 150,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-02-unweight",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l08-04-reseat-d",
+          "v5-completion-l08-01-protect-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-04-reseat-s",
+          "v5-completion-l08-01-protect-s",
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-l08-02-unweight-d"
+      }
+    },
+    {
+      "id": "v5-completion-l08-02-unweight-d",
+      "source": "prepared/l08-02-unweight-detached.png",
+      "sourceSHA256": "4707357461629f0d2a8c194596ccf1ef6383e514bd4cf52d5515f3a490a7c079",
+      "durationMs": 150,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-02-unweight",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l08-04-reseat-d",
+          "v5-completion-l08-01-protect-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-02-unweight-s",
+          "v5-completion-l08-04-reseat-s",
+          "v5-completion-l08-01-protect-s",
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "6581c00b090a3ceee05fbd127034a3f1b6e83ae6b423ae6f06654876fbe8ca19"
+      }
+    },
+    {
+      "id": "v5-completion-l08-03-shift-s",
+      "source": "prepared/l08-03-shift-ordinary.png",
+      "sourceSHA256": "5ef9698df90cfb09a21e5e0414e8ce7b6ea8ca783e96e589867d8aec7a596e4f",
+      "durationMs": 260,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-03-shift",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l08-04-reseat-d",
+          "v5-completion-l08-01-protect-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-04-reseat-s",
+          "v5-completion-l08-01-protect-s",
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-l08-03-shift-d"
+      }
+    },
+    {
+      "id": "v5-completion-l08-03-shift-d",
+      "source": "prepared/l08-03-shift-detached.png",
+      "sourceSHA256": "43b3c1a57d4828c3914cb19349cfac69d981378d97a818e18617114adf67dad8",
+      "durationMs": 260,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-03-shift",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l08-04-reseat-d",
+          "v5-completion-l08-01-protect-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-03-shift-s",
+          "v5-completion-l08-04-reseat-s",
+          "v5-completion-l08-01-protect-s",
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "5ef9698df90cfb09a21e5e0414e8ce7b6ea8ca783e96e589867d8aec7a596e4f"
+      }
+    },
+    {
+      "id": "v5-completion-l08-04-reseat-s",
+      "source": "prepared/l08-04-reseat-ordinary.png",
+      "sourceSHA256": "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+      "durationMs": 140,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-04-reseat",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l08-01-protect-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-01-protect-s",
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-l08-04-reseat-d"
+      }
+    },
+    {
+      "id": "v5-completion-l08-04-reseat-d",
+      "source": "prepared/l08-04-reseat-detached.png",
+      "sourceSHA256": "126d322a104b396a3fc3a273b5251c49e8af97ed28ed1896431dffed09920ce1",
+      "durationMs": 140,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-04-reseat",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l08-01-protect-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-04-reseat-s",
+          "v5-completion-l08-01-protect-s",
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4"
+      }
+    },
+    {
+      "id": "v5-completion-l08-05-release-s",
+      "source": "prepared/l08-05-release-ordinary.png",
+      "sourceSHA256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+      "durationMs": 130,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-05-release",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l08-01-protect-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-l08-05-release-d"
+      }
+    },
+    {
+      "id": "v5-completion-l08-05-release-d",
+      "source": "prepared/l08-05-release-detached.png",
+      "sourceSHA256": "da30fbb28b3e5cae917bd2a0429861082b7c4827220e5446a9a7518431fc8f6a",
+      "durationMs": 130,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l08-05-release",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l08-01-protect-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l08-05-release-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8"
+      }
+    },
+    {
+      "id": "v5-completion-l01-closed-onset-r2-s",
+      "source": "prepared/l01-closed-onset-r2-ordinary.png",
+      "sourceSHA256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-onset-r2",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-l01-closed-onset-r2-d"
+      }
+    },
+    {
+      "id": "v5-completion-l01-closed-onset-r2-d",
+      "source": "prepared/l01-closed-onset-r2-detached.png",
+      "sourceSHA256": "6e42ed1b2b79cb567288d336f96a1ad026694da359d4a29d2511d7b91e99437e",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-onset-r2",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l01-closed-onset-r2-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3"
+      }
+    },
+    {
+      "id": "v5-completion-l01-closed-breath-s",
+      "source": "prepared/l01-closed-breath-ordinary.png",
+      "sourceSHA256": "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-breath",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l01-closed-onset-r2-d",
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l01-closed-onset-r2-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-l01-closed-breath-d"
+      }
+    },
+    {
+      "id": "v5-completion-l01-closed-breath-d",
+      "source": "prepared/l01-closed-breath-detached.png",
+      "sourceSHA256": "aa3f8aa986c4d1af6d80cb683ed05a6721810f8b926f551ddbb88ec53406ebf6",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-breath",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l01-closed-onset-r2-d",
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l01-closed-breath-s",
+          "v5-completion-l01-closed-onset-r2-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1"
+      }
+    },
+    {
+      "id": "v5-completion-l01-closed-fingers-s",
+      "source": "prepared/l01-closed-fingers-ordinary.png",
+      "sourceSHA256": "a7fa9986c36df17bb2b162a0be44b9107504f813069faca1a14b3eda52d5a9e8",
+      "durationMs": 120,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-fingers",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-l01-closed-fingers-d"
+      }
+    },
+    {
+      "id": "v5-completion-l01-closed-fingers-d",
+      "source": "prepared/l01-closed-fingers-detached.png",
+      "sourceSHA256": "3f5f27ac5adcecc74e8b49453f530ec11fc1d2c6863f7bc4c560b5a92d97e97b",
+      "durationMs": 120,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-closed-fingers",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-l01-closed-fingers-s",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "a7fa9986c36df17bb2b162a0be44b9107504f813069faca1a14b3eda52d5a9e8"
+      }
+    },
+    {
+      "id": "v5-completion-l01-open-onset-r2-s",
+      "source": "prepared/l01-open-onset-r2-ordinary.png",
+      "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-onset-r2",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-d-neutral",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-l01-open-onset-r2-d"
+      }
+    },
+    {
+      "id": "v5-completion-l01-open-onset-r2-d",
+      "source": "prepared/l01-open-onset-r2-detached.png",
+      "sourceSHA256": "fe07f5bd98a33435932859b50fbfa5b8c0027f1da9d3b44d57aa67dbf8f82106",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-onset-r2",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-d-neutral",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-l01-open-onset-r2-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f"
+      }
+    },
+    {
+      "id": "v5-completion-l01-open-breath-s",
+      "source": "prepared/l01-open-breath-ordinary.png",
+      "sourceSHA256": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-breath",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l01-open-onset-r2-d",
+          "v5-d-neutral",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-l01-open-onset-r2-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-l01-open-breath-d"
+      }
+    },
+    {
+      "id": "v5-completion-l01-open-breath-d",
+      "source": "prepared/l01-open-breath-detached.png",
+      "sourceSHA256": "45c3e602ec70fa1e20615791acc454801df4936e5e5c6059c86ba98a98b2de37",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-breath",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-l01-open-onset-r2-d",
+          "v5-d-neutral",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-l01-open-breath-s",
+          "v5-completion-l01-open-onset-r2-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84"
+      }
+    },
+    {
+      "id": "v5-completion-l01-open-fingers-s",
+      "source": "prepared/l01-open-fingers-ordinary.png",
+      "sourceSHA256": "5ec81daa0183f0b16913a4663e15b679831889d4e052320beebb9ddaf0f2bd4a",
+      "durationMs": 120,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-fingers",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-d-neutral",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-l01-open-fingers-d"
+      }
+    },
+    {
+      "id": "v5-completion-l01-open-fingers-d",
+      "source": "prepared/l01-open-fingers-detached.png",
+      "sourceSHA256": "aa248839829ad4d6f55516c73dd118361f8646bbfb2078dd5321c8efbfbb5c3a",
+      "durationMs": 120,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "l01-open-fingers",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-d-neutral",
+          "v5-d-side",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-l01-open-fingers-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "5ec81daa0183f0b16913a4663e15b679831889d4e052320beebb9ddaf0f2bd4a"
+      }
+    },
+    {
+      "id": "v5-completion-wait-entry-s",
+      "source": "prepared/wait-entry-ordinary.png",
+      "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-entry",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-wait-entry-d"
+      }
+    },
+    {
+      "id": "v5-completion-wait-entry-d",
+      "source": "prepared/wait-entry-detached.png",
+      "sourceSHA256": "70ef82e1db65f655166f8dd1ed5071ec2e1b7b89485120918363fd4d6563e54c",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-entry",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e"
+      }
+    },
+    {
+      "id": "v5-completion-wait-settle-s",
+      "source": "prepared/wait-settle-ordinary.png",
+      "sourceSHA256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-settle",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-wait-entry-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-wait-settle-d"
+      }
+    },
+    {
+      "id": "v5-completion-wait-settle-d",
+      "source": "prepared/wait-settle-detached.png",
+      "sourceSHA256": "a3d3657cd5df70e21e283fe0bf85cee51ed36d3685436e5276a59a0190ba05b8",
+      "durationMs": 180,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-settle",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-wait-entry-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-settle-s",
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281"
+      }
+    },
+    {
+      "id": "v5-completion-wait-hold-s",
+      "source": "prepared/wait-hold-ordinary.png",
+      "sourceSHA256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
+      "durationMs": 80,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-hold",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-wait-settle-d",
+          "v5-completion-wait-entry-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-settle-s",
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-wait-hold-d"
+      }
+    },
+    {
+      "id": "v5-completion-wait-hold-d",
+      "source": "prepared/wait-hold-detached.png",
+      "sourceSHA256": "ade109382238aa2cbf05f816b76381d5b99228a69e50dc28c30e5add040b3d7d",
+      "durationMs": 80,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-hold",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-wait-settle-d",
+          "v5-completion-wait-entry-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-hold-s",
+          "v5-completion-wait-settle-s",
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787"
+      }
+    },
+    {
+      "id": "v5-completion-wait-half-s",
+      "source": "prepared/wait-half-ordinary.png",
+      "sourceSHA256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
+      "durationMs": 70,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-half",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-wait-hold-d",
+          "v5-completion-wait-settle-d",
+          "v5-completion-wait-entry-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-hold-s",
+          "v5-completion-wait-settle-s",
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-wait-half-d"
+      }
+    },
+    {
+      "id": "v5-completion-wait-half-d",
+      "source": "prepared/wait-half-detached.png",
+      "sourceSHA256": "fc96b4466150fb92645f146ec7cd6fa1a513465e3e239facb91e0af0c42b1321",
+      "durationMs": 70,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-half",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-wait-hold-d",
+          "v5-completion-wait-settle-d",
+          "v5-completion-wait-entry-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-half-s",
+          "v5-completion-wait-hold-s",
+          "v5-completion-wait-settle-s",
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5"
+      }
+    },
+    {
+      "id": "v5-completion-wait-shut-s",
+      "source": "prepared/wait-shut-ordinary.png",
+      "sourceSHA256": "e27e0d22d15e7bff635a20a7cc2b02f2e1f87582925689f5d712bb36778b9b4c",
+      "durationMs": 70,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-shut",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-wait-half-d",
+          "v5-completion-wait-hold-d",
+          "v5-completion-wait-settle-d",
+          "v5-completion-wait-entry-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-half-s",
+          "v5-completion-wait-hold-s",
+          "v5-completion-wait-settle-s",
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-wait-shut-d"
+      }
+    },
+    {
+      "id": "v5-completion-wait-shut-d",
+      "source": "prepared/wait-shut-detached.png",
+      "sourceSHA256": "686824c4185489285756dfeb5f1b9d23ed63cae91fc18c3c8b014f154f22ce65",
+      "durationMs": 70,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "wait-shut",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-wait-half-d",
+          "v5-completion-wait-hold-d",
+          "v5-completion-wait-settle-d",
+          "v5-completion-wait-entry-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-wait-shut-s",
+          "v5-completion-wait-half-s",
+          "v5-completion-wait-hold-s",
+          "v5-completion-wait-settle-s",
+          "v5-completion-wait-entry-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "e27e0d22d15e7bff635a20a7cc2b02f2e1f87582925689f5d712bb36778b9b4c"
+      }
+    },
+    {
+      "id": "v5-completion-unknown-release-s",
+      "source": "prepared/unknown-release-ordinary.png",
+      "sourceSHA256": "9a6694dd3f00526948f68b71270f46be473b05551057cb1dcd3c2c767bcb2373",
+      "durationMs": 140,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "unknown-release",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-unknown-rest-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-unknown-rest-s",
+          "v5-s-question-05-wait-r1",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-unknown-release-d"
+      }
+    },
+    {
+      "id": "v5-completion-unknown-release-d",
+      "source": "prepared/unknown-release-detached.png",
+      "sourceSHA256": "ca7348624490a693691e83a026e0ecb8ae9ae7c130d22eaa52dcc0f05c9f09a7",
+      "durationMs": 140,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "unknown-release",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-unknown-rest-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-unknown-release-s",
+          "v5-completion-unknown-rest-s",
+          "v5-s-question-05-wait-r1",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "9a6694dd3f00526948f68b71270f46be473b05551057cb1dcd3c2c767bcb2373"
+      }
+    },
+    {
+      "id": "v5-completion-unknown-rest-s",
+      "source": "prepared/unknown-rest-ordinary.png",
+      "sourceSHA256": "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55",
+      "durationMs": 140,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "unknown-rest",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-s-question-05-wait-r1",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-unknown-rest-d"
+      }
+    },
+    {
+      "id": "v5-completion-unknown-rest-d",
+      "source": "prepared/unknown-rest-detached.png",
+      "sourceSHA256": "fa81cb1625ea816905bb95075db2fe28d98f815fe0a7230bd0928203df65ecf8",
+      "durationMs": 140,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "unknown-rest",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-unknown-rest-s",
+          "v5-s-question-05-wait-r1",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-low-s",
+      "source": "prepared/bot-think-low-ordinary.png",
+      "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-low",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-think-low-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-low-d",
+      "source": "prepared/bot-think-low-detached.png",
+      "sourceSHA256": "dccf81f00f234b6b433a3b264122033c89677c9163fe51e1e371738def653cfb",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-low",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-low-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-approach-s",
+      "source": "prepared/bot-think-approach-ordinary.png",
+      "sourceSHA256": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-approach",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-low-d",
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-low-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-think-approach-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-approach-d",
+      "source": "prepared/bot-think-approach-detached.png",
+      "sourceSHA256": "2215fb4ae92f2c0124944858e8ad1e177add246a4586af6ba50fd213c0a6957b",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-approach",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-low-d",
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-approach-s",
+          "v5-completion-bot-think-low-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-contact-s",
+      "source": "prepared/bot-think-contact-ordinary.png",
+      "sourceSHA256": "c4b59b31ed7e9a056835941facfe51cbebe8bf7b1009abc3d54152075c6c324c",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-contact",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-release-d",
+          "v5-completion-bot-think-approach-d",
+          "v5-completion-bot-think-low-d",
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-release-s",
+          "v5-completion-bot-think-approach-s",
+          "v5-completion-bot-think-low-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-think-contact-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-contact-d",
+      "source": "prepared/bot-think-contact-detached.png",
+      "sourceSHA256": "db303bc865a39dde86e428e6317a0a7fa44ef19ce58a84d9d67a06d0c9d1c6d1",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-contact",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-release-d",
+          "v5-completion-bot-think-approach-d",
+          "v5-completion-bot-think-low-d",
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-contact-s",
+          "v5-completion-bot-think-release-s",
+          "v5-completion-bot-think-approach-s",
+          "v5-completion-bot-think-low-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "c4b59b31ed7e9a056835941facfe51cbebe8bf7b1009abc3d54152075c6c324c"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-release-s",
+      "source": "prepared/bot-think-release-ordinary.png",
+      "sourceSHA256": "4725a1259009826f6a1a15fce2e33fe1cd73217810e403e4ba4f48d3acbe974e",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-release",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-approach-d",
+          "v5-completion-bot-think-low-d",
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-approach-s",
+          "v5-completion-bot-think-low-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-think-release-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-release-d",
+      "source": "prepared/bot-think-release-detached.png",
+      "sourceSHA256": "297bf158ba415099fdd7788db9f520b93ad3c293c0c34b76cd79f607a9a5c2d4",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-release",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-approach-d",
+          "v5-completion-bot-think-low-d",
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-release-s",
+          "v5-completion-bot-think-approach-s",
+          "v5-completion-bot-think-low-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "4725a1259009826f6a1a15fce2e33fe1cd73217810e403e4ba4f48d3acbe974e"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-lower-s",
+      "source": "prepared/bot-think-lower-ordinary.png",
+      "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-lower",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-think-lower-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-think-lower-d",
+      "source": "prepared/bot-think-lower-detached.png",
+      "sourceSHA256": "ddcf19fb0d39d1f2f84ef0bc2e4cca3e46a93dc4bb4eab46a982956027ac99df",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-think-lower",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110"
+      }
+    },
+    {
+      "id": "v5-completion-bot-dispatch-high-s",
+      "source": "prepared/bot-dispatch-high-ordinary.png",
+      "sourceSHA256": "6850eb482f15290aa2cc121dd541e6011a7f917c486f3de3c20796563dd886de",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-dispatch-high",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-dispatch-down-d",
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-dispatch-down-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-dispatch-high-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-dispatch-high-d",
+      "source": "prepared/bot-dispatch-high-detached.png",
+      "sourceSHA256": "f34ecb7a13034c9800b01a9fb97b79d91bc620c04cc23052ee5a134b4ded358a",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-dispatch-high",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-dispatch-down-d",
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-dispatch-high-s",
+          "v5-completion-bot-dispatch-down-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "6850eb482f15290aa2cc121dd541e6011a7f917c486f3de3c20796563dd886de"
+      }
+    },
+    {
+      "id": "v5-completion-bot-dispatch-down-s",
+      "source": "prepared/bot-dispatch-down-ordinary.png",
+      "sourceSHA256": "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-dispatch-down",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-dispatch-down-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-dispatch-down-d",
+      "source": "prepared/bot-dispatch-down-detached.png",
+      "sourceSHA256": "09685245ae1ec8cb4f0cbab2fc51e222148545b228c93c740d3bda7ea267e7d7",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-dispatch-down",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-think-lower-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-dispatch-down-s",
+          "v5-completion-bot-think-lower-s",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae"
+      }
+    },
+    {
+      "id": "v5-completion-bot-prepare-mid-s",
+      "source": "prepared/bot-prepare-mid-ordinary.png",
+      "sourceSHA256": "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-prepare-mid",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-s-side",
+          "v5-s-return",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-prepare-mid-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-prepare-mid-d",
+      "source": "prepared/bot-prepare-mid-detached.png",
+      "sourceSHA256": "028b00dd45f8dd19fd09592f121415b815a03fa8fcace8e8bdaf1402dcb4c6c6",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-prepare-mid",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-prepare-mid-s",
+          "v5-s-side",
+          "v5-s-return",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353"
+      }
+    },
+    {
+      "id": "v5-completion-bot-prepare-press-s",
+      "source": "prepared/bot-prepare-press-ordinary.png",
+      "sourceSHA256": "0961d2682619f6649bdd9041df353f59abb303c2deaaef1c402a66869fb40fc8",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-prepare-press",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-prepare-mid-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-prepare-mid-s",
+          "v5-s-side",
+          "v5-s-return",
+          "v5-s-neutral"
+        ],
+        "grabImmediate": "v5-completion-bot-prepare-press-d"
+      }
+    },
+    {
+      "id": "v5-completion-bot-prepare-press-d",
+      "source": "prepared/bot-prepare-press-detached.png",
+      "sourceSHA256": "f1343d2eb3b2d569379066b197686035d3951b1f6f7e4367b54f35ae1a76944e",
+      "durationMs": 90,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "bot-prepare-press",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-completion-bot-prepare-mid-d",
+          "v5-completion-open-side-approach",
+          "v5-d-support",
+          "v5-d-bridge",
+          "v5-d-float"
+        ],
+        "releaseNext": [
+          "v5-completion-bot-prepare-press-s",
+          "v5-completion-bot-prepare-mid-s",
+          "v5-s-side",
+          "v5-s-return",
+          "v5-s-neutral"
+        ],
+        "entrySourceSha256": "0961d2682619f6649bdd9041df353f59abb303c2deaaef1c402a66869fb40fc8"
+      }
+    },
+    {
+      "id": "v5-completion-sleep-breath-onset-s",
+      "source": "prepared/sleep-breath-onset-ordinary.png",
+      "sourceSHA256": "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340",
+      "durationMs": 80,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "sleep-local-breath",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-sleep-05-wake-eyes-d",
+          "v5-sleep-06-wake-support-r2-d",
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-sleep-05-wake-eyes-fg",
+          "v5-sleep-06-wake-support-r2-fg",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-sleep-breath-onset-d"
+      }
+    },
+    {
+      "id": "v5-completion-sleep-breath-onset-d",
+      "source": "prepared/sleep-breath-onset-detached.png",
+      "sourceSHA256": "39b2f0923c456e56f696a3c8b50102252272738197184bb7ad50f09a046694dc",
+      "durationMs": 80,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "sleep-local-breath",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-sleep-05-wake-eyes-d",
+          "v5-sleep-06-wake-support-r2-d",
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-sleep-breath-onset-s",
+          "v5-sleep-05-wake-eyes-fg",
+          "v5-sleep-06-wake-support-r2-fg",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340"
+      }
+    },
+    {
+      "id": "v5-completion-sleep-breath-inhale-s",
+      "source": "prepared/sleep-breath-inhale-ordinary.png",
+      "sourceSHA256": "c6b80e02fd55b8f53af3f46045d6df83a5db58fb4be583b00de6581acf4b695b",
+      "durationMs": 80,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "sleep-local-breath",
+      "gesture": {
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-sleep-05-wake-eyes-d",
+          "v5-sleep-06-wake-support-r2-d",
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-sleep-05-wake-eyes-fg",
+          "v5-sleep-06-wake-support-r2-fg",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "grabImmediate": "v5-completion-sleep-breath-inhale-d"
+      }
+    },
+    {
+      "id": "v5-completion-sleep-breath-inhale-d",
+      "source": "prepared/sleep-breath-inhale-detached.png",
+      "sourceSHA256": "c04589a3c7d093d3c5ed135630a7579109bafbf5a28356f6729b0d0d5273ce44",
+      "durationMs": 80,
+      "exitSafe": true,
+      "pauseSafe": false,
+      "cue": "RECOVERY_ONLY",
+      "phase": "sleep-local-breath",
+      "gesture": {
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabNext": [
+          "v5-sleep-05-wake-eyes-d",
+          "v5-sleep-06-wake-support-r2-d",
+          "v5-m01-closed-neutral-d",
+          "v5-m01-lid-closed-side-d",
+          "v5-m01-lid-closed-secure-d",
+          "v5-m01-lid-closed-relax-d"
+        ],
+        "releaseNext": [
+          "v5-completion-sleep-breath-inhale-s",
+          "v5-sleep-05-wake-eyes-fg",
+          "v5-sleep-06-wake-support-r2-fg",
+          "v5-m01-closed-neutral-fg"
+        ],
+        "entrySourceSha256": "c6b80e02fd55b8f53af3f46045d6df83a5db58fb4be583b00de6581acf4b695b"
+      }
     }
   ],
   "counterparts": [
@@ -14691,13 +18645,129 @@
     {
       "sourceSHA256": "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
       "detachedSHA256": "12781381b2d8c308b5391f8d881b2fdc02ecb42e0e5f683a19fc1414e51f235b"
+    },
+    {
+      "sourceSHA256": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+      "detachedSHA256": "3d0edf6805ca75a251af9f76619dc237e83c7bdeed85d372af741d8e30a65dee"
+    },
+    {
+      "sourceSHA256": "6581c00b090a3ceee05fbd127034a3f1b6e83ae6b423ae6f06654876fbe8ca19",
+      "detachedSHA256": "4707357461629f0d2a8c194596ccf1ef6383e514bd4cf52d5515f3a490a7c079"
+    },
+    {
+      "sourceSHA256": "5ef9698df90cfb09a21e5e0414e8ce7b6ea8ca783e96e589867d8aec7a596e4f",
+      "detachedSHA256": "43b3c1a57d4828c3914cb19349cfac69d981378d97a818e18617114adf67dad8"
+    },
+    {
+      "sourceSHA256": "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+      "detachedSHA256": "126d322a104b396a3fc3a273b5251c49e8af97ed28ed1896431dffed09920ce1"
+    },
+    {
+      "sourceSHA256": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+      "detachedSHA256": "da30fbb28b3e5cae917bd2a0429861082b7c4827220e5446a9a7518431fc8f6a"
+    },
+    {
+      "sourceSHA256": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+      "detachedSHA256": "6e42ed1b2b79cb567288d336f96a1ad026694da359d4a29d2511d7b91e99437e"
+    },
+    {
+      "sourceSHA256": "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1",
+      "detachedSHA256": "aa3f8aa986c4d1af6d80cb683ed05a6721810f8b926f551ddbb88ec53406ebf6"
+    },
+    {
+      "sourceSHA256": "a7fa9986c36df17bb2b162a0be44b9107504f813069faca1a14b3eda52d5a9e8",
+      "detachedSHA256": "3f5f27ac5adcecc74e8b49453f530ec11fc1d2c6863f7bc4c560b5a92d97e97b"
+    },
+    {
+      "sourceSHA256": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+      "detachedSHA256": "fe07f5bd98a33435932859b50fbfa5b8c0027f1da9d3b44d57aa67dbf8f82106"
+    },
+    {
+      "sourceSHA256": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+      "detachedSHA256": "45c3e602ec70fa1e20615791acc454801df4936e5e5c6059c86ba98a98b2de37"
+    },
+    {
+      "sourceSHA256": "5ec81daa0183f0b16913a4663e15b679831889d4e052320beebb9ddaf0f2bd4a",
+      "detachedSHA256": "aa248839829ad4d6f55516c73dd118361f8646bbfb2078dd5321c8efbfbb5c3a"
+    },
+    {
+      "sourceSHA256": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+      "detachedSHA256": "70ef82e1db65f655166f8dd1ed5071ec2e1b7b89485120918363fd4d6563e54c"
+    },
+    {
+      "sourceSHA256": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+      "detachedSHA256": "a3d3657cd5df70e21e283fe0bf85cee51ed36d3685436e5276a59a0190ba05b8"
+    },
+    {
+      "sourceSHA256": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
+      "detachedSHA256": "ade109382238aa2cbf05f816b76381d5b99228a69e50dc28c30e5add040b3d7d"
+    },
+    {
+      "sourceSHA256": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
+      "detachedSHA256": "fc96b4466150fb92645f146ec7cd6fa1a513465e3e239facb91e0af0c42b1321"
+    },
+    {
+      "sourceSHA256": "e27e0d22d15e7bff635a20a7cc2b02f2e1f87582925689f5d712bb36778b9b4c",
+      "detachedSHA256": "686824c4185489285756dfeb5f1b9d23ed63cae91fc18c3c8b014f154f22ce65"
+    },
+    {
+      "sourceSHA256": "9a6694dd3f00526948f68b71270f46be473b05551057cb1dcd3c2c767bcb2373",
+      "detachedSHA256": "ca7348624490a693691e83a026e0ecb8ae9ae7c130d22eaa52dcc0f05c9f09a7"
+    },
+    {
+      "sourceSHA256": "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55",
+      "detachedSHA256": "fa81cb1625ea816905bb95075db2fe28d98f815fe0a7230bd0928203df65ecf8"
+    },
+    {
+      "sourceSHA256": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+      "detachedSHA256": "dccf81f00f234b6b433a3b264122033c89677c9163fe51e1e371738def653cfb"
+    },
+    {
+      "sourceSHA256": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+      "detachedSHA256": "2215fb4ae92f2c0124944858e8ad1e177add246a4586af6ba50fd213c0a6957b"
+    },
+    {
+      "sourceSHA256": "c4b59b31ed7e9a056835941facfe51cbebe8bf7b1009abc3d54152075c6c324c",
+      "detachedSHA256": "db303bc865a39dde86e428e6317a0a7fa44ef19ce58a84d9d67a06d0c9d1c6d1"
+    },
+    {
+      "sourceSHA256": "4725a1259009826f6a1a15fce2e33fe1cd73217810e403e4ba4f48d3acbe974e",
+      "detachedSHA256": "297bf158ba415099fdd7788db9f520b93ad3c293c0c34b76cd79f607a9a5c2d4"
+    },
+    {
+      "sourceSHA256": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+      "detachedSHA256": "ddcf19fb0d39d1f2f84ef0bc2e4cca3e46a93dc4bb4eab46a982956027ac99df"
+    },
+    {
+      "sourceSHA256": "6850eb482f15290aa2cc121dd541e6011a7f917c486f3de3c20796563dd886de",
+      "detachedSHA256": "f34ecb7a13034c9800b01a9fb97b79d91bc620c04cc23052ee5a134b4ded358a"
+    },
+    {
+      "sourceSHA256": "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae",
+      "detachedSHA256": "09685245ae1ec8cb4f0cbab2fc51e222148545b228c93c740d3bda7ea267e7d7"
+    },
+    {
+      "sourceSHA256": "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353",
+      "detachedSHA256": "028b00dd45f8dd19fd09592f121415b815a03fa8fcace8e8bdaf1402dcb4c6c6"
+    },
+    {
+      "sourceSHA256": "0961d2682619f6649bdd9041df353f59abb303c2deaaef1c402a66869fb40fc8",
+      "detachedSHA256": "f1343d2eb3b2d569379066b197686035d3951b1f6f7e4367b54f35ae1a76944e"
+    },
+    {
+      "sourceSHA256": "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340",
+      "detachedSHA256": "39b2f0923c456e56f696a3c8b50102252272738197184bb7ad50f09a046694dc"
+    },
+    {
+      "sourceSHA256": "c6b80e02fd55b8f53af3f46045d6df83a5db58fb4be583b00de6581acf4b695b",
+      "detachedSHA256": "c04589a3c7d093d3c5ed135630a7579109bafbf5a28356f6729b0d0d5273ce44"
     }
   ],
   "excludedScope": [
-    "Candidate only; production selection and visual admission unchanged.",
-    "Known source graph with exact SHA-driven pickup/landing; native full temporal acceptance remains separate.",
+    "Candidate only; production selection and visual admission are separately artifact-bound.",
+    "Exact SHA-driven pickup/landing; native temporal acceptance remains separate.",
     "W12 requires genuine matched Agent selected-thread receipt; no Bot-global inferred approval.",
-    "Quiet supervision/open attention intentionally share canonical rest; L08 seat-adjust absent."
+    "Quiet neutral life and faint sleeping breath are authored; permission/query holds intentionally stable. Shared semantic intents are not independent drawing families."
   ],
   "endpoints": {
     "geometryReference": "varin-canonical-v5-study",
@@ -14743,12 +18813,22 @@
       "f95303427b7962ec8b448dbd4dcd7bf0af471af1b3c12837281ab060c0db6dae",
       "fb6ea468745597665d76c359df7a8c5fb0c2f4ce72fbf28e32e64a612bd750f9",
       "d864830ebaa9c819933dd18fbc073d288d4b4227cd2c7b93fa4315f19aa1f114",
-      "1387a3abdbe40c321685ef9a09e2ae303a9adf49a51b2d586cf1a587ea314d5a"
+      "1387a3abdbe40c321685ef9a09e2ae303a9adf49a51b2d586cf1a587ea314d5a",
+      "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+      "6581c00b090a3ceee05fbd127034a3f1b6e83ae6b423ae6f06654876fbe8ca19",
+      "5ef9698df90cfb09a21e5e0414e8ce7b6ea8ca783e96e589867d8aec7a596e4f",
+      "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+      "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+      "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+      "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1",
+      "a7fa9986c36df17bb2b162a0be44b9107504f813069faca1a14b3eda52d5a9e8",
+      "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340",
+      "c6b80e02fd55b8f53af3f46045d6df83a5db58fb4be583b00de6581acf4b695b"
     ]
   },
   "sourcePreparation": {
     "recipe": "seated-preparation.json",
-    "recipeSHA256": "390bf6d51eb88ff914206fbd4213caa23e0b67d59187138208a69dde6117ddfc",
+    "recipeSHA256": "227866fe2179e1fcb3f0f9a202a6dd06048ed8f0b5cb5b5e5ff45b0c44e3f35a",
     "detachedOnly": [
       {
         "id": "lift-bridge",
@@ -15039,6 +19119,64 @@
     "7aaa7806207fc3a398544e7a6f07f08e3647ab10adc811433324c6285a81dd2e",
     "43ec0701f2b773a71a63399488fd61f4a08c454db6aaf89c447b5f4d91308750",
     "75170de4db540c3f359a22dec767469a1a6a9f6a9fe40a45f5df6d1f58ebaf67",
-    "12781381b2d8c308b5391f8d881b2fdc02ecb42e0e5f683a19fc1414e51f235b"
+    "12781381b2d8c308b5391f8d881b2fdc02ecb42e0e5f683a19fc1414e51f235b",
+    "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+    "3d0edf6805ca75a251af9f76619dc237e83c7bdeed85d372af741d8e30a65dee",
+    "6581c00b090a3ceee05fbd127034a3f1b6e83ae6b423ae6f06654876fbe8ca19",
+    "4707357461629f0d2a8c194596ccf1ef6383e514bd4cf52d5515f3a490a7c079",
+    "5ef9698df90cfb09a21e5e0414e8ce7b6ea8ca783e96e589867d8aec7a596e4f",
+    "43b3c1a57d4828c3914cb19349cfac69d981378d97a818e18617114adf67dad8",
+    "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+    "126d322a104b396a3fc3a273b5251c49e8af97ed28ed1896431dffed09920ce1",
+    "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+    "da30fbb28b3e5cae917bd2a0429861082b7c4827220e5446a9a7518431fc8f6a",
+    "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+    "6e42ed1b2b79cb567288d336f96a1ad026694da359d4a29d2511d7b91e99437e",
+    "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1",
+    "aa3f8aa986c4d1af6d80cb683ed05a6721810f8b926f551ddbb88ec53406ebf6",
+    "a7fa9986c36df17bb2b162a0be44b9107504f813069faca1a14b3eda52d5a9e8",
+    "3f5f27ac5adcecc74e8b49453f530ec11fc1d2c6863f7bc4c560b5a92d97e97b",
+    "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+    "fe07f5bd98a33435932859b50fbfa5b8c0027f1da9d3b44d57aa67dbf8f82106",
+    "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+    "45c3e602ec70fa1e20615791acc454801df4936e5e5c6059c86ba98a98b2de37",
+    "5ec81daa0183f0b16913a4663e15b679831889d4e052320beebb9ddaf0f2bd4a",
+    "aa248839829ad4d6f55516c73dd118361f8646bbfb2078dd5321c8efbfbb5c3a",
+    "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+    "70ef82e1db65f655166f8dd1ed5071ec2e1b7b89485120918363fd4d6563e54c",
+    "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+    "a3d3657cd5df70e21e283fe0bf85cee51ed36d3685436e5276a59a0190ba05b8",
+    "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
+    "ade109382238aa2cbf05f816b76381d5b99228a69e50dc28c30e5add040b3d7d",
+    "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
+    "fc96b4466150fb92645f146ec7cd6fa1a513465e3e239facb91e0af0c42b1321",
+    "e27e0d22d15e7bff635a20a7cc2b02f2e1f87582925689f5d712bb36778b9b4c",
+    "686824c4185489285756dfeb5f1b9d23ed63cae91fc18c3c8b014f154f22ce65",
+    "9a6694dd3f00526948f68b71270f46be473b05551057cb1dcd3c2c767bcb2373",
+    "ca7348624490a693691e83a026e0ecb8ae9ae7c130d22eaa52dcc0f05c9f09a7",
+    "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55",
+    "fa81cb1625ea816905bb95075db2fe28d98f815fe0a7230bd0928203df65ecf8",
+    "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+    "dccf81f00f234b6b433a3b264122033c89677c9163fe51e1e371738def653cfb",
+    "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+    "2215fb4ae92f2c0124944858e8ad1e177add246a4586af6ba50fd213c0a6957b",
+    "c4b59b31ed7e9a056835941facfe51cbebe8bf7b1009abc3d54152075c6c324c",
+    "db303bc865a39dde86e428e6317a0a7fa44ef19ce58a84d9d67a06d0c9d1c6d1",
+    "4725a1259009826f6a1a15fce2e33fe1cd73217810e403e4ba4f48d3acbe974e",
+    "297bf158ba415099fdd7788db9f520b93ad3c293c0c34b76cd79f607a9a5c2d4",
+    "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+    "ddcf19fb0d39d1f2f84ef0bc2e4cca3e46a93dc4bb4eab46a982956027ac99df",
+    "6850eb482f15290aa2cc121dd541e6011a7f917c486f3de3c20796563dd886de",
+    "f34ecb7a13034c9800b01a9fb97b79d91bc620c04cc23052ee5a134b4ded358a",
+    "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae",
+    "09685245ae1ec8cb4f0cbab2fc51e222148545b228c93c740d3bda7ea267e7d7",
+    "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353",
+    "028b00dd45f8dd19fd09592f121415b815a03fa8fcace8e8bdaf1402dcb4c6c6",
+    "0961d2682619f6649bdd9041df353f59abb303c2deaaef1c402a66869fb40fc8",
+    "f1343d2eb3b2d569379066b197686035d3951b1f6f7e4367b54f35ae1a76944e",
+    "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340",
+    "39b2f0923c456e56f696a3c8b50102252272738197184bb7ad50f09a046694dc",
+    "c6b80e02fd55b8f53af3f46045d6df83a5db58fb4be583b00de6581acf4b695b",
+    "c04589a3c7d093d3c5ed135630a7579109bafbf5a28356f6729b0d0d5273ce44"
   ]
 }

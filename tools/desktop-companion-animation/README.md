@@ -247,3 +247,7 @@ python tools/desktop-companion-animation/select_interaction_bundle.py \
 The review record must bind `candidateSHA256`, `baselineSHA256`, `buildReceiptSHA256`, `rebuildReceiptSHA256`, the complete `newPackageIds`, `uniqueDrawingSha256` and `fileSha256` map. It must explicitly name `reviewer: "assistant"`, `decision: "selected"`, `scope: "feature-branch default candidate"`, and nonempty `basis`/`notClaimed` evidence scopes. Selection is not a claim of user approval of every frame. Source rebuilding must be standalone and retain its prepared manifest beside the rebuild receipt. The tool checks these bindings, source/package/geometry/endpoints and plate before writing a fresh output; PNGs are immutable hardlinks where supported, otherwise copied. Never modify linked textures in place.
 
 The isolated selected generation changes only acceptance metadata and records `publicInstalled: false`; it does not install public resources or adopt a branch default. Actual normal-mode loading/native review and the separate adoption decision remain separate.
+
+## 当前整套补齐回归
+
+`node tools/desktop-companion-animation/check_completion_routes.mjs` 使用安装后的真实播放器包检查每个新动作/恢复曝光、共享query提放、最新意图、早放/重抓、暂停点、眼先醒、监督不敲键和单次委派下拍。可传入另一bundle路径及JSON报告路径用于独立候选验证。桥与gesture节点不计作独立动画；历史32意图对应见coverage.json的currentV5，最终原画/atlas/颜色与审阅范围见production-v5/completion-integration-evidence.json。

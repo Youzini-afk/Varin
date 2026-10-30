@@ -29,3 +29,11 @@ it('admits an explicitly verified independent geometry only with the required ac
   expect(hasAcceptedDirectorAssets(assets.map(asset=>({...asset,reviewStatus:'candidate'})),endpoints)).toBe(false);
   expect(hasAcceptedDirectorAssets(assets.filter(asset=>asset.action!=='director-supervise'),endpoints)).toBe(false);
 });
+
+it('allows explicit selected-assets developer review only through accepted asset capability, never candidate admission', () => {
+  expect(companionDirectorMode(bundle, true, false, null, true)).toBe(true);
+  expect(companionDirectorMode([], true, false, null, true)).toBe(false);
+  expect(companionDirectorMode(bundle.map(asset => ({ ...asset, reviewStatus: 'candidate' })), true, false, null, true)).toBe(false);
+  expect(companionDirectorMode(bundle.slice(0, -1), true, false, null, true)).toBe(false);
+  expect(companionDirectorMode([], false, false, null, true)).toBe(false);
+});

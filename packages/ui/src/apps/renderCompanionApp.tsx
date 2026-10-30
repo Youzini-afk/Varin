@@ -9,7 +9,7 @@ import { useCompanionDirector } from '@/components/companion/useCompanionDirecto
 import { useDirectorPortfolio } from '@/components/companion/useDirectorPortfolio';
 import { directorToolDetail } from '@/components/companion/directorPortfolio';
 import { companionLocalIdle, companionClosedDrawing, companionClosedSequence, companionSafeOpenDrawing, directorLocalResponse } from '@/components/companion/directorLocalInteraction';
-import { directorBodyAction } from '@/components/companion/directorBody';
+import { directorBodyAction, directorStopRecoveryReady } from '@/components/companion/directorBody';
 import { useCompanionAttention } from '@/components/companion/useCompanionAttention';
 import { useCompanionVisualIntent } from '@/components/companion/useCompanionVisualIntent';
 import { CompanionAttentionPanel, CompanionAttentionSummary } from '@/components/companion/CompanionAttentionPanel';
@@ -51,7 +51,10 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     return () => window.removeEventListener('keydown', restore);
   }, [review, reviewStageOnly]);
   const [directorEnabled, setDirectorEnabled] = React.useState(() => review && new URLSearchParams(window.location.search).get('director') === '1');
+  const [selectedReviewEnabled, setSelectedReviewEnabled] = React.useState(false);
   const directorReview = review && directorEnabled;
+  const selectedDirectorReview = review && selectedReviewEnabled && !directorEnabled;
+  const directorReviewControls = directorReview || selectedDirectorReview;
   const [reviewBundleIdentity, setReviewBundleIdentity] = React.useState('');
   const [bundledEpoch, setBundledEpoch] = React.useState<string | null>(null);
   const [visibleDrawing, setVisibleDrawing] = React.useState<DesktopCompanionDrawing>();
@@ -61,7 +64,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [fixtureInspection, setFixtureInspection] = React.useState<ThreadIdentity | null | undefined>();
   const fixtureSession = React.useMemo(createDirectorReviewFixtureSession, []);
   const [, refreshFixture] = React.useReducer((v: number) => v + 1, 0);
-  const fixtureActive = directorReview && fixtureMode;
+  const fixtureActive = directorReviewControls && fixtureMode;
   const [hideTaskNames, setHideTaskNames] = React.useState(false);
   const [finishedDirectorSentence, setFinishedDirectorSentence] = React.useState<string | null>(null);
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -93,7 +96,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [asset, setAsset] = React.useState<CompanionPackage>();
   const [assetList, setAssetList] = React.useState<CompanionPackage[]>([]);
   const [bundleEndpoints, setBundleEndpoints] = React.useState<CompanionEndpoints | null>(null);
-  const directorMode = companionDirectorMode(assetList, review, directorReview, bundleEndpoints);
+  const directorMode = companionDirectorMode(assetList, review, directorReview, bundleEndpoints, selectedDirectorReview);
   const [imageLibrary, setImageLibrary] = React.useState<Record<string, ImageBitmap[]>>({});
   const imageCache = React.useRef<Record<string, ImageBitmap[]>>({});
   const atlasReader = React.useRef<((name: string) => Promise<ImageBitmap>) | null>(null);
@@ -203,8 +206,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const rawScene = sceneForIntent(sceneFact, intent.state);
   const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation)
     : stableIntent.state !== intent.state && rawScene.phase === 'active' ? { kind: null, phase: 'withdraw', outcome: null, count: null } as SceneFact : rawScene;
-  const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.interactionRoute, director.body.subjectRoute, director.inspectionRoute, director.body.verb, director.body.workActive, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
-  useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
+  const directorContextKey = JSON.stringify([directorReview ? 'candidate' : 'selected', fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.interactionRoute, director.body.subjectRoute, director.inspectionRoute, director.body.verb, director.body.workActive, director.body.activity?.key, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
+  useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? `director-explicit-offline-fixture-${directorReview ? 'candidate' : 'selected'}` : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
     companionWindow.phase !== 'rest' || (!directorMode && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorMode || reviewRoute ? undefined : team, directorMode ? portfolioProjection.portfolio : undefined, directorMode ? directorContextKey : null, visibleDrawing, directorMode);
   const usableAction = (action: string) => assetList.some(item => item.action === action && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate'));
   const availableQuietActions = COMPANION_QUIET_ACTIONS.filter(usableAction);
@@ -291,6 +294,17 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       if (director.body.edge) director.consumeEdge(director.body.edge.key);
     }
   }, [directorMode, automatic.finished, automatic.context, directorContextKey, automatic.packageId, directorRequestedAction, directorSentenceKey, assetList]);
+  const pendingStopEdge = director.body.edge?.kind === 'executor-stopped' ? director.body.edge.key : null;
+  const consumeDirectorEdge = director.consumeEdge;
+  React.useEffect(() => {
+    // A stop receipt owns a safe recovery, not a looping "all stopped" pose.
+    // Consume only after the current context actually painted its safe observation frame.
+    if (directorMode && !manualReview && pendingStopEdge && directorStopRecoveryReady('executor-stopped',
+      visibleDrawing ? { action: shownDirectorAsset?.action, context: visibleCue?.context,
+        pauseSafe: shownDirectorAsset?.frames[visibleDrawing.frameIndex]?.pauseSafe } : null, directorContextKey)) {
+      consumeDirectorEdge(pendingStopEdge);
+    }
+  }, [directorMode, manualReview, pendingStopEdge, consumeDirectorEdge, visibleCue?.context, directorContextKey, shownDirectorAsset, visibleDrawing]);
   React.useEffect(() => {
     if (automatic.finished && COMPANION_QUIET_ACTIONS.some(action => action === assetList.find(item => item.id === automatic.packageId)?.action)) finishQuiet();
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'output-emphasis') setOutputBeat(false);
@@ -599,22 +613,23 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         onClick={() => void invokeDesktop('desktop_close_current_window')}>Close</button>
     </header> : <button aria-label={t('companion.controls')} aria-expanded={controlsOpen} onClick={() => setControlsOpen(value => !value)} style={{ position: 'absolute', right: 6, top: 6, zIndex: 20, borderRadius: 20, background: '#20242bca', color: 'white', border: 0, padding: '6px 10px' }}>⋯</button>}
     {reviewChrome && <section style={{ ...panel, margin: 0, padding: '4px 8px' }} aria-label="Director review entry">
-      <label><input type="checkbox" checked={directorReview} onChange={event => setDirectorEnabled(event.target.checked)} />主管候选（独立资源，仅开发审阅）</label>
-      {directorReview && <>
+      <label><input type="checkbox" checked={directorReview} onChange={event => { setDirectorEnabled(event.target.checked); setSelectedReviewEnabled(false); setManualReview(false); setPlaying(false); setFinishedDirectorSentence(null); fixtureSession.discardTransient(); refreshFixture(); }} />主管候选（独立资源，仅开发审阅）</label>
+      <label><input type="checkbox" aria-label="Review selected director assets" checked={selectedDirectorReview} onChange={event => { setSelectedReviewEnabled(event.target.checked); setDirectorEnabled(false); setManualReview(false); setPlaying(false); setFinishedDirectorSentence(null); fixtureSession.discardTransient(); refreshFixture(); }} />已选正式资源（仅开发审阅，不开放候选）</label>
+      {directorReviewControls && <>
         <label style={{ display: 'block' }}>数据 <select aria-label="Director review data source" value={fixtureMode ? 'fixture' : 'host'} onChange={event => { setFixtureMode(event.target.value === 'fixture'); setFinishedDirectorSentence(null); fixtureSession.discardTransient(); refreshFixture(); }}><option value="host">实际 Host · 只读</option><option value="fixture">Bot统筹演示 fixture · 非真实任务</option></select></label>
-        {fixtureActive && <label>演示 <select aria-label="Offline director scenario" value={fixtureStep} onChange={event => selectFixture(event.target.value as DirectorReviewStep)}><option value="portfolio">三项目总览</option><option value="team-active">A/C各自主队与子队</option><option value="a-child-ended">A子队结束 · C子队仍执行</option><option value="b-intake">B新项目接收→交负责人</option><option value="b-result">B结果 · A仍执行</option><option value="requests">B授权 · C问题</option><option value="b-resolved">B解除 · C仍待答</option><option value="unknown">观察未知</option><option value="reconnected">恢复观察不重播</option></select></label>}
-        <small style={{ display: 'block', color: fixtureActive ? '#ffd393' : undefined }}>{fixtureActive ? '显式Bot协调示例：不写Host，不执行/打开任何示例任务' : '真实Host空列表将保持为空；不生成示例任务'} · 未选择正式人物包</small>
+        {fixtureActive && <label>演示 <select aria-label="Offline director scenario" value={fixtureStep} onChange={event => selectFixture(event.target.value as DirectorReviewStep)}><option value="portfolio">三项目总览</option><option value="team-active">A/C各自主队与子队</option><option value="a-child-ended">A子队结束 · C子队仍执行</option><option value="b-intake">B新分派已受理</option><option value="b-result">B结果 · A仍执行</option><option value="requests">B授权 · C问题</option><option value="b-resolved">B解除 · C仍待答</option><option value="unknown">观察未知</option><option value="reconnected">恢复观察不重播</option><option value="bot-ready">模拟 · Bot准备就绪</option><option value="bot-reasoning">模拟 · 当前请求推理阶段</option><option value="bot-output">模拟 · 当前请求输出阶段（普通工作）</option><option value="report-delivered">模拟 · 报告已实际送达根任务</option><option value="retry-wait">模拟 · 已安排重试等待（不按时钟假定恢复）</option><option value="queued-successor">模拟 · 后继任务真实排队</option><option value="queue-promoted">模拟 · 排队任务晋升 · 新任务接收</option><option value="executor-stopped">模拟 · 单执行器已停止回执（非全部停止）</option></select></label>}
+        <small style={{ display: 'block', color: fixtureActive ? '#ffd393' : undefined }}>{fixtureActive ? '显式Bot协调示例：不写Host，不执行/打开任何示例任务' : '真实Host空列表将保持为空；不生成示例任务'} · {selectedDirectorReview ? '使用已选正式人物包' : '未选择正式人物包'}</small>
       </>}
     </section>}
     {review && reviewStageOnly && <div style={{ position: 'fixed', left: 4, top: 4, zIndex: 30, background: '#20242bd9', color: 'white', padding: '3px 6px', borderRadius: 8, font: '10px system-ui' }}>
       <span>{fixtureActive ? '开发舞台 · 演示任务（非真实执行）' : '开发舞台 · 实际Host只读'}</span> <button ref={restoreReview} onClick={() => setReviewStageOnly(false)} aria-label="恢复开发审阅控件">恢复控件</button>
     </div>}
-    <canvas ref={canvas} {...companionWindow.handlers} style={{ width: directorReview && !reviewStageOnly ? 'min(100%,320px)' : 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
+    <canvas ref={canvas} {...companionWindow.handlers} style={{ width: directorReviewControls && !reviewStageOnly ? 'min(100%,320px)' : 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
     {error && !review && <p role="alert" style={panel}>{error}</p>}
     {!asset && <p style={panel}>{assetList.length ? t('companion.loading') : t('companion.missing')}</p>}
-    {directorReview && reviewChrome && <section data-companion-scene-floor style={panel} aria-label="Director candidate portfolio">
-      <strong>Director candidate — read-only project inspection, not final artwork selection</strong>
-      <p>候选 {reviewBundleIdentity.slice(0, 12) || "尚未加载"} · Management: {director.body.verb}. Project execution detail does not select Varin's body.</p>
+    {directorReviewControls && reviewChrome && <section data-companion-scene-floor style={panel} aria-label="Director candidate portfolio">
+      <strong>{selectedDirectorReview ? 'Selected director assets — read-only developer review' : 'Director candidate — read-only project inspection, not final artwork selection'}</strong>
+      <p>{selectedDirectorReview ? '已选' : '候选'} {(selectedDirectorReview ? bundledEpoch : reviewBundleIdentity)?.slice(0, 12) || "尚未加载"} · Management: {director.body.verb}. Project execution detail does not select Varin's body.</p>
       <label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />Hide decorative task names</label>
       <div>{portfolioProjection.legend.map(item => <button key={item.key} onClick={() => { if (fixtureActive) { setFixtureInspection(item.identity); setFinishedDirectorSentence(null); refreshFixture(); } else setSelected({ generation, identity: item.identity }); }}>{item.label} · {item.title || 'Untitled task'}</button>)}</div>
       {!assetList.some(item => item.action === 'director-supervise') && <p>Load the explicit complete director candidate bundle to review management performances. No old tool-action fallback is used.</p>}

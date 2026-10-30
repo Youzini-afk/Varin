@@ -11,7 +11,7 @@ import { renderCompanionApp } from './renderCompanionApp';
 
 // Keep real root composition, theme owner, asset admission, player, painting and
 // material. Only Host/native observation, bitmap decoding and canvas IO are fixtures.
-const boundary = vi.hoisted(() => ({ scene: vi.fn(), native: vi.fn(), persist: vi.fn(), refresh: vi.fn(), root: undefined as Root | undefined, grab: undefined as undefined | (() => void), release: undefined as undefined | (() => void), phase: 'rest', noop: () => {} }));
+const boundary = vi.hoisted(() => ({ scene: vi.fn(), native: vi.fn(), persist: vi.fn(), refresh: vi.fn(), root: undefined as Root | undefined, grab: undefined as undefined | (() => void), release: undefined as undefined | (() => void), phase: 'rest', working: true, stopKey: undefined as string | undefined, update: undefined as (() => void) | undefined, consumed: vi.fn(), blockPaint: false, noop: () => {} }));
 vi.mock('react-dom/client', async original => {
   const actual = await original<typeof import('react-dom/client')>();
   return { ...actual, createRoot: (...args: Parameters<typeof actual.createRoot>) => (boundary.root = actual.createRoot(...args)) };
@@ -23,13 +23,17 @@ vi.mock('@/lib/persistence', () => ({ updateDesktopSettings: boundary.persist })
 vi.mock('@/lib/i18n', () => ({ initializeLocale: boundary.noop, I18nProvider: ({ children }: { children: React.ReactNode }) => children, useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/companion/useCompanionProductMode', () => ({ useCompanionProductMode: () => 'agent-companion' }));
 vi.mock('@/components/companion/useCompanionAttention', () => ({ useCompanionAttention: () => ({ snapshot: null, health: 'current', observationRevision: 1, refresh: boundary.refresh, projectionAPI: null }) }));
-vi.mock('@/components/companion/useCompanionDirector', () => ({ useCompanionDirector: () => ({ health: 'current', interactionRoute: 'agent-companion', inspectionRoute: null, body: { verb: 'working', workActive: true, subjectRoute: 'agent-companion', edge: null, attentionItem: null, subject: null }, discardTransient: boundary.noop, consumeEdge: boundary.noop }) }));
-vi.mock('@/components/companion/useDirectorPortfolio', () => ({ useDirectorPortfolio: () => ({ portfolio: { subjectKey: 'existing-task' }, legend: [] }) }));
-// Expose review pause controls while retaining the installed bundle's real capability gate.
-vi.mock('@/components/companion/directorMode', async original => {
-  const actual = await original<typeof import('@/components/companion/directorMode')>();
-  return { ...actual, companionDirectorMode: (packages: Parameters<typeof actual.hasAcceptedDirectorAssets>[0], _review: boolean, _candidate: boolean, endpoints: Parameters<typeof actual.hasAcceptedDirectorAssets>[1]) => actual.hasAcceptedDirectorAssets(packages, endpoints) };
+vi.mock('@/components/companion/useCompanionDirector', async () => {
+  const React = await import('react');
+  return { useCompanionDirector: () => {
+    const [, update] = React.useReducer(value => value + 1, 0); boundary.update = update;
+    return { health: 'current', interactionRoute: 'agent-companion', inspectionRoute: null,
+      body: { verb: boundary.stopKey ? 'executor-stopped' : 'review-portfolio', workActive: boundary.working,
+        subjectRoute: 'agent-companion', edge: boundary.stopKey ? {key:boundary.stopKey,kind:'executor-stopped'} : null, attentionItem:null,subject:null },
+      discardTransient: boundary.noop, consumeEdge: (key:string) => { boundary.consumed(key); boundary.stopKey=undefined; update(); } };
+  } };
 });
+vi.mock('@/components/companion/useDirectorPortfolio', () => ({ useDirectorPortfolio: () => ({ portfolio: { subjectKey: 'existing-task' }, legend: [] }) }));
 vi.mock('@/components/companion/useCompanionScene', () => ({ useCompanionScene: boundary.scene }));
 vi.mock('@/components/companion/useCompanionWindow', async () => {
   const React = await import('react');
@@ -43,7 +47,8 @@ vi.mock('@/components/companion/useCompanionWindow', async () => {
 let cleanup: (() => void) | undefined;
 afterEach(async () => { await act(async () => boundary.root?.unmount()); cleanup?.(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it('repaints actual work, paused and grabbed exposures without restarting player, cue or scene identity', async () => {
+async function mountHarness() {
+  vi.clearAllMocks(); boundary.working=true; boundary.stopKey=undefined; boundary.blockPaint=false;
   const { window, document } = parseHTML('<html><head></head><body style="background-color:transparent"><div id="root"></div></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('crypto', webcrypto);
   const write = vi.fn();
@@ -70,6 +75,7 @@ it('repaints actual work, paused and grabbed exposures without restarting player
         for (let i = 0; i < data.length; i += 4) data.set([63, 142, 243, 255], i);
         return { width: 512, height: 512, data };
       }, putImageData(image: ImageData) {
+        if (boundary.blockPaint) throw new Error('fixture canvas paint unavailable');
         const totals = [0, 0, 0, 0];
         for (let i = 0; i < image.data.length; i++) totals[i % 4]! += image.data[i]!;
         paintedPixels(totals.join(':'));
@@ -86,6 +92,10 @@ it('repaints actual work, paused and grabbed exposures without restarting player
   const listThreads = vi.fn(async () => []);
   const apis = { threads: { list: listThreads }, extensions: {} } as unknown as RuntimeAPIs;
   await act(async () => renderCompanionApp(apis));
+  // Exercise the real selected-assets review control, not a mocked mode predicate.
+  const selectedReview = document.querySelector<HTMLInputElement>('[aria-label="Review selected director assets"]')!;
+  expect(selectedReview).toBeDefined();
+  await act(async () => { selectedReview.checked = true; selectedReview.dispatchEvent(new window.Event('click', { bubbles: true })); });
   const tick = async (now: number) => { await act(async () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(now)); }); };
   // Bundle digest/decode are async; wait on their actual completion, not wall time.
   for (let step = 0; step < 30 && !material.mock.calls.length; step++) {
@@ -95,6 +105,11 @@ it('repaints actual work, paused and grabbed exposures without restarting player
   expect(material.mock.calls.length).toBeGreaterThan(0);
   await tick(1000); await tick(1200);
   expect(material.mock.lastCall?.[1].action).toBe('work-active');
+  return {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick};
+}
+
+it('repaints actual work, paused and grabbed exposures without restarting player, cue or scene identity', async () => {
+  const {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick}=await mountHarness();
   const switchTheme = async (id: string) => {
     const last = material.mock.lastCall!;
     const scene = boundary.scene.mock.lastCall!;
@@ -127,4 +142,21 @@ it('repaints actual work, paused and grabbed exposures without restarting player
   expect(material.mock.lastCall![1].gesture).toBeDefined();
   await switchTheme('nord-light');
   expect(boundary.phase).toBe('lifting');
+});
+
+
+it('consumes an executor-stop edge once only after real recovery has painted its matching safe observation', async () => {
+ const {tick,material}=await mountHarness();
+ boundary.blockPaint=true;boundary.working=false;boundary.stopKey='exact-stop';
+ await act(async()=>boundary.update!());
+ expect(boundary.consumed).not.toHaveBeenCalled();
+ // Let the real player select/route to supervision while actual paint is unavailable.
+ for(let n=0;n<100;n++) await tick(1300+n*50);
+ expect(material.mock.lastCall?.[1].action).toBe('director-supervise');
+ expect(boundary.consumed).not.toHaveBeenCalled();
+ boundary.blockPaint=false;
+ for(let n=0;n<160 && !boundary.consumed.mock.calls.length;n++) await tick(6400+n*50);
+ expect(boundary.consumed).toHaveBeenCalledExactlyOnceWith('exact-stop');
+ for(let n=0;n<20;n++) await tick(15000+n*50);
+ expect(boundary.consumed).toHaveBeenCalledTimes(1);
 });

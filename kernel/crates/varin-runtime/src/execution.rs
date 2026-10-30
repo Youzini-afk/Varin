@@ -619,6 +619,11 @@ pub enum ProviderEvent {
     Usage { receipt: UsageReceipt },
 }
 
+/// Content-free observation of the current provider callback, not inferred cognition.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum GenerationPhase { Reasoning, Output, ToolCall }
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
@@ -1395,6 +1400,10 @@ pub enum ToolResume {
 }
 
 pub trait Persistence: Send + Sync + 'static {
+    /// Optional presentation metadata; failure must not alter execution or provider delivery.
+    fn observe_generation(&self, _run: &str, _epoch: u64, _request: &str, _phase: Option<GenerationPhase>) {}
+    fn observe_retry(&self, _run: &str, _epoch: u64, _request: &str, _schedule: Option<(u64, u64)>) {}
+
     fn stop_reason(&self, _run: &str, _epoch: u64) -> Result<crate::catalog::bot::RunStopReason, ExecutionError> {
         Ok(crate::catalog::bot::RunStopReason::Cancel)
     }
@@ -2810,6 +2819,7 @@ impl<
                     }
                     let (items, deltas, usage, mut result) = self.generate(
                         &input.run_id,
+                        input.owner_generation,
                         &snapshot,
                         &model_cancel,
                         selected_model
@@ -2881,9 +2891,12 @@ impl<
                         Err(failure) => {
                             let decision = retry_policy.decide(&(&failure).into(), retries_used);
                             if decision.retry {
+                                self.persistence.observe_retry(&input.run_id, input.owner_generation, &snapshot.view.request_id, Some((retries_used + 1, decision.delay_ms)));
                                 self.progress.emit(&input.run_id, &snapshot.view.request_id,
                                     ExecutionEvent::RetryScheduled { attempt: retries_used + 1, delay_ms: decision.delay_ms });
-                                if !crate::model_retry::wait(&model_cancel, decision.delay_ms) {
+                                let retry_ready = crate::model_retry::wait(&model_cancel, decision.delay_ms);
+                                self.persistence.observe_retry(&input.run_id, input.owner_generation, &snapshot.view.request_id, None);
+                                if !retry_ready {
                                     interrupted_generation = !cancel.is_cancelled();
                                     continue 'agent;
                                 }
@@ -3031,6 +3044,7 @@ impl<
     pub(crate) fn generate(
         &self,
         run_id: &str,
+        owner_generation: u64,
         snapshot: &RequestSnapshot,
         cancel: &CancellationToken,
         selected: Option<&dyn ModelProvider>,
@@ -3043,6 +3057,7 @@ impl<
         let mut items = Vec::new();
         let mut deltas = Vec::new();
         let mut usage = UsageReceipt::default();
+        let mut phase = None;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut emit = |event| {
                 if cancel.is_cancelled() && !matches!(event, ProviderEvent::Usage { .. }) {
@@ -3050,6 +3065,20 @@ impl<
                         "cancelled",
                         "model generation cancelled",
                     ));
+                }
+                let observed = match &event {
+                    ProviderEvent::ReasoningDelta { text, .. } if !text.is_empty() => Some(Some(GenerationPhase::Reasoning)),
+                    ProviderEvent::TextDelta { text, .. } if !text.is_empty() => Some(Some(GenerationPhase::Output)),
+                    ProviderEvent::ToolArgumentsDelta { delta, .. } if !delta.is_empty() => Some(Some(GenerationPhase::ToolCall)),
+                    ProviderEvent::ToolCallStarted { request_id, .. } if request_id == &snapshot.view.request_id => Some(Some(GenerationPhase::ToolCall)),
+                    ProviderEvent::ItemCompleted { .. } => Some(None),
+                    _ => None,
+                };
+                if let Some(next) = observed {
+                    if next != phase {
+                        self.persistence.observe_generation(run_id, owner_generation, &snapshot.view.request_id, next);
+                        phase = next;
+                    }
                 }
                 match &event {
                     ProviderEvent::ItemCompleted { item } => items.push(item.clone()),
@@ -3075,6 +3104,10 @@ impl<
                 provider_request_id: None,
             })
         });
+        // Covers normal completion, transport failure, cooperative cancellation and panic.
+        if phase.is_some() {
+            self.persistence.observe_generation(run_id, owner_generation, &snapshot.view.request_id, None);
+        }
         (items, deltas, usage, result)
     }
 

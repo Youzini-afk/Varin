@@ -2777,3 +2777,59 @@ fn cancellation_during_request_preparation_does_not_publish_a_failure_fact() {
     assert!(db.run_failure(&run_id).unwrap().is_none());
     assert!(!db.events_after(0, 100).unwrap().iter().any(|event| event.kind == "run.failed"));
 }
+
+#[test]
+fn generation_phase_tracks_actual_callbacks_and_clears_every_provider_exit() {
+    struct PhaseProvider { db: Arc<Mutex<Catalog>>, ending: u8 }
+    impl ModelProvider for PhaseProvider {
+        fn serialize(&self, _: &RequestView, _: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> { Ok(json!({}).into()) }
+        fn generate(&self, request: &RequestSnapshot, cancel: &CancellationToken, emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>) -> Result<FinishReason, ModelFailure> {
+            let phase = || {
+                let read = self.db.lock().unwrap().capture_attention_read();
+                let snapshot = serde_json::to_value(read.load(&|| false).unwrap()).unwrap();
+                snapshot["branches"][0]["currentRun"]["generation"]["phase"].clone()
+            };
+            for _ in 0..3 { emit(ProviderEvent::ReasoningDelta { item_id: "r".into(), text: "private content must not enter phase facts".into() })?; }
+            assert_eq!(phase(), "reasoning");
+            emit(ProviderEvent::TextDelta { item_id: "t".into(), text: "answer".into() })?;
+            assert_eq!(phase(), "output");
+            emit(ProviderEvent::ToolCallStarted { request_id: request.view.request_id.clone(), call_id: "c".into(), name: "read".into() })?;
+            assert_eq!(phase(), "tool-call");
+            emit(ProviderEvent::ItemCompleted { item: ProviderItem { id: "t".into(), content: Content::Text { text: "answer".into() }, opaque: None } })?;
+            assert!(phase().is_null());
+            emit(ProviderEvent::ReasoningDelta { item_id: "r2".into(), text: "more".into() })?;
+            match self.ending {
+                0 => Ok(FinishReason::Stop),
+                1 => Err(ModelFailure { code: "transport_error".into(), message: "fixture".into(), tool_name: None, retry_after_ms: None, provider_request_id: None }),
+                2 => { cancel.cancel(); emit(ProviderEvent::TextDelta { item_id: "late".into(), text: "must not publish".into() })?; unreachable!() },
+                _ => panic!("provider fixture panic"),
+            }
+        }
+    }
+    for ending in 0..4 {
+        let fixture = Fixture::new(); let db = fixture.catalog(); let input = input(&db);
+        let snapshot = RequestSnapshot { view: RequestView { request_id: format!("phase-{ending}"), run_id: input.run_id.clone(),
+            origin: RequestOrigin::Conversation { compaction: None, step: 1, history_range: input.binding.history_range.clone() },
+            binding: input.binding.clone(), history: input.history.clone(),
+        }, serialized: json!({}).into() };
+        {
+            let mut catalog = db.lock().unwrap();
+            catalog.commit_execution(&input.run_id, input.owner_generation, &ExecutionRecord::RequestPrepared { snapshot: snapshot.clone().into() }).unwrap();
+            catalog.commit_execution(&input.run_id, input.owner_generation, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+            catalog.commit_execution(&input.run_id, input.owner_generation, &ExecutionRecord::StateChanged { state: RunState::Generating, waiting_on: None }).unwrap();
+            catalog.commit_execution(&input.run_id, input.owner_generation, &ExecutionRecord::ModelDispatched { request_id: snapshot.view.request_id.clone() }).unwrap();
+        }
+        let engine = ExecutionEngine { persistence: db.clone(), context_preparation: Arc::new(NoopContextPreparation),
+            provider: Arc::new(PhaseProvider { db: db.clone(), ending }), tools: Arc::new(Tools::default()), policy: Arc::new(DefaultAgentPolicy), progress: ProgressSink::default() };
+        let (_, _, _, result) = engine.generate(&input.run_id, input.owner_generation, &snapshot, &CancellationToken::default(), None);
+        assert_eq!(result.is_ok(), ending == 0);
+        let catalog = db.lock().unwrap();
+        let events: Vec<_> = catalog.events_after(0, 1000).unwrap().into_iter().filter(|event| event.kind == "generation.phase_changed").collect();
+        let phases: Vec<_> = events.iter().map(|event| event.data["phase"].clone()).collect();
+        assert_eq!(phases, vec![json!("reasoning"), json!("output"), json!("tool-call"), Value::Null, json!("reasoning"), Value::Null]);
+        assert!(!serde_json::to_string(&events).unwrap().contains("private content"));
+        let read = catalog.capture_attention_read(); drop(catalog);
+        let snapshot = serde_json::to_value(read.load(&|| false).unwrap()).unwrap();
+        assert!(snapshot["branches"][0]["currentRun"]["generation"].is_null());
+    }
+}

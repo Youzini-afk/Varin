@@ -177,7 +177,7 @@
     "contract-mid selected as actual peak due to stronger shoulder/chest contraction than file named concern-peak.",
     "Body recovery returns availability, not success or resolution; authoritative known-failure state remains unchanged."
   ],
-  "sleepPolicy": "Stable sleep FG holds until wake or interruption; no invented breathing. Wake never replays yawn. Interruption releases mouth contact before low hand, wakes eyes before carry. D recovery is finite even when asleep.",
+  "sleepPolicy": "Original stable sleep and entry/wake drawings retained. completion-provenance.json adds two authored extremely weak local chest phases within the held loop; no whole-sprite scaling. Reduced motion pauses on original stable sleep. Wake interrupts directly eyes-first without completing a breath; no yawn replay. Same-pose detached recovery stays finite and supported.",
   "evidence": {
     "parentReview": "Selected FG/D pairs reviewed at360; candidate review only.",
     "runtimeBatch": "in progress at plan creation; no runtime result claimed."
@@ -191,5 +191,6 @@
     "Source-only checkpoint; no public installation or normal admission.",
     "Native world-stool/root and temporal acceptance remain separate gates.",
     "Original PNG hashes must not substitute for prepared display SHA."
-  ]
+  ],
+  "historicalSleepPolicy": "Stable sleep FG holds until wake or interruption; no invented breathing. Wake never replays yawn. Interruption releases mouth contact before low hand, wakes eyes before carry. D recovery is finite even when asleep."
 }
