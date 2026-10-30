@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import type { MemoryService } from "../memory/memory-service.js";
 import type { Knowledge } from "../knowledge/store.js";
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
+import { projectBotPresence } from './bot-presence.js';
 
 /**
  * Bot routes (BC0): the durable Bot catalog plus entry/work resolution. These
@@ -17,7 +18,7 @@ export interface BotRoutesOptions {
   bots: BotService;
   computers?: Pick<ComputerService, "workDesktops" | "listArtifacts">;
   memory?: MemoryService;
-  work?: Pick<AgentRuntimeClient, 'botMatters' | 'updateBotMatter'>;
+  work?: Pick<AgentRuntimeClient, 'botMatters' | 'updateBotMatter' | 'botScope' | 'botActivity'>;
   requireAuth?: RequestHandler;
 }
 
@@ -71,6 +72,36 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, work,
       if (!work || !await bots.get(botIdOf(request))) throw new HarnessServiceError('not-found', 'Bot work is unavailable');
       response.json({ matters: await work.botMatters(botIdOf(request)) });
     } catch (error) { sendError(response, error, 'Unable to read followed work'); }
+  });
+  const runtimeOf = async (request: Request) => {
+    const bot = await bots.get(botIdOf(request));
+    if (!bot) throw new HarnessServiceError('not-found', 'Unknown Bot');
+    if (!work) throw new HarnessServiceError('unavailable', 'The Bot runtime is unavailable');
+    return { bot, work };
+  };
+  /** Dispatches, reports, the user's changes, quiet rounds and schedules across every Bot conversation. */
+  app.get('/api/harness/bots/:botId/activity', requireAuth, async (request: Request, response: Response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      const count = (name: 'before' | 'limit') => {
+        const value = request.query[name];
+        if (value === undefined) return undefined;
+        const parsed = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
+        if (!Number.isSafeInteger(parsed) || (name === 'limit' && parsed === 0)) throw new HarnessServiceError('invalid-params', `${name} must be a ${name === 'limit' ? 'positive' : 'non-negative'} integer`);
+        return parsed;
+      };
+      const before = count('before'); const limit = count('limit');
+      const { bot, work: runtime } = await runtimeOf(request);
+      response.json(await runtime.botActivity({ botId: bot.id, ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) }));
+    } catch (error) { sendError(response, error, 'Unable to read Bot activity'); }
+  });
+  /** Who waits for the user, which work runs and which conversation replies. Pushed as `varin:bot-presence`. */
+  app.get('/api/harness/bots/:botId/presence', requireAuth, async (request: Request, response: Response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      const { bot, work: runtime } = await runtimeOf(request);
+      response.json({ presence: projectBotPresence(bot, await runtime.botScope(bot.id)) });
+    } catch (error) { sendError(response, error, 'Unable to read Bot presence'); }
   });
   app.post('/api/harness/bots/:botId/matters', requireAuth, async (request: Request, response: Response) => {
     response.setHeader('Cache-Control', 'no-store');

@@ -944,6 +944,10 @@ export class AgentRuntimeClient {
   botHistory(input: import('./protocol.generated.js').BotHistoryReadParams, signal?: AbortSignal): Promise<HistoryItem> {
     return this.kernel.agentRuntimeRequest('runtime.bot.history.read', input, signal);
   }
+  /** One page of the Bot's activity across all of its sessions, newest first. */
+  botActivity(input: import('./protocol.generated.js').BotActivityParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').BotActivityPage> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.activity.read', input, signal);
+  }
   createThread(
     threadId: string,
     branchId: string,

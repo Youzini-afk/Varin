@@ -204,6 +204,7 @@ import { createPromptToolCatalog } from './lib/memory/prompt-tool-catalog.js';
 import { createBotService } from './lib/bots/bot-service.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
+import { createBotPresencePublisher } from './lib/bots/bot-presence.js';
 import { createComputerService } from './lib/computer/computer-service.js';
 import { ComputerError } from './lib/computer/computer-error.js';
 import { createComputerRuntime, COMPUTER_CAPABILITY } from './lib/kernel/computer-runtime.js';
@@ -1391,6 +1392,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let botLifecycleRuntime: ReturnType<typeof createBotLifecycleRuntime> | null = null;
   const canExecuteBotScope = async (scopeId: string): Promise<boolean> => !isBotScopeId(scopeId)
     || (botAdmissionReady && await botService.canExecute(botIdFromScopeId(scopeId)));
+  // The figure's execution facts follow the same work changes the sidebar refreshes on.
+  const botPresence = createBotPresencePublisher({
+    bots: () => botService.list(),
+    scope: botId => agentRuntime.botScope(botId),
+    publish: presence => broadcastGlobalUiEvent?.({ type: 'varin:bot-presence', properties: { botId: presence.botId, presence } }),
+    onError: () => console.error('[Bots] Bot presence projection is unavailable'),
+  });
   // BC0: durable Bot identity. The profile record lives in the kernel catalog;
   // the Bot's work is ordinary Threads under the `bot:<id>` owner scope, and
   // its entry conversation is a native Thread and branch.
@@ -1473,8 +1481,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!botLifecycleRuntime) throw new Error('Bot lifecycle is not ready');
       return botLifecycleRuntime;
     },
-    onChange: (bot) => broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }),
-    onDeleted: (botId) => broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId } }),
+    onChange: (bot) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }); botPresence.schedule(); },
+    onDeleted: (botId) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId } }); botPresence.schedule(); },
     removeData: createBotDataCleanup({
       dataDir: VARIN_DATA_DIR, hostId,
       deleteAgentScope: async bot => {
@@ -2320,7 +2328,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     reconcileDomainReceipts: async signal => { await Promise.all([reconcileFileEffectReceipts(signal), reconcileMaterialReceipts(signal), reconcileScheduleReceipts(signal)]); },
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
     recoverColdBotWork: signal => threads.recoverBotWork(signal),
-    onWorkChanged: () => broadcastGlobalUiEvent?.({ type: 'varin:bot-work-changed', properties: {} }),
+    onWorkChanged: () => { broadcastGlobalUiEvent?.({ type: 'varin:bot-work-changed', properties: {} }); botPresence.schedule(); },
     recoverCheckpoints: recoveryCheckpoints.recover, settleRunCheckpoints: recoveryCheckpoints.settle,
     prepareContext: threadContext,
     prepareMaterials: threadMaterialLifetime.prepareChild,
@@ -2990,6 +2998,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await shutdown.run('collaboration.stop', () => collaboration.stop());
       await shutdown.run('fileObservations.stop', () => fileObservations.stop());
       await shutdown.run('scheduledTasksRuntime.stop', () => scheduledTasksRuntime.stop());
+      await shutdown.run('botPresence.dispose', () => botPresence.dispose());
       await shutdown.run('botService.dispose', () => botService.dispose());
       await shutdown.run('unregisterRuntimeContractCapability', () => unregisterRuntimeContractCapability());
       await shutdown.run('unregisterExtensionPackageCapability', () => unregisterExtensionPackageCapability());

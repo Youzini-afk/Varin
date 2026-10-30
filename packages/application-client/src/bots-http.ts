@@ -1,6 +1,6 @@
-import type { BotsAPI, BotEntry, BotEntryResult, BotSession, BotSummary, BotWorkItem, BotMemoryItem } from './bots.js';
+import type { BotsAPI, BotEntry, BotEntryResult, BotPresence, BotSession, BotSummary, BotWorkItem, BotMemoryItem } from './bots.js';
 import type { ThreadMemoryDraft, ChatMemoryOwner, ChatMemoryReceipt } from './chat-memory.js';
-import type { MemorySourceExcerpt } from '@varin/protocol';
+import type { BotActivityPage, MemorySourceExcerpt } from '@varin/protocol';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 
@@ -130,6 +130,46 @@ const memoryReceipt = (value: unknown): ChatMemoryReceipt => {
   return receipt as unknown as ChatMemoryReceipt;
 };
 
+const decodePresence = (value: unknown): BotPresence => {
+  const presence = record(value); string(presence.botId); strings(presence.replying);
+  array(presence.needs, value => {
+    const need = record(value); entry(need.identity); string(need.name);
+    if (!nullableString(need.avatar) || !['permission', 'question'].includes(string(need.kind)) || typeof need.session !== 'boolean') invalid();
+  });
+  array(presence.working, value => {
+    const work = record(value); entry(work.identity); string(work.name);
+    if (!nullableString(work.avatar) || !nullableString(work.sessionThreadId)) invalid();
+  });
+  return presence as unknown as BotPresence;
+};
+const count = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0;
+const decodeActivity = (value: unknown): BotActivityPage => {
+  const page = record(value); string(page.botId);
+  if (!(page.before === null || count(page.before)) || !count(page.eventCursor)) invalid();
+  array(page.participants, value => {
+    const participant = record(value); string(participant.threadId); string(participant.name); string(participant.agentId);
+    if (!nullableString(participant.avatar)) invalid();
+  });
+  array(page.events, value => {
+    const event = record(value);
+    if (!count(event.cursor) || !(event.atMs === null || count(event.atMs))) invalid();
+    string(event.sessionThreadId); string(event.sessionBranchId);
+    if (event.kind === 'dispatch' || event.kind === 'report') {
+      string(event.operationId); string(event.executionId); string(event.threadId); string(event.branchId);
+      if (event.kind === 'dispatch') { string(event.task); if (!nullableString(event.preset)) invalid(); } else string(event.outcome);
+    } else if (event.kind === 'change') {
+      if (!['user_input', 'workspace_change', 'history_changed'].includes(string(event.change))) invalid();
+      string(event.threadId); string(event.branchId);
+    } else if (event.kind === 'quiet') {
+      string(event.runId);
+      array(event.inputs, value => { const input = record(value); string(input.origin); if (!nullableString(input.threadId) || !nullableString(input.change)) invalid(); });
+    } else if (event.kind === 'schedule') {
+      string(event.occurrenceId); string(event.definitionId); string(event.name); string(event.state);
+    } else invalid();
+  });
+  return page as unknown as BotActivityPage;
+};
+
 const decodeMatter = (value: unknown): import('@varin/protocol').BotMatter => {
   const matter = record(value);
   string(matter.id); string(matter.title); string(matter.description);
@@ -181,6 +221,20 @@ export function createBotsHttpAPI(): BotsAPI {
     changeState: async (id, action) => decodeBot((await request(`${path(id)}/${action}`, 'POST')).bot),
     entry: async (id, signal) => decodeBotEntryResult(await request(`${path(id)}/entry`, 'POST', undefined, signal)),
     work: async (id, signal) => array((await request(`${path(id)}/work`, 'GET', undefined, signal)).threads, decodeBotWork),
+    activity: async (id, page = {}, signal) => {
+      const query = new URLSearchParams();
+      if (page.before !== undefined) query.set('before', String(page.before));
+      if (page.limit !== undefined) query.set('limit', String(page.limit));
+      const suffix = query.toString() ? `?${query.toString()}` : '';
+      const result = decodeActivity(await request(`${path(id)}/activity${suffix}`, 'GET', undefined, signal));
+      if (result.botId !== id) invalid();
+      return result;
+    },
+    presence: async (id, signal) => {
+      const presence = decodePresence((await request(`${path(id)}/presence`, 'GET', undefined, signal)).presence);
+      if (presence.botId !== id) invalid();
+      return presence;
+    },
     sessions: {
       list: async (id, signal) => array((await request(`${path(id)}/sessions`, 'GET', undefined, signal)).sessions, decodeBotSession),
       create: async id => decodeBotSession((await request(`${path(id)}/sessions`, 'POST')).session),

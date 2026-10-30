@@ -106,6 +106,39 @@ export interface BotSession {
   primary: boolean;
 }
 
+/** Something in a Bot's execution scope that waits for the user. */
+export interface BotPresenceNeed {
+  identity: ThreadIdentity;
+  /** The Bot's name for its own conversations; the executor's title for delegated work. */
+  name: string;
+  avatar: string | null;
+  kind: 'permission' | 'question';
+  /** One of the Bot's own conversations rather than delegated work. */
+  session: boolean;
+}
+
+/** Delegated work whose Run is active and not waiting for the user. */
+export interface BotPresenceWork {
+  identity: ThreadIdentity;
+  name: string;
+  avatar: string | null;
+  /** The Bot conversation the work reports back to; null when its ancestry is not in the scope. */
+  sessionThreadId: string | null;
+}
+
+/**
+ * The execution facts behind a Bot's figure (docs/design/bot-ui.md §5.7). The Host projects them
+ * from the Bot's scope and pushes `varin:bot-presence` when they change. Sleep, archive and the
+ * figure itself stay with the Bot record and the UI.
+ */
+export interface BotPresence {
+  botId: string;
+  needs: BotPresenceNeed[];
+  working: BotPresenceWork[];
+  /** The Bot's own conversations whose Run is active and not waiting for the user. */
+  replying: string[];
+}
+
 export interface BotMemoryItem {
   id: number;
   content: string;
@@ -133,6 +166,9 @@ export interface BotsAPI {
   changeState(botId: string, action: 'sleep' | 'wake' | 'restore' | 'retry'): Promise<BotSummary>;
   entry(botId: string, signal?: AbortSignal): Promise<BotEntryResult>;
   work(botId: string, signal?: AbortSignal): Promise<BotWorkItem[]>;
+  /** One page of the Bot's activity across its conversations, newest first. */
+  activity(botId: string, page?: { before?: number; limit?: number }, signal?: AbortSignal): Promise<import('@varin/protocol').BotActivityPage>;
+  presence(botId: string, signal?: AbortSignal): Promise<BotPresence>;
   sessions: {
     list(botId: string, signal?: AbortSignal): Promise<BotSession[]>;
     create(botId: string): Promise<BotSession>;

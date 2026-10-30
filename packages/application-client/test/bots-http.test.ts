@@ -65,3 +65,29 @@ it('decodes Bot conversations on their main branch and refuses foreign navigatio
     await assert.rejects(api.sessions.list(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
   } finally { globalThis.fetch = original; }
 });
+it('reads Bot activity pages and presence, and refuses another Bot or an unknown event kind', async () => {
+  const original = globalThis.fetch; let kind = 'quiet'; let owner = bot.id;
+  const requests: string[] = [];
+  const presence = { botId: bot.id, replying: ['thread-original'], working: [{ identity: { runtime: 'agent', threadId: 'work', branchId: 'work-main' }, name: 'Reviewer', avatar: null, sessionThreadId: 'thread-original' }],
+    needs: [{ identity: { runtime: 'agent', threadId: 'work', branchId: 'work-main' }, name: 'Reviewer', avatar: null, kind: 'permission', session: false }] };
+  globalThis.fetch = async input => {
+    requests.push(String(input).replace(/^.*\/api/, '/api'));
+    if (String(input).includes('/presence')) return Response.json({ presence: { ...presence, botId: owner } });
+    return Response.json({ botId: owner, before: 7, eventCursor: 12, participants: [{ threadId: 'work', name: 'Reviewer', agentId: 'agent', avatar: null }],
+      events: [{ kind, cursor: 9, atMs: null, sessionThreadId: 'thread-original', sessionBranchId: 'branch-original', runId: 'run', inputs: [{ origin: 'message', threadId: 'work', change: null }] }] });
+  };
+  try {
+    const api = createBotsHttpAPI();
+    const page = await api.activity(bot.id, { before: 10, limit: 5 });
+    assert.equal(page.events[0]?.kind, 'quiet');
+    assert.equal(page.events[0]?.atMs, null);
+    assert.equal(page.before, 7);
+    assert.deepEqual(await api.presence(bot.id), presence);
+    assert.deepEqual(requests, ['/api/harness/bots/bot/activity?before=10&limit=5', '/api/harness/bots/bot/presence']);
+    kind = 'unexplained';
+    await assert.rejects(api.activity(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
+    kind = 'quiet'; owner = 'other';
+    await assert.rejects(api.activity(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
+    await assert.rejects(api.presence(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
+  } finally { globalThis.fetch = original; }
+});
