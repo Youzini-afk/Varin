@@ -111,12 +111,12 @@ function preferredSceneSide(descriptor: CompanionSceneDescriptor): 'left' | 'rig
 
 type SceneEntry = {
   owner: CompanionSceneOwner; window: CompanionSceneWindow; descriptor: CompanionSceneDescriptor;
-  viewport: CompanionSceneViewport; receivedAt: number; ready: boolean; blocked: boolean; queue: Promise<void>; lastPayload?: string; teamRetiresAt?: number; retirementTimer?: ReturnType<typeof setTimeout>;
+  viewport: CompanionSceneViewport; receivedAt: number; ready: boolean; blocked: boolean; publishing: boolean; dirty: boolean; lastPayload?: string; teamRetiresAt?: number; retirementTimer?: ReturnType<typeof setTimeout>;
 };
 /** One inert surface per companion. Its owner is the only presentation source. */
 export class CompanionSceneWindows {
   private readonly entries = new Map<number, SceneEntry>();
-  constructor(private readonly create: (bounds: Bounds) => CompanionSceneWindow,
+  constructor(private readonly create: (bounds: Bounds, owner: CompanionSceneOwner) => CompanionSceneWindow,
     private readonly workArea: (bounds: Bounds) => Bounds) {}
 
   update(owner: CompanionSceneOwner, raw: unknown, viewport: CompanionSceneViewport): void {
@@ -128,7 +128,7 @@ export class CompanionSceneWindows {
     if (entry && descriptor.revision <= entry.descriptor.revision) return;
     if (!entry) {
       if (descriptor.kind === null && !descriptor.team?.members.length) return;
-      entry = { owner, window: this.create(geometry.bounds), descriptor, viewport: { ...viewport }, receivedAt: Date.now(), ready: false, blocked: false, queue: Promise.resolve() };
+      entry = { owner, window: this.create(geometry.bounds, owner), descriptor, viewport: { ...viewport }, receivedAt: Date.now(), ready: false, blocked: false, publishing: false, dirty: false };
       this.entries.set(owner.id, entry);
       const created = entry;
       entry.window.onReady(() => {
@@ -175,24 +175,35 @@ export class CompanionSceneWindows {
     // Native input suppression happens synchronously, before queued renderer work.
     if (!this.visible(entry)) entry.window.hide();
     if (!entry.ready) return;
-    entry.queue = entry.queue.catch(() => {}).then(async () => {
-      if (this.entries.get(ownerId) !== entry || entry.window.isDestroyed() || entry.owner.isDestroyed()) return;
-      // Publish suppression even when native visibility events are throttled or disabled.
-      // The decorative renderer must stop its own RAF, not rely on document.hidden.
-      if (!this.visible(entry)) entry.window.hide();
-      const { bounds, layout } = companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()), entry.descriptor.layout === 'spatial-b-v1', preferredSceneSide(entry.descriptor));
-      entry.window.setBounds(bounds); entry.window.setAlwaysOnTop(entry.owner.isAlwaysOnTop());
-      const descriptor = { ...entry.descriptor, suppressed: !this.visible(entry) };
-      const payload = { descriptor, layout }, key = JSON.stringify(payload);
-      if (entry.lastPayload !== key) {
-        await entry.window.publish(payload);
-        entry.lastPayload = key;
+    // Keep only the latest receipt while a renderer publish is pending. Pointer
+    // moves must not allocate a promise chain behind a slow decorative window.
+    entry.dirty = true;
+    if (entry.publishing) return;
+    entry.publishing = true;
+    void Promise.resolve().then(async () => {
+      while (entry.dirty) {
+        entry.dirty = false;
+        if (this.entries.get(ownerId) !== entry || entry.window.isDestroyed() || entry.owner.isDestroyed()) return;
+        // Suppression is also published: hidden renderers must stop their RAF.
+        if (!this.visible(entry)) entry.window.hide();
+        const { bounds, layout } = companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()), entry.descriptor.layout === 'spatial-b-v1', preferredSceneSide(entry.descriptor));
+        entry.window.setBounds(bounds); entry.window.setAlwaysOnTop(entry.owner.isAlwaysOnTop());
+        const descriptor = { ...entry.descriptor, suppressed: !this.visible(entry) };
+        const payload = { descriptor, layout }, key = JSON.stringify(payload);
+        if (entry.lastPayload !== key) {
+          await entry.window.publish(payload);
+          entry.lastPayload = key;
+        }
+        if (this.entries.get(ownerId) !== entry || entry.window.isDestroyed()) return;
+        // A changed viewport or unblock with the same revision still needs its
+        // latest payload before showing; never flash the stale in-flight scene.
+        if (!entry.dirty && this.visible(entry) && entry.descriptor.revision === descriptor.revision) entry.window.showInactive();
+        else entry.window.hide();
       }
-      if (this.entries.get(ownerId) !== entry || entry.window.isDestroyed()) return;
-      if (this.visible(entry) && entry.descriptor.revision === descriptor.revision) entry.window.showInactive();
-      else entry.window.hide();
-    }).catch(() => { if (this.entries.get(ownerId) === entry) this.clear(ownerId); });
+    }).catch(() => { if (this.entries.get(ownerId) === entry) this.clear(ownerId); })
+      .finally(() => { entry.publishing = false; if (entry.dirty && this.entries.get(ownerId) === entry) this.refresh(ownerId); });
   }
+
   private visible(entry: SceneEntry): boolean {
     const age = Date.now() - entry.receivedAt;
     const expired = entry.descriptor.phase === 'withdraw' ? age >= 600 : entry.descriptor.phase === 'resolve' && age >= 900;

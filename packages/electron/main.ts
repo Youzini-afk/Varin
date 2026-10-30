@@ -2409,7 +2409,10 @@ const createBrowserWindow = ({
     minWidth: decorative ? 1 : companion ? 240 : MIN_WINDOW_WIDTH,
     minHeight: decorative ? 1 : companion ? 300 : MIN_WINDOW_HEIGHT,
     ...(fixedBounds ?? {}),
-    ...(decorative ? { focusable: false } : {}),
+    // Linux focusable:false bypasses the window manager and floats above every
+    // workspace, even when the companion is unpinned. Mouse passthrough and
+    // showInactive keep decorative surfaces inert without bypassing stacking.
+    ...(decorative && process.platform !== 'linux' ? { focusable: false } : {}),
     ...(windowIconPath ? { icon: windowIconPath } : {}),
     show: false,
     backgroundColor: companion || useVibrancy ? '#00000000' : '#151313',
@@ -2440,6 +2443,16 @@ const createBrowserWindow = ({
   const browserWindow = new BrowserWindow(options);
   let auxiliaryClosing = false;
   browserWindow.__varinLabel = label || nextWindowLabel();
+  // Lifecycle diagnostics only: never include document URLs or renderer content.
+  browserWindow.webContents.on('render-process-gone', (_event, details) => {
+    log.warn('[electron] renderer exited', { label: browserWindow.__varinLabel, reason: details.reason, exitCode: details.exitCode });
+  });
+  browserWindow.on('unresponsive', () => {
+    log.warn('[electron] window unresponsive', { label: browserWindow.__varinLabel });
+  });
+  browserWindow.on('responsive', () => {
+    log.info('[electron] window responsive', { label: browserWindow.__varinLabel });
+  });
   browserWindow.__varinRuntimeConfig = rendererRuntimeConfig;
   browserWindow.__varinInitScript = decorative ? '' : buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__varinTitleBarOverlayEnabled = titleBarOverlayEnabled;
@@ -2884,16 +2897,18 @@ const companionStools = new CompanionStoolWindows((bounds, phase, owner) => {
       window.webContents.once('did-finish-load', () => { loaded = true; start(); });
     } };
 });
-const companionScenes = new CompanionSceneWindows(bounds => {
+const companionScenes = new CompanionSceneWindows((bounds, owner) => {
   const base = shouldUsePackagedUi() ? buildPackagedUiUrl('/companion.html') : state.localOrigin || state.sidecarUrl;
   if (!base) throw new Error('Local companion UI is unavailable');
   const url = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
   url.searchParams.set('scene', '1');
   const window = createBrowserWindow({ label: 'companion-scene', presentation: 'companion-scene', fixedBounds: bounds, url: url.toString() });
   window.setIgnoreMouseEvents(true);
+  // Follow the character's native stacking group, not an independent overlay.
+  window.setParentWindow(BrowserWindow.fromId(owner.id));
   return {
     isDestroyed: () => window.isDestroyed(), close: () => window.close(), hide: () => window.hide(),
-    showInactive: () => window.showInactive(), setBounds: (value) => window.setBounds(value),
+    showInactive: () => { if (!window.isVisible()) window.showInactive(); }, setBounds: (value) => window.setBounds(value),
     setAlwaysOnTop: (value) => { if (window.isAlwaysOnTop() !== value) window.setAlwaysOnTop(value); },
     publish: async (value) => { await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('varin-companion-scene',{detail:${JSON.stringify(value)}}))`); },
     onReady: (callback) => {

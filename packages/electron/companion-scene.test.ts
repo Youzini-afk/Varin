@@ -8,12 +8,13 @@ function fixture() {
   const owner = { id: 7, closed: false, visible: true, minimized: false, pinned: false, bounds: { x: 100, y: 80, width: 360, height: 480 },
     isDestroyed() { return this.closed; }, isVisible() { return this.visible; }, isMinimized() { return this.minimized; },
     isAlwaysOnTop() { return this.pinned; }, getContentBounds() { return this.bounds; } };
-  const windows: { closed: boolean; visible: boolean; pinned: boolean; bounds: typeof area; ready?: () => void; payloads: CompanionScenePayload[] }[] = [];
+  const windows: { closed: boolean; visible: boolean; pinned: boolean; bounds: typeof area; boundsUpdates: number; ready?: () => void; payloads: CompanionScenePayload[] }[] = [];
   let release: (() => void) | undefined;
-  const manager = new CompanionSceneWindows(bounds => {
-    const win = { closed: false, visible: false, pinned: false, bounds, payloads: [] as CompanionScenePayload[] }; windows.push(win);
+  const manager = new CompanionSceneWindows((bounds, sceneOwner) => {
+    expect(sceneOwner).toBe(owner);
+    const win = { closed: false, visible: false, pinned: false, bounds, boundsUpdates: 0, payloads: [] as CompanionScenePayload[] }; windows.push(win);
     return { isDestroyed: () => win.closed, close: () => { win.closed = true; win.visible = false; }, hide: () => { win.visible = false; },
-      showInactive: () => { win.visible = true; }, setBounds: value => { win.bounds = value; }, setAlwaysOnTop: value => { win.pinned = value; },
+      showInactive: () => { win.visible = true; }, setBounds: value => { win.bounds = value; win.boundsUpdates++; }, setAlwaysOnTop: value => { win.pinned = value; },
       onReady: cb => { (win as typeof windows[number]).ready = cb; },
       publish: async payload => { win.payloads.push(payload); if (release === undefined) return; await new Promise<void>(resolve => { release = resolve; }); },
     };
@@ -182,4 +183,43 @@ it('honors the actual B report side, with neutral unavailable-side behavior rath
  expect(companionSceneLayout(owner,viewport,area,true,'left').layout.inspectionSide).toBe('left');
  expect(companionSceneLayout({...owner,x:0},viewport,area,true,'left').layout.inspectionSide).toBeNull();
  expect(companionSceneLayout({...owner,x:920},viewport,area,true,'right').layout.inspectionSide).toBeNull();
+});
+
+it('coalesces a stalled publication burst into the latest geometry and facts', async () => {
+  const f = fixture(); f.manager.update(f.owner, descriptor(1), viewport);
+  f.windows[0]?.ready?.(); await flush();
+  f.stall(); f.manager.update(f.owner, descriptor(2), viewport); await flush();
+  const window = f.windows[0]!, before = window.boundsUpdates;
+  for (let revision = 3; revision <= 1002; revision++) {
+    f.owner.bounds.x = 100 + revision / 10;
+    f.manager.update(f.owner, descriptor(revision), viewport);
+    f.manager.block(f.owner.id, true);
+  }
+  expect(window.visible).toBe(false);
+  expect(window.payloads).toHaveLength(2);
+  f.release(); await flush();
+  expect(window.boundsUpdates - before).toBe(1);
+  expect(window.payloads).toHaveLength(3);
+  expect(window.payloads.at(-1)?.descriptor).toMatchObject({ revision: 1002, suppressed: true });
+  expect(window.bounds).toEqual(companionSceneLayout(f.owner.bounds, viewport, area).bounds);
+  f.manager.block(f.owner.id, false); await flush();
+  expect(window.visible).toBe(true);
+  expect(window.payloads.at(-1)?.descriptor.suppressed).toBe(false);
+  f.manager.clearAll();
+});
+
+it('cannot revive or close a replacement scene when a cleared publication settles', async () => {
+  const f = fixture(); f.manager.update(f.owner, descriptor(1), viewport);
+  f.windows[0]?.ready?.(); await flush();
+  f.stall(); f.manager.update(f.owner, descriptor(2), viewport); await flush();
+  f.manager.update(f.owner, descriptor(3), viewport);
+  f.manager.clear(f.owner.id);
+  f.manager.update(f.owner, descriptor(1), viewport);
+  f.release(); f.windows[1]?.ready?.(); await flush();
+  expect(f.windows[0]?.closed).toBe(true);
+  expect(f.windows[0]?.payloads).toHaveLength(2);
+  expect(f.windows[1]?.closed).toBe(false);
+  expect(f.windows[1]?.visible).toBe(true);
+  expect(f.windows[1]?.payloads.at(-1)?.descriptor.revision).toBe(1);
+  f.manager.clearAll();
 });
