@@ -75,6 +75,28 @@ export interface ModelHttpConfiguration { headers?:Record<string,string>; proxy?
 
 export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}
 
+export interface BotActivityInput {
+  origin: string;
+  threadId: string | null;
+  change: string | null;
+}
+
+export type BotActivityEvent = { cursor: number; atMs: number | null; sessionThreadId: string; sessionBranchId: string } & (
+  | { kind: 'dispatch'; operationId: string; executionId: string; threadId: string; branchId: string; task: string; preset: string | null }
+  | { kind: 'report'; operationId: string; executionId: string; threadId: string; branchId: string; outcome: Outcome }
+  | { kind: 'change'; change: 'user_input' | 'workspace_change' | 'history_changed'; threadId: string; branchId: string }
+  | { kind: 'quiet'; runId: string; inputs: BotActivityInput[] }
+  | { kind: 'schedule'; occurrenceId: string; definitionId: string; name: string; state: CalendarOccurrenceState }
+);
+
+export interface BotActivityPage {
+  botId: string;
+  events: BotActivityEvent[];
+  participants: MessageParticipant[];
+  before: number | null;
+  eventCursor: number;
+}
+
 export interface InferenceReceiptPendingParams {
   operationId: string;
   executionOwner: ExecutorOwner;

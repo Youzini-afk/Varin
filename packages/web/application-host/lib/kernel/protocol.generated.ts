@@ -33,6 +33,7 @@ export type KernelMethod =
   | "runtime.bot.matters.update"
   | "runtime.bot.scope.inspect"
   | "runtime.bot.history.read"
+  | "runtime.bot.activity.read"
   | "runtime.bot.gate.publish"
   | "runtime.bot.thread.create"
   | "runtime.bot.scope.suspend"
@@ -665,6 +666,34 @@ export interface BotHistoryReadParams {
   branchId: string;
   headId: string;
   itemId: string;
+}
+
+export interface BotActivityParams {
+  botId: string;
+  before?: number;
+  limit?: number;
+}
+
+export interface BotActivityInput {
+  origin: string;
+  threadId: string | null;
+  change: string | null;
+}
+
+export type BotActivityEvent = { cursor: number; atMs: number | null; sessionThreadId: string; sessionBranchId: string } & (
+  | { kind: 'dispatch'; operationId: string; executionId: string; threadId: string; branchId: string; task: string; preset: string | null }
+  | { kind: 'report'; operationId: string; executionId: string; threadId: string; branchId: string; outcome: Outcome }
+  | { kind: 'change'; change: 'user_input' | 'workspace_change' | 'history_changed'; threadId: string; branchId: string }
+  | { kind: 'quiet'; runId: string; inputs: BotActivityInput[] }
+  | { kind: 'schedule'; occurrenceId: string; definitionId: string; name: string; state: CalendarOccurrenceState }
+);
+
+export interface BotActivityPage {
+  botId: string;
+  events: BotActivityEvent[];
+  participants: MessageParticipant[];
+  before: number | null;
+  eventCursor: number;
 }
 
 export interface BotScopeRun {
@@ -6422,6 +6451,7 @@ export type KernelMethodParams = {
   "runtime.bot.matters.update": BotMatterUpdate;
   "runtime.bot.scope.inspect": BotScopeParams;
   "runtime.bot.history.read": BotHistoryReadParams;
+  "runtime.bot.activity.read": BotActivityParams;
   "runtime.bot.gate.publish": BotExecutionGate;
   "runtime.bot.thread.create": BotThreadCreateParams;
   "runtime.bot.scope.suspend": BotScopeSuspension;
@@ -6980,6 +7010,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.bot.history.read";
       params: BotHistoryReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.bot.activity.read";
+      params: BotActivityParams;
       epoch?: string;
       grantId?: string;
     }

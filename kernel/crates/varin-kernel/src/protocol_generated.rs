@@ -338,6 +338,14 @@ pub(crate) struct BotHistoryReadParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BotActivityParams {
+    pub(crate) bot_id: String,
+    pub(crate) before: Option<i64>,
+    pub(crate) limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BotExecutionGate {
     pub(crate) bot_id: String,
     pub(crate) profile_revision: i64,
@@ -3752,6 +3760,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.bot.activity.read" => serde_json::from_value::<BotActivityParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.bot.gate.publish" => serde_json::from_value::<BotExecutionGate>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

@@ -145,3 +145,42 @@ fn bot_project_dispatch_waits_for_its_own_source_and_never_borrows_the_home_sour
     drop(fixture);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn bot_activity_pages_a_sessions_dispatch_and_its_report_newest_first() {
+    let mut fixture = child_fixture::Fixture::new_in_bot("bot");
+    let child = fixture.accept();
+    fixture
+        .db
+        .fail_child_preparation(&child.execution_id, "source_unavailable")
+        .unwrap();
+    let read = |before| {
+        serde_json::to_value(
+            fixture.db.capture_bot_activity("bot", before, Some(1)).unwrap().load(&|| false).unwrap(),
+        )
+        .unwrap()
+    };
+    let newest = read(None);
+    let report = &newest["events"][0];
+    assert_eq!(newest["events"].as_array().unwrap().len(), 1);
+    assert_eq!(report["kind"], "report");
+    assert_eq!(report["outcome"], "failed");
+    assert_eq!(report["threadId"], json!(child.child_thread_id));
+    assert_eq!(report["sessionThreadId"], "thread:parent");
+    assert!(report["atMs"].as_u64().is_some());
+    assert!(newest["participants"].as_array().unwrap().iter().any(|p| p["threadId"] == json!(child.child_thread_id)));
+    let older = read(newest["before"].as_u64());
+    let dispatch = &older["events"][0];
+    assert_eq!(dispatch["kind"], "dispatch");
+    assert_eq!(dispatch["task"], "Read the fixed file and report");
+    assert_eq!(dispatch["operationId"], json!(child.operation_id));
+    assert!(dispatch["atMs"].as_u64().is_some());
+    assert!(older["before"].is_null());
+    let whole = fixture.db.capture_bot_activity("bot", None, None).unwrap().load(&|| false).unwrap();
+    assert_eq!(whole.events.len(), 2);
+    assert!(whole.before.is_none());
+    assert!(fixture.db.capture_bot_activity("bot", None, None).unwrap().load(&|| true).is_err());
+    let root = fixture.root.clone();
+    drop(fixture);
+    std::fs::remove_dir_all(root).unwrap();
+}

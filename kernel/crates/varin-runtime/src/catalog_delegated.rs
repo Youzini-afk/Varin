@@ -1231,7 +1231,7 @@ impl Catalog {
             id,
             execution.revision,
             "child.report_ready",
-            json!({"outcome":"failed"}),
+            json!({"outcome":"failed","atMs":observations::wall_time_ms()?}),
         )?;
         super::bot_reports::publish_pending(&tx, id, execution.revision)?;
         tx.commit()?;

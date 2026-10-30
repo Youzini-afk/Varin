@@ -1827,6 +1827,8 @@ mod bot_reports;
 pub mod bot_work;
 #[path = "catalog_bot_work_events.rs"]
 mod bot_work_events;
+#[path = "catalog_bot_activity.rs"]
+pub mod bot_activity;
 #[path = "catalog_background.rs"]
 pub mod background;
 

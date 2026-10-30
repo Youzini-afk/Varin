@@ -516,6 +516,12 @@ fn occurrence_hold(
     }
     target_hold(db, d, o, target)
 }
+/// One occurrence's definition name and current projection, for the Bot activity read.
+pub(super) fn named_occurrence(db: &Connection, id: &str) -> Result<(String, OccurrenceView)> {
+    let o: Occurrence = record(db, "calendar_occurrences", id)?;
+    let d: Definition = record(db, "calendar_definitions", &o.definition_id)?;
+    Ok((d.view.name.clone(), project_occurrence(db, &d, &o)?))
+}
 fn project_occurrence(db: &Connection, d: &Definition, o: &Occurrence) -> Result<OccurrenceView> {
     let mut v = OccurrenceView {
         id: o.id.clone(),

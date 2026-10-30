@@ -448,7 +448,7 @@ fn cancel_unlaunched_trigger(
     execution.revision += 1;
     delegated::write_execution(tx, &execution)?;
     if report_created {
-        event(tx,execution_id,execution.revision,"child.report_ready",json!({"outcome":"cancelled"}))?;
+        event(tx,execution_id,execution.revision,"child.report_ready",json!({"outcome":"cancelled","atMs":observations::wall_time_ms()?}))?;
         super::bot_reports::publish_pending(tx, execution_id, execution.revision)?;
     }
     event(

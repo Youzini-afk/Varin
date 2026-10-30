@@ -2289,6 +2289,21 @@ pub(crate) fn spawn(
                             })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
                             deferred = true; return Ok(Value::Null);
                         }
+                        if method == "runtime.bot.activity.read" {
+                            let p: BotActivityParams = serde_json::from_value(params)?;
+                            let limit = p.limit.map(usize::try_from).transpose().map_err(|_| KernelError::Protocol("activity page size must be positive".into()))?;
+                            let before = p.before.map(u64::try_from).transpose().map_err(|_| KernelError::Protocol("activity cursor must be non-negative".into()))?;
+                            let read = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                .capture_bot_activity(&p.bot_id, before, limit).map_err(domain)?;
+                            let response_id = id.clone(); let response_sender = responses.clone(); let done = finished.clone(); let cancelled = cancellation.clone();
+                            content_tasks.send(Box::new(move || {
+                                let result = read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)
+                                    .and_then(|page| serde_json::to_value(page).map_err(Into::into));
+                                let response = match result { Ok(value) => response_ok(&response_id, value), Err(error) => response_error(&response_id, &error) };
+                                done(&response_id); let _ = response_sender.send(response);
+                            })).map_err(|_| KernelError::Storage("content reader unavailable".into()))?;
+                            deferred = true; return Ok(Value::Null);
+                        }
                         if method == "runtime.history.page" {
                             let p: HistoryPageParams = serde_json::from_value(params)?;
                             let limit = u32::try_from(p.limit).map_err(|_| {

@@ -2147,6 +2147,7 @@ impl Catalog {
             if run.state.terminal() {
                 let mut visible = serde_json::to_value(&run)?;
                 visible["hasVisibleAssistantOutput"] = json!(tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='assistant.output')", [run_id], |row| row.get::<_, bool>(0))?);
+                visible["atMs"] = json!(observations::wall_time_ms()?);
                   super::bot_work_events::completed(&tx, &run)?;
                 event(&tx, run_id, run.revision, "run.changed", visible)?;
                 goals::settle_run(&tx, &run)?;

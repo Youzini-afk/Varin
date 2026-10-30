@@ -1259,7 +1259,7 @@ impl Catalog {
                     Value::Null,
                 )?;
                 if report_created {
-                    event(&tx,&execution.execution_id,execution.revision,"child.report_ready",json!({"outcome":"cancelled"}))?;
+                    event(&tx,&execution.execution_id,execution.revision,"child.report_ready",json!({"outcome":"cancelled","atMs":observations::wall_time_ms()?}))?;
                     super::bot_reports::publish_pending(&tx, &execution.execution_id, execution.revision)?;
                 }
             }

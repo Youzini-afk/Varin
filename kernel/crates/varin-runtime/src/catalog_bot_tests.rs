@@ -532,3 +532,71 @@ fn bot_session_input_stays_in_its_own_session_and_scope_lists_sessions_in_order(
     assert_eq!(owner.session_thread_id.as_deref(), Some("second"));
     assert_eq!(db.bot_for_thread("second").unwrap().as_deref(), Some("bot"));
 }
+
+#[test]
+fn bot_activity_shows_a_followed_change_and_the_background_round_that_stayed_quiet() {
+    use super::bot_work::{BotMatter, MatterThread, MatterUpdate};
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    db.publish_bot_gate(gate(1, true)).unwrap();
+    db.create_bot_thread("thread", "main", "bot").unwrap();
+    db.create_thread("ordinary", "ordinary-main").unwrap();
+    db.update_bot_matter(MatterUpdate { bot_id: "bot".into(), key: "follow".into(), expected_revision: 0,
+        matter: BotMatter { id: "work".into(), revision: 0, title: "Original work".into(), description: String::new(), archived: false,
+            threads: vec![MatterThread { thread_id: "ordinary".into(), branch_id: "ordinary-main".into(), send: false, memory: false }] } }, None).unwrap();
+    let mut user = command();
+    user.thread_id = "ordinary".into();
+    user.branch_id = "ordinary-main".into();
+    user.key = "work-user".into();
+    user.input = json!("The user corrected the original task.");
+    db.submit(&user).unwrap();
+    let owner = std::sync::Mutex::new(db);
+    super::bot_work_events::deliver(&owner).unwrap();
+    let mut db = owner.into_inner().unwrap();
+    let work = db.pending_cold_bot_work().unwrap().remove(0);
+    let proposal = context::ContextProposal { key: "bot-initial".into(), branch_id: "main".into(), through_id: None, expected_revision: 0, summary: String::new(),
+        effective_system_prompt: "Long-term assistant".into(), instruction_sources: vec![], memory_checkpoint: None };
+    let basis: personalization::PersonalizationBasis = serde_json::from_value(json!({"mode":"bot","threadRole":"main","revision":0,"configurationDigest":"original","memorySnapshot":{"revision":0,"memories":[]},"threadId":"thread","projectId":null,"originalSections":[{"name":"preamble","content":"Long-term assistant"}],"instructionSources":[]})).unwrap();
+    let preparation = db.prepare_cold_bot_work(work, command().configuration, proposal, basis, None).unwrap();
+    let receipt = Receipt { thread_id: "thread".into(), branch_id: "main".into(), run_id: "unused".into(), input_id: "unused".into(), cursor: 0 };
+    let launch = launches::LaunchSelection::from_binding(&request_snapshot(&receipt).view.binding, DefaultAgentPolicy.identity(), None);
+    let admitted = db.admit_cold_bot_work(preparation.load(launch).unwrap()).unwrap();
+    let delivery = db.prepare_input_delivery(&admitted.run_id, db.epoch(), db.head("main").unwrap().as_deref()).unwrap().load().unwrap();
+    db.admit_input_delivery(delivery).unwrap().unwrap();
+    let epoch = db.epoch();
+    for state in [RunState::Runnable, RunState::Completed] {
+        db.commit_execution(&admitted.run_id, epoch, &ExecutionRecord::StateChanged { state, waiting_on: None }).unwrap();
+    }
+    let page = serde_json::to_value(db.capture_bot_activity("bot", None, None).unwrap().load(&|| false).unwrap()).unwrap();
+    let events = page["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2, "{page}");
+    // The round ended without assistant output, so the user was not interrupted.
+    assert_eq!(events[0]["kind"], "quiet");
+    assert_eq!(events[0]["runId"], json!(admitted.run_id));
+    assert_eq!(events[0]["sessionThreadId"], "thread");
+    assert!(events[0]["atMs"].as_u64().is_some());
+    assert!(events[0]["inputs"].as_array().unwrap().iter()
+        .any(|input| input["origin"] == "work_event" && input["threadId"] == "ordinary" && input["change"] == "user_input"));
+    assert_eq!(events[1]["kind"], "change");
+    assert_eq!(events[1]["change"], "user_input");
+    assert_eq!(events[1]["threadId"], "ordinary");
+    assert_eq!(events[1]["sessionThreadId"], "thread");
+    assert!(events[1]["atMs"].as_u64().is_some());
+    assert!(page["participants"].as_array().unwrap().iter().any(|p| p["threadId"] == "ordinary"));
+}
+
+#[test]
+fn bot_activity_leaves_out_user_rounds_and_rejects_unknown_bots() {
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    let receipt = bot_submit(&mut db);
+    let epoch = db.epoch();
+    for state in [RunState::Runnable, RunState::Completed] {
+        db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state, waiting_on: None }).unwrap();
+    }
+    let page = db.capture_bot_activity("bot", None, None).unwrap().load(&|| false).unwrap();
+    assert!(page.events.is_empty());
+    assert!(page.before.is_none());
+    assert!(db.capture_bot_activity("other-bot", None, None).is_err());
+    assert!(db.capture_bot_activity("bot", None, Some(0)).is_err());
+}

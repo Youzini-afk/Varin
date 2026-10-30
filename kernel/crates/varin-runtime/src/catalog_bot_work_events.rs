@@ -31,7 +31,8 @@ pub(super) fn user_input(tx: &Transaction<'_>, run: &Run, item_id: &str) -> Resu
             1,
             "bot.work_pending",
             json!({"botId":bot,"targetThreadId":target,"targetBranchId":branch,
-            "kind":"user_input","sourceThreadId":run.thread_id,"sourceBranchId":run.branch_id,"itemId":item_id}),
+            "kind":"user_input","sourceThreadId":run.thread_id,"sourceBranchId":run.branch_id,"itemId":item_id,
+            "atMs":observations::wall_time_ms()?}),
         )?;
     }
     Ok(())
@@ -46,7 +47,8 @@ pub(super) fn observation(
         event(tx, "bot-work-pending", 1, "bot.work_pending", json!({
             "kind":"workspace_change", "botId":bot, "targetThreadId":target,
             "targetBranchId":branch,"sourceThreadId":owner.thread_id,
-            "sourceBranchId":owner.branch_id,"sourceRunId":owner.run_id,"observationId":id,"changeId":change_id
+            "sourceBranchId":owner.branch_id,"sourceRunId":owner.run_id,"observationId":id,"changeId":change_id,
+            "atMs":observations::wall_time_ms()?
         }))?;
     }
     Ok(())
@@ -56,7 +58,8 @@ pub(super) fn navigation(tx: &Transaction<'_>, receipt: &super::navigation::Navi
         let branch = super::threads::branch(tx, &target)?;
         event(tx, "bot-work-pending", 1, "bot.work_pending", json!({"kind":"history_changed",
             "botId":bot,"targetThreadId":target,"targetBranchId":branch,
-            "sourceThreadId":receipt.thread_id,"sourceBranchId":receipt.branch_id,"navigation":receipt}))?;
+            "sourceThreadId":receipt.thread_id,"sourceBranchId":receipt.branch_id,"navigation":receipt,
+            "atMs":observations::wall_time_ms()?}))?;
     }
     Ok(())
 }
