@@ -3,569 +3,831 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Varin 形象提案 · 圈圈</title>
+<title>Varin 形象提案 · 第二版</title>
 <style>
-  :root { --bg:#f6f5f1; --card:#fff; --ink:#20272a; --muted:#6d7471; --line:#e4e1d8; --mist:#7aa7ef; --sage:#77837f; }
+  :root { --page:#f6f5f1; --ink:#16191c; --muted:#6c7270; --faint:#9aa09d; --line:#e5e2d9; --card:#fff; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.6 system-ui,"PingFang SC","Microsoft YaHei",sans-serif; }
-  main { max-width:1180px; margin:0 auto; padding:40px 24px 80px; }
-  h1 { font-size:30px; letter-spacing:-.01em; margin:0 0 6px; }
-  h2 { font-size:19px; margin:56px 0 6px; }
-  .lede { color:var(--muted); max-width:760px; margin:0; }
-  .lede a { color:inherit; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:18px; }
-  /* Hero */
-  .hero { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr); margin-top:28px; overflow:hidden; }
-  .stage { position:relative; min-height:460px; display:grid; place-items:center;
-    background:radial-gradient(circle at 50% 45%, #eef3ff 0, #fbfaf7 46%, #fff 70%);
-    background-image:radial-gradient(#d9dce3 1px, transparent 1.2px), radial-gradient(circle at 50% 45%, #eaf1ff 0, #fbfaf7 46%, #fff 72%);
-    background-size:18px 18px, 100% 100%; }
-  .stage .caption { position:absolute; left:20px; top:16px; font:600 11px/1 ui-monospace,Consolas,monospace; letter-spacing:.14em; color:#8b9190; text-transform:uppercase; }
-  .stage .status { position:absolute; left:0; right:0; bottom:22px; text-align:center; color:var(--muted); font-size:13px; }
-  .stage .agent { position:absolute; right:12%; top:56%; transition:transform .2s; }
-  .stage .agent.got { animation:receive .7s cubic-bezier(.2,1.6,.4,1); }
-  @keyframes receive { 0%{transform:scale(1)} 35%{transform:scale(1.18) translateY(-6px)} 100%{transform:scale(1)} }
-  .controls { border-left:1px solid var(--line); padding:20px 22px; display:flex; flex-direction:column; gap:18px; }
-  .group-title { font:600 11px/1 ui-monospace,Consolas,monospace; letter-spacing:.14em; color:#8b9190; text-transform:uppercase; margin-bottom:9px; display:flex; justify-content:space-between; }
-  .chips { display:flex; flex-wrap:wrap; gap:7px; }
-  .chip { border:1px solid var(--line); background:#fff; border-radius:999px; padding:6px 12px; font:inherit; font-size:13px; color:var(--ink); cursor:pointer; transition:background .15s, border-color .15s, transform .15s; }
-  .chip:hover { border-color:#c9cdd6; transform:translateY(-1px); }
-  .chip[aria-pressed=true] { background:var(--ink); border-color:var(--ink); color:#fff; }
-  .swatches { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; }
-  .swatch { aspect-ratio:1; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line); cursor:pointer; position:relative; }
-  .swatch[aria-pressed=true] { box-shadow:0 0 0 2px var(--ink); }
-  .toggle { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
-  /* Concepts */
-  .concepts { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:18px; }
-  .concept { padding:0 0 18px; overflow:hidden; position:relative; }
-  .concept .mini-stage { height:230px; display:grid; place-items:center; background:radial-gradient(circle at 50% 50%, #f1f5ff, #fff 70%); border-bottom:1px solid var(--line); }
-  .concept h3 { margin:16px 18px 2px; font-size:16px; display:flex; gap:8px; align-items:center; }
-  .badge { font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px; background:#eaf1ff; color:#3f63a3; }
-  .concept p, .concept ul { margin:4px 18px; color:var(--muted); font-size:13px; }
-  .concept ul { padding-left:18px; }
-  .concept .state-tag { position:absolute; right:14px; top:12px; font-size:12px; color:#8b9190; }
-  /* Family & sizes */
-  .panel-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:18px; }
-  .panel { padding:22px; border-radius:18px; border:1px solid var(--line); }
-  .panel.dark { background:#171b20; border-color:#262c33; color:#dfe3e6; }
-  .panel.light { background:#fff; }
-  .row { display:flex; align-items:flex-end; gap:22px; flex-wrap:wrap; }
-  .row figure { margin:0; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:12px; color:#8b9190; }
-  .sidebar-mock { margin-top:20px; display:grid; gap:4px; max-width:300px; }
-  .sidebar-mock .item { display:flex; gap:9px; align-items:center; padding:6px 8px; border-radius:8px; font-size:13px; }
-  .panel.light .sidebar-mock .item.on { background:#eef0f3; }
-  .panel.dark .sidebar-mock .item.on { background:#232a31; }
-  .sidebar-mock .indent { padding-left:30px; }
-  table { width:100%; border-collapse:collapse; margin-top:16px; font-size:13px; }
-  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { font-weight:600; color:var(--muted); font-size:12px; }
-  td:first-child { white-space:nowrap; font-weight:600; }
-  .anatomy { display:grid; grid-template-columns:300px 1fr; gap:24px; align-items:center; margin-top:18px; padding:22px; }
-  .anatomy ol { margin:0; padding-left:20px; color:var(--muted); }
-  .anatomy li { margin:6px 0; }
-  .anatomy b { color:var(--ink); }
-  .note { color:var(--muted); font-size:13px; margin-top:10px; }
-  @media (max-width:880px) { .hero, .concepts, .panel-row, .anatomy { grid-template-columns:1fr; } .controls { border-left:0; border-top:1px solid var(--line); } }
+  html { scroll-behavior:smooth; }
+  body { margin:0; background:var(--page); color:var(--ink); font:14px/1.65 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; -webkit-font-smoothing:antialiased; }
+  main { max-width:1200px; margin:0 auto; padding:0 28px 120px; }
+  .mono { font:600 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
+  header.top { display:flex; align-items:center; gap:10px; padding:22px 0 0; }
+  header.top svg { width:20px; height:20px; }
+  header.top b { font-size:14px; }
+  .intro { padding:64px 0 34px; display:grid; grid-template-columns:1.1fr .9fr; gap:40px; align-items:end; }
+  h1 { font-size:46px; line-height:1.08; letter-spacing:-.025em; margin:14px 0 0; font-weight:800; }
+  .intro p { margin:0; color:var(--muted); font-size:15px; max-width:520px; }
+  h2 { font-size:28px; letter-spacing:-.02em; margin:10px 0 8px; font-weight:800; }
+  section.block { padding-top:96px; }
+  .lede { color:var(--muted); max-width:720px; margin:0; font-size:14.5px; }
+
+  /* Hero studio */
+  .studio { display:grid; grid-template-columns:minmax(0,1fr) 340px; border:1px solid var(--line); border-radius:28px; overflow:hidden; background:var(--card); box-shadow:0 30px 80px -50px rgba(30,40,50,.35); }
+  .stage { position:relative; min-height:560px; display:grid; place-items:center; overflow:hidden; transition:background .5s;
+    background:
+      radial-gradient(60% 55% at 50% 46%, rgba(255,255,255,.95), rgba(255,255,255,0) 70%),
+      linear-gradient(45deg, rgba(20,30,40,.045) 1px, transparent 1px) 0 0/36px 36px,
+      linear-gradient(-45deg, rgba(20,30,40,.045) 1px, transparent 1px) 0 0/36px 36px,
+      #efeee8; }
+  .stage.dark { background:
+      radial-gradient(60% 55% at 50% 46%, rgba(70,90,120,.35), rgba(0,0,0,0) 70%),
+      linear-gradient(45deg, rgba(255,255,255,.045) 1px, transparent 1px) 0 0/36px 36px,
+      linear-gradient(-45deg, rgba(255,255,255,.045) 1px, transparent 1px) 0 0/36px 36px,
+      #14171b; }
+  .stage > * { position:relative; z-index:1; }
+  .stage .tag { position:absolute; left:24px; top:22px; }
+  .aurora { position:absolute !important; inset:-12%; pointer-events:none; z-index:0 !important; }
+  .aurora i { position:absolute; width:46%; aspect-ratio:1; border-radius:50%; filter:blur(52px); opacity:.85; mix-blend-mode:multiply; transition:background-color 1.2s ease; will-change:transform; animation:drift 19s ease-in-out infinite alternate; }
+  .aurora i:nth-child(1) { left:16%; top:18%; animation-duration:17s; }
+  .aurora i:nth-child(2) { left:44%; top:12%; animation-duration:22s; animation-delay:-7s; }
+  .aurora i:nth-child(3) { left:26%; top:44%; animation-duration:20s; animation-delay:-3s; }
+  .aurora i:nth-child(4) { left:50%; top:42%; animation-duration:24s; animation-delay:-11s; }
+  .stage.dark .aurora i { opacity:.42; mix-blend-mode:screen; }
+  .tile .mini > *:not(.aurora) { position:relative; z-index:1; }
+  .tile .mini .aurora i { filter:blur(34px); width:54%; opacity:.75; }
+  @keyframes drift { 0% { transform:translate(0,0) scale(1); } 50% { transform:translate(7%,-6%) scale(1.14); } 100% { transform:translate(-6%,7%) scale(.9); } }
+  @media (prefers-reduced-motion: reduce) { .aurora i { animation:none; } }
+  .stage .hint { position:absolute; right:24px; top:22px; }
+  .stage .line { position:absolute; left:0; right:0; bottom:30px; text-align:center; font-size:14px; color:var(--muted); transition:color .3s; }
+  .stage.dark .line, .stage.dark .mono { color:#8f979c; }
+  .stage .fig { cursor:pointer; }
+  .panel { border-left:1px solid var(--line); padding:24px 24px 28px; display:flex; flex-direction:column; gap:22px; background:#fcfbf8; }
+  .group-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+  .states { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .state-btn { display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px 4px 8px; border:1px solid transparent; border-radius:14px; background:transparent; font:inherit; font-size:12.5px; color:var(--muted); cursor:pointer; transition:background .18s, border-color .18s, color .18s, transform .18s; }
+  .state-btn:hover { background:#f2f0ea; transform:translateY(-1px); }
+  .state-btn[aria-pressed=true] { background:#fff; border-color:var(--line); color:var(--ink); box-shadow:0 6px 18px -12px rgba(0,0,0,.35); }
+  .moves { display:flex; flex-wrap:wrap; gap:7px; }
+  .chip { border:1px solid var(--line); background:#fff; border-radius:999px; padding:7px 13px; font:inherit; font-size:13px; color:var(--ink); cursor:pointer; transition:transform .15s, border-color .15s, box-shadow .15s; }
+  .chip:hover { transform:translateY(-1px); border-color:#cfd2d6; box-shadow:0 6px 14px -10px rgba(0,0,0,.4); }
+  .chip:active { transform:scale(.96); }
+  .swatches { display:grid; grid-template-columns:repeat(8,1fr); gap:8px; }
+  .swatch { aspect-ratio:1; border-radius:30%; border:0; cursor:pointer; box-shadow:inset 0 -3px 6px rgba(0,0,0,.12), 0 0 0 1px rgba(0,0,0,.06); transition:transform .15s, box-shadow .15s; }
+  .swatch[aria-pressed=true] { box-shadow:inset 0 -3px 6px rgba(0,0,0,.12), 0 0 0 2px #fff, 0 0 0 3.5px var(--ink); transform:translateY(-1px); }
+  .toggles { display:flex; flex-direction:column; gap:9px; color:var(--muted); font-size:13px; }
+  .toggles label { display:flex; align-items:center; gap:9px; cursor:pointer; }
+  .seg { display:inline-flex; background:#efede6; border-radius:10px; padding:3px; }
+  .seg button { border:0; background:transparent; font:inherit; font-size:12.5px; padding:5px 12px; border-radius:8px; color:var(--muted); cursor:pointer; }
+  .seg button[aria-pressed=true] { background:#fff; color:var(--ink); box-shadow:0 2px 6px -3px rgba(0,0,0,.3); }
+
+  /* Idea */
+  .idea { display:grid; grid-template-columns:repeat(4,1fr); gap:0; border:1px solid var(--line); border-radius:24px; background:#fff; margin-top:28px; overflow:hidden; }
+  .idea figure { margin:0; padding:30px 18px 22px; display:flex; flex-direction:column; align-items:center; gap:14px; border-right:1px solid var(--line); position:relative; }
+  .idea figure:last-child { border-right:0; }
+  .idea figure:not(:last-child)::after { content:''; position:absolute; right:-9px; top:44%; width:16px; height:16px; background:#fff; border-top:1px solid var(--line); border-right:1px solid var(--line); transform:rotate(45deg); z-index:1; }
+  .idea figcaption { text-align:center; font-size:13px; color:var(--muted); }
+  .idea figcaption b { display:block; color:var(--ink); font-size:14px; margin-bottom:2px; }
+  .idea-live { display:grid; grid-template-columns:320px 1fr; gap:36px; align-items:center; margin-top:20px; padding:26px 34px; border:1px solid var(--line); border-radius:24px; background:#fff; }
+  .idea-live ol { margin:0; padding-left:20px; color:var(--muted); }
+  .idea-live li { margin:8px 0; }
+  .idea-live b { color:var(--ink); }
+
+  /* Grids */
+  .grid { display:grid; gap:14px; margin-top:26px; }
+  .grid.g3 { grid-template-columns:repeat(3,1fr); }
+  .grid.g4 { grid-template-columns:repeat(4,1fr); }
+  .tile { border:1px solid var(--line); border-radius:22px; background:#fff; overflow:hidden; display:flex; flex-direction:column; }
+  .tile .mini { height:250px; display:grid; place-items:center; background:radial-gradient(70% 70% at 50% 45%, #fff, #f3f2ed); border-bottom:1px solid var(--line); position:relative; overflow:hidden; }
+  .tile .meta { padding:14px 18px 16px; }
+  .tile .meta b { font-size:15px; }
+  .tile .meta p { margin:3px 0 0; color:var(--muted); font-size:13px; }
+  .tile .meta .status { margin-top:8px; font-size:12px; color:var(--faint); }
+  .colors .mini { height:200px; }
+  .colors .meta { padding:10px 14px 12px; display:flex; justify-content:space-between; align-items:center; }
+
+  /* Product */
+  .product { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:26px; }
+  .mock { border-radius:24px; border:1px solid var(--line); background:#fff; overflow:hidden; display:grid; grid-template-columns:230px 1fr; min-height:380px; }
+  .mock.dark { background:#16191d; border-color:#262b31; color:#e1e4e6; }
+  .mock .side { background:#f4f3ef; border-right:1px solid var(--line); padding:14px 10px; display:flex; flex-direction:column; gap:2px; font-size:13px; }
+  .mock.dark .side { background:#1b1f24; border-color:#262b31; }
+  .mock .titlebar { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted); padding:2px 8px 12px; }
+  .mock .row { display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:9px; }
+  .mock .row.on { background:#e9e7e0; }
+  .mock.dark .row.on { background:#262c33; }
+  .mock .row.sub { padding-left:30px; color:var(--muted); }
+  .mock.dark .row.sub { color:#9aa3a8; }
+  .mock .head { padding:26px 22px 18px; display:flex; flex-direction:column; align-items:center; gap:4px; border-bottom:1px solid var(--line); }
+  .mock.dark .head { border-color:#262b31; }
+  .mock .head b { font-size:16px; margin-top:6px; }
+  .mock .head span { font-size:12.5px; color:var(--muted); }
+  .mock.dark .head span { color:#9aa3a8; }
+  .mock .team { padding:16px 22px; display:flex; flex-direction:column; gap:10px; font-size:13px; }
+  .mock .team .who { display:flex; align-items:center; gap:10px; }
+  .mock .team small { color:var(--faint); margin-left:auto; }
+
+  /* Rules */
+  .rules { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:26px; }
+  .rule { border:1px solid var(--line); border-radius:20px; background:#fff; padding:20px 20px 18px; }
+  .rule b { display:block; font-size:15px; margin:10px 0 4px; }
+  .rule p { margin:0; color:var(--muted); font-size:13px; }
+  .rule .curve { height:44px; }
+  @media (max-width:980px) { .studio, .intro, .idea-live, .product, .mock { grid-template-columns:1fr; } .panel { border-left:0; border-top:1px solid var(--line); } .grid.g3, .grid.g4, .rules, .idea { grid-template-columns:1fr 1fr; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>Varin 形象提案 · 圈圈</h1>
-  <p class="lede">二次元桌宠保留给喜欢它的人；Bot 的默认形象换成一眼能懂、谁都觉得可爱的软糖小团子。造型从 Varin 本身长出来：桌宠角色左侧唯一的圈丸变成头顶斜飘的一枚珠光圈，Logo 的两片互扣折带化成圈上的两段色。动效参考了 <a href="https://grokbots.ai/studio">Grok bot 头像工作室</a> 的软糖质感和指针跟随，所有动作都用弹簧驱动，状态之间连续过渡。本页是可交互的设计稿，不是正式资源。</p>
+  <header class="top">
+    <svg viewBox="-64 -64 128 128" aria-hidden="true"><path d="M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z" fill="#20272a"/><path d="M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z" fill="#77837f"/></svg>
+    <b>Varin</b><span class="mono" style="margin-left:6px">形象提案 · 第二版</span>
+  </header>
 
-  <section class="card hero" aria-label="主形象">
-    <div class="stage" id="hero-stage">
-      <span class="caption" id="hero-caption">圈圈 · 雾蓝 · 空闲</span>
-      <div id="hero"></div>
-      <span class="agent" id="hero-agent" title="被派发的负责人"></span>
-      <span class="status" id="hero-status">空闲</span>
+  <div class="intro">
+    <div>
+      <span class="mono">Bot · 默认形象</span>
+      <h1>它的脸，<br>就是 Varin 的标志。</h1>
     </div>
-    <div class="controls">
-      <div><div class="group-title"><span>状态合同</span><span>bot-ui §5.7</span></div><div class="chips" id="state-chips"></div></div>
-      <div><div class="group-title"><span>小动作</span><span>点一下播放</span></div><div class="chips" id="delight-chips"></div></div>
-      <div><div class="group-title"><span>颜色</span><span id="color-name">雾蓝</span></div><div class="swatches" id="swatches"></div>
-        <p class="note">每个 Bot 可选自己的颜色，多个 Bot 一眼能分开；圈始终保留，表示“这是 Bot”。</p></div>
-      <div class="toggle"><input type="checkbox" id="follow" checked><label for="follow">眼睛跟随指针</label></div>
-      <div class="toggle"><input type="checkbox" id="reduced"><label for="reduced">减少动态（只保留姿态淡入淡出）</label></div>
+    <p>Varin 的标志是两段折角笔画互相扣住。把两笔横收起来，剩下两笔竖就是一双眼睛。所以它醒着时是一块会眨眼、会看你的软方块；睡着时把横笔放回去，变回 App 图标。颜色交给它的团队：派出去的 Agent 都是彩色的，围着它转。</p>
+  </div>
+
+  <section class="studio" aria-label="形象工作台">
+    <div class="stage" id="stage">
+      <span class="mono tag" id="tag">Varin · 雾蓝 · 空闲</span>
+      <span class="mono hint">点它一下</span>
+      <div class="fig" id="hero"></div>
+      <span class="line" id="line">空闲</span>
+    </div>
+    <div class="panel">
+      <div><div class="group-head"><span class="mono">状态</span><span class="mono">bot-ui §5.7</span></div><div class="states" id="states"></div></div>
+      <div><div class="group-head"><span class="mono">小动作</span></div><div class="moves" id="moves"></div></div>
+      <div><div class="group-head"><span class="mono">颜色</span><span class="mono" id="color-name">雾蓝</span></div><div class="swatches" id="swatches"></div></div>
+      <div class="toggles">
+        <div style="display:flex;align-items:center;justify-content:space-between"><span>背景</span><span class="seg" id="bg-seg"><button aria-pressed="true" data-v="light">浅</button><button aria-pressed="false" data-v="dark">深</button></span></div>
+        <label><input type="checkbox" id="follow" checked> 眼睛跟随指针</label>
+        <label><input type="checkbox" id="reduced"> 减少动态</label>
+      </div>
     </div>
   </section>
 
-  <h2>三个方向</h2>
-  <p class="lede">三张卡片共用同一套表情和弹簧动效，只换身体和标志物，循环播放全部状态，方便直接比较。推荐 A。</p>
-  <div class="concepts" id="concepts"></div>
+  <section class="block" id="idea">
+    <span class="mono">01 · 想法</span>
+    <h2>从标志里长出来</h2>
+    <p class="lede">不另外造一个吉祥物。标志里的两笔竖本来就在左右两边，像一双眼睛；横笔是它的“手”，需要时伸出来，收起来就是一张脸。</p>
+    <div class="idea" id="idea-strip"></div>
+    <div class="idea-live">
+      <div id="idea-live"></div>
+      <ol>
+        <li><b>身体是 App 图标那块圆角方块</b>：上窄下宽一点，站得稳；缎面质感加细颗粒，像一块软陶，而不是塑料泡泡。</li>
+        <li><b>眼睛是标志的两笔竖</b>：左笔炭黑，右笔在拼成标志时带一点鼠尾草灰，和标志一致。思考时两笔变回标志并转动，就是它的加载动画。</li>
+        <li><b>表情只用这两笔</b>：笑眼、闭眼、眯眼、眨眼都由同一对笔画变形而来，没有额外的五官，14px 也看得清。</li>
+        <li><b>颜色交给团队</b>：Varin 本身只有一种颜色；它派出去的 Agent 用产品里真实的彩色头像，工作时围着它转，有结果时撒出彩色纸片。</li>
+      </ol>
+    </div>
+  </section>
 
-  <h2>造型拆解（方向 A）</h2>
-  <div class="card anatomy">
-    <div id="anatomy-figure"></div>
-    <ol>
-      <li><b>软糖身体</b>：上圆下宽的团子轮廓，站得稳、显得亲切；径向渐变加左上高光和底部透光，做出软糖/黏土的体积，区别于 Agent 的平涂头像。</li>
-      <li><b>珠光圈</b>：来自桌宠角色左侧唯一的圈丸。斜飘在左上，造成不对称的剪影，14px 也认得出来。圈由两段互扣的珠光色组成，呼应 Logo 的两片折带。它是最主要的表情道具：思考时绕身体公转，工作时变成进度环，等你时转暖色，有结果时迸出光点，睡觉时落在头顶。</li>
-      <li><b>眼睛</b>：两枚炭黑竖胶囊，带一粒高光，颜色取 Logo 的 #20272a，和 Agent 头像的深色眼睛同一家族。表情只靠眼睛形状、开合、视线和少量腮红/嘴，不画复杂五官。</li>
-      <li><b>层级</b>：Varin 有圈；负责人 Agent 穿披肩、扣菱形扣；子 Agent 是原本的平涂小团子。三者在同一行里一眼能分清。</li>
-    </ol>
-  </div>
+  <section class="block" id="states-block">
+    <span class="mono">02 · 状态</span>
+    <h2>九个状态，一套动作系统</h2>
+    <p class="lede">对应 Bot 工作台的形象状态合同。状态之间都是连续过渡：身体用弹簧，眼睛用变形，外轮廓有果冻回弹。</p>
+    <div class="grid g3" id="state-grid"></div>
+  </section>
 
-  <h2>家族与尺寸</h2>
-  <p class="lede">和产品里真实的 Agent 头像（负责人与子 Agent）放在一起看。40px 以下只显示姿态、不播循环，和现有状态合同一致。</p>
-  <div class="panel-row">
-    <div class="panel light" id="family-light"></div>
-    <div class="panel dark" id="family-dark"></div>
-  </div>
-  <div class="panel-row">
-    <div class="panel light"><div class="group-title"><span>尺寸</span><span>14 · 20 · 32 · 48 · 96 · 160</span></div><div class="row" id="sizes-light"></div></div>
-    <div class="panel dark"><div class="group-title"><span>尺寸 · 深色</span><span>同一组</span></div><div class="row" id="sizes-dark"></div></div>
-  </div>
+  <section class="block" id="moves-block">
+    <span class="mono">03 · 小动作</span>
+    <h2>有性格的瞬间</h2>
+    <p class="lede">这些不是状态，是叠在状态上的一次性动作：打招呼、派发、庆祝、戳一下。派发时，一个真实的 Agent 头像从它头顶被抛出去。</p>
+    <div class="grid g3" id="move-grid"></div>
+  </section>
 
-  <h2>状态与动作（方向 A）</h2>
-  <table>
-    <thead><tr><th>状态</th><th>姿态</th><th>动作</th><th>圈</th></tr></thead>
-    <tbody id="state-table"></tbody>
-  </table>
-  <p class="note">动效规则：身体用欠阻尼弹簧（有轻微回弹），视线和眼睛用接近临界阻尼的弹簧，颜色和光晕慢慢渐变；进入动作（跳一下、压一下、伸懒腰）叠加在弹簧之上，状态切换不会跳帧。窗口不可见时暂停；“减少动态”只保留姿态之间的淡入淡出，不放粒子。</p>
+  <section class="block" id="colors-block">
+    <span class="mono">04 · 颜色</span>
+    <h2>每个 Bot 一种颜色</h2>
+    <p class="lede">多个 Bot 时各选一种颜色，形状和表情不变。原色就是 App 图标本身。</p>
+    <div class="grid g4 colors" id="color-grid"></div>
+  </section>
+
+  <section class="block" id="product-block">
+    <span class="mono">05 · 放进产品</span>
+    <h2>在侧栏、标题栏和 Bot 区里</h2>
+    <p class="lede">40px 以下只显示姿态，不播循环：休息时就是一个小 App 图标，等你时右上角有提醒点。Agent 仍是平涂头像，Varin 是唯一有体积的那个，主次一眼分清。</p>
+    <div class="product">
+      <div class="mock" id="mock-light"></div>
+      <div class="mock dark" id="mock-dark"></div>
+    </div>
+  </section>
+
+  <section class="block" id="rules-block">
+    <span class="mono">06 · 动效规则</span>
+    <h2>丝滑来自哪里</h2>
+    <div class="rules">
+      <div class="rule"><canvas class="curve" id="c-body" width="280" height="88"></canvas><b>身体：欠阻尼弹簧</b><p>刚度 260、阻尼 16，落地有一次轻微回弹。蹲、跳、落三段都有预备和缓冲，不做匀速位移。</p></div>
+      <div class="rule"><canvas class="curve" id="c-jelly" width="280" height="88"></canvas><b>轮廓：果冻模态</b><p>外轮廓叠加 2、3、4 阶振动，落地、被戳时激发，约两秒衰减；平时只随呼吸轻微起伏。</p></div>
+      <div class="rule"><canvas class="curve" id="c-face" width="280" height="88"></canvas><b>眼睛：形变而不是切换</b><p>同一对笔画在竖眼、笑眼、闭眼和标志之间插值，接近临界阻尼，没有两种眼睛叠在一起的残影。</p></div>
+    </div>
+    <p class="lede" style="margin-top:18px">窗口不可见时暂停；“减少动态”下只保留姿态之间的平滑过渡，不放纸片、不做果冻回弹。小尺寸只画静态姿态。所有动作都由同一个参数集驱动，正式实现可以直接换成 Rive 状态机或保留 SVG。</p>
+  </section>
 </main>
 
 <script>
-const FAMILY = {"pebble-blue:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"pebble-blue\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"></path><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"></path></svg>","pebble-blue:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"pebble-blue\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"></path><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","pebble-blue:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"pebble-blue\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"></path><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"></path></svg>","pebble-blue:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"pebble-blue\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit1-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit1-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit1-head\"><path d=\"M-8 -8 H72 V44 H59.5 L56.03 45.27 L52.56 46.47 L49.09 47.59 L45.63 48.64 L42.16 49.6 L38.69 50.5 L35.22 51.31 L32 52 L31.75 51.95 L28.28 51.21 L24.81 50.4 L21.34 49.52 L17.88 48.56 L14.41 47.53 L10.94 46.43 L7.47 45.25 L4 44 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit1-cape\"><path d=\"M4 43.5 Q0 49 -2 63 Q5 67 15.100000000000001 68 L32 63.5 L49.51 68 Q61.5 67 65.5 63 Q63.5 50 59.5 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M4 43.5 Q0 49 -2 63 Q5 67 15.100000000000001 68 L32 63.5 L49.51 68 Q61.5 67 65.5 63 Q63.5 50 59.5 43.5 Z\" fill=\"url(#fit1-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit1-cape)\"><path d=\"M-1 62.5 L15.100000000000001 67 L30 63.5 L9.55 59 Z M35 63.5 L49.51 67 L64.5 62.5 L55.06 59 Z\" fill=\"#a0c3d9\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5 47 Q3 55 0 63 M58.5 47 Q60.5 54 63.5 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit1-head)\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"/><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"/></g><path d=\"M4 44 L7.47 45.25 L10.94 46.43 L14.41 47.53 L17.88 48.56 L21.34 49.52 L24.81 50.4 L28.28 51.21 L31.75 51.95 L32 52 L20.345 58.7 Q12.325 56 7.885 52 Z\" fill=\"url(#fit1-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 52 L35.22 51.31 L38.69 50.5 L42.16 49.6 L45.63 48.64 L49.09 47.59 L52.56 46.47 L56.03 45.27 L59.5 44 L55.615 52 Q51.175 56 43.655 58.7 Z\" fill=\"url(#fit1-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 50.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","slope-lilac:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"slope-lilac\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C7B5EF\" d=\"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z\"></path><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"></path></svg>","slope-lilac:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"slope-lilac\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C7B5EF\" d=\"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z\"></path><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","slope-lilac:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"slope-lilac\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C7B5EF\" d=\"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z\"></path><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"></path></svg>","slope-lilac:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"slope-lilac\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit2-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit2-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit2-head\"><path d=\"M-8 -8 H72 V44 H60.5 L57.22 45.17 L53.94 46.27 L50.66 47.31 L47.38 48.28 L44.09 49.19 L40.81 50.04 L37.53 50.82 L34.25 51.54 L32 52 L30.97 51.75 L27.69 50.92 L24.41 49.99 L21.13 48.97 L17.84 47.86 L14.56 46.66 L11.28 45.38 L8 44 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit2-cape\"><path d=\"M8 43.5 Q4 49 2 63 Q9 67 18.5 68 L32 63.5 L51.05 68 Q62.5 67 66.5 63 Q64.5 50 60.5 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M8 43.5 Q4 49 2 63 Q9 67 18.5 68 L32 63.5 L51.05 68 Q62.5 67 66.5 63 Q64.5 50 60.5 43.5 Z\" fill=\"url(#fit2-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit2-cape)\"><path d=\"M3 62.5 L18.5 67 L30 63.5 L13.25 59 Z M35 63.5 L51.05 67 L65.5 62.5 L56.3 59 Z\" fill=\"#d3c4ef\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9 47 Q7 55 4 63 M59.5 47 Q61.5 54 64.5 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit2-head)\"><path fill=\"#C7B5EF\" d=\"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z\"/><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"/></g><path d=\"M8 44 L11.28 45.38 L14.56 46.66 L17.84 47.86 L21.13 48.97 L24.41 49.99 L27.69 50.92 L30.97 51.75 L32 52 L20.975 58.7 Q15.875 56 11.675 52 Z\" fill=\"url(#fit2-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 52 L34.25 51.54 L37.53 50.82 L40.81 50.04 L44.09 49.19 L47.38 48.28 L50.66 47.31 L53.94 46.27 L57.22 45.17 L60.5 44 L56.825 52 Q52.625 56 43.025 58.7 Z\" fill=\"url(#fit2-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 50.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","notch-ochre:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"notch-ochre\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path></svg>","notch-ochre:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"notch-ochre\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","notch-ochre:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"notch-ochre\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path></svg>","notch-ochre:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"notch-ochre\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit3-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit3-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit3-head\"><path d=\"M-8 -8 H72 V44 H61.75 L58.08 45.25 L54.41 46.42 L50.73 47.52 L47.06 48.55 L43.39 49.5 L39.72 50.39 L36.05 51.19 L32.38 51.93 L32 52 L28.7 51.33 L25.03 50.52 L21.36 49.62 L17.69 48.65 L14.02 47.6 L10.34 46.48 L6.67 45.28 L3 44 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit3-cape\"><path d=\"M3 43.5 Q-1 49 -3 63 Q4 67 14.75 68 L32 63.5 L51.175 68 Q63.75 67 67.75 63 Q65.75 50 61.75 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M3 43.5 Q-1 49 -3 63 Q4 67 14.75 68 L32 63.5 L51.175 68 Q63.75 67 67.75 63 Q65.75 50 61.75 43.5 Z\" fill=\"url(#fit3-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit3-cape)\"><path d=\"M-2 62.5 L14.75 67 L30 63.5 L8.875 59 Z M35 63.5 L51.175 67 L66.75 62.5 L57.05 59 Z\" fill=\"#eece8b\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4 47 Q2 55 -1 63 M60.75 47 Q62.75 54 65.75 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit3-head)\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"/><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"/></g><path d=\"M3 44 L6.67 45.28 L10.34 46.48 L14.02 47.6 L17.69 48.65 L21.36 49.62 L25.03 50.52 L28.7 51.33 L32 52 L19.6625 58.7 Q11.8125 56 7.112500000000001 52 Z\" fill=\"url(#fit3-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 52 L32.38 51.93 L36.05 51.19 L39.72 50.39 L43.39 49.5 L47.06 48.55 L50.73 47.52 L54.41 46.42 L58.08 45.25 L61.75 44 L57.6375 52 Q52.9375 56 44.3375 58.7 Z\" fill=\"url(#fit3-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 50.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","taper-sage:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"taper-sage\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#A8BD96\" d=\"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z\"></path><path fill=\"#202326\" d=\"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z\"></path><path fill=\"none\" stroke=\"#202326\" stroke-width=\"4\" stroke-linecap=\"round\" d=\"M40 33Q44 27 48 33\"></path></svg>","taper-sage:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"taper-sage\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#A8BD96\" d=\"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z\"></path><path fill=\"#202326\" d=\"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z\"></path><path fill=\"none\" stroke=\"#202326\" stroke-width=\"4\" stroke-linecap=\"round\" d=\"M40 33Q44 27 48 33\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","taper-sage:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"taper-sage\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#A8BD96\" d=\"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z\"></path><path fill=\"#202326\" d=\"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z\"></path><path fill=\"none\" stroke=\"#202326\" stroke-width=\"4\" stroke-linecap=\"round\" d=\"M40 33Q44 27 48 33\"></path></svg>","taper-sage:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"taper-sage\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit4-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit4-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit4-head\"><path d=\"M-8 -8 H72 V44 H59.75 L56.36 45.23 L52.97 46.4 L49.58 47.49 L46.19 48.51 L42.8 49.46 L39.41 50.33 L36.02 51.14 L32.63 51.87 L32 52 L29.23 51.39 L25.84 50.57 L22.45 49.67 L19.06 48.69 L15.67 47.64 L12.28 46.5 L8.89 45.29 L5.5 44 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit4-cape\"><path d=\"M5.5 43.5 Q1.5 49 -0.5 63 Q6.5 67 16.35 68 L32 63.5 L49.985 68 Q61.75 67 65.75 63 Q63.75 50 59.75 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M5.5 43.5 Q1.5 49 -0.5 63 Q6.5 67 16.35 68 L32 63.5 L49.985 68 Q61.75 67 65.75 63 Q63.75 50 59.75 43.5 Z\" fill=\"url(#fit4-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit4-cape)\"><path d=\"M0.5 62.5 L16.35 67 L30 63.5 L10.925 59 Z M35 63.5 L49.985 67 L64.75 62.5 L55.41 59 Z\" fill=\"#bbcaaa\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6.5 47 Q4.5 55 1.5 63 M58.75 47 Q60.75 54 63.75 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit4-head)\"><path fill=\"#A8BD96\" d=\"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z\"/><path fill=\"#202326\" d=\"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z\"/><path fill=\"none\" stroke=\"#202326\" stroke-width=\"4\" stroke-linecap=\"round\" d=\"M40 33Q44 27 48 33\"/></g><path d=\"M5.5 44 L8.89 45.29 L12.28 46.5 L15.67 47.64 L19.06 48.69 L22.45 49.67 L25.84 50.57 L29.23 51.39 L32 52 L20.6075 58.7 Q13.6375 56 9.2975 52 Z\" fill=\"url(#fit4-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 52 L32.63 51.87 L36.02 51.14 L39.41 50.33 L42.8 49.46 L46.19 48.51 L49.58 47.49 L52.97 46.4 L56.36 45.23 L59.75 44 L55.9525 52 Q51.6125 56 43.3925 58.7 Z\" fill=\"url(#fit4-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 50.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","overlap-coral:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"overlap-coral\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C4746B\" d=\"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z\"></path><path fill=\"#EE9583\" d=\"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path></svg>","overlap-coral:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"overlap-coral\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C4746B\" d=\"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z\"></path><path fill=\"#EE9583\" d=\"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","overlap-coral:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"overlap-coral\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C4746B\" d=\"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z\"></path><path fill=\"#EE9583\" d=\"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path></svg>","overlap-coral:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"overlap-coral\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit5-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit5-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit5-head\"><path d=\"M-8 -8 H72 V44 H61.5 Q49 49 34 51 Q19 48.5 7 43 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit5-cape\"><path d=\"M7 42.5 Q1 49 -1 64.5 Q8 68 17 70 L34 65 L53 70 Q61 68 68 64.5 Q66 51 61.5 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M7 42.5 Q1 49 -1 64.5 Q8 68 17 70 L34 65 L53 70 Q61 68 68 64.5 Q66 51 61.5 43.5 Z\" fill=\"url(#fit5-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit5-cape)\"><path d=\"M0 64 L17 69 L31 65 L12 61 Z M37 65 L53 69 L67 64 L57 61 Z\" fill=\"#f2ab9b\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M8 46 Q6 55 3 63 M60.5 47 Q62.5 54 65.5 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit5-head)\"><path fill=\"#C4746B\" d=\"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z\"/><path fill=\"#EE9583\" d=\"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z\"/><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"/></g><path d=\"M7 43 Q19 48.5 34 51 L22 58 Q14 56 11 53 Z\" fill=\"url(#fit5-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M34 51 Q49 49 61.5 44 L57 55 L46 58.5 Z\" fill=\"url(#fit5-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M34 49.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","dome-ivory:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"dome-ivory\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"></path><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"></path></svg>","dome-ivory:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"dome-ivory\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"></path><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","dome-ivory:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"dome-ivory\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"></path><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"></path></svg>","dome-ivory:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"dome-ivory\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit6-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit6-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit6-head\"><path d=\"M-8 -8 H72 V43 H59.5 L56.09 43.94 L52.69 44.82 L49.28 45.65 L45.88 46.42 L42.47 47.14 L39.06 47.8 L35.66 48.41 L32.25 48.96 L32 49 L28.84 48.48 L25.44 47.87 L22.03 47.2 L18.63 46.48 L15.22 45.69 L11.81 44.85 L8.41 43.96 L5 43 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit6-cape\"><path d=\"M5 42.5 Q1 48 -1 62 Q6 66 15.9 67 L32 62.5 L49.69 67 Q61.5 66 65.5 62 Q63.5 49 59.5 42.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M5 42.5 Q1 48 -1 62 Q6 66 15.9 67 L32 62.5 L49.69 67 Q61.5 66 65.5 62 Q63.5 49 59.5 42.5 Z\" fill=\"url(#fit6-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit6-cape)\"><path d=\"M0 61.5 L15.9 66 L30 62.5 L10.45 58 Z M35 62.5 L49.69 66 L64.5 61.5 L55.14 58 Z\" fill=\"#eee4d7\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6 46 Q4 55 1 63 M58.5 46 Q60.5 54 63.5 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit6-head)\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"/><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"/></g><path d=\"M5 43 L8.41 43.96 L11.81 44.85 L15.22 45.69 L18.63 46.48 L22.03 47.2 L25.44 47.87 L28.84 48.48 L32 49 L20.555 55.7 Q13.174999999999999 55 8.815000000000001 51 Z\" fill=\"url(#fit6-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 49 L32.25 48.96 L35.66 48.41 L39.06 47.8 L42.47 47.14 L45.88 46.42 L49.28 45.65 L52.69 44.82 L56.09 43.94 L59.5 43 L55.685 51 Q51.325 55 43.445 55.7 Z\" fill=\"url(#fit6-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 47.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>"};
+const TEAM = [{"id":"slope-lilac","body":"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z","color":"#C7B5EF","eyes":"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z"},{"id":"notch-ochre","body":"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z","color":"#E9C16E","eyes":"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z"},{"id":"taper-sage","body":"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z","color":"#A8BD96","eyes":"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z","eyeStroke":"M40 33Q44 27 48 33"},{"id":"overlap-coral","body":"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z","color":"#EE9583","eyes":"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z","accent":{"path":"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z","color":"#C4746B"}},{"id":"capsule-sky","body":"M21 17H43Q60 17 60 34Q60 51 43 51H21Q4 51 4 34Q4 17 21 17Z","color":"#A2C7DC","eyes":"M25 33A3 3 0 1 1 19 33A3 3 0 1 1 25 33ZM45 33A3 3 0 1 1 39 33A3 3 0 1 1 45 33Z"},{"id":"lozenge-mint","body":"M27 7Q32 3 38 8L57 26Q63 32 58 39L40 57Q34 63 27 58L7 39Q1 33 7 26Z","color":"#A5CAB7","eyes":"M22 31H25Q27 31 27 33Q27 35 25 35H22Q20 35 20 33Q20 31 22 31ZM39 31H42Q44 31 44 33Q44 35 42 35H39Q37 35 37 33Q37 31 39 31Z"},{"id":"oval-rose","body":"M3 32Q3 15 29 14Q55 13 61 31Q66 48 41 53Q15 59 6 47Q3 43 3 32Z","color":"#D6A4B4","eyes":"M18 29H21Q24 29 24 32V34Q24 37 21 37H18Q15 37 15 34V32Q15 29 18 29ZM43 29H46Q49 29 49 32V34Q49 37 46 37H43Q40 37 40 34V32Q40 29 43 29Z"},{"id":"pebble-blue","body":"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z","color":"#85B3D2","eyes":"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z"},{"id":"wedge-apricot","body":"M10 31L42 10Q49 5 52 14L61 46Q63 55 53 55H14Q5 55 5 46Q5 37 10 31Z","color":"#E8B48B","eyes":"M19 33H24Q26 33 26 35Q26 37 24 37H19Q17 37 17 35Q17 33 19 33ZM41 27H44Q47 27 47 30V32Q47 35 44 35H41Q38 35 38 32V30Q38 27 41 27Z"},{"id":"squircle-periwinkle","body":"M5 30Q5 7 29 7H35Q59 7 59 30V37Q59 58 35 58H29Q5 58 5 37Z","color":"#AAB8DE","eyes":"M20 26H24Q26 26 26 28V31Q26 33 24 33H20Q18 33 18 31V28Q18 26 20 26ZM40 26H44Q46 26 46 28V31Q46 33 44 33H40Q38 33 38 31V28Q38 26 40 26Z"}];
 const NS = 'http://www.w3.org/2000/svg';
 const el = (tag, attrs = {}, parent) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; };
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
-const bump = x => x <= 0 || x >= 1 ? 0 : Math.sin(Math.PI * x);
-const wave = (t, period, phase = 0) => Math.sin(2 * Math.PI * (t / period + phase));
-const mixHex = (a, b, t) => { const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); const x = p(a), y = p(b); return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
-let reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const B01 = (x, a, b) => x <= a || x >= b ? 0 : Math.sin(Math.PI * (x - a) / (b - a));
+const C01 = (x, a, b) => clamp((x - a) / (b - a));
+const eIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const eOC = x => 1 - Math.pow(1 - x, 3);
+const eOB = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const mix = (a, b, t) => { const x = hex(a), y = hex(b); return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * clamp(t)).toString(16).padStart(2, '0')).join(''); };
+let reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const PALETTES = {
-  mist:     { name:'雾蓝', light:'#c9dcfc', base:'#7aa7ef', deep:'#4a6db0', rim:'#e0ebff' },
-  sky:      { name:'天青', light:'#c8eefc', base:'#5cbfe9', deep:'#2d82b0', rim:'#dcf5ff' },
-  aqua:     { name:'湖绿', light:'#c4f1e8', base:'#4ec6b1', deep:'#218d7b', rim:'#d9fff7' },
-  sage:     { name:'鼠尾草', light:'#e2ecd3', base:'#9cba82', deep:'#5f7e4b', rim:'#f0f7e6' },
-  butter:   { name:'奶油黄', light:'#fff1bd', base:'#f0c64a', deep:'#b9871a', rim:'#fff8da' },
-  apricot:  { name:'杏橙', light:'#ffdcc2', base:'#f3a06a', deep:'#c06634', rim:'#ffecde' },
-  coral:    { name:'珊瑚', light:'#ffcdc4', base:'#ee7f6e', deep:'#b4463a', rim:'#ffe4df' },
-  rose:     { name:'玫瑰', light:'#ffd3e4', base:'#e47fa8', deep:'#a84570', rim:'#ffe9f2' },
-  lilac:    { name:'丁香', light:'#e6dcff', base:'#a88bec', deep:'#6c50b6', rim:'#f2edff' },
-  periwinkle:{ name:'长春花', light:'#dde2ff', base:'#8e98ec', deep:'#5560b4', rim:'#eef0ff' },
-  graphite: { name:'石墨', light:'#8b959b', base:'#4a5459', deep:'#20272a', rim:'#aab4b9', eye:'#f3efe6' },
-  cream:    { name:'米白', light:'#ffffff', base:'#ece6d8', deep:'#b4ab95', rim:'#ffffff' },
+const PAL = {
+  mist:     { name:'雾蓝',  light:'#dce8ff', base:'#94b7f3', shade:'#6d92dc', deep:'#34528f', eye:'#1b2230', tone2:'#4f6fae', blush:'#ff9db4' },
+  cream:    { name:'原色',  light:'#fffdf8', base:'#eeebe2', shade:'#d7d1c3', deep:'#8f8673', eye:'#20272a', tone2:'#77837f', blush:'#f2a596' },
+  lilac:    { name:'丁香',  light:'#efe8ff', base:'#bcaaf3', shade:'#9581de', deep:'#4f3c97', eye:'#1e1a2c', tone2:'#6a56b2', blush:'#ff9fc4' },
+  sage:     { name:'鼠尾草', light:'#eef5e6', base:'#b2c99e', shade:'#8eab78', deep:'#45622f', eye:'#1c2619', tone2:'#5b7a45', blush:'#f3a08c' },
+  butter:   { name:'奶油',  light:'#fff6d4', base:'#f3d37a', shade:'#e2b44f', deep:'#8f6410', eye:'#2a2111', tone2:'#a77b1d', blush:'#f6977a' },
+  coral:    { name:'珊瑚',  light:'#ffe5dd', base:'#f5a490', shade:'#e47e69', deep:'#93372a', eye:'#2b1713', tone2:'#ab4f3a', blush:'#ff8585' },
+  mint:     { name:'薄荷',  light:'#e3f8f1', base:'#a1d9c7', shade:'#74bfa8', deep:'#226a57', eye:'#13241e', tone2:'#2f7d68', blush:'#f59f99' },
+  graphite: { name:'石墨',  light:'#646e74', base:'#383f45', shade:'#262c30', deep:'#0b0e10', eye:'#f3efe6', tone2:'#a8b2ac', blush:'#d8837f' },
 };
-const IRIDESCENT = ['#fff4d6', '#ffd2e5', '#d3dcff', '#c6f2e8', '#fff4d6'];
-const IRIDESCENT_SMALL = ['#f4c66a', '#ec8fb8', '#8ea5f0', '#66c9b4', '#f4c66a'];
-const WARM = '#ffbf5e';
+const PAL_ORDER = ['mist', 'cream', 'lilac', 'sage', 'butter', 'coral', 'mint', 'graphite'];
 
-// ---- Shared parameters and the nine states of the product contract ----
-const DEFAULTS = { y:0, sx:1, sy:1, rot:0, lookX:0, lookY:0, open:1, eyeScale:1, smile:0, closed:0, mouth:0, blush:.12,
-  glow:0, warm:0, ringX:0, ringY:0, ringTilt:-24, ringScale:1, orbit:0, progress:0, ringDim:0, desat:0, dim:0, zz:0, wink:0 };
-const SPRINGS = { body:{k:230,c:15}, face:{k:200,c:27}, ring:{k:120,c:13}, fx:{k:110,c:21} };
-const GROUP = { y:'body', sx:'body', sy:'body', rot:'body', lookX:'face', lookY:'face', open:'face', eyeScale:'face', smile:'face', closed:'face',
-  mouth:'face', blush:'fx', glow:'fx', warm:'fx', ringX:'ring', ringY:'ring', ringTilt:'ring', ringScale:'ring', orbit:'fx', progress:'fx', ringDim:'fx', desat:'fx', dim:'fx', zz:'fx', wink:'face' };
+// ---- Geometry: one figure space. Body centre (CX, CY), half extents A × B, squircle exponent n. ----
+const CX = 100, CY = 108, A = 62, BH = 59, K = .78;
+const LOGO_D = ['M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z', 'M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z'];
+// Centre lines of the two logo strokes, from the upright's free end to the bar's end.
+const LOGO_L = [[-28, 19], [-28, -13], [-4.5, -36.5], [50.5, -36.5]].map(([x, y]) => [x * K, y * K]);
+const LOGO_R = [[28, -19], [28, 13], [4.5, 36.5], [-50.5, 36.5]].map(([x, y]) => [x * K, y * K]);
+const BASE = { y:0, sx:1, sy:1, rot:0, spin:0, lean:0, n:3.25, lookX:0, lookY:0, eyeH:6.4, eyeScale:1, sep:1, winkL:0,
+  wL:0, wH:0, wC:0, wF:0, faceRot:0, glow:0, badge:0, blush:0, zz:0, desat:0, dim:0, team:0 };
+const SPRING = { body:[260, 16], face:[320, 27], morph:[170, 24], fx:[90, 18] };
+const GROUP = { y:'body', sx:'body', sy:'body', rot:'body', spin:'body', lean:'body', n:'body', lookX:'face', lookY:'face', eyeH:'face', eyeScale:'face', sep:'face', winkL:'face',
+  wL:'morph', wH:'morph', wC:'morph', wF:'morph', faceRot:null, glow:'fx', badge:'fx', blush:'fx', zz:'fx', desat:'fx', dim:'fx', team:'fx' };
 
+const spinner = t => { const P = 1.25, k = Math.floor(t / P), f = t / P - k; return (k + (f < .62 ? eIO(f / .62) : 1)) * 180; };
 const STATES = {
-  idle:      { label:'空闲', line:'空闲', T:{}, blink:[2.4, 5],
-    pose:'正视，偶尔眨眼', motion:'慢呼吸；偶尔看看四周；指针靠近时目光跟随', ring:'在左上轻轻浮动',
-    loop:t => ({ y:-.9*wave(t,3.6), sy:.014*wave(t,3.6), sx:-.009*wave(t,3.6), ringY:1.8*wave(t,2.8,.3), ringTilt:3*wave(t,4.6) }) },
-  listening: { label:'倾听', line:'在听', T:{ eyeScale:1.13, rot:-3, y:-1.5, ringY:-2, ringScale:1.05 }, blink:[3, 6],
-    pose:'眼睛略睁大，身体微微前倾', motion:'呼吸更轻更快；目光跟着输入的方向', ring:'稍微抬起、变亮',
-    loop:t => ({ y:-.5*wave(t,2.2), sy:.008*wave(t,2.2), ringY:1*wave(t,2) }) },
-  thinking:  { label:'思考', line:'正在想…', T:{ lookY:-.45, orbit:1, ringScale:.62 }, blink:[4, 8],
-    pose:'看向斜上方', motion:'眼睛追着绕行的圈慢慢转', ring:'缩小成一颗小环，绕身体公转，绕到背后时被身体挡住',
-    loop:t => ({ y:-.6*wave(t,3), rot:1.2*wave(t,6) }) },
-  working:   { label:'工作', line:'写作正在编辑 · 12 分钟', T:{ lookY:.6, ringY:-3, ringTilt:-16, ringScale:1.14, progress:1 }, blink:[3.5, 7],
-    pose:'眼睛向下，专注', motion:'轻快地上下点动，像在敲键', ring:'原位稍稍抬起，变成转动的进度环',
-    loop:t => { const tap = Math.abs(Math.sin(Math.PI * t * 1.6)); return { y:-1.7*tap, sy:.02*tap - .01, sx:-.012*tap, ringY:.6*wave(t,1.25) }; } },
-  waiting:   { label:'等你', line:'写作在等你确认', T:{ eyeScale:1.08, lookY:.08, glow:1, warm:1, blush:.3 }, blink:[2.6, 5],
-    pose:'看向你', motion:'暖色光晕呼吸；进入时轻跳一下', ring:'转成暖橙色并随光晕脉动',
-    enter:'hop', loop:t => ({ glow:.25*wave(t,2.4), y:-.7*wave(t,2.4), ringScale:.05*wave(t,2.4) }) },
-  result:    { label:'有结果', line:'依赖调查返回了结果', T:{ smile:1, mouth:1, blush:.75, ringScale:1.08 }, blink:null,
-    pose:'眯眼笑', motion:'轻压一下再回弹，持续约 3 秒', ring:'翻转一圈，迸出彩色光点',
-    enter:'press', loop:t => ({ y:-.6*wave(t,1.8), ringTilt:6*wave(t,1.8) }) },
-  sleeping:  { label:'休息', line:'休息中 · 叫醒', T:{ open:0, closed:1, y:3, sy:.95, sx:1.04, dim:.28, zz:1, ringX:22, ringY:14, ringTilt:-8, ringScale:.95, ringDim:.5, blush:.25 }, blink:null,
-    pose:'闭眼，身体沉下去一点', motion:'很慢的深呼吸，zz 飘起', ring:'落到头顶歇着，跟着呼吸起伏',
-    enter:'sigh', loop:t => ({ sy:.03*wave(t,4.8), sx:-.018*wave(t,4.8), y:-1.2*wave(t,4.8), ringY:-1.2*wave(t,4.8) }) },
-  waking:    { label:'唤醒中', line:'正在醒来…', T:{}, blink:null,
-    pose:'睁眼', motion:'眨两下眼，伸个懒腰', ring:'从头顶弹回原位',
-    enter:'stretch', loop:t => ({ y:-.8*wave(t,3.6) }) },
-  offline:   { label:'离线', line:'电脑没连上 · 只能查看', T:{ desat:1, dim:.12, open:.55, eyeScale:.92, y:2, ringDim:1, ringTilt:-12 }, blink:null,
-    pose:'去色，眼睛半闭变暗', motion:'不播放循环', ring:'变灰，不动', loop:() => ({}) },
+  idle:      { label:'空闲',  line:'空闲', T:{}, blink:[2.2, 5.5], loop:t => { const b = Math.sin(2 * Math.PI * t / 3.8); return { sy:.012 * b, sx:-.009 * b, y:-.6 * b }; } },
+  listening: { label:'倾听',  line:'在听', T:{ eyeScale:1.15, lean:5, lookY:-.1, n:3.1 }, blink:[3, 6], loop:t => { const k = Math.abs(Math.sin(Math.PI * t * 1.9)); return { y:-1.4 * k, sy:.014 * k, rot:.9 * Math.sin(t * 2) }; } },
+  thinking:  { label:'思考',  line:'正在想…', T:{ wL:1 }, blink:null, spin:spinner, loop:t => { const b = Math.sin(2 * Math.PI * t / 2.5); return { y:-.9 * b, sy:.01 * b }; } },
+  working:   { label:'工作',  line:'2 项工作在进行 · 写作正在编辑', T:{ lookY:.85, eyeH:5, team:1 }, blink:[3, 6.5], loop:t => { const k = Math.abs(Math.sin(Math.PI * t * 1.75)); return { y:-2 * k, sy:.018 * k - .009, sx:-.011 * k, lookX:.32 * Math.sin(t * 1.3) }; } },
+  waiting:   { label:'等你',  line:'写作在等你确认', T:{ eyeScale:1.1, glow:1, badge:1, blush:.3, lookY:-.08 }, blink:[2.4, 5], enter:'hop', every:[3.6, 'knock'], loop:t => ({ y:-.7 * Math.sin(2 * Math.PI * t / 2.2) }) },
+  result:    { label:'有结果', line:'依赖调查返回了结果', T:{ wH:1, blush:.85, n:3.05 }, blink:null, enter:'press', loop:t => ({ rot:1.8 * Math.sin(t * 2.6), y:-.9 * Math.abs(Math.sin(t * 2.6)) }) },
+  sleeping:  { label:'休息',  line:'休息中 · 叫醒', T:{ wL:1, y:3, sy:.955, sx:1.035, zz:1, dim:.16 }, blink:null, enter:'sigh', loop:t => { const b = Math.sin(2 * Math.PI * t / 5.2); return { sy:.02 * b, sx:-.014 * b, y:-1.1 * b }; } },
+  waking:    { label:'唤醒中', line:'正在醒来…', T:{}, blink:null, enter:'wake', loop:t => ({ y:-.5 * Math.sin(2 * Math.PI * t / 3.8) }) },
+  offline:   { label:'离线',  line:'电脑没连上 · 只能查看', T:{ wF:1, desat:1, dim:.1, y:3, sy:.965, rot:-3.5, eyeH:4 }, blink:null, enter:'slump', loop:() => ({}) },
 };
 const STATE_ORDER = ['idle', 'listening', 'thinking', 'working', 'waiting', 'result', 'sleeping', 'waking', 'offline'];
+const STATE_TEXT = {
+  idle:'正视，偶尔眨眼、看看四周；指针靠近时目光跟随。',
+  listening:'眼睛睁大，身体前倾，跟着你打字的节奏轻轻点头。',
+  thinking:'两笔竖眼伸出横笔拼成标志，标志一顿一顿地转，就是加载。',
+  working:'低头专注，像在敲键；在跑的子任务化成彩色 Agent 绕着它转。',
+  waiting:'看着你，暖色光晕呼吸，右上角亮起提醒点；隔一会儿轻敲两下。',
+  result:'眯眼笑、压一下再弹起，撒出团队颜色的纸片。',
+  sleeping:'横笔放回去，变回 App 图标；身体沉下去，慢慢呼吸。',
+  waking:'标志松开，眨两下眼，伸个懒腰。',
+  offline:'去色，眼睛压成两道短线，身体歪着，不播放循环。',
+};
 
-// Pulses: smooth additive moves on top of the springs; they cannot jump a frame.
 const PULSES = {
-  hop:     { d:.62, f:x => ({ y:-8*bump(x/.55), sy:.08*bump(x/.55) - .1*bump((x-.5)/.25), sx:-.05*bump(x/.55) + .08*bump((x-.5)/.25) }) },
-  press:   { d:.7,  f:x => ({ sy:-.13*bump(x/.35) + .06*bump((x-.32)/.3), sx:.1*bump(x/.35) - .04*bump((x-.32)/.3), ringFlip:clamp(x/.75) }), burst:.12 },
-  sigh:    { d:1.2, f:x => ({ sy:-.05*bump(x), y:1.2*bump(x) }) },
-  stretch: { d:1.3, f:x => ({ open:-bump((x-.05)/.12) - bump((x-.3)/.12), sy:.13*bump((x-.35)/.55), sx:-.08*bump((x-.35)/.55), ringY:-7*bump((x-.4)/.45), y:-2*bump((x-.4)/.5) }) },
-  wink:    { d:.9,  f:x => ({ wink:bump(x/.7), rot:5*bump(x/.8), ringFlip:clamp(x/.8) * .5, smile:.25*bump(x) }) },
-  hello:   { d:1.6, f:x => { const env = bump(x); return { ringTilt:24*Math.sin(2*Math.PI*2.4*x)*env, rot:4*Math.sin(2*Math.PI*2.4*x - .6)*env, y:-3*bump(x/.3), mouth:env, smile:.35*env }; } },
-  dispatch:{ d:1.4, f:x => ({ rot:7*bump(x/.8), lookX:.8*bump(x/.9), ringY:-4*bump(x/.35), smile:.4*bump((x-.5)/.5), y:-1.5*bump(x/.4) }), spark:.18 },
-  celebrate:{ d:1.2, f:x => ({ y:-11*bump(x/.5), sy:.1*bump(x/.5) - .12*bump((x-.48)/.25), sx:-.06*bump(x/.5) + .09*bump((x-.48)/.25), smile:bump(x), mouth:bump(x), blush:.6*bump(x), ringFlip:clamp(x/.6) }), burst:.1 },
-  comet:   { d:1.5, f:x => ({ orbit:bump(x), orbitPhase:x, ringScale:-.3*bump(x) }), trail:true },
+  hop:      { d:.74, f:x => { const a = B01(x, 0, .17), air = B01(x, .15, .66), s = B01(x, .15, .42), l = B01(x, .64, .88); return { sy:-.09 * a + .08 * s - .08 * l, sx:.07 * a - .05 * s + .07 * l, y:-15 * air }; }, at:[[.65, f => f.kick(1)]] },
+  knock:    { d:.62, f:x => ({ y:-3.2 * B01(x, 0, .3) - 2.4 * B01(x, .32, .6), sy:.03 * B01(x, 0, .3) }), at:[[.3, f => f.kick(.35)], [.6, f => f.kick(.3)]] },
+  press:    { d:.7,  f:x => ({ sy:-.15 * B01(x, 0, .34) + .06 * B01(x, .3, .64), sx:.11 * B01(x, 0, .34) - .04 * B01(x, .3, .64) }), at:[[.22, f => f.confetti(22)], [.32, f => f.kick(.85)]] },
+  celebrate:{ d:1.4, f:x => { const a = B01(x, 0, .18), air = B01(x, .17, .78), s = B01(x, .17, .4), l = B01(x, .76, .95); return { sy:-.11 * a + .1 * s - .1 * l, sx:.08 * a - .06 * s + .09 * l, y:-30 * air, spin:360 * eIO(C01(x, .2, .72)), wH:B01(x, .15, 1), blush:.6 * B01(x, .15, 1) }; }, at:[[.45, f => f.confetti(32)], [.77, f => f.kick(1.3)]] },
+  hello:    { d:1.6, f:x => { const env = Math.pow(B01(x, 0, 1), .6), ph = 2 * Math.PI * 2.3 * x; return { rot:9 * Math.sin(ph) * env, lean:-5 * Math.sin(ph - .9) * env, wH:.95 * env, y:-3 * B01(x, 0, .28), blush:.45 * env }; } },
+  wink:     { d:1.0, f:x => ({ winkL:B01(x, 0, .85), rot:4 * B01(x, 0, .85), lookX:.25 * B01(x, 0, .85), blush:.35 * B01(x, 0, .85) }), at:[[.22, f => f.sparkle()]] },
+  dispatch: { d:1.5, f:x => { const a = B01(x, 0, .24), s = B01(x, .22, .44), fol = eOC(C01(x, .28, .62)) * (1 - C01(x, .86, 1)); return { sy:-.09 * a + .09 * s, sx:.06 * a - .05 * s, y:-5 * s, lookY:-.5 * a + .35 * fol, lookX:1.1 * fol, wH:.6 * B01(x, .62, 1) }; }, at:[[.27, f => f.launch()]] },
+  logo:     { d:2.3, f:x => { const on = eIO(C01(x, 0, .22)) * (1 - eIO(C01(x, .82, 1))); return { wL:on, faceRot:x < .78 ? 180 * eOB(C01(x, .3, .7)) : 0, sy:-.06 * B01(x, .2, .36) - .05 * B01(x, .68, .82), sx:.05 * B01(x, .2, .36) + .04 * B01(x, .68, .82) }; }, at:[[.27, f => f.kick(.45)], [.72, f => f.kick(.4)]] },
+  poke:     { d:.85, f:x => ({ eyeScale:.34 * B01(x, 0, .38), wH:.85 * B01(x, .36, 1), blush:.45 * B01(x, .36, 1) }) },
+  wake:     { d:1.75, f:x => ({ sy:.12 * B01(x, .25, .7), sx:-.07 * B01(x, .25, .7), y:-3 * B01(x, .25, .7), rot:3.5 * Math.sin(2 * Math.PI * 3 * x) * B01(x, .72, 1) }), at:[[.5, f => f.blink()], [.66, f => f.blink()]] },
+  sigh:     { d:1.3, f:x => ({ sy:-.06 * B01(x, 0, 1), sx:.04 * B01(x, 0, 1), y:2 * B01(x, 0, 1) }) },
+  slump:    { d:1.0, f:x => ({ rot:-4 * B01(x, 0, 1), y:2 * B01(x, 0, 1) }), at:[[.5, f => f.kick(.3)]] },
+  peek:     { d:2.2, f:x => { const e = B01(x, 0, 1); return { lookX:-.9 * e, lean:-4 * e, rot:-2 * e }; } },
+  bounce:   { d:.6, f:x => ({ y:-6 * B01(x, .1, .55), sy:-.05 * B01(x, 0, .12) + .04 * B01(x, .1, .35) - .05 * B01(x, .52, .7) }), at:[[.53, f => f.kick(.55)]] },
 };
-const DELIGHTS = [['wink','眨眼'], ['hello','打招呼'], ['dispatch','派发'], ['celebrate','庆祝'], ['comet','彗星']];
+const MOVES = [['hello', '打招呼'], ['wink', '眨眼'], ['dispatch', '派发'], ['celebrate', '庆祝'], ['logo', '标志'], ['poke', '戳一下']];
 
-// ---- Bodies: one face and motion system, three ways of being Varin ----
-const GUMDROP = 'M60 34C84 34 101 52 101 75C101 93 89 101 60 101C31 101 19 93 19 75C19 52 36 34 60 34Z';
-const MOCHI = 'M60 38C86 38 102 56 102 76C102 94 86 102 60 102C34 102 18 94 18 76C18 56 34 38 60 38Z';
-const SEAM = 'C66 48 77 58 60 68C45 77 54 88 46 106';
-const CONCEPTS = {
-  loop:  { name:'A · 圈圈', body:GUMDROP },
-  fold:  { name:'B · 折纸', body:GUMDROP },
-  mochi: { name:'C · 团子', body:MOCHI },
+// Fine grain, generated once and shared by every figure (no per-frame filters).
+const GRAIN = (() => { const c = document.createElement('canvas'); c.width = c.height = 96; const g = c.getContext('2d'), img = g.createImageData(96, 96);
+  for (let i = 0; i < img.data.length; i += 4) { const v = Math.random(); const dark = v < .5; img.data[i] = img.data[i + 1] = img.data[i + 2] = dark ? 20 : 255; img.data[i + 3] = dark ? 26 * Math.random() : 22 * Math.random(); }
+  g.putImageData(img, 0, 0); return c.toDataURL(); })();
+
+const smoothPath = pts => {
+  const n = pts.length; let d = `M${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+    d += `C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(2)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(2)} ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(2)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(2)} ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`;
+  }
+  return d + 'Z';
 };
+const N = 56;
+let uid = 0;
 
-let serial = 0;
 class Figure {
-  constructor(host, { concept = 'loop', size = 220, palette = 'mist', still = false, state = 'idle', dark = false, framing = size < 120 ? 'tight' : 'stage' } = {}) {
-    this.host = host; this.concept = concept; this.size = size; this.still = still || size < 40; this.dark = dark; this.small = size < 40;
-    this.id = 'f' + (++serial); this.p = { ...DEFAULTS }; this.v = {}; this.pulses = []; this.particles = []; this.trail = [];
-    this.loopBlend = 1; this.prevLoop = null; this.prevBlend = 0; this.cursor = null; this.nextBlink = 1 + Math.random() * 2; this.blinkAt = -1; this.glance = { x:0, y:0, until:0 };
-    const box = framing === 'tight' ? [13, 16, 94, 92] : [-10, -14, 140, 134];
-    this.svg = el('svg', { viewBox:box.join(' '), width:size, height:Math.round(size * box[3] / box[2]), overflow:'visible', role:'img', 'aria-label':'Varin' }, host);
-    this.svg.style.overflow = 'visible';
-    this.build(); this.setPalette(palette); this.setState(state, true);
-    Figure.all.add(this);
+  constructor(host, o = {}) {
+    this.host = host; this.size = o.size ?? 220; this.still = o.still ?? this.size < 44; this.small = this.size < 44;
+    this.tight = o.tight ?? this.size < 150; this.box = o.box; this.palName = o.palette ?? 'mist'; this.pal = PAL[this.palName];
+    this.id = 'v' + (++uid); this.p = { ...BASE }; this.v = {}; this.pulses = []; this.particles = []; this.flyers = []; this.sparkles = [];
+    this.jelly = { a2:0, v2:0, a3:0, v3:0, a4:0, v4:0, d:0, vd:0, th:0 };
+    this.blinkAt = -9; this.nextBlink = 1 + Math.random() * 2; this.glance = { x:0, y:0, until:0 }; this.cursor = null;
+    this.faceRot = 0; this.flyIndex = Math.floor(Math.random() * TEAM.length); this.auto = !!o.auto; this.nextMicro = Figure.now + 5 + Math.random() * 6;
+    this.teamSize = o.team ?? 3; this.visible = true; this.overrides = o.params || null; this.onTick = null;
+    this.build(); this.setState(o.state ?? 'idle', true);
+    if (this.overrides) Object.assign(this.p, this.overrides);
+    this.render({ ...this.p, faceRot:this.p.faceRot }, Figure.now, 0);
+    if (!this.still) { Figure.live.add(this); Figure.io?.observe(this.host); }
   }
   build() {
-    const s = this.svg, id = this.id, concept = this.concept;
-    const defs = el('defs', {}, s);
-    this.grad = el('radialGradient', { id:id+'b', cx:'.38', cy:'.3', r:'.78' }, defs);
-    this.gStops = [0, .48, 1].map(o => el('stop', { offset:o }, this.grad));
-    const rim = el('linearGradient', { id:id+'r', x1:0, y1:0, x2:0, y2:1 }, defs);
-    el('stop', { offset:.5, 'stop-color':'#fff', 'stop-opacity':0 }, rim); this.rimMid = el('stop', { offset:.86, 'stop-opacity':.18 }, rim); this.rimStop = el('stop', { offset:1, 'stop-opacity':.5 }, rim);
-    const cream = el('radialGradient', { id:id+'c', cx:'.36', cy:'.28', r:'.8' }, defs);
-    [['0','#fffefa'], ['.5','#f1ece1'], ['1','#c9bfa9']].forEach(([o, c]) => el('stop', { offset:o, 'stop-color':c }, cream));
-    const iri = el('linearGradient', { id:id+'i', x1:0, y1:0, x2:1, y2:1 }, defs);
-    const pearl = this.size < 40 ? IRIDESCENT_SMALL : IRIDESCENT;
-    pearl.forEach((c, i) => el('stop', { offset:i / (pearl.length - 1), 'stop-color':c }, iri));
-    const glow = el('radialGradient', { id:id+'g' }, defs);
-    this.glowStop = el('stop', { offset:0, 'stop-opacity':.85 }, glow); this.glowStop2 = el('stop', { offset:.45, 'stop-opacity':.32 }, glow); el('stop', { offset:1, 'stop-opacity':0, 'stop-color':'#fff' }, glow);
-    const blur = el('filter', { id:id+'f', x:'-50%', y:'-50%', width:'200%', height:'200%' }, defs); el('feGaussianBlur', { stdDeviation:1.3 }, blur);
-    const soft = el('filter', { id:id+'s', x:'-50%', y:'-50%', width:'200%', height:'200%' }, defs); el('feGaussianBlur', { stdDeviation:2.4 }, soft);
-    if (concept === 'fold') {
-      el('clipPath', { id:id+'L' }, defs).appendChild(el('path', { d:`M-10 -14H73V28${SEAM}V130H-10Z` }));
-      el('clipPath', { id:id+'R' }, defs).appendChild(el('path', { d:`M130 -14H73V28${SEAM}V130H130Z` }));
+    const box = this.box || (this.tight ? [27, 30, 146, 146] : [-34, -18, 268, 236]);
+    this.svg = el('svg', { viewBox:box.join(' '), width:this.size, height:Math.round(this.size * box[3] / box[2]), role:'img', 'aria-label':'Varin' }, this.host);
+    this.svg.style.overflow = 'visible'; this.svg.style.display = 'block';
+    const id = this.id, defs = el('defs', {}, this.svg);
+    const grad = (tag, attrs, stops) => { const g = el(tag, { id:id + attrs.id, ...attrs }, defs); g.removeAttribute('id'); g.setAttribute('id', id + attrs.id); return stops.map(([o, c, a = 1]) => el('stop', { offset:o, 'stop-color':c, 'stop-opacity':a }, g)); };
+    this.gBase = grad('linearGradient', { id:'b', x1:.15, y1:0, x2:.85, y2:1 }, [[0, '#fff'], [.52, '#fff'], [1, '#fff']]);
+    this.gShade = grad('radialGradient', { id:'s', cx:.74, cy:1.04, r:.86 }, [[0, '#000', .5], [.6, '#000', .12], [1, '#000', 0]]);
+    grad('radialGradient', { id:'h', cx:.3, cy:.14, r:.62 }, [[0, '#fff', .78], [.55, '#fff', .18], [1, '#fff', 0]]);
+    grad('linearGradient', { id:'t', x1:0, y1:0, x2:0, y2:1 }, [[0, '#fff', .95], [.42, '#fff', 0]]);
+    this.gBounce = grad('linearGradient', { id:'u', x1:0, y1:0, x2:0, y2:1 }, [[.62, '#fff', 0], [1, '#fff', .7]]);
+    this.iri = el('linearGradient', { id:id + 'i', x1:0, y1:0, x2:1, y2:1 }, defs);
+    ['#ffcfe4', '#fff0bf', '#c4f0de', '#c3d8ff', '#e0ccff', '#ffcfe4'].forEach((c, i) => el('stop', { offset:i / 5, 'stop-color':c }, this.iri));
+    grad('radialGradient', { id:'w', cx:.5, cy:.5, r:.5 }, [[0, '#ffb45c', .55], [.55, '#ffc98a', .22], [1, '#ffc98a', 0]]);
+    this.gDrop = grad('radialGradient', { id:'d', cx:.5, cy:.5, r:.5 }, [[0, '#0e141a', .34], [.6, '#0e141a', .11], [1, '#0e141a', 0]]);
+    // Grain stays fine at every display size: one grain tile covers about 64 screen pixels.
+    const gs = Math.max(10, 64 * 146 / this.size);
+    const pattern = el('pattern', { id:id + 'g', width:gs, height:gs, patternUnits:'userSpaceOnUse' }, defs);
+    el('image', { href:GRAIN, width:gs, height:gs }, pattern);
+    const clip = el('clipPath', { id:id + 'c' }, defs); this.clipPath = el('path', {}, clip);
+
+    this.gGlow = el('circle', { r:96, fill:`url(#${id}w)`, opacity:0 }, this.svg);
+    this.shadow = el('ellipse', { fill:`url(#${id}d)` }, this.svg);
+    this.back = el('g', {}, this.svg);
+    const body = el('g', {}, this.svg);
+    this.paths = [
+      el('path', { fill:`url(#${id}b)` }, body),
+      el('path', { fill:`url(#${id}s)` }, body),
+      el('path', { fill:`url(#${id}h)` }, body),
+    ];
+    if (!this.small) this.paths.push(el('path', { fill:`url(#${id}g)`, opacity:.75 }, body));
+    const inner = el('g', { 'clip-path':`url(#${id}c)` }, body);
+    if (!this.small) {
+      this.paths.push(el('path', { fill:'none', stroke:`url(#${id}t)`, 'stroke-width':3.2 }, inner));
+      this.paths.push(el('path', { fill:'none', stroke:`url(#${id}u)`, 'stroke-width':4 }, inner));
+      this.paths.push(el('path', { fill:'none', stroke:`url(#${id}i)`, 'stroke-width':3.6, opacity:.62 }, inner));
     }
-    if (concept === 'mochi') el('clipPath', { id:id+'K' }, defs).appendChild(el('path', { d:'M-10 82C28 77 48 87 60 85C74 83 92 77 130 83V130H-10Z' }));
-    this.root = el('g', {}, s);
-    this.glow = el('circle', { cx:60, cy:70, r:58, fill:`url(#${id}g)`, opacity:0 }, this.root);
-    this.shadow = el('ellipse', { cx:60, cy:105, rx:31, ry:4.6, fill:'#1d2733', opacity:.16, filter:`url(#${id}s)` }, this.root);
-    this.ringBack = el('g', {}, this.root);
-    this.body = el('g', {}, this.root);
-    if (concept === 'fold') {
-      this.halfL = el('g', { 'clip-path':`url(#${id}L)` }, this.body);
-      this.halfLInner = el('g', {}, this.halfL); el('path', { d:GUMDROP, fill:`url(#${id}c)` }, this.halfLInner);
-      this.halfR = el('g', { 'clip-path':`url(#${id}R)` }, this.body);
-      this.halfRInner = el('g', {}, this.halfR); this.bodyPath = el('path', { d:GUMDROP, fill:`url(#${id}b)` }, this.halfRInner);
-      el('path', { d:GUMDROP, fill:`url(#${id}r)` }, this.halfRInner);
-      this.seam = el('path', { d:`M73 28${SEAM}`, fill:'none', stroke:'#fff', 'stroke-width':1.3, 'stroke-opacity':.75, 'stroke-linecap':'round' }, this.body);
-      this.seamGlow = el('path', { d:`M73 28${SEAM}`, fill:'none', stroke:WARM, 'stroke-width':2.6, 'stroke-linecap':'round', opacity:0, filter:`url(#${id}f)` }, this.body);
-    } else if (concept === 'mochi') {
-      el('path', { d:MOCHI, fill:`url(#${id}c)` }, this.body);
-      const scarf = el('g', { 'clip-path':`url(#${id}K)` }, this.body);
-      this.bodyPath = el('path', { d:MOCHI, fill:`url(#${id}b)` }, scarf);
-      el('path', { d:'M18 84C30 80 48 88 60 86C74 84 92 79 102 84', fill:'none', stroke:'#fff', 'stroke-opacity':.55, 'stroke-width':1.2 }, this.body);
-      this.clasp = el('path', { d:'M60 81.5l4.5 4.5l-4.5 4.5l-4.5-4.5Z', fill:'#fbe7b4', stroke:'#c8a267', 'stroke-width':1.5, 'stroke-linejoin':'round' }, this.body);
-      this.curl = el('g', {}, this.body);
-      el('path', { d:'M51 40C46 27 58 22 61 29C63 34 56 37 54 33', fill:'none', stroke:'#c9ced8', 'stroke-width':3.4, 'stroke-linecap':'round' }, this.curl);
-      el('path', { d:'M51 40C46 27 58 22 61 29', fill:'none', stroke:'#fff', 'stroke-width':1.2, 'stroke-linecap':'round', 'stroke-opacity':.9 }, this.curl);
-    } else {
-      this.bodyPath = el('path', { d:GUMDROP, fill:`url(#${id}b)` }, this.body);
-      el('path', { d:GUMDROP, fill:`url(#${id}r)` }, this.body);
+    this.edge = el('path', { fill:'none', 'stroke-width':this.small ? 2.2 : 1.1 }, body); this.paths.push(this.edge);
+    this.blushes = [0, 1].map(() => el('ellipse', { rx:7.5, ry:4.2, opacity:0 }, body));
+    const face = el('g', {}, this.svg);
+    this.eyes = [0, 1].map(() => el('path', { fill:'none', 'stroke-linecap':'round', 'stroke-linejoin':'round' }, face));
+    this.glints = [0, 1].map(() => el('circle', { r:this.small ? 0 : 1.9, fill:'#fff' }, face));
+    this.logo = el('g', { opacity:0 }, face);
+    this.logoPaths = LOGO_D.map(d => el('path', { d }, this.logo));
+    this.front = el('g', {}, this.svg);
+    this.fx = el('g', {}, this.svg);
+    this.badge = el('g', { opacity:0 }, this.fx);
+    this.badgeRing = el('circle', { r:8, fill:'none', stroke:'#ff9a3c', 'stroke-width':2 }, this.badge);
+    el('circle', { r:8, fill:'#ff9a3c', stroke:'#fff', 'stroke-width':2.6 }, this.badge);
+    el('circle', { r:2.2, cx:-2.3, cy:-2.4, fill:'#fff', opacity:.7 }, this.badge);
+    this.zz = [0, 1, 2].map(() => el('path', { d:'M-3 -3H3L-3 3H3', fill:'none', 'stroke-width':1.7, 'stroke-linecap':'round', 'stroke-linejoin':'round', opacity:0 }, this.fx));
+    this.members = [];
+    for (let j = 0; j < this.teamSize && !this.still; j++) {
+      const m = TEAM[(j * 3 + uid) % TEAM.length], g = this.avatar(m);
+      const gradEl = el('linearGradient', { id:`${id}r${j}`, gradientUnits:'userSpaceOnUse' }, defs);
+      el('stop', { offset:0, 'stop-color':m.color, 'stop-opacity':0 }, gradEl); el('stop', { offset:1, 'stop-color':m.color, 'stop-opacity':.85 }, gradEl);
+      const trail = el('path', { fill:'none', stroke:`url(#${id}r${j})`, 'stroke-width':3.4, 'stroke-linecap':'round', opacity:0 }, this.back);
+      g.setAttribute('opacity', 0); this.back.appendChild(g);
+      this.members.push({ m, g, trail, gradEl, hist:[], layer:'back' });
     }
-    el('ellipse', { cx:43, cy:concept === 'mochi' ? 51 : 48, rx:11, ry:5.8, fill:'#fff', opacity:.68, transform:'rotate(-28 43 48)', filter:`url(#${id}f)` }, this.body);
-    el('circle', { cx:58, cy:concept === 'mochi' ? 44 : 41, r:2.1, fill:'#fff', opacity:.8 }, this.body);
-    this.blushes = [40, 80].map(x => el('ellipse', { cx:x, cy:76, rx:5.4, ry:3.1, fill:'#ff8fae', opacity:0 }, this.body));
-    this.face = el('g', {}, this.body);
-    this.eyes = [49, 71].map(x => {
-      const g = el('g', {}, this.face);
-      const pill = el('rect', { x:x - 4.3, y:58.6, width:8.6, height:14.8, rx:4.3 }, g);
-      const glint = el('circle', { cx:x - 1.6, cy:62, r:1.45, fill:'#fff', opacity:.9 }, g);
-      const smile = el('path', { d:`M${x-5.6} 67.8Q${x} 60 ${x+5.6} 67.8`, fill:'none', 'stroke-width':3.2, 'stroke-linecap':'round', opacity:0 }, this.face);
-      const shut = el('path', { d:`M${x-5.6} 65Q${x} 70.5 ${x+5.6} 65`, fill:'none', 'stroke-width':3, 'stroke-linecap':'round', opacity:0 }, this.face);
-      return { x, g, pill, glint, smile, shut };
-    });
-    this.mouth = el('path', { d:'M56 77Q60 81 64 77', fill:'none', 'stroke-width':2.4, 'stroke-linecap':'round', opacity:0 }, this.face);
-    this.ringFront = el('g', {}, this.root);
-    this.rings = [this.ringBack, this.ringFront].map(layer => {
-      const g = el('g', {}, layer);
-      const base = el('ellipse', { rx:12.5, ry:4.6, fill:'none', stroke:`url(#${this.id}i)`, 'stroke-width':4.2 }, g);
-      const edge = el('ellipse', { rx:12.5, ry:4.6, fill:'none', stroke:'#4a6db0', 'stroke-opacity':.28, 'stroke-width':.7 }, g);
-      const shine = el('path', { d:'M-9 -2.6Q0 -5.8 9 -2.6', fill:'none', stroke:'#fff', 'stroke-width':1, 'stroke-linecap':'round', opacity:.95 }, g);
-      const warm = el('ellipse', { rx:12.5, ry:4.6, fill:'none', stroke:WARM, 'stroke-width':4.4, opacity:0 }, g);
-      const arc = el('ellipse', { rx:12.5, ry:4.6, fill:'none', stroke:'#fff', 'stroke-width':4.6, 'stroke-linecap':'round', opacity:0 }, g);
-      return { g, base, edge, shine, warm, arc };
-    });
-    if (concept !== 'loop') this.rings.forEach(r => r.g.setAttribute('display', 'none'));
-    if (this.small) {
-      this.shadow.setAttribute('display', 'none');
-      this.rings.forEach(r => { r.base.setAttribute('stroke-width', 5.6); r.edge.setAttribute('stroke-width', 1.4); r.edge.setAttribute('stroke-opacity', .6); r.shine.setAttribute('display', 'none'); });
-      this.face.parentNode.insertBefore(el('g', {}), this.face);
-      this.smallFace = true;
-    }
-    this.trailLayer = el('g', {}, this.root);
-    this.fx = el('g', {}, this.root);
-    this.zz = [0, 1, 2].map(i => { const t = el('text', { x:84, y:40, 'font-size':8 + i * 1.5, 'font-weight':700, fill:'#8aa0c9', opacity:0, 'font-family':'system-ui' }, this.root); t.textContent = 'z'; return t; });
+    this.applyPalette();
   }
-  setPalette(name) {
-    const c = PALETTES[name] || PALETTES.mist; this.palette = c;
-    [c.light, c.base, c.deep].forEach((col, i) => this.gStops[i].setAttribute('stop-color', col));
-    this.rimStop.setAttribute('stop-color', c.rim); this.rimMid.setAttribute('stop-color', c.rim);
-    const eye = c.eye || '#20272a';
-    this.eyes.forEach(e => { e.pill.setAttribute('fill', eye); e.smile.setAttribute('stroke', eye); e.shut.setAttribute('stroke', eye); e.glint.setAttribute('fill', c.eye ? '#20272a' : '#fff'); });
-    this.mouth.setAttribute('stroke', eye);
-    this.rings.forEach(r => r.edge.setAttribute('stroke', c.deep));
+  avatar(m, parent) {
+    const g = el('g', {}, parent);
+    if (m.accent) el('path', { d:m.accent.path, fill:m.accent.color }, g);
+    el('path', { d:m.body, fill:m.color }, g);
+    if (m.eyes) el('path', { d:m.eyes, fill:'#202326' }, g);
+    if (m.eyeStroke) el('path', { d:m.eyeStroke, fill:'none', stroke:'#202326', 'stroke-width':4, 'stroke-linecap':'round' }, g);
+    return g;
+  }
+  setPalette(name) { this.palName = name; this.pal = PAL[name]; this.applyPalette(); if (this.still) this.render({ ...this.p }, Figure.now, 0); }
+  applyPalette() {
+    const c = this.pal;
+    [c.light, c.base, c.shade].forEach((col, i) => this.gBase[i].setAttribute('stop-color', col));
+    this.gShade.forEach(s => s.setAttribute('stop-color', c.deep));
+    this.gBounce.forEach(s => s.setAttribute('stop-color', c.light));
+    this.gDrop.forEach(s => s.setAttribute('stop-color', mix(c.deep, '#0e141a', .45)));
+    this.edge.setAttribute('stroke', c.deep); this.edge.setAttribute('stroke-opacity', this.palName === 'cream' ? .32 : .2);
+    this.blushes.forEach(b => b.setAttribute('fill', c.blush));
+    this.logoPaths[0].setAttribute('fill', c.eye); this.logoPaths[1].setAttribute('fill', c.tone2);
+    const darkEyes = hex(c.eye).reduce((a, b) => a + b) < 380;
+    this.glints.forEach(g => { g.setAttribute('fill', darkEyes ? '#fff' : '#20272a'); g.setAttribute('fill-opacity', darkEyes ? .92 : .45); });
+    this.zz.forEach(z => z.setAttribute('stroke', this.palName === 'graphite' ? '#9aa6b5' : mix(c.deep, '#8796ad', .5)));
   }
   setState(name, immediate = false) {
     const st = STATES[name]; if (!st) return;
-    if (this.state && !immediate) { this.prevLoop = STATES[this.state].loop; this.prevBlend = 1; this.loopBlend = 0; }
-    this.state = name; this.stateAt = Figure.now;
-    this.target = { ...DEFAULTS, ...st.T };
-    if (immediate || this.still) { Object.assign(this.p, this.target); this.loopBlend = 1; this.prevLoop = null; }
+    if (this.stateName && !immediate) { this.prevLoop = STATES[this.stateName].loop; this.prevBlend = 1; this.loopBlend = 0; }
+    else { this.prevLoop = null; this.prevBlend = 0; this.loopBlend = 1; }
+    this.stateName = name; this.stateAt = Figure.now; this.T = { ...BASE, ...st.T }; this.nextEvery = Figure.now + (st.every?.[0] ?? 0);
+    if (immediate || this.still) { Object.assign(this.p, this.T); this.v = {}; this.faceRot = 0; }
     if (st.enter && !immediate && !this.still) this.play(st.enter);
-    this.nextBlink = Figure.now + 0.6 + Math.random();
+    this.nextBlink = Figure.now + .5 + Math.random();
   }
-  play(name) {
-    if (this.still) return;
-    const pulse = PULSES[name]; if (!pulse) return;
+  play(name, opts = {}) {
+    if (this.still) return; const pulse = PULSES[name]; if (!pulse) return;
+    if (reduced && name !== 'logo') return;
     this.pulses = this.pulses.filter(p => p.name !== name);
-    this.pulses.push({ name, at:Figure.now, ...pulse, burstDone:false, sparkDone:false });
+    this.pulses.push({ name, at:Figure.now, d:pulse.d, f:pulse.f, events:(pulse.at || []).map(([x, fn]) => ({ x, fn, done:false })), ...opts });
   }
-  burst(x, y, count) {
-    if (reducedMotion) return;
-    const colors = ['#ffd36e', '#ff9fc4', '#9ec3ff', '#8ee6d1', '#fff', this.palette.base];
-    for (let i = 0; i < count; i++) {
-      const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.5, sp = 38 + Math.random() * 46;
-      const node = el(i % 3 ? 'circle' : 'path', i % 3 ? { r:1.2 + Math.random() * 1.6 } : { d:'M0 -3.4L.9 -.9L3.4 0L.9 .9L0 3.4L-.9 .9L-3.4 0L-.9 -.9Z' }, this.fx);
-      node.setAttribute('fill', colors[i % colors.length]);
-      this.particles.push({ node, x, y, vx:Math.cos(a) * sp, vy:Math.sin(a) * sp, life:0, max:.75 + Math.random() * .45, spin:(Math.random() - .5) * 600 });
-    }
-  }
-  ringPose(p, t) {
-    // Rest: floating at the upper left. Orbit: a small ring travelling around the body.
-    const rest = { x:30 + p.ringX, y:30 + p.ringY, tilt:p.ringTilt, depth:1 };
-    if (p.orbit <= .001) return rest;
-    const phase = (this.orbitPhaseOverride ?? (t / 2.6)) * Math.PI * 2;
-    const ox = 60 + Math.cos(phase) * 47, oy = 60 + Math.sin(phase) * 13, depth = Math.sin(phase);
-    const k = p.orbit;
-    return { x:rest.x + (ox - rest.x) * k, y:rest.y + (oy - rest.y) * k, tilt:rest.tilt + (-8 - rest.tilt) * k, depth:k > .5 ? depth : 1, phase };
+  kick(s) { if (reduced) return; const j = this.jelly; j.v2 += .9 * s; j.v4 += .35 * s; j.v3 += .25 * s * (Math.random() < .5 ? -1 : 1); }
+  blink() { this.blinkAt = Figure.now; }
+  poke(angle) { if (reduced) { this.play('poke'); return; } this.jelly.vd -= 4.2; this.jelly.th = angle; this.v.lean = (this.v.lean || 0) - Math.cos(angle) * 90; this.v.rot = (this.v.rot || 0) - Math.cos(angle) * 40; this.play('poke'); }
+  tf(o) {
+    // Body transform as one affine map: spin (centre) → squash (bottom) → lean → rock (bottom) → place.
+    const cs = Math.cos(o.spin * Math.PI / 180), ss = Math.sin(o.spin * Math.PI / 180), cr = Math.cos(o.rot * Math.PI / 180), sr = Math.sin(o.rot * Math.PI / 180);
+    return (x, y) => {
+      let X = x * cs - y * ss, Y = x * ss + y * cs;
+      X *= o.sx; Y = BH + (Y - BH) * o.sy;
+      X += o.lean * (BH - Y) / (2 * BH);
+      const dx = X, dy = Y - BH; X = dx * cr - dy * sr; Y = BH + dx * sr + dy * cr;
+      return [CX + X, CY + Y + o.y];
+    };
   }
   step(dt, t) {
-    const p = this.p, T = this.target, st = STATES[this.state];
-    if (this.still) { this.render(p, t); return; }
-    // Gaze: cursor in idle/listening, the orbiting ring while thinking, random glances otherwise.
-    let lookX = T.lookX, lookY = T.lookY;
-    if ((this.state === 'idle' || this.state === 'listening') && this.cursor && Figure.follow) { lookX = this.cursor.x; lookY = this.cursor.y; }
-    else if (this.state === 'idle') { if (t > this.glance.until) this.glance = { x:(Math.random() - .5) * 1.2, y:(Math.random() - .5) * .6, until:t + 2.5 + Math.random() * 3 }; lookX = this.glance.x * .7; lookY = this.glance.y * .7; }
-    if (this.state === 'thinking' || this.pulses.some(x => x.name === 'comet')) { const r = this.ringPose(p, t); lookX = clamp((r.x - 60) / 40, -1, 1) * .9; lookY = clamp((r.y - 58) / 20, -1, 1) * .7 - .2; }
-    const goal = { ...T, lookX, lookY };
-    for (const key in DEFAULTS) {
-      const { k, c } = SPRINGS[GROUP[key]], v = this.v[key] || 0;
-      if (reducedMotion && GROUP[key] === 'body') { p[key] += (goal[key] - p[key]) * clamp(dt * 8); continue; }
-      const a = k * (goal[key] - p[key]) - c * v;
-      this.v[key] = v + a * dt; p[key] += this.v[key] * dt;
+    const p = this.p, T = this.T, st = STATES[this.stateName];
+    let lookX = T.lookX, lookY = T.lookY, lean = T.lean, rot = T.rot;
+    const following = this.cursor && Figure.follow && ['idle', 'listening', 'waiting'].includes(this.stateName);
+    if (following) { lookX = this.cursor.x * 1.05; lookY = this.cursor.y * .9 + T.lookY * .3; lean = T.lean + this.cursor.x * 4; rot = T.rot + this.cursor.x * 1.6; }
+    else if (this.stateName === 'idle') {
+      if (t > this.glance.until) { const quiet = Math.random() < .45; this.glance = { x:quiet ? 0 : (Math.random() - .5) * 1.4, y:quiet ? 0 : (Math.random() - .55) * .7, until:t + 1.6 + Math.random() * 2.6 }; }
+      lookX = this.glance.x; lookY = this.glance.y;
     }
-    // Loops crossfade between states; pulses add smooth moves on top.
-    this.loopBlend = clamp(this.loopBlend + dt / .45); this.prevBlend = clamp(this.prevBlend - dt / .45);
-    const out = { ...p }, add = (o, w) => { for (const key in o) if (key in out) out[key] += o[key] * w; };
-    if (!reducedMotion) { add(st.loop(t), this.loopBlend); if (this.prevLoop && this.prevBlend > 0) add(this.prevLoop(t), this.prevBlend); }
-    let flip = 0; this.orbitPhaseOverride = undefined;
-    this.pulses = this.pulses.filter(pulse => {
-      const x = (t - pulse.at) / pulse.d; if (x >= 1) return false;
-      if (reducedMotion) return false;
-      const o = pulse.f(x); flip += o.ringFlip || 0; if (o.orbitPhase !== undefined) this.orbitPhaseOverride = (t / 2.6) + o.orbitPhase * 1.0;
-      add(o, 1);
-      if (pulse.burst !== undefined && !pulse.burstDone && x >= pulse.burst / pulse.d) { pulse.burstDone = true; const r = this.ringPose(out, t); this.burst(r.x, r.y, pulse.name === 'celebrate' ? 26 : 16); }
-      if (pulse.spark !== undefined && !pulse.sparkDone && x >= pulse.spark / pulse.d) { pulse.sparkDone = true; this.onSpark?.(this.ringPose(out, t)); }
-      if (pulse.trail) { const r = this.ringPose(out, t); this.trail.push({ x:r.x, y:r.y, life:0 }); }
+    const goal = { ...T, lookX, lookY, lean, rot };
+    // The logo is symmetric under a half turn: finish the current half turn, then release the eyes.
+    if (st.spin) this.faceRot = st.spin(t - this.stateAt);
+    else if (this.faceRot !== 0) {
+      const target = Math.ceil((this.faceRot - .5) / 180) * 180; this.faceRot += (target - this.faceRot) * clamp(dt * 7);
+      goal.wL = 1; if (Math.abs(target - this.faceRot) < .6) this.faceRot = 0;
+    }
+    const sub = dt > 1 / 50 ? 2 : 1, h = dt / sub;
+    for (let s = 0; s < sub; s++) {
+      for (const key in GROUP) {
+        const g = GROUP[key]; if (!g) continue;
+        const [k, c] = SPRING[g], v = this.v[key] || 0;
+        if (reduced) { p[key] += (goal[key] - p[key]) * clamp(h * 7); continue; }
+        this.v[key] = v + (k * (goal[key] - p[key]) - c * v) * h; p[key] += this.v[key] * h;
+      }
+      const j = this.jelly;
+      j.v2 += (-150 * j.a2 - 5.5 * j.v2) * h; j.a2 += j.v2 * h;
+      j.v3 += (-220 * j.a3 - 7 * j.v3) * h; j.a3 += j.v3 * h;
+      j.v4 += (-300 * j.a4 - 9 * j.v4) * h; j.a4 += j.v4 * h;
+      j.vd += (-210 * j.d - 12 * j.vd) * h; j.d += j.vd * h;
+    }
+    // Loops crossfade between states; one-shot moves add on top of the springs.
+    this.loopBlend = clamp((this.loopBlend ?? 1) + dt / .5); this.prevBlend = clamp((this.prevBlend ?? 0) - dt / .5);
+    const out = { ...p, faceRot:this.faceRot }, add = (o, w) => { for (const k in o) if (k in out) out[k] += o[k] * w; };
+    const lt = t - this.stateAt;
+    if (!reduced) { add(st.loop(lt), this.loopBlend); if (this.prevLoop && this.prevBlend > 0) add(this.prevLoop(lt), this.prevBlend); }
+    this.pulses = this.pulses.filter(q => {
+      const x = (t - q.at) / q.d; if (x >= 1) return false;
+      add(q.f(x), 1); for (const e of q.events) if (!e.done && x >= e.x) { e.done = true; e.fn(this); }
       return true;
     });
-    // Blinks: quick, smooth, never while asleep or delighted.
-    if (st.blink && t > this.nextBlink) { this.blinkAt = t; this.nextBlink = t + st.blink[0] + Math.random() * (st.blink[1] - st.blink[0]); if (Math.random() < .2) this.doubleBlink = t + .28; }
-    const blink = Math.max(bump((t - this.blinkAt) / .16), this.doubleBlink ? bump((t - this.doubleBlink) / .16) : 0);
-    out.open = clamp(out.open * (1 - blink * .92));
-    out.ringFlip = flip;
+    if (st.every && t > this.nextEvery) { this.play(st.every[1]); this.nextEvery = t + st.every[0]; }
+    if (st.blink && t > this.nextBlink) { this.blinkAt = t; this.nextBlink = t + st.blink[0] + Math.random() * (st.blink[1] - st.blink[0]); if (Math.random() < .22) this.blinkAt2 = t + .27; }
+    if (this.auto && this.stateName === 'idle' && t > this.nextMicro && !this.pulses.length) {
+      const pick = ['peek', 'bounce', 'peek', 'wink', 'logo', 'hello'][Math.floor(Math.random() * 6)];
+      this.play(pick); this.nextMicro = t + 6 + Math.random() * 7;
+    }
+    this.onTick?.(t, this);
     this.render(out, t, dt);
   }
-  render(p, t, dt = 0) {
-    const id = this.id, concept = this.concept;
-    this.root.style.filter = p.desat > .01 || p.dim > .01 ? `saturate(${1 - .88 * p.desat}) brightness(${1 - .1 * p.dim})` : '';
-    // Glow
-    const glowColor = mixHex(this.palette.rim, WARM, clamp(p.warm));
-    this.glowStop.setAttribute('stop-color', glowColor); this.glowStop2.setAttribute('stop-color', glowColor);
-    this.glow.setAttribute('opacity', clamp(p.glow) * .9);
-    // Body squash & stretch pivots on its base, so it never floats away from its shadow.
-    this.body.setAttribute('transform', `translate(60 ${101 + p.y}) rotate(${p.rot}) scale(${p.sx} ${p.sy}) translate(-60 -101)`);
-    const lift = clamp(-p.y / 14, -.3, 1);
-    this.shadow.setAttribute('rx', 31 * (1 - lift * .3) * p.sx); this.shadow.setAttribute('opacity', .16 * (1 - lift * .5));
-    // Face
-    const lx = clamp(p.lookX, -1, 1) * 5.2, ly = clamp(p.lookY, -1, 1) * 4;
-    this.face.setAttribute('transform', this.smallFace ? `translate(${lx} ${ly}) translate(60 67) scale(1.14) translate(-60 -67)` : `translate(${lx} ${ly})`);
-    const shape = clamp(p.smile + p.closed), pill = clamp(1 - shape * 2.4);
-    this.eyes.forEach((e, i) => {
-      const open = clamp(p.open * (i === 0 ? 1 - clamp(p.wink) * .95 : 1), .04, 1.2);
-      e.g.setAttribute('transform', `translate(${e.x} 66) scale(${p.eyeScale} ${p.eyeScale * open * (1 - .78 * shape)}) translate(${-e.x} -66)`);
-      e.g.setAttribute('opacity', pill * (1 - p.desat * .35));
-      e.smile.setAttribute('opacity', clamp(p.smile * 1.8 - .35) + (i === 0 ? clamp(p.wink * 1.6 - .3) * clamp(1 - p.smile) : 0));
-      e.shut.setAttribute('opacity', clamp(p.closed * 1.8 - .35));
-    });
-    this.mouth.setAttribute('opacity', clamp(p.mouth + (concept === 'mochi' ? .45 : 0)) * (1 - p.closed));
-    this.blushes.forEach(b => b.setAttribute('opacity', clamp(p.blush + (concept === 'mochi' ? .25 : 0)) * .55));
-    // Signature
-    if (concept === 'loop') this.renderRing(p, t);
-    if (concept === 'fold') {
-      const split = .6 + p.smile * 1.6 + p.orbit * (1.2 + Math.sin(t * 2.4)) + p.progress * Math.abs(Math.sin(t * 5)) * .9 - p.closed * .6 + (p.ringFlip ? bump(p.ringFlip) * 3 : 0);
-      const twist = p.orbit * 3 * Math.sin(t * 2.4) + p.ringTilt * .04;
-      this.halfLInner.setAttribute('transform', `translate(${-split * .9} ${-split * .35}) rotate(${-twist} 60 68)`);
-      this.halfRInner.setAttribute('transform', `translate(${split * .9} ${split * .35}) rotate(${twist} 60 68)`);
-      this.seam.setAttribute('opacity', .75 * (1 - clamp(split / 3)));
-      this.seamGlow.setAttribute('opacity', clamp(p.warm) * (.6 + .4 * Math.sin(t * 2.6)));
+  render(o, t, dt) {
+    const f = this.tf(o), j = this.jelly, small = this.small;
+    // Body outline: squircle, a little wider at the base, plus jelly modes.
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+      const th = 2 * Math.PI * i / N, c = Math.cos(th), s = Math.sin(th);
+      let x = A * Math.sign(c) * Math.pow(Math.abs(c), 2 / o.n), y = BH * Math.sign(s) * Math.pow(Math.abs(s), 2 / o.n);
+      x *= 1 + .07 * (y / BH);
+      let dth = th - j.th; dth = Math.atan2(Math.sin(dth), Math.cos(dth));
+      const r = j.a2 * Math.cos(2 * th) + j.a3 * Math.cos(3 * th + .4) + j.a4 * Math.cos(4 * th) + j.d * .045 * Math.exp(-(dth * dth) / (2 * .3 * .3));
+      pts.push(f(x * (1 + r), y * (1 + r)));
     }
-    if (concept === 'mochi') {
-      const angle = 8 * Math.sin(t * 2.2) * (1 - p.closed) + p.orbit * 25 * Math.sin(t * 1.6) + (p.ringFlip ? 360 * p.ringFlip : 0) - p.closed * 22 + p.ringTilt * .3 + 7;
-      this.curl.setAttribute('transform', `rotate(${angle} 52 40)`);
-      this.clasp.setAttribute('fill', mixHex('#fbe7b4', WARM, clamp(p.warm)));
-    }
-    // zz
-    this.zz.forEach((z, i) => { const ph = ((t * .45) + i / 3) % 1; z.setAttribute('x', 84 + ph * 10 + i * 2); z.setAttribute('y', 40 - ph * 22 - i * 3); z.setAttribute('opacity', clamp(p.zz) * bump(ph) * .9); });
-    // Particles & trail
-    if (dt) {
-      this.particles = this.particles.filter(q => {
-        q.life += dt; if (q.life >= q.max) { q.node.remove(); return false; }
-        q.vy += 95 * dt; q.vx *= 1 - dt * 1.4; q.x += q.vx * dt; q.y += q.vy * dt;
-        q.node.setAttribute('transform', `translate(${q.x} ${q.y}) rotate(${q.spin * q.life})`); q.node.setAttribute('opacity', 1 - q.life / q.max);
-        return true;
+    const d = smoothPath(pts);
+    this.clipPath.setAttribute('d', d); for (const path of this.paths) path.setAttribute('d', d);
+    const centre = f(0, 0), lift = clamp(-o.y / 32);
+    if (this.iri) this.iri.setAttribute('gradientTransform', `rotate(${(o.rot * 3 + o.lean * 4 + o.lookX * 18 + o.spin + 12 * Math.sin(t * .45)).toFixed(1)} .5 .5)`);
+    this.gGlow.setAttribute('cx', centre[0]); this.gGlow.setAttribute('cy', centre[1]);
+    this.gGlow.setAttribute('opacity', clamp(o.glow) * (.72 + .28 * Math.sin(2 * Math.PI * t / 2.2)));
+    const foot = f(0, BH);
+    this.shadow.setAttribute('cx', foot[0]); this.shadow.setAttribute('cy', CY + BH + 3);
+    this.shadow.setAttribute('rx', A * 1.05 * o.sx * (1 - lift * .4)); this.shadow.setAttribute('ry', 8.5 * (1 - lift * .3));
+    this.shadow.setAttribute('opacity', (1 - lift * .55) * (small ? 0 : 1));
+    // Face: the same two strokes become pill eyes, happy arcs, closed arcs, flat lines or the logo.
+    const blink = Math.max(B01(t - this.blinkAt, 0, .15), this.blinkAt2 ? B01(t - this.blinkAt2, 0, .15) : 0);
+    const E = (small ? 21 : 20) * o.sep, EY = 6 + o.lookY * 4.6, LX = o.lookX * 6.2;
+    const hh = Math.max(.01, o.eyeH * o.eyeScale * (1 - .92 * blink)) * (small ? .82 : 1);
+    const baseW = (small ? 15.5 : 11.6) * (1 + (o.eyeScale - 1) * .45), squash = 1 - j.a2 * .6;
+    const rotFace = o.faceRot * Math.PI / 180, cf = Math.cos(rotFace), sf = Math.sin(rotFace);
+    const darkLeft = this.pal.eye, rightTone = mix(this.pal.eye, this.pal.tone2, clamp(o.wL));
+    let logoOpacity = clamp((o.wL - .93) / .07);
+    [-1, 1].forEach((side, i) => {
+      const cx = side * E + LX, cy = EY * squash;
+      const pill = side < 0 ? [[cx, cy + hh], [cx, cy - hh], [cx, cy - hh], [cx, cy - hh]] : [[cx, cy - hh], [cx, cy + hh], [cx, cy + hh], [cx, cy + hh]];
+      const arc = k => [[cx - 7.4, cy + 3.3 * k], [cx - 2.9, cy - 3.1 * k], [cx + 2.9, cy - 3.1 * k], [cx + 7.4, cy + 3.3 * k]];
+      const flat = [[cx - 6.8, cy], [cx - 2.2, cy], [cx + 2.2, cy], [cx + 6.8, cy]];
+      const logo = side < 0 ? LOGO_L : LOGO_R;
+      let wH = clamp(o.wH + (side < 0 ? o.winkL : 0)), wC = clamp(o.wC), wF = clamp(o.wF), wL = clamp(o.wL);
+      const sum = wH + wC + wF + wL; if (sum > 1) { wH /= sum; wC /= sum; wF /= sum; wL /= sum; }
+      const wP = Math.max(0, 1 - wH - wC - wF - wL);
+      const happy = arc(1), closed = arc(-1);
+      const P = [0, 1, 2, 3].map(k => {
+        const x = wP * pill[k][0] + wH * happy[k][0] + wC * closed[k][0] + wF * flat[k][0] + wL * logo[k][0];
+        const y = wP * pill[k][1] + wH * happy[k][1] + wC * closed[k][1] + wF * flat[k][1] + wL * logo[k][1];
+        return f(x * cf - y * sf, x * sf + y * cf);
       });
-      this.trail = this.trail.filter(q => (q.life += dt) < .45);
-      this.trailLayer.replaceChildren(...this.trail.map(q => el('circle', { cx:q.x, cy:q.y, r:3.2 * (1 - q.life / .45), fill:'#ffd8ec', opacity:.7 * (1 - q.life / .45) })));
+      const w = wP * baseW + (wH + wC) * baseW * .68 + wF * baseW * .7 + wL * 14 * K;
+      const eye = this.eyes[i];
+      eye.setAttribute('d', `M${P[0][0].toFixed(2)} ${P[0][1].toFixed(2)}L${P[1][0].toFixed(2)} ${P[1][1].toFixed(2)}L${P[2][0].toFixed(2)} ${P[2][1].toFixed(2)}L${P[3][0].toFixed(2)} ${P[3][1].toFixed(2)}`);
+      eye.setAttribute('stroke-width', w.toFixed(2)); eye.setAttribute('stroke', i ? rightTone : darkLeft);
+      eye.setAttribute('opacity', 1 - logoOpacity * .999);
+      const g = f(cx - baseW * .2, cy - hh + baseW * .1);
+      this.glints[i].setAttribute('cx', g[0]); this.glints[i].setAttribute('cy', g[1]);
+      this.glints[i].setAttribute('opacity', Math.pow(wP, 3) * (1 - blink));
+      const b = f(side * 31 + LX * .4, 19);
+      this.blushes[i].setAttribute('cx', b[0]); this.blushes[i].setAttribute('cy', b[1]); this.blushes[i].setAttribute('opacity', clamp(o.blush) * .5);
+    });
+    // Exact logo, for crisp chamfers once the strokes have assembled.
+    const o0 = f(0, 0), ox = f(1, 0), oy = f(0, 1);
+    this.logo.setAttribute('transform', `matrix(${ox[0] - o0[0]} ${ox[1] - o0[1]} ${oy[0] - o0[0]} ${oy[1] - o0[1]} ${o0[0]} ${o0[1]}) rotate(${o.faceRot}) scale(${K})`);
+    this.logo.setAttribute('opacity', logoOpacity);
+    // Notification badge: the app icon's own way of asking for you.
+    const bw = clamp(o.badge);
+    if (bw > .01) {
+      const bp = f(A * .74, -BH * .78), pop = bw < 1 ? eOB(bw) : 1;
+      this.badge.setAttribute('transform', `translate(${bp[0]} ${bp[1]}) scale(${(small ? 3 : 1) * pop})`); this.badge.setAttribute('opacity', clamp(bw * 1.4));
+      const ph = (t % 1.7) / 1.7; this.badgeRing.setAttribute('r', 8 + ph * 11); this.badgeRing.setAttribute('opacity', reduced || this.still ? 0 : .55 * (1 - ph));
+    } else this.badge.setAttribute('opacity', 0);
+    const zw = clamp(o.zz);
+    this.zz.forEach((z, i) => {
+      const ph = ((t * .32) + i / 3) % 1, top = f(A * .55, -BH);
+      const x = top[0] + 8 + ph * 16 + i * 2, y = top[1] - 4 - ph * 30;
+      z.setAttribute('transform', `translate(${x} ${y}) scale(${.8 + ph * .9 + i * .15})`); z.setAttribute('opacity', zw * B01(ph, 0, 1) * (this.still ? (i === 1 ? 1 : 0) : 1));
+    });
+    this.svg.style.filter = o.desat > .01 || o.dim > .01 ? `saturate(${(1 - .9 * clamp(o.desat)).toFixed(3)}) brightness(${(1 - .12 * clamp(o.dim)).toFixed(3)})` : '';
+    if (!this.still) this.renderTeam(o, t, dt, f);
+    if (dt) this.renderFx(dt, t, f);
+  }
+  renderTeam(o, t, dt, f) {
+    const wT = clamp(o.team), K2 = this.members.length;
+    this.members.forEach((mem, j) => {
+      const wj = clamp(wT * 1.6 - j * .3);
+      if (wj < .005) { mem.g.setAttribute('opacity', 0); mem.trail.setAttribute('opacity', 0); mem.hist.length = 0; return; }
+      const ph = t * .85 + j * 2 * Math.PI / K2;
+      const ex = 98 * Math.cos(ph), ey = 30 * Math.sin(ph), tilt0 = -.12;
+      const x = CX + ex * Math.cos(tilt0) - ey * Math.sin(tilt0), y = CY + 10 + ex * Math.sin(tilt0) + ey * Math.cos(tilt0) + 2.6 * Math.sin(t * 3.1 + j * 1.7) + o.y * .3;
+      const depth = Math.sin(ph), s = (.8 + .2 * (depth + 1) / 2) * eOB(clamp(wj)) * 30 / 64, tilt = -Math.cos(ph) * 10;
+      const layer = depth > 0 ? 'front' : 'back';
+      if (layer !== mem.layer) { mem.layer = layer; this[layer].appendChild(mem.trail); this[layer].appendChild(mem.g); }
+      mem.g.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${tilt.toFixed(2)}) scale(${s.toFixed(3)}) translate(-32 -32)`);
+      mem.g.setAttribute('opacity', clamp(wj * 1.3) * (.82 + .18 * (depth + 1) / 2));
+      mem.hist.push([x, y]); if (mem.hist.length > 20) mem.hist.shift();
+      if (mem.hist.length > 2 && !reduced) {
+        const hs = mem.hist; let dd = `M${hs[0][0].toFixed(1)} ${hs[0][1].toFixed(1)}`; for (let k = 1; k < hs.length; k++) dd += `L${hs[k][0].toFixed(1)} ${hs[k][1].toFixed(1)}`;
+        mem.trail.setAttribute('d', dd); mem.trail.setAttribute('opacity', clamp(wj) * .9);
+        mem.gradEl.setAttribute('x1', hs[0][0]); mem.gradEl.setAttribute('y1', hs[0][1]); mem.gradEl.setAttribute('x2', x); mem.gradEl.setAttribute('y2', y);
+      } else mem.trail.setAttribute('opacity', 0);
+    });
+  }
+  confetti(n) {
+    if (reduced || this.still) return;
+    const top = this.tf({ ...this.p, faceRot:0 })(0, -BH * .8);
+    const colors = [...TEAM.map(m => m.color), this.pal.base, '#ffd36e'];
+    for (let i = 0; i < n; i++) {
+      const kind = i % 3, size = 3.4 + Math.random() * 3;
+      const node = kind === 0 ? el('rect', { x:-size / 2, y:-size / 2, width:size, height:size, rx:1, transform:'rotate(45)' }, this.fx)
+        : kind === 1 ? el('rect', { x:-size / 2, y:-size * .3, width:size, height:size * .6, rx:1.2 }, this.fx) : el('circle', { r:size * .38 }, this.fx);
+      node.setAttribute('fill', colors[i % colors.length]);
+      const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.25, v = 130 + Math.random() * 150;
+      this.particles.push({ node, x:top[0] + (Math.random() - .5) * 30, y:top[1], vx:Math.cos(a) * v, vy:Math.sin(a) * v, r:Math.random() * 360, vr:(Math.random() - .5) * 720, life:0, max:1.1 + Math.random() * .5 });
     }
   }
-  renderRing(p, t) {
-    const pose = this.ringPose(p, t), behind = pose.depth < 0;
-    const flip = p.ringFlip ? Math.cos(Math.PI * 2 * p.ringFlip) : 1;
-    const sc = p.ringScale * (behind ? .9 : 1);
-    const rx = 12.5 * Math.max(.12, Math.abs(flip)), ry = 4.6;
-    this.rings.forEach((r, i) => {
-      const visible = (i === 0) === behind;
-      r.g.setAttribute('display', visible ? 'inline' : 'none');
-      if (!visible) return;
-      r.g.setAttribute('transform', `translate(${pose.x} ${pose.y}) rotate(${pose.tilt}) scale(${sc})`);
-      for (const n of [r.base, r.edge, r.warm, r.arc]) { n.setAttribute('rx', rx); n.setAttribute('ry', ry); }
-      r.base.setAttribute('opacity', (1 - .55 * p.progress) * (1 - .55 * p.ringDim) * (behind ? .75 : 1));
-      r.shine.setAttribute('opacity', .95 * (1 - p.ringDim) * Math.abs(flip));
-      r.warm.setAttribute('opacity', clamp(p.warm) * (.75 + .25 * Math.sin(t * 2.6)));
-      const L = 2 * Math.PI * Math.sqrt((rx * rx + ry * ry) / 2);
-      r.arc.setAttribute('stroke-dasharray', `${L * .3} ${L}`); r.arc.setAttribute('stroke-dashoffset', -(t * L * .9) % L);
-      r.arc.setAttribute('opacity', clamp(p.progress) * .95);
+  sparkle() {
+    if (reduced || this.still) return;
+    const p = this.tf(this.p)(-21 - 12, -14);
+    const node = el('path', { d:'M0 -6C.9 -1.4 1.4 -.9 6 0C1.4 .9 .9 1.4 0 6C-.9 1.4 -1.4 .9 -6 0C-1.4 -.9 -.9 -1.4 0 -6Z', fill:'#ffd36e' }, this.fx);
+    this.sparkles.push({ node, x:p[0], y:p[1], life:0 });
+  }
+  launch() {
+    if (this.still) return;
+    const m = TEAM[this.flyIndex++ % TEAM.length], g = this.avatar(m, this.fx);
+    const gradEl = el('linearGradient', { id:`${this.id}f${this.flyIndex}`, gradientUnits:'userSpaceOnUse' }, this.svg.querySelector('defs'));
+    el('stop', { offset:0, 'stop-color':m.color, 'stop-opacity':0 }, gradEl); el('stop', { offset:1, 'stop-color':m.color, 'stop-opacity':.9 }, gradEl);
+    const trail = el('path', { fill:'none', stroke:`url(#${this.id}f${this.flyIndex})`, 'stroke-width':4, 'stroke-linecap':'round' }, this.fx);
+    this.fx.appendChild(g);
+    const from = this.tf(this.p)(0, -BH * .7);
+    this.flyers.push({ g, trail, gradEl, t0:Figure.now, from, ctrl:[CX + 62, CY - BH - 92], to:[CX + 96, CY + BH - 14], hist:[] });
+  }
+  renderFx(dt, t) {
+    this.particles = this.particles.filter(q => {
+      q.life += dt; if (q.life >= q.max) { q.node.remove(); return false; }
+      q.vy += 430 * dt; q.vx *= 1 - dt * 1.3; q.vy *= 1 - dt * .5; q.x += q.vx * dt; q.y += q.vy * dt; q.r += q.vr * dt;
+      q.node.setAttribute('transform', `translate(${q.x.toFixed(1)} ${q.y.toFixed(1)}) rotate(${q.r.toFixed(0)})`);
+      q.node.setAttribute('opacity', 1 - C01(q.life / q.max, .62, 1)); return true;
     });
-    this.rings[0].g.parentNode.style.opacity = 1;
-    if (p.ringDim > .5) this.rings.forEach(r => r.base.setAttribute('stroke', '#c7cbd1')); else this.rings.forEach(r => r.base.setAttribute('stroke', `url(#${this.id}i)`));
+    this.sparkles = this.sparkles.filter(s => {
+      s.life += dt; const x = s.life / .7; if (x >= 1) { s.node.remove(); return false; }
+      s.node.setAttribute('transform', `translate(${s.x} ${s.y}) rotate(${x * 90}) scale(${B01(x, 0, 1) * 1.25})`); return true;
+    });
+    this.flyers = this.flyers.filter(fl => {
+      const age = t - fl.t0, fly = .72, sit = .9, leave = .55;
+      let x, y, sc = 1, rot = 0, op = 1, sy = 1;
+      if (age < fly) {
+        const u = eIO(age / fly), a = (1 - u) * (1 - u), b = 2 * (1 - u) * u, c = u * u;
+        x = a * fl.from[0] + b * fl.ctrl[0] + c * fl.to[0]; y = a * fl.from[1] + b * fl.ctrl[1] + c * fl.to[1];
+        sc = .35 + .65 * eOB(C01(age / fly, 0, .4)); rot = 360 * eOC(age / fly);
+      } else if (age < fly + sit) {
+        const u = (age - fly) / sit; x = fl.to[0]; y = fl.to[1]; sy = 1 - .26 * B01(u, 0, .22) + .06 * B01(u, .2, .4);
+      } else if (age < fly + sit + leave) {
+        const u = (age - fly - sit) / leave; x = fl.to[0] + 50 * u; y = fl.to[1] - 18 * B01(u, 0, 1); op = 1 - u;
+      } else { fl.g.remove(); fl.trail.remove(); fl.gradEl.remove(); return false; }
+      const s = 34 / 64 * sc;
+      fl.g.setAttribute('transform', `translate(${x.toFixed(1)} ${(y + 17 * (1 - sy)).toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${s.toFixed(3)} ${(s * sy).toFixed(3)}) translate(-32 -32)`);
+      fl.g.setAttribute('opacity', op);
+      if (age < fly + .25) { fl.hist.push([x, y]); if (fl.hist.length > 16) fl.hist.shift(); } else fl.hist.shift();
+      if (fl.hist.length > 2) {
+        const hs = fl.hist; let dd = `M${hs[0][0].toFixed(1)} ${hs[0][1].toFixed(1)}`; for (let k = 1; k < hs.length; k++) dd += `L${hs[k][0].toFixed(1)} ${hs[k][1].toFixed(1)}`;
+        fl.trail.setAttribute('d', dd); fl.gradEl.setAttribute('x1', hs[0][0]); fl.gradEl.setAttribute('y1', hs[0][1]); fl.gradEl.setAttribute('x2', hs.at(-1)[0]); fl.gradEl.setAttribute('y2', hs.at(-1)[1]);
+      } else fl.trail.setAttribute('d', '');
+      return true;
+    });
   }
 }
-Figure.all = new Set(); Figure.now = 0; Figure.follow = true;
+Figure.live = new Set(); Figure.now = performance.now() / 1000; Figure.follow = true;
+Figure.io = new IntersectionObserver(entries => { for (const e of entries) for (const f of Figure.live) if (f.host === e.target) f.visible = e.isIntersecting; }, { rootMargin:'120px' });
 let last = performance.now();
 const frame = now => {
   const dt = Math.min(.05, (now - last) / 1000); last = now; Figure.now = now / 1000;
-  if (!document.hidden) for (const f of Figure.all) if (f.visible !== false) f.step(dt, Figure.now);
+  if (!document.hidden) for (const f of Figure.live) if (f.visible) f.step(dt, Figure.now);
   requestAnimationFrame(frame);
 };
-requestAnimationFrame(t => { last = t; Figure.now = t / 1000; requestAnimationFrame(frame); });
-const io = new IntersectionObserver(entries => { for (const e of entries) for (const f of Figure.all) if (f.host === e.target) f.visible = e.isIntersecting; });
+requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 
-// ---- Hero ----
-const hero = new Figure(document.getElementById('hero'), { size:300 });
-io.observe(hero.host);
-const heroStage = document.getElementById('hero-stage');
-const agentHost = document.getElementById('hero-agent');
-agentHost.innerHTML = FAMILY['pebble-blue:48:lead'] || '';
-const overlay = el('svg', { width:'100%', height:'100%', style:'position:absolute;inset:0;pointer-events:none;overflow:visible' }, heroStage);
-hero.onSpark = pose => {
-  if (reducedMotion) { agentHost.classList.remove('got'); void agentHost.offsetWidth; agentHost.classList.add('got'); return; }
-  const stage = heroStage.getBoundingClientRect(), svg = hero.svg.getBoundingClientRect(), scale = svg.width / 140;
-  const from = { x:svg.left - stage.left + (pose.x + 10) * scale, y:svg.top - stage.top + (pose.y + 14) * scale };
-  const a = agentHost.getBoundingClientRect(), to = { x:a.left - stage.left + a.width / 2, y:a.top - stage.top + a.height * .35 };
-  const dot = el('circle', { r:6, fill:'#ffd36e' }, overlay), halo = el('circle', { r:13, fill:'#ffd36e', opacity:.25 }, overlay);
-  const start = performance.now(), cx = (from.x + to.x) / 2, cy = Math.min(from.y, to.y) - 90;
-  const fly = now => {
-    const x = clamp((now - start) / 700), e = x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
-    const px = (1 - e) * (1 - e) * from.x + 2 * (1 - e) * e * cx + e * e * to.x, py = (1 - e) * (1 - e) * from.y + 2 * (1 - e) * e * cy + e * e * to.y;
-    for (const n of [dot, halo]) { n.setAttribute('cx', px); n.setAttribute('cy', py); }
-    if (x < 1) requestAnimationFrame(fly); else { dot.remove(); halo.remove(); agentHost.classList.remove('got'); void agentHost.offsetWidth; agentHost.classList.add('got'); }
-  };
-  requestAnimationFrame(fly);
+const AURORA = {
+  idle:['#cfe0ff', '#e4dbff', '#d3f1e6', '#fff0d2'], listening:['#c9ddff', '#d4ecff', '#e2d9ff', '#d2f0f7'],
+  thinking:['#c3d1ff', '#d9caff', '#c9e3ff', '#e6d6ff'], working:['#e3d8ff', '#ffe6b5', '#d3e9c7', '#ffd6ca'],
+  waiting:['#ffdcb0', '#ffcfbf', '#ffeec6', '#ffe1cf'], result:['#ffd2e4', '#cff1e3', '#ffeeb8', '#d8d1ff'],
+  sleeping:['#d6d2f3', '#cbd5ec', '#e0daf3', '#d2d9ec'], waking:['#ffeec6', '#d2e3ff', '#e2d9ff', '#d3f1e6'],
+  offline:['#e0e0de', '#e7e5e0', '#dcdcda', '#eae8e3'],
 };
-heroStage.addEventListener('pointermove', e => {
-  const r = hero.svg.getBoundingClientRect();
-  hero.cursor = { x:clamp((e.clientX - (r.left + r.width / 2)) / 220, -1, 1), y:clamp((e.clientY - (r.top + r.height * .5)) / 200, -1, 1) };
-});
-heroStage.addEventListener('pointerleave', () => { hero.cursor = null; });
-let paletteName = 'mist';
-const caption = () => { document.getElementById('hero-caption').textContent = `圈圈 · ${PALETTES[paletteName].name} · ${STATES[hero.state].label}`; document.getElementById('hero-status').textContent = STATES[hero.state].line; };
-const stateChips = document.getElementById('state-chips');
+const AURORA_DARK = {
+  idle:['#2f5fd0', '#6a45c8', '#1f8f7a', '#a8742a'], listening:['#2c63d8', '#2a7fb8', '#5a44c0', '#1f8aa0'],
+  thinking:['#3046d8', '#7a3fd0', '#2a6fd0', '#6a3cc0'], working:['#6a45c8', '#b07a1c', '#3f8a3a', '#c0503a'],
+  waiting:['#c06a14', '#c04a30', '#b08a1c', '#c05a3a'], result:['#c0407a', '#1f9a7a', '#b0901c', '#5a46d0'],
+  sleeping:['#3a3690', '#25407a', '#4a3a8a', '#283f6a'], waking:['#b08a2a', '#2c5fc0', '#5a44c0', '#1f8f7a'],
+  offline:['#3a3c40', '#45443f', '#38393c', '#4a4844'],
+};
+const aurora = (host, state) => {
+  const a = document.createElement('div'); a.className = 'aurora'; a.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 4; i++) a.appendChild(document.createElement('i'));
+  host.insertBefore(a, host.firstChild);
+  let current = state;
+  const set = name => { current = name; const dark = host.classList.contains('dark'); ((dark ? AURORA_DARK : AURORA)[name] || AURORA.idle).forEach((c, i) => { a.children[i].style.backgroundColor = c; }); };
+  set(state); return { set, refresh:() => set(current) };
+};
+// ---- Hero studio ----
+const stage = document.getElementById('stage');
+const heroAurora = aurora(stage, 'idle');
+const hero = new Figure(document.getElementById('hero'), { size:560, box:[-16, -4, 232, 214], auto:true, team:3 });
+let heroPalette = 'mist';
+const caption = () => {
+  document.getElementById('tag').textContent = `Varin · ${PAL[heroPalette].name} · ${STATES[hero.stateName].label}`;
+  document.getElementById('line').textContent = STATES[hero.stateName].line;
+};
+let wakeTimer;
+const setHeroState = name => {
+  hero.setState(name); heroAurora.set(name); clearTimeout(wakeTimer);
+  for (const b of document.querySelectorAll('.state-btn')) b.setAttribute('aria-pressed', b.dataset.state === name);
+  if (name === 'waking') wakeTimer = setTimeout(() => setHeroState('idle'), 1900);
+  caption();
+};
+const statesHost = document.getElementById('states'), stateIcons = [];
 for (const name of STATE_ORDER) {
-  const b = document.createElement('button'); b.className = 'chip'; b.textContent = STATES[name].label; b.setAttribute('aria-pressed', name === 'idle');
-  b.onclick = () => { hero.setState(name); for (const c of stateChips.children) c.setAttribute('aria-pressed', c === b); caption();
-    if (name === 'waking') setTimeout(() => { if (hero.state === 'waking') { hero.setState('idle'); for (const c of stateChips.children) c.setAttribute('aria-pressed', c.textContent === '空闲'); caption(); } }, 1700); };
-  stateChips.appendChild(b);
+  const b = document.createElement('button'); b.className = 'state-btn'; b.dataset.state = name; b.setAttribute('aria-pressed', name === 'idle');
+  const icon = document.createElement('span'); b.appendChild(icon); b.appendChild(document.createTextNode(STATES[name].label));
+  b.onclick = () => setHeroState(name); statesHost.appendChild(b);
+  stateIcons.push(new Figure(icon, { size:34, state:name === 'waking' ? 'idle' : name, palette:heroPalette }));
 }
-const delightChips = document.getElementById('delight-chips');
-for (const [name, label] of DELIGHTS) { const b = document.createElement('button'); b.className = 'chip'; b.textContent = label; b.onclick = () => hero.play(name); delightChips.appendChild(b); }
+const movesHost = document.getElementById('moves');
+for (const [name, label] of MOVES) {
+  const b = document.createElement('button'); b.className = 'chip'; b.textContent = label;
+  b.onclick = () => { if (name === 'poke') hero.poke(-Math.PI / 2 + .6); else hero.play(name); };
+  movesHost.appendChild(b);
+}
 const swatches = document.getElementById('swatches');
-for (const [name, c] of Object.entries(PALETTES)) {
-  const b = document.createElement('button'); b.className = 'swatch'; b.title = c.name; b.style.background = `radial-gradient(circle at 35% 30%, ${c.light}, ${c.base} 55%, ${c.deep})`;
-  b.setAttribute('aria-pressed', name === 'mist'); b.setAttribute('aria-label', c.name);
-  b.onclick = () => { paletteName = name; hero.setPalette(name); anatomy.setPalette(name); for (const s of swatches.children) s.setAttribute('aria-pressed', s === b); document.getElementById('color-name').textContent = c.name; caption(); };
+for (const name of PAL_ORDER) {
+  const c = PAL[name], b = document.createElement('button'); b.className = 'swatch'; b.title = c.name; b.setAttribute('aria-label', c.name);
+  b.style.background = `linear-gradient(160deg, ${c.light}, ${c.base} 55%, ${c.shade})`; b.setAttribute('aria-pressed', name === heroPalette);
+  b.onclick = () => { heroPalette = name; hero.setPalette(name); ideaLive.setPalette(name); stateIcons.forEach(f => f.setPalette(name));
+    for (const s of swatches.children) s.setAttribute('aria-pressed', s === b); document.getElementById('color-name').textContent = c.name; caption(); hero.play('bounce'); };
   swatches.appendChild(b);
 }
 document.getElementById('follow').onchange = e => { Figure.follow = e.target.checked; };
-document.getElementById('reduced').onchange = e => { reducedMotion = e.target.checked; };
+document.getElementById('reduced').onchange = e => { reduced = e.target.checked; };
+document.querySelectorAll('#bg-seg button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#bg-seg button').forEach(x => x.setAttribute('aria-pressed', x === b)); stage.classList.toggle('dark', b.dataset.v === 'dark'); heroAurora.refresh();
+});
+stage.addEventListener('pointermove', e => {
+  const r = hero.svg.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height * .48;
+  hero.cursor = { x:clamp((e.clientX - cx) / (r.width * .55), -1, 1), y:clamp((e.clientY - cy) / (r.height * .55), -1, 1) };
+});
+stage.addEventListener('pointerleave', () => { hero.cursor = null; });
+hero.svg.addEventListener('pointerdown', e => {
+  const r = hero.svg.getBoundingClientRect(), vb = hero.svg.viewBox.baseVal;
+  const x = vb.x + (e.clientX - r.left) / r.width * vb.width, y = vb.y + (e.clientY - r.top) / r.height * vb.height;
+  if (Math.abs(x - CX) > A * 1.1 || Math.abs(y - CY) > BH * 1.15) return;
+  hero.poke(Math.atan2(y - CY, x - CX));
+});
 caption();
 
-// ---- Concepts ----
-const CONCEPT_TEXT = {
-  loop:  { badge:'推荐', from:'桌宠角色左侧唯一的圈丸 + Logo 的两片互扣', pros:['剪影不对称，14px 也认得出', '圈是现成的表情道具：公转、进度、暖色、迸光', '和 Agent 头像同一家族，又一眼看出是主角'], risk:'圈在浅色背景上偏淡，需要那圈细描边。' },
-  fold:  { badge:'更有设计感', from:'Logo 的两片折带直接做成身体的两半', pros:['最像 Varin 品牌，适合官网和启动画面', '“两半分开又扣上”可以表达派发与汇总'], risk:'小尺寸时接缝看不清，可爱度略低。' },
-  mochi: { badge:'最大众', from:'桌宠角色的奶白外衫、雾蓝针织、发圈和扣饰', pros:['毛绒团子最讨喜，接近 Muse / Dots 的大众口味', '腮红和小嘴让情绪更直白'], risk:'容易和别家吉祥物撞型，Varin 的辨识度最弱。' },
-};
-const conceptsHost = document.getElementById('concepts');
-const conceptFigures = [];
-for (const key of Object.keys(CONCEPTS)) {
-  const card = document.createElement('article'); card.className = 'card concept';
-  const t = CONCEPT_TEXT[key];
-  card.innerHTML = `<div class="mini-stage"></div><span class="state-tag"></span><h3>${CONCEPTS[key].name}<span class="badge">${t.badge}</span></h3><p>来源：${t.from}</p><ul>${t.pros.map(x => `<li>${x}</li>`).join('')}</ul><p>风险：${t.risk}</p>`;
-  conceptsHost.appendChild(card);
-  const f = new Figure(card.querySelector('.mini-stage'), { concept:key, size:190 });
-  f.tag = card.querySelector('.state-tag'); io.observe(f.host); conceptFigures.push(f);
+// ---- 01 Idea ----
+const strip = document.getElementById('idea-strip');
+[['App 图标', '两笔互扣的标志', { wL:1 }, 'cream'], ['收起横笔', '两笔竖留在左右', { wL:.45 }, 'cream'], ['一双眼睛', '同一块方块，睁开眼', {}, 'cream'], ['有了表情', '同一对笔画变形', { wH:1, blush:.8 }, 'mist']].forEach(([title, text, params, pal]) => {
+  const fig = document.createElement('figure'), host = document.createElement('div'); fig.appendChild(host);
+  const cap = document.createElement('figcaption'); cap.innerHTML = `<b>${title}</b>${text}`; fig.appendChild(cap); strip.appendChild(fig);
+  new Figure(host, { size:150, still:true, tight:true, palette:pal, params });
+});
+const ideaLive = new Figure(document.getElementById('idea-live'), { size:300, tight:true, palette:heroPalette });
+let ideaPhase = 0;
+ideaLive.onTick = t => { const ph = Math.floor(t / 2.6) % 4; if (ph !== ideaPhase) { ideaPhase = ph; ideaLive.setState(ph === 1 ? 'sleeping' : ph === 2 ? 'waking' : ph === 3 ? 'result' : 'idle'); } };
+
+// ---- 02 States ----
+const stateGrid = document.getElementById('state-grid');
+for (const name of STATE_ORDER) {
+  const tile = document.createElement('article'); tile.className = 'tile';
+  tile.innerHTML = `<div class="mini"></div><div class="meta"><b>${STATES[name].label}</b><p>${STATE_TEXT[name]}</p><div class="status">状态行：${STATES[name].line}</div></div>`;
+  stateGrid.appendChild(tile);
+  aurora(tile.querySelector('.mini'), name);
+  const f = new Figure(tile.querySelector('.mini'), { size:300, box:[-14, 8, 228, 186], state:name === 'waking' ? 'sleeping' : name, palette:'mist', team:2 });
+  if (name === 'result') f.onTick = t => { if (t - f.stateAt > 3.4) f.setState('result'); };
+  if (name === 'waking') f.onTick = t => { if (f.stateName === 'sleeping' && t - f.stateAt > 2.2) f.setState('waking'); else if (f.stateName === 'waking' && t - f.stateAt > 2.4) f.setState('sleeping'); };
+  if (name === 'waiting') f.onTick = t => { if (t - f.stateAt > 7.2) f.setState('waiting'); };
 }
-let cycle = 0;
-const cycleStates = ['idle', 'listening', 'thinking', 'working', 'waiting', 'result', 'sleeping', 'waking', 'offline'];
-const advanceConcepts = () => { const s = cycleStates[cycle++ % cycleStates.length]; for (const f of conceptFigures) { f.setState(s); f.tag.textContent = STATES[s].label; } };
-advanceConcepts(); setInterval(advanceConcepts, 2800);
 
-// ---- Anatomy ----
-const anatomy = new Figure(document.getElementById('anatomy-figure'), { size:280 });
-io.observe(anatomy.host);
+// ---- 03 Moves ----
+const MOVE_TEXT = { hello:'左右摇两下，眯眼笑，像在挥手。', wink:'左眼弯成笑眼，旁边闪一颗星。', dispatch:'蹲下、一弹，把一个真实的 Agent 头像抛出去，眼睛一路跟着。',
+  celebrate:'蓄力、起跳、空中转一圈，落地果冻回弹，纸片撒出来。', logo:'两笔竖伸出横笔拼成标志，转半圈，再松开变回眼睛。', poke:'被点到的地方凹下去，吓一跳，然后笑。' };
+const moveGrid = document.getElementById('move-grid');
+MOVES.forEach(([name, label], i) => {
+  const tile = document.createElement('article'); tile.className = 'tile';
+  tile.innerHTML = `<div class="mini"></div><div class="meta"><b>${label}</b><p>${MOVE_TEXT[name]}</p></div>`;
+  moveGrid.appendChild(tile);
+  aurora(tile.querySelector('.mini'), ['idle', 'result', 'working', 'result', 'thinking', 'listening'][i]);
+  const f = new Figure(tile.querySelector('.mini'), { size:300, box:[-14, 8, 228, 186], palette:PAL_ORDER[(i + 2) % PAL_ORDER.length] });
+  let next = Figure.now + .8 + i * .35;
+  f.onTick = t => { if (t > next) { if (name === 'poke') f.poke(-Math.PI / 2 + .7); else f.play(name); next = t + (name === 'dispatch' ? 3.4 : name === 'logo' ? 3.6 : 3); } };
+});
 
-// ---- Family & sizes ----
-const family = (host, dark) => {
-  const title = document.createElement('div'); title.className = 'group-title'; title.innerHTML = `<span>家族 · ${dark ? '深色' : '浅色'}</span><span>Varin · 负责人 · 子 Agent</span>`; host.appendChild(title);
-  const row = document.createElement('div'); row.className = 'row'; host.appendChild(row);
-  const add = (label, markup) => { const fig = document.createElement('figure'); const box = document.createElement('div'); if (markup) box.innerHTML = markup; fig.appendChild(box); const cap = document.createElement('figcaption'); cap.textContent = label; fig.appendChild(cap); row.appendChild(fig); return box; };
-  const v = add('Varin', ''); const f = new Figure(v, { size:76, state:'idle' }); io.observe(v);
-  add('负责人', FAMILY['pebble-blue:48:lead']); add('负责人', FAMILY['notch-ochre:48:lead']);
-  add('子 Agent', FAMILY['slope-lilac:48:plain']); add('子 Agent', FAMILY['taper-sage:48:plain']); add('子 Agent', FAMILY['overlap-coral:48:plain']);
-  const mock = document.createElement('div'); mock.className = 'sidebar-mock'; host.appendChild(mock);
-  const item = (cls, icon, text) => { const d = document.createElement('div'); d.className = 'item ' + cls; const i = document.createElement('span'); if (typeof icon === 'string') i.innerHTML = icon; d.appendChild(i); const s = document.createElement('span'); s.textContent = text; d.appendChild(s); mock.appendChild(d); return i; };
-  const vi = item('on', null, 'Varin · 周末旅行'); new Figure(vi, { size:20, state:'working', still:true });
-  item('indent', FAMILY['pebble-blue:20:lead'], '行程整理（负责人）');
-  item('indent', FAMILY['slope-lilac:20:plain'], '酒店比价');
-  item('', FAMILY['notch-ochre:20:lead'], '依赖调查');
+// ---- 04 Colors ----
+const colorGrid = document.getElementById('color-grid');
+PAL_ORDER.forEach(name => {
+  const tile = document.createElement('article'); tile.className = 'tile';
+  tile.innerHTML = `<div class="mini"></div><div class="meta"><b>${PAL[name].name}</b><span class="mono">${PAL[name].base}</span></div>`;
+  colorGrid.appendChild(tile);
+  const f = new Figure(tile.querySelector('.mini'), { size:220, box:[0, 22, 200, 172], palette:name, auto:true });
+  f.nextMicro = Figure.now + 1.5 + Math.random() * 6;
+});
+
+// ---- 05 Product ----
+const mock = (host, dark) => {
+  const side = document.createElement('div'); side.className = 'side'; host.appendChild(side);
+  const main = document.createElement('div'); host.appendChild(main);
+  const title = document.createElement('div'); title.className = 'titlebar'; side.appendChild(title);
+  new Figure(title, { size:14, still:true, palette:'mist' }); title.appendChild(document.createTextNode('Bot · Varin'));
+  const row = (text, opts, cls = '') => { const r = document.createElement('div'); r.className = 'row ' + cls; const i = document.createElement('span'); r.appendChild(i);
+    r.appendChild(document.createTextNode(text)); side.appendChild(r); if (opts.agent) { const svg = el('svg', { viewBox:'0 0 64 64', width:20, height:20 }, i); Figure.prototype.avatar(opts.agent, svg); } else new Figure(i, { size:20, still:true, ...opts }); };
+  row('日常', { state:'idle', palette:'mist' }, 'on');
+  row('依赖调查', { agent:TEAM[3] }, 'sub');
+  row('写作', { agent:TEAM[0] }, 'sub');
+  row('周末旅行', { state:'waiting', palette:'mist' });
+  row('写作助手', { state:'sleeping', palette:'lilac' });
+  row('家里的电脑', { state:'offline', palette:'sage' });
+  const head = document.createElement('div'); head.className = 'head'; main.appendChild(head);
+  const figHost = document.createElement('div'); head.appendChild(figHost);
+  const f = new Figure(figHost, { size:118, tight:true, palette:'mist' });
+  const name = document.createElement('b'); name.textContent = 'Varin'; head.appendChild(name);
+  const status = document.createElement('span'); head.appendChild(status);
+  const cycle = ['idle', 'working', 'waiting', 'result', 'thinking']; let k = 0;
+  const statusText = { idle:'空闲', working:'2 项工作在进行', waiting:'写作在等你确认', result:'依赖调查返回了结果', thinking:'正在想…' };
+  status.textContent = statusText.idle;
+  f.onTick = t => { if (t - f.stateAt > 3.2) { k = (k + 1) % cycle.length; f.setState(cycle[k]); status.textContent = statusText[cycle[k]]; } };
+  const team = document.createElement('div'); team.className = 'team'; main.appendChild(team);
+  [[TEAM[3], '依赖调查', '返回了结果'], [TEAM[0], '写作', '正在编辑'], [TEAM[2], '验证', '排队中']].forEach(([m, who, what]) => {
+    const r = document.createElement('div'); r.className = 'who'; const svg = el('svg', { viewBox:'0 0 64 64', width:24, height:24 }, r); Figure.prototype.avatar(m, svg);
+    const b = document.createElement('span'); b.textContent = who; r.appendChild(b); const s = document.createElement('small'); s.textContent = what; r.appendChild(s); team.appendChild(r);
+  });
 };
-family(document.getElementById('family-light'), false); family(document.getElementById('family-dark'), true);
-const sizes = (host, dark) => { for (const s of [14, 20, 32, 48, 96, 160]) { const fig = document.createElement('figure'); const box = document.createElement('div'); fig.appendChild(box); const cap = document.createElement('figcaption'); cap.textContent = s + (s < 40 ? ' · 静态' : ''); fig.appendChild(cap); host.appendChild(fig); const f = new Figure(box, { size:s, state:'idle' }); io.observe(box); } };
-sizes(document.getElementById('sizes-light'), false); sizes(document.getElementById('sizes-dark'), true);
+mock(document.getElementById('mock-light'), false); mock(document.getElementById('mock-dark'), true);
 
-// ---- Table ----
-document.getElementById('state-table').innerHTML = STATE_ORDER.map(name => { const s = STATES[name]; return `<tr><td>${s.label}</td><td>${s.pose}</td><td>${s.motion}</td><td>${s.ring}</td></tr>`; }).join('');
+// ---- 06 Curves ----
+const curve = (id, fn, color) => {
+  const c = document.getElementById(id), g = c.getContext('2d'); g.lineWidth = 2.4; g.strokeStyle = color; g.lineCap = 'round';
+  g.beginPath(); for (let i = 0; i <= 140; i++) { const x = i / 140, y = fn(x); const px = 6 + x * 268, py = 66 - y * 48; i ? g.lineTo(px, py) : g.moveTo(px, py); } g.stroke();
+  g.strokeStyle = 'rgba(0,0,0,.08)'; g.lineWidth = 1; g.beginPath(); g.moveTo(6, 66); g.lineTo(274, 66); g.moveTo(6, 18); g.lineTo(274, 18); g.stroke();
+};
+curve('c-body', x => { const t = x * 1.4, z = 16 / (2 * Math.sqrt(260)), w = Math.sqrt(260) * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * Math.sqrt(260) * t) * (Math.cos(w * t) + z / Math.sqrt(1 - z * z) * Math.sin(w * t)); }, '#6d92dc');
+curve('c-jelly', x => .5 + .5 * Math.exp(-x * 4.2) * Math.cos(x * 2 * Math.PI * 3.6), '#e47e69');
+curve('c-face', x => { const t = x * 1.1, z = 27 / (2 * Math.sqrt(320)), w0 = Math.sqrt(320), w = w0 * Math.sqrt(Math.max(1e-6, 1 - z * z)); return 1 - Math.exp(-z * w0 * t) * (Math.cos(w * t) + z / Math.sqrt(Math.max(1e-6, 1 - z * z)) * Math.sin(w * t)); }, '#5b7a45');
 </script>
 </body>
 </html>

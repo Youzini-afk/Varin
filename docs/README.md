@@ -40,7 +40,7 @@
 - [工具契约与执行环境优化](design/tool-contracts-and-execution-environment.md)：Windows Shell、PATH 与原生 rg、进程输入回执、完整工具目录、文件与文档默认读取及错误反馈；已实现，当前契约见上面的领域文档。
 
 ## 正在评审的设计
-- [Varin 形象：圈圈](design/varin-figure.md)、[交互设计稿](design/varin-figure-preview/index.html)：给 Bot 设计的大众形象，含三个方向、状态合同对照和动效规则；提案，尚未实施。
+- [Varin 形象：标志即面孔](design/varin-figure.md)、[交互设计稿](design/varin-figure-preview/index.html)：Bot 的大众形象，眼睛来自标志的两笔竖，含状态合同对照、颜色和动效规则；提案，尚未实施。
 - [Q 版桌宠与主题差分](design/desktop-companion.md)：32 类表现规划、坐姿电脑工作、默认色[母版与8张分镜](design/desktop-companion-assets/README.md)、真实状态映射及换位置交互；已合入 main 并接入多会话 Bot 归属，美术逐帧验收与 Windows/macOS 原生验证仍待进行。
 - [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：按需隔离、实际 Host 依赖准入与清晰失败、各平台安装交付、稳定来源和增量分叉；已有引擎与挂载适配器继续完善，新准入合同和性能改造的实施状态见原文。
 - [外部 Harness 接入与跨 Agent 协作](design/external-harness-integration.md)：直接会话、外部预设、派发、消息与文件交换已接入；CLI / Skills / MCP 共享按产品决定暂缓。当前支持边界见[外部 Agent](external-agents.md)。
