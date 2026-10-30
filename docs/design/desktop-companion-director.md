@@ -6,9 +6,9 @@
 
 ## 1. 她是谁：主管与秘书，不是所有项目的亲自执行者
 
-下列统筹分镜属于 **Bot 模式**。Agent 模式是用户直接与项目主 agent 对话，Varin 只提醒真实事项/授权/问题/结果；检查项目不等于她听取汇报或批示。工作台模式与每个项目归属分别核验，Bot 视图中的普通 Agent 后台任务也不能被改演成 Varin 派发。
+下列统筹分镜属于**关联了某个 Bot** 的桌宠。她陪伴哪个 Bot 由用户在桌宠菜单里明确选择，未选择时默认 Bot 工作台打开的第一个 Bot；选择“Agent 工作台（不绑定 Bot）”则是 Agent 桌宠：用户直接与项目主 agent 对话，Varin 只提醒真实事项/授权/问题/结果。工作台壳、聚焦的会话和正在查看的任务都不决定她是谁；查看只改变检查视角。读不到 Bot 目录时保持未知，只做中性提醒。
 
-Bot 的权威 `BotProfile.entry` 是 Varin 本体入口 E，不是另一个负责人。只有由稳定、精确分支关系证明的 E→A/B 直接任务才是项目负责人；A→a1 才是较小子精灵。缺少或冲突的根/关系证据显示普通 task 身份，不猜负责人层级；E 的请求仍在主体提醒和列表中保留精确导航，但不另画团子。
+Bot 的每个会话都是 Varin 本体 E（一个 Bot 可以有多个会话），由 Catalog 的会话绑定确定，不是另一个负责人。会话直接派发的 A/B 才是负责人；A→a1 才是较小子精灵。归属其他 Bot 的工作只做中性提醒；Bot 明确关注（事项关联）的普通任务标为“关注中”，不当作派发。缺少会话绑定或关系证据时显示普通 task 身份，不猜负责人层级；E 的请求仍在主体提醒和列表中保留精确导航，但不另画团子。
 
 ```text
 用户：交代工作 / 做出决定 / 查看结果
@@ -64,7 +64,7 @@ Varin：接待、协调、跟进、递交待决事项、呈现已确认结果
 | 经已核验 Bot 根实际派发新项目 | 轻坐正 → 小幅收拢手势 → 回舒服监督位；不向某个负责人槽位递物 | 普通新 Run 不触发收件；对应主 agent 自己进入工作状态 |
 | 工作推进／用户检查项目 | 安静监督，偶尔自然短停手；检查只改变详情 | 安静陪伴；不演听取汇报、批示或执行项目工具 |
 | 真实授权／问题 | 认真停一拍 → 面用户短开掌 → 真收手等待决定 | 抬眼注意用户 → 一次轻提醒 → 回可继续查看的稳态 |
-| 观察到某项目本轮结果 | 小幅放松肩部、克制确认 → 回稳态，不接不存在的报告 | 一次面用户提示，不演接报告、汇总或派发 |
+| 观察到某项目本轮结果 | 负责人的 Run 结束或报告送回本身不演；Bot 会话向用户公开回复时才汇总呈现；静默处理的后台回合保持安静 | 普通任务自己的 Run 结束时一次面用户提示，不演接报告、汇总或派发 |
 | 异常／结果未知 | 笑意收敛、停手关注，不责备、不慌乱 | 同样温和提醒；文字区分已确认失败与未知结果 |
 | 当前覆盖范围明确安静 | 舒服共处及合资格的有限生活动作 | 同一人格；不把未选择项目当作全局空闲 |
 
@@ -98,14 +98,16 @@ A 自己显示精确本轮结果，B 继续工作。人物最多一次通用克�
 
 ## 6. 精确关系：只画真实负责人和真实子队
 
-全局 attention 的 branch 是执行身份，不单凭 parentThreadId 判定角色。只读 `botEntries` 从 Host 校验过的 Bot profile entry/revision 提供本体边界，`delegations` 从既有稳定派发关系提供精确父子分支与原始 acceptedCursor；终态移出 CURRENT 不能让项目负责人退化成未知子任务。backend `7fa96e77` 已实现并以 native fixture 验证同事务紧凑 `teamExecutions`，不是未来占位合同。每项包含原 parent thread/branch/run、child operation、execution ID、child thread/branch、原已保存头像、owner state、childRunId/childRunState 及必要 activity。只有 exact relation 才把子请求接到具体父 branch；单独 parentThreadId 仍不足以猜分支归属。
+全局 attention 的 branch 是执行身份，不单凭 parentThreadId 判定角色。每个 branch 带 `botSessionThreadId`（Bot 执行祖先所在的会话，会话本身等于自己），与 `botId` 一起来自 Catalog 的会话绑定，与其余事实同一个 SQLite 快照；`delegations` 从既有稳定派发关系提供精确父子分支、原始 acceptedCursor、同一 Agent 被再次交办的 `continuedCursor` 与发起方、以及最近一次实际送回的报告；`follows` 来自 Bot 事项的明确关注。终态 latest Run 另带 `visibleOutput`，区分公开回复与静默回合；终态移出 CURRENT 不能让项目负责人退化成未知子任务。backend `7fa96e77` 已实现并以 native fixture 验证同事务紧凑 `teamExecutions`，不是未来占位合同。每项包含原 parent thread/branch/run、child operation、execution ID、child thread/branch、原已保存头像、owner state、childRunId/childRunState 及必要 activity。只有 exact relation 才把子请求接到具体父 branch；单独 parentThreadId 仍不足以猜分支归属。
 
 当前关系范围是现有 Family CURRENT 中每个真实 child 的最新 execution；包括仍需交付/结算的终态成员，不含任意历史。child Run terminal 而 delegated owner 仍 ready 时为 settling；owner 真正 terminal 才离场。原 parentRun 跨 continuation 保留。没有任务输入/正文/工具参数，没有新的调度或写入，沿同一个全局只读 attention 流更新，不为每个项目开 full snapshot/projection。
 每个可见工作席显示实际主 agent，并通过 `portfolio.teams` 的 projectKey 展示自己的真实直接子队（最多三席、每席最多三个可见成员，各有真实 overflow）；空队保持空，不凭负责人工作状态捏造子成员。未覆盖的小队信息显示未读取/未知，不能用装饰精灵凑数。旧父 Run 派发的真实工作可继续属于同一父 branch，精灵按自己的原 parentRun/execution 校验；terminal 所有结局都中性离场，失败保留在结果/待处理。准备失败但未终结可显示温和问题标记。
 
 同一 child 多 execution 的头像身份不变，仍有工作就不能被旧终态移除。原全局 ledger 只计一次请求；父卡“子任务需要你”是指向同一项，不复制请求数字。
 
-Bot 收件只由已核验根的真实新派发事件触发：同 epoch 的前后 snapshot cursor 区间中出现原 acceptedCursor，即使首个可见 Run 已在 executing 也可一次接件；首屏、重连、刚核验根、已终态派发不补演开工。收件尚无 child Run 时不借用 parentRun 冒充其执行身份。
+Bot 收件只由所关联 Bot 会话的真实新派发事件触发：同 epoch 的前后 snapshot cursor 区间中出现原 acceptedCursor，或同一 Bot 会话再次交办同一 Agent 的 continuedCursor，即使首个可见 Run 已在 executing 也可一次接件；用户在工作台直接续接不是 Bot 交办。首屏、重连、刚核验根、已终态派发不补演开工。收件尚无 child Run 时不借用 parentRun 冒充其执行身份。
+
+attention 读取只加载可见 branch 与仍有未结算工作的 branch，未结束的 Run/operation 走部分索引；Catalog 数据未变（data_version 与自身写入计数）时直接复用上一快照，并发读取共享同一次读取。桌宠只在实际影响 attention 的事件后重读，对话内容追加与已读位置不触发。外部 Harness 的子任务有自己的会话/turn 身份和审批通道，当前不并入原生 attention，coverage 明确为 `external: unsupported`，不伪造原生 Run。
 
 ## 7. 下一轮并发仲裁：保留完整句子，事实不等动画
 
@@ -145,18 +147,18 @@ Local attention and global idle eligibility use this same management mode. A col
 
 有限Linux正常入口已观察无需review控件加载、绝对坐标拖动精确跟随、悬空去凳/落座恢复与闭盖转开盖注意。既有候选还验证了权限/问题更新和单次装饰场景渲染进程丢失后恢复；拖动时小队隐藏，落座按最新事实恢复。所有动作完整时序、Windows/macOS及真实Host匹配回执到Agent动作端到端尚未证明；窗口截图偶发空白与全桌面连续可见样本存在差异，不能据此前者定性实际人物消失。查看、hover和轻点从不代替批准或回答。
 
-### Product role binding: Bot versus Agent (2026-10-29)
+### 陪伴对象：Bot 还是 Agent
 
-The selected upright art capability does **not** determine the product role. The companion reads the existing authenticated `ExtensionsAPI.hostState` / `waitForHostState` workbench snapshot and resolves the authoritative user profile and built-in shell. `varin.bot` + Bot Workspace means **Bot coordinator**: intake, handoff, listening and presentation remain available. The default Agent profile + Agent Workspace means **Agent companion**: the user talks directly to the project lead; a new Run does not imply a delegation by Varin, and inspecting a project does not make its leader report to her. Exact pending items and observed results can prompt a user-facing notice while the project's own lead/team retains its work state.
+美术能力不决定她的身份，工作台壳也不决定。桌宠读取 Host 的 Bot 目录，按用户保存在本机的选择（`varin.companion.association`）关联一个 Bot；没有选择时用 Bot 工作台默认打开的第一个可用 Bot，所选 Bot 被归档或删除时同样回到默认；用户选“Agent 工作台”则保持 Agent 桌宠。读取 Bot 目录不会创建 Bot。
 
-Thread `runtime: 'agent'`, parent/child links, the existence of a Bot, directory selection and task titles are not product-mode evidence. Missing/non-authoritative/custom shell state remains `unknown` and uses non-delegating notification semantics until a known role is restored. Endpoint generation and workbench revisions fence stale responses. Switching product roles clears transient intake/result choreography and establishes a new edge baseline; historical work is not replayed as a new delegation.
-
-The existing normal profile switch is the main window's **WorkbenchProfileSwitcher** (Agent / IDE / Varin bot), not the workspace directory selector. Offline coordination fixtures remain explicitly labelled and do not supply the real product mode. No Host protocol, execution authority, public art or native window geometry changes in this role-binding stage.
+关联 Bot 时她是 **Bot 统筹**：只有这个 Bot 的会话派发或再次交办才接件，只有这个 Bot 会话自己的回合才让她敲键，会话公开回复才汇总呈现；派发出去的 Agent 在自己的卡上工作。**Agent 桌宠**时用户直接与项目主 agent 对话，新的 Run 不代表 Varin 派发，查看项目也不等于负责人向她汇报；真实待办与普通任务结果只做面向用户的提醒。切换关联对象会清除临时的接件/结果节拍并建立新的基线，不把历史工作重演为新派发。离线协调 fixture 继续明确标注，不提供真实身份。
 
 ### 正在执行的工作姿态边界（2026-10-30）
 
-`body.workActive` 只表达当前健康的原生执行观察：分支未归档/删除，`activeRunId` 与 `currentRun.id` 精确一致，Run 为 `generating` 或 `executing` 且未请求取消。Bot 使用已核验入口或精确派发关系，入口自己运行即使没有外部项目卡也可成立；Agent 使用已知未绑定 Bot 的真实任务关系。角色、归属或健康未知不借用别人的执行权。待回答/授权、失败、结果未知、取消信息优先于工作姿态；隐藏与抓放期间撤下工作意图，恢复只采用最新观察，不补播旧工作。
+`body.workActive` 只表达当前健康的原生执行观察：分支未归档/删除，`activeRunId` 与 `currentRun.id` 精确一致，Run 为 `generating` 或 `executing` 且未请求取消。关联 Bot 时只有该 Bot 会话自己的 Run 成立，即使没有外部项目卡；她派发出去的 Agent 正在执行时只显示在对应卡上。Agent 桌宠使用已知未绑定 Bot 的真实任务关系。角色、归属或健康未知不借用别人的执行权。待回答/授权、失败、结果未知、取消信息优先于工作姿态；隐藏与抓放期间撤下工作意图，恢复只采用最新观察，不补播旧工作。
 
 原生同步工具批次在 `executing` 中执行，模型请求在 `generating` 中执行。`waiting` 则包括策略暂停、准备及注册的观察等待；其中 `wait_process` 可以只停放观察 Run，而独立进程仍在运行。当前紧凑 attention 不提供独立进程的实际运行 phase，`hasUnsettledWork` 同时包含等待、未结算和不确定效果，**不能据此补猜后台进程正在执行**。真实子任务自身的活跃 Run 仍可提供工作证据；单独 parked Run/未结算效果不能。此次不新增 native 遥测、调度器或写权限。
+
+正式 bundle 的 `v5-work-active` 已用安装的 bundle.json 与实际播放器路线验证：从闭盖、监督和欢迎入口可达并可返回，权限/问题可经已画路线打断后恢复，抓起落下后继续工作（`workActiveRoute.test.ts`）。这是路线与状态验证，不是逐帧视觉验收。
 
 `work-active` 是看屏幕、敲键、停下来阅读的表现性动作，不声称人物实际操作了键盘、文件或工具。只有已安装且有匹配姿态路线的动作可播放；资源缺席时保留原有中立看护。持续循环不作为一次性通知消费，变化的工具进度不重启动作；状态退出依照真实素材的安全收手路线，抓放使用同源去凳/恢复图。
