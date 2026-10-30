@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Varin · Bot 工作台原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="frame" id="frame" data-size="desktop" data-sidebar="closed" data-panel="open">
+
+    <!-- ================= Bot 外壳 ================= -->
+    <div class="shell" id="botShell">
+      <header class="titlebar">
+        <div class="tb-left">
+          <button class="tb-btn" id="sidebarToggle" type="button" aria-label="打开侧栏（Ctrl B）" data-tip="侧栏 · Ctrl B"><i data-ic="side"></i><span class="tb-dot" id="sidebarDot" hidden></span></button>
+          <button class="profile-pill" type="button" aria-label="模式：Bot"><i data-ic="bot"></i><span>Bot</span><i data-ic="chev" class="dim"></i></button>
+        </div>
+        <div class="tb-title" id="tbTitle">
+          <div class="tb-main swap" id="sessionTitle"><span class="swap-cur">日常</span></div>
+          <div class="tb-sub swap" id="sessionSub"><span class="swap-cur">Varin</span></div>
+        </div>
+        <button class="tb-bot" id="tbBot" type="button" aria-label="打开 Bot 面板">
+          <span class="fig-host" data-fig="tb"></span>
+          <span class="tb-bot-text"><b id="tbBotName">Varin</b><span class="swap" id="tbBotState"><span class="swap-cur">空闲</span></span></span>
+        </button>
+        <div class="tb-right">
+          <span class="local-pill"><i data-ic="stack"></i><span>Local</span></span>
+          <button class="tb-btn" id="panelToggle" type="button" aria-label="右侧面板" aria-pressed="true" data-tip="面板"><i data-ic="panel"></i><span class="tb-dot warn" id="panelDot" hidden></span></button>
+        </div>
+      </header>
+
+      <div class="body">
+        <aside class="sidebar" id="sidebar" aria-label="Bot 与会话">
+          <div class="sb-inner">
+            <div class="sb-actions">
+              <button class="sb-new" id="newSession" type="button"><i data-ic="new"></i><span>新建会话</span><kbd>Ctrl N</kbd></button>
+              <button class="sb-icon" type="button" aria-label="搜索会话"><i data-ic="search"></i></button>
+            </div>
+            <nav class="sb-list" id="sbList" aria-label="会话">
+              <div class="sb-pill sel" id="selPill" aria-hidden="true"></div>
+              <div class="sb-pill hov" id="hovPill" aria-hidden="true"></div>
+              <div id="sbGroups"></div>
+            </nav>
+            <div class="sb-foot">
+              <button class="sb-foot-btn" type="button"><i data-ic="plus"></i><span>新建 Bot</span></button>
+              <button class="sb-icon" type="button" aria-label="设置"><i data-ic="gear"></i></button>
+            </div>
+          </div>
+        </aside>
+        <div class="scrim" id="sidebarScrim"></div>
+
+        <main class="main" id="main">
+          <div class="chat" id="chat">
+            <div class="scroller" id="scroller">
+              <div class="col" id="col"></div>
+            </div>
+            <div class="draft" id="draft" hidden>
+              <span class="fig-host" data-fig="draft"></span>
+              <h1 class="draft-title" id="draftTitle">和 Varin 聊点什么</h1>
+              <div class="draft-slot" id="draftSlot"></div>
+              <div class="starters" id="starters"></div>
+            </div>
+            <button class="jump" id="jump" type="button" hidden><i data-ic="down"></i>回到最新</button>
+            <div class="dock" id="dock">
+              <div class="queue" id="queue"></div>
+              <div class="composer" id="composer">
+                <textarea id="input" rows="1" aria-label="消息" placeholder="和 Varin 说…"></textarea>
+                <div class="cf">
+                  <button class="cf-ic" type="button" aria-label="添加附件" data-tip="附件"><i data-ic="plus"></i></button>
+                  <button class="cf-ic" type="button" aria-label="引用" data-tip="引用事项、项目、会话或记忆"><i data-ic="at"></i></button>
+                  <span class="cf-gap"></span>
+                  <button class="cf-chip" type="button" data-tip="档案里的模型"><span class="model-mark"></span><span>主力模型</span><i data-ic="chev" class="dim"></i></button>
+                  <button class="send" id="send" type="button" aria-label="发送" data-state="idle"><i data-ic="up" class="i-up"></i><i data-ic="stop" class="i-stop"></i></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="rp" id="rp" aria-label="Bot 面板">
+            <div class="rp-handle" id="rpHandle" role="separator" aria-orientation="vertical" aria-label="调整面板宽度" aria-valuemin="300" aria-valuemax="560" aria-valuenow="360" tabindex="0"></div>
+            <div class="rp-inner" id="rpInner">
+              <div class="sheet-grab" id="sheetGrab"><i></i></div>
+              <section class="stage" id="stage">
+                <button class="stage-menu tb-btn" id="stageMenu" type="button" aria-label="Bot 菜单" aria-haspopup="menu"><i data-ic="dots"></i></button>
+                <div class="stage-floor" aria-hidden="true"></div>
+                <button class="stage-fig" id="stageFig" type="button" aria-label="Bot 形象"><span class="fig-host" data-fig="stage"></span></button>
+                <div class="stage-text">
+                  <button class="stage-name swap" id="stageName" type="button"><span class="swap-cur">Varin</span></button>
+                  <div class="stage-state" id="stageState" aria-live="polite"><span class="swap" id="stageStateText"><span class="swap-cur">空闲</span></span><button class="stage-wake" id="stageWake" type="button" hidden>叫醒</button></div>
+                </div>
+              </section>
+              <div class="tabs" role="tablist" id="tabs" aria-label="Bot 面板">
+                <span class="tab-ink" id="tabInk" aria-hidden="true"></span>
+              </div>
+              <div class="panes" id="panes"></div>
+            </div>
+          </aside>
+          <div class="scrim sheet-scrim" id="sheetScrim"></div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ================= 工作台外壳 ================= -->
+    <div class="shell wb" id="wbShell" hidden>
+      <header class="titlebar">
+        <div class="tb-left">
+          <button class="tb-btn" type="button" aria-label="侧栏"><i data-ic="side"></i></button>
+          <button class="profile-pill" type="button"><i data-ic="workbench"></i><span>工作台</span><i data-ic="chev" class="dim"></i></button>
+          <button class="back-chip" id="backChip" type="button" aria-label="回到 Bot"><i data-ic="back"></i><span class="fig-host" data-fig="back"></span><span id="backLabel">Varin · 日常</span></button>
+        </div>
+        <div class="tb-title">
+          <div class="tb-main" id="wbTitle">任务</div>
+          <div class="tb-sub" id="wbSub"></div>
+        </div>
+        <div class="tb-right">
+          <span class="local-pill"><i data-ic="stack"></i><span>Local</span></span>
+          <button class="tb-btn" type="button" aria-label="面板"><i data-ic="panel"></i></button>
+        </div>
+      </header>
+      <div class="body">
+        <aside class="sidebar wb-side"><div class="sb-inner" id="wbSide"></div></aside>
+        <main class="main"><div class="chat"><div class="scroller"><div class="col" id="wbCol"></div></div>
+          <div class="dock"><div class="composer"><textarea rows="1" placeholder="继续这项工作…" aria-label="消息"></textarea>
+            <div class="cf"><button class="cf-ic" type="button"><i data-ic="plus"></i></button><button class="cf-ws" type="button"><i data-ic="folder"></i><span id="wbProject">paper</span></button><span class="cf-gap"></span><button class="send" type="button"><i data-ic="up" class="i-up"></i></button></div></div></div>
+        </div></main>
+      </div>
+    </div>
+
+    <div class="lattice" id="lattice" hidden aria-hidden="true"></div>
+    <div class="menu" id="menu" role="menu" hidden></div>
+    <div class="toast" id="toast" role="status" hidden></div>
+  </div>
+
+  <!-- ================= 实验室（评审工具，不属于产品） ================= -->
+  <section class="lab" id="lab" data-open="true" aria-label="原型实验室">
+    <button class="lab-head" id="labToggle" type="button" aria-expanded="true"><span>原型实验室</span><i data-ic="chev"></i></button>
+    <div class="lab-body">
+      <div class="lab-group">
+        <div class="lab-label">场景</div>
+        <div class="lab-btns">
+          <button type="button" data-scene="dispatch">交办一件事</button>
+          <button type="button" data-scene="need">子任务需要你</button>
+          <button type="button" data-scene="report">回报回到原会话</button>
+          <button type="button" data-scene="remember">记住一件事</button>
+          <button type="button" data-scene="sleep">休息 / 叫醒</button>
+          <button type="button" data-scene="offline">电脑断开 / 恢复</button>
+          <button type="button" data-scene="reset" class="ghost">重置</button>
+        </div>
+      </div>
+      <div class="lab-row"><span>窗口</span><div class="seg" data-lab="size"><span class="seg-knob"></span><button type="button" data-v="desktop" aria-pressed="true">桌面</button><button type="button" data-v="narrow" aria-pressed="false">窄窗口</button><button type="button" data-v="mobile" aria-pressed="false">手机</button></div></div>
+      <div class="lab-row"><span>主题</span><div class="seg" data-lab="theme"><span class="seg-knob"></span><button type="button" data-v="light" aria-pressed="true">浅色</button><button type="button" data-v="dark" aria-pressed="false">深色</button></div></div>
+      <div class="lab-row"><span>动效</span><div class="seg" data-lab="motion"><span class="seg-knob"></span><button type="button" data-v="full" aria-pressed="true">完整</button><button type="button" data-v="reduced" aria-pressed="false">简化</button><button type="button" data-v="off" aria-pressed="false">关闭</button></div></div>
+      <div class="lab-row"><span>形象</span><select id="figOverride" aria-label="形象状态"><option value="">按真实状态</option><option value="idle">空闲</option><option value="listening">倾听</option><option value="thinking">思考</option><option value="working">工作</option><option value="waiting">等你</option><option value="result">有结果</option><option value="sleeping">休息</option><option value="waking">唤醒中</option><option value="offline">离线</option></select></div>
+      <label class="lab-row lab-switch"><span>慢放 ×4</span><input type="checkbox" id="slowmo" role="switch"><span class="switch" aria-hidden="true"><i></i></span></label>
+    </div>
+  </section>
+
+  <script src="../motion-preview/motion.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
