@@ -22,6 +22,7 @@ import { readCompanionPackage, readCompanionEndpoints, type CompanionEndpoints, 
 import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
 import { route, type PlaybackAsset } from '@/components/companion/playback.mjs';
+import { paintCompanionFrame } from '@/components/companion/paintCompanionFrame';
 import { pickupPreloadDependencies } from '@/components/companion/pickupPreload';
 import { projectCompanionIntent, newlyAnsweredQuestion, companionObserverAction, companionReceipt, currentCompanionReceipt, consumeCompanionReceipt, type CompanionReceipt, type ObservationHealth } from '@/components/companion/presentation';
 import { initializeLocale, I18nProvider, useI18n, type I18nKey } from '@/lib/i18n';
@@ -162,6 +163,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     }
   }, [providerProgress, intent.state, health, assetList, outputBeat]);
   const canvas = React.useRef<HTMLCanvasElement>(null);
+  const paintSurface = React.useRef<HTMLCanvasElement | null>(null);
   const beforeNativeLift = React.useRef<() => void>(() => {});
   const repeatTapAllowed = React.useRef(false);
   const companionWindow = useCompanionWindow(canvas, review, () => beforeNativeLift.current(), () => repeatTapAllowed.current);
@@ -489,12 +491,11 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     }
   }, [automatic.packageId, assetList, asset?.id, playing, manualReview]);
   const drawActualFrame = (sequence: CompanionPackage, images: ImageBitmap[], exposure: number) => {
-    const node = canvas.current, context = node?.getContext('2d');
-    if (!node || !context || images.length !== sequence.pages.length) return;
-    [node.width, node.height] = sequence.canvas;
-    const frame = sequence.frames[exposure] ?? sequence.frames[0]!;
-    context.clearRect(0, 0, node.width, node.height);
-    context.drawImage(images[frame.page]!, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
+    const node = canvas.current;
+    if (!node) return;
+    paintSurface.current ??= document.createElement('canvas');
+    if (!paintCompanionFrame(node, paintSurface.current, sequence, images, exposure)) return;
+    const frame = sequence.frames[exposure]!;
     const cue = frame.cue ? sceneCue(frame.cue, sequence.sceneAction ?? sequence.action) : 'engaged';
     const drawnContext = !manualReview && !playing && automatic.packageId === sequence.id && automatic.exposure === exposure ? automatic.context : null;
     displayedDrawing.current = { packageId: sequence.id, exposure, context: drawnContext };
