@@ -1,5 +1,6 @@
 import type { BotActivity, BotMemoryItem, BotPresence, BotSession, BotSummary, BotWorkItem, ThreadIdentity } from '@varin/application-client';
 import type { BotActivityEvent, BotActivityInput, CalendarOccurrenceState, MessageParticipant, Outcome, Run, RunState, ThreadSummary } from '@varin/protocol';
+import type { IconName } from '@/components/icon/icons';
 import type { I18nKey } from '@/lib/i18n';
 
 /**
@@ -218,6 +219,29 @@ export function stateLine(bot: BotSummary, state: BotFigureState, details: { nee
     default: return { key: 'bot.state.idle', tone: 'none' };
   }
 }
+
+const STATE_ICON: Partial<Record<I18nKey, IconName>> = {
+  'bot.state.offline': 'cloud-off',
+  'bot.state.waking': 'loader-4',
+  'bot.state.goingToSleep': 'moon',
+  'bot.state.sleeping': 'moon',
+  'bot.state.sleepFailed': 'error-warning',
+  'bot.state.wakeFailed': 'error-warning',
+  'bot.state.archived': 'archive',
+  'settings.bots.deleting': 'delete-bin',
+  'settings.bots.deleteFailed': 'error-warning',
+  'bot.state.waitingPermission': 'shield-check',
+  'bot.state.waitingQuestion': 'question',
+  'bot.state.waitingMany': 'notification-3',
+  'bot.state.result': 'check',
+  'bot.state.thinking': 'sparkling',
+  'bot.state.workingOne': 'pulse',
+  'bot.state.workingMany': 'pulse',
+  'bot.state.listening': 'chat-3',
+};
+/** The small mark before the state line; it turns only while something is in transition. */
+export const stateIcon = (line: BotStateLine): { icon: IconName; spin: boolean } =>
+  ({ icon: STATE_ICON[line.key] ?? 'emotion-happy', spin: line.key === 'bot.state.waking' });
 
 /** The pale word beside a Bot in the sidebar; empty when there is nothing to say. */
 export function shortState(state: BotFigureState): { key: I18nKey; tone: 'warn' | 'none' } | null {

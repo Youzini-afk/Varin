@@ -2,7 +2,9 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { SwapText } from '@/components/motion/SwapText';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { useMainColumnGlide, useSlidingUnderline } from '@/components/layout/railMotion';
+import { useMainColumnGlide } from '@/components/layout/railMotion';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import type { IconName } from '@/components/icon/icons';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { documentMotionLevel } from '@/lib/motion/preference';
 import { cn } from '@/lib/utils';
@@ -10,6 +12,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { BOT_PANEL_TABS, BOT_PANEL_WIDTH, clampBotPanelWidth, dampBotPanelWidth, useBotLayout, type BotPanelTab } from './botLayout';
 import { BotPanelContext, useBotPanel, type BotPanelModel } from './botPanelModel';
 import { BotFigure } from './BotFigure';
+import { useSegmentKnob } from './segmentKnob';
+import { stateIcon } from './botPresentation';
 import { BotOverviewPane } from './BotOverviewPane';
 import { BotActivityPane } from './BotActivityPane';
 import { BotMemoryPane } from './BotMemoryPane';
@@ -17,6 +21,7 @@ import { BotSchedulePane } from './BotSchedulePane';
 import { BotProfilePage, type BotProfileGuard } from './BotProfilePage';
 
 const TAB_LABEL: Record<BotPanelTab, I18nKey> = { overview: 'bot.tab.overview', activity: 'bot.tab.activity', memory: 'bot.tab.memory', schedule: 'bot.tab.schedule' };
+const TAB_ICON: Record<BotPanelTab, IconName> = { overview: 'list-unordered', activity: 'history', memory: 'fingerprint', schedule: 'calendar-schedule' };
 const PANE: Record<BotPanelTab, React.FC> = { overview: BotOverviewPane, activity: BotActivityPane, memory: BotMemoryPane, schedule: BotSchedulePane };
 const EXIT_MS = 110;
 
@@ -34,6 +39,7 @@ function BotStage() {
   const resting = state !== 'awake' && state !== 'sleep-failed';
   const transitioning = state === 'sleeping' || state === 'waking';
   const text = t(line.key, line.params);
+  const mark = stateIcon(line);
   return <div className="bot-stage">
     <span className="bot-stage-floor" aria-hidden="true" />
     <div className="bot-stage-menu">
@@ -54,10 +60,16 @@ function BotStage() {
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
-    <div className="bot-stage-figure"><BotFigure key={bot.id} className="bot-figure-arrive" state={model.figure} size={104} label={bot.name} /></div>
+    <div className="bot-stage-figure">
+      <BotFigure key={bot.id} className="bot-figure-arrive" state={model.figure} size={112} label={bot.name} />
+      <button type="button" className="bot-stage-edit" aria-label={t('bot.stage.editProfile')} title={t('bot.stage.editProfile')} onClick={model.openProfile}>
+        <Icon name="pencil" className="size-4" />
+      </button>
+    </div>
     <div className="bot-stage-text">
       <button type="button" className="bot-stage-name truncate" onClick={model.openProfile}><SwapText text={bot.name} hold={0} /></button>
       <div className="bot-stage-state" data-tone={line.tone === 'warn' ? 'warn' : undefined}>
+        <span className="bot-stage-state-mark" aria-hidden="true"><Icon name={mark.icon} className={cn('size-2.5', mark.spin && 'animate-spin')} /></span>
         <SwapText text={text} className="min-w-0" />
         {line.wake ? <button type="button" className="bot-stage-wake" disabled={model.busy} onClick={() => model.changeState(state === 'wake-failed' ? 'retry' : 'wake')}>{t('settings.bots.wake')}</button> : null}
       </div>
@@ -79,7 +91,7 @@ function BotPanelContent() {
   const setTab = useBotLayout(state => state.setTab);
   const seen = useBotLayout(state => state.seen[model.bot.id]);
   const markSeen = useBotLayout(state => state.markSeen);
-  const underline = React.useRef<HTMLSpanElement>(null);
+  const knob = React.useRef<HTMLSpanElement>(null);
   const tabRow = React.useRef<HTMLDivElement>(null);
   const panes = React.useRef<HTMLDivElement>(null);
   const [entered, setEntered] = React.useState<{ tab: BotPanelTab; direction: 1 | -1 } | null>(null);
@@ -88,7 +100,7 @@ function BotPanelContent() {
   const [profileLeaving, setProfileLeaving] = React.useState(false);
   const [profileShown, setProfileShown] = React.useState(model.profileOpen);
 
-  useSlidingUnderline(underline, model.profileOpen ? '' : tab);
+  useSegmentKnob(tabRow, knob, '[role="tab"][aria-selected="true"]', model.profileOpen ? '' : tab);
 
   // The old pane leaves as a still copy of what was on screen, so it is not mounted (and read) again.
   const paneNode = React.useRef<HTMLDivElement | null>(null);
@@ -169,13 +181,20 @@ function BotPanelContent() {
   return <BotPanelContext.Provider value={guardedModel}>
     <div className="bot-panel-body" aria-label={t('bot.panel.aria')} role="complementary">
       <BotStage />
-      <div ref={tabRow} className="bot-tabs" role="tablist" aria-label={t('bot.panel.aria')} onKeyDown={onTabKey}>
-        <span ref={underline} className="tab-underline" aria-hidden="true" data-hidden="" />
-        {BOT_PANEL_TABS.map(id => <button key={id} type="button" role="tab" id={`bot-tab-${id}`} aria-controls={`bot-pane-${id}`}
-          aria-selected={!model.profileOpen && tab === id} tabIndex={tab === id ? 0 : -1} className="bot-tab" onClick={() => choose(id)}>
-          {t(TAB_LABEL[id])}
-          {dots[id] ? <span className="bot-dot" data-arrive="" data-tone={dots[id] === 'warn' ? 'warn' : undefined} aria-label={t(dots[id] === 'warn' ? 'bot.panel.needsYou' : 'bot.tab.newActivity')} /> : null}
-        </button>)}
+      <div className="bot-tabs-frame">
+        <div ref={tabRow} className="bot-tabs" role="tablist" aria-label={t('bot.panel.aria')} onKeyDown={onTabKey}>
+          <span ref={knob} className="bot-tabs-knob" aria-hidden="true" data-hidden="" />
+          {BOT_PANEL_TABS.map(id => <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <button type="button" role="tab" id={`bot-tab-${id}`} aria-controls={`bot-pane-${id}`} aria-label={t(TAB_LABEL[id])}
+                aria-selected={!model.profileOpen && tab === id} tabIndex={tab === id ? 0 : -1} className="bot-tab" onClick={() => choose(id)}>
+                <Icon name={TAB_ICON[id]} className="size-[18px]" />
+                {dots[id] ? <span className="bot-dot" data-arrive="" data-tone={dots[id] === 'warn' ? 'warn' : undefined} aria-label={t(dots[id] === 'warn' ? 'bot.panel.needsYou' : 'bot.tab.newActivity')} /> : null}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t(TAB_LABEL[id])}</TooltipContent>
+          </Tooltip>)}
+        </div>
       </div>
       <div ref={panes} className="bot-panes">
         <div key={tab} ref={bindPane} id={`bot-pane-${tab}`} role="tabpanel" aria-labelledby={`bot-tab-${tab}`} className="bot-pane"

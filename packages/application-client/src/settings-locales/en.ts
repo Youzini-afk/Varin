@@ -2876,6 +2876,7 @@ export const settingsDict = {
   'bot.tab.memory': 'Memory',
   'bot.tab.schedule': 'Schedule',
   'bot.tab.newActivity': 'New activity',
+  'bot.stage.editProfile': 'Edit profile',
   'bot.state.offline': 'Computer not connected · view only',
   'bot.state.waking': 'Waking up…',
   'bot.state.sleeping': 'Resting',

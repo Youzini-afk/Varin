@@ -2883,6 +2883,7 @@ export const settingsDict = {
   'bot.tab.memory': '记忆',
   'bot.tab.schedule': '日程',
   'bot.tab.newActivity': '有新动态',
+  'bot.stage.editProfile': '编辑档案',
   'bot.state.offline': '电脑没连上 · 只能查看',
   'bot.state.waking': '正在醒来…',
   'bot.state.sleeping': '休息中',

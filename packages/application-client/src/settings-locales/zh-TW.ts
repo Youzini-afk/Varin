@@ -294,6 +294,7 @@ export const settingsDict = {
   'bot.tab.memory': '記憶',
   'bot.tab.schedule': '日程',
   'bot.tab.newActivity': '有新動態',
+  'bot.stage.editProfile': '編輯檔案',
   'bot.state.offline': '電腦沒連上 · 只能檢視',
   'bot.state.waking': '正在醒來…',
   'bot.state.sleeping': '休息中',

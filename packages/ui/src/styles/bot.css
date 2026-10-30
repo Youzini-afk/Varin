@@ -150,8 +150,8 @@
 
 /* Stage: fixed above the tabs; only another Bot changes it (§5.1). */
 .bot-stage {
-  position: relative; flex: none; height: 214px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-  padding: 0 18px 16px; border-bottom: 1px solid var(--border); overflow: hidden;
+  position: relative; flex: none; height: 232px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  padding: 0 18px 14px; overflow: hidden;
   transition: height var(--motion-dur-glide) var(--motion-ease-glide), padding var(--motion-dur-glide) var(--motion-ease-glide);
 }
 .bot-stage-floor {
@@ -163,12 +163,24 @@
   transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 .bot-stage-menu { position: absolute; top: 8px; right: 8px; z-index: 2; }
-.bot-stage-figure { position: relative; z-index: 1; margin-bottom: 14px; }
-.bot-stage-text { position: relative; z-index: 1; display: flex; min-width: 0; max-width: 100%; flex-direction: column; align-items: center; gap: 3px; }
-.bot-stage-name { max-width: 100%; border-radius: 6px; padding: 0 4px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; transition: background-color var(--motion-dur-fade) var(--motion-ease-out); }
+.bot-stage-figure { position: relative; z-index: 1; margin-bottom: 12px; }
+/* A round edit badge sits on the figure's lower right corner, cut out of the stage by a ring of its colour. */
+.bot-stage-edit {
+  position: absolute; right: -10px; bottom: -6px; display: flex; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 50%;
+  color: var(--foreground); background: color-mix(in srgb, var(--foreground) 12%, var(--background)); box-shadow: 0 0 0 3px var(--background);
+  transition: background-color var(--motion-dur-snap) var(--motion-ease-snap), scale var(--motion-dur-snap) var(--motion-ease-snap);
+}
+.bot-stage-edit:hover { background: color-mix(in srgb, var(--foreground) 18%, var(--background)); }
+.bot-stage-edit:active { scale: .94; }
+.bot-stage-edit:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: 2px; }
+.bot-stage-text { position: relative; z-index: 1; display: flex; min-width: 0; max-width: 100%; flex-direction: column; align-items: center; gap: 2px; }
+.bot-stage-name { max-width: 100%; border-radius: 6px; padding: 0 4px; font-size: 20px; font-weight: 700; line-height: 1.3; letter-spacing: -.01em; transition: background-color var(--motion-dur-fade) var(--motion-ease-out); }
 .bot-stage-name:hover { background: var(--interactive-hover); }
-.bot-stage-state { display: flex; min-height: 20px; max-width: 100%; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted-foreground); }
+.bot-stage-state { display: flex; min-height: 22px; max-width: 100%; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted-foreground); }
 .bot-stage-state[data-tone="warn"] { color: var(--status-warning); }
+/* The state's mark: a filled disc in the line's own colour with the glyph knocked out of it. */
+.bot-stage-state-mark { display: inline-flex; width: 16px; height: 16px; flex: none; align-items: center; justify-content: center; border-radius: 50%; background: currentColor; }
+.bot-stage-state-mark > svg { color: var(--background); }
 .bot-stage-wake {
   height: 22px; padding: 0 9px; border-radius: 11px; font-size: 12px; color: var(--foreground); flex: none;
   box-shadow: inset 0 0 0 1px var(--interactive-border); background: var(--background);
@@ -178,7 +190,9 @@
   .bot-stage-figure { margin: 0; }
   .bot-stage-figure .bot-figure { width: 40px !important; height: 36px !important; }
   .bot-stage-text { align-items: flex-start; }
-  .bot-stage-name { padding: 0; font-size: 14px; }
+  .bot-stage-name { padding: 0; font-size: 14px; line-height: 1.35; }
+  .bot-stage-state { min-height: 18px; font-size: 12.5px; }
+  .bot-stage-edit { display: none; }
   .bot-stage-floor { opacity: 0; }
 }
 /* In the phone sheet the stage is always the compact row, so the tabs get the room (§8). */
@@ -186,19 +200,34 @@
 .mobile-bottom-sheet .bot-stage-figure { margin: 0; }
 .mobile-bottom-sheet .bot-stage-figure .bot-figure { width: 40px !important; height: 36px !important; }
 .mobile-bottom-sheet .bot-stage-text { align-items: flex-start; }
-.mobile-bottom-sheet .bot-stage-name { padding: 0; font-size: 14px; }
+.mobile-bottom-sheet .bot-stage-name { padding: 0; font-size: 14px; line-height: 1.35; }
+.mobile-bottom-sheet .bot-stage-state { min-height: 18px; font-size: 12.5px; }
+.mobile-bottom-sheet .bot-stage-edit { display: none; }
 .mobile-bottom-sheet .bot-stage-floor { opacity: 0; }
 
-/* Tabs (§5.2). */
-.bot-tabs { position: relative; flex: none; display: flex; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid var(--border); }
-.bot-tab {
-  position: relative; height: 36px; padding: 0 10px; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 500; color: var(--muted-foreground);
-  transition: color var(--motion-dur-snap) var(--motion-ease-snap);
+/* Tabs (§5.2): one rounded bar of icon segments; a single knob glides to the chosen one and the
+   hairlines beside it step aside. Names show as tooltips and are the segments' accessible names. */
+.bot-tabs-frame { flex: none; padding: 4px 12px 10px; }
+.bot-tabs { position: relative; display: flex; height: 40px; padding: 4px; border-radius: 999px; background: color-mix(in srgb, var(--foreground) 7%, transparent); }
+.bot-tabs-knob {
+  position: absolute; top: 4px; bottom: 4px; left: 0; border-radius: 999px; pointer-events: none;
+  background: color-mix(in srgb, var(--foreground) 11%, var(--background)); box-shadow: 0 1px 2px rgb(0 0 0 / .12);
+  transition: translate var(--motion-dur-glide) var(--motion-ease-glide), width var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
+.bot-tabs-knob[data-placing] { transition: none; }
+.bot-tabs-knob[data-hidden] { opacity: 0; }
+.bot-tab {
+  position: relative; z-index: 1; display: flex; min-width: 0; flex: 1 1 0; align-items: center; justify-content: center; border-radius: 999px;
+  color: var(--muted-foreground); transition: color var(--motion-dur-snap) var(--motion-ease-snap);
+}
+.bot-tab + .bot-tab::before {
+  content: ''; position: absolute; left: 0; top: 50%; width: 1px; height: 16px; translate: 0 -50%;
+  background: color-mix(in srgb, var(--foreground) 14%, transparent); transition: opacity var(--motion-dur-snap) var(--motion-ease-snap);
+}
+.bot-tab[aria-selected="true"]::before, .bot-tab[aria-selected="true"] + .bot-tab::before { opacity: 0; }
 .bot-tab:hover, .bot-tab[aria-selected="true"] { color: var(--foreground); }
-.bot-tab:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: -4px; }
-.bot-tab .bot-dot { position: absolute; top: 9px; right: 2px; }
-.bot-tabs .tab-underline { bottom: -1px; background: var(--foreground); }
+.bot-tab:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: -2px; }
+.bot-tab .bot-dot { position: absolute; top: 6px; left: calc(50% + 8px); }
 .bot-panes { position: relative; flex: 1; min-height: 0; }
 .bot-pane { position: absolute; inset: 0; overflow-x: hidden; overflow-y: auto; padding: 8px 8px 24px; scrollbar-width: thin; }
 /* The incoming pane enters from the direction of travel; its first six items 18ms apart. */
