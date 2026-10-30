@@ -53,6 +53,31 @@
       "id": "reminder-keyboard-approach",
       "source": "foreground/reminder/keyboard-approach.png",
       "sha256": "26b7235b1d49376241b1e87776d890ba1030a07dd2a88fb5bdf6922b339413f9"
+    },
+    {
+      "id": "permission-release",
+      "source": "foreground/permission/release.png",
+      "sha256": "c8ba3f9e2efbd382b9ac3ddcc86dce12dffedcd56f88616a10fa4f2b54256ee7"
+    },
+    {
+      "id": "permission-upper",
+      "source": "foreground/permission/upper.png",
+      "sha256": "49143d872115041c28aa7ba4fea9784280e0ec6680d5fc51262c0f8601476f27"
+    },
+    {
+      "id": "permission-mid",
+      "source": "foreground/permission/mid.png",
+      "sha256": "e4665dbd2cbf41c92e6449cd01b24a4f291c7fea5ba47bf5820804942fbd3713"
+    },
+    {
+      "id": "permission-low",
+      "source": "foreground/permission/low.png",
+      "sha256": "b097ef872a965d02c23e4bed1bc590420bda5805606f626a1aac1119d8a1904a"
+    },
+    {
+      "id": "permission-hold",
+      "source": "foreground/permission/hold.png",
+      "sha256": "04039b3e24e93e2853b7580d4e92b16bd7febe270448fcdcd30660cdcc9028d5"
     }
   ]
 }
