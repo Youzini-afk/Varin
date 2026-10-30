@@ -5,8 +5,10 @@ import { chatExperienceMessages } from './chat-experience';
 import { settingsDict } from './zh-TW.settings';
 import { toolMessagesZhTW } from './tool-interactions';
 
+import { companionLibraryMessages } from './companion-library';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...companionLibraryMessages('zh-TW'),
   "contextManager.resourceVersion": "固定資源版本：{version}",
   "contextManager.checkpointVersion": "上下文檢查點：{id} · 修訂 {revision}",
   "contextManager.hiddenSkill": "不向模型自動披露",

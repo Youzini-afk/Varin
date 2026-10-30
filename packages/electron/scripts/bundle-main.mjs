@@ -11,11 +11,13 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { prepareCompanionCatalog } from './companion-assets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const outdir = path.join(root, 'dist-bundle');
 const updaterE2eBuild = process.env.VARIN_UPDATER_E2E_BUILD === '1';
+await prepareCompanionCatalog();
 
 // dist-bundle is generated output. Replace it as one unit so a removed entry
 // cannot survive from an older build and later enter a package.

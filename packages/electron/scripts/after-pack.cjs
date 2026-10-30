@@ -84,6 +84,10 @@ module.exports = (context) => {
   }
 
   const packagedWebDistPath = path.join(resourcesPath, 'web-dist');
+  for (const name of ['companion-assets', 'companion-review-director']) {
+    if (fs.existsSync(path.join(packagedWebDistPath, name))) throw new Error(`Optional companion artwork entered the base installer: ${name}`);
+  }
+  if (!fs.existsSync(path.join(packagedWebDistPath, 'companion-catalog.json'))) throw new Error('Missing companion download catalog');
   if (!fs.existsSync(path.join(packagedWebDistPath, 'index.html'))) {
     throw new Error(`Missing packaged web UI at ${packagedWebDistPath}`);
   }

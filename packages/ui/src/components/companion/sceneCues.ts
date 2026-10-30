@@ -3,6 +3,8 @@ import type { DesktopCompanionScene } from '@varin/application-client';
 export function sceneCue(value?: string, drawnAction?: string): DesktopCompanionScene['cue'] {
   if (!value) return 'transition';
   const v=value.toUpperCase();
+  if (drawnAction === 'bot-dispatch') return v === 'DISPATCH_DOWN' ? 'management-delegate' : 'transition';
+  if (drawnAction === 'bot-think' || drawnAction === 'bot-prepare') return v.startsWith('WATCH') ? 'watch' : 'transition';
   if (drawnAction?.startsWith('director-')) {
     if (['ATTEND_LEAD','LISTEN'].includes(v)) return drawnAction.endsWith('-left') ? 'listen-left' : drawnAction.endsWith('-right') ? 'listen-right' : 'transition';
     if (drawnAction==='director-intake'&&['RECEIVE_PROJECT','ACCEPT_INWARD'].includes(v)) return 'management-receive';
@@ -43,7 +45,7 @@ export function sceneCue(value?: string, drawnAction?: string): DesktopCompanion
 
 export function cueMatchesScene(kind: DesktopCompanionScene['kind'], drawnAction: string | undefined): boolean {
   if (!kind) return false;
-  if (kind === 'portfolio') return !!drawnAction?.startsWith('director-');
+  if (kind === 'portfolio') return !!drawnAction?.startsWith('director-') || ['bot-think', 'bot-prepare', 'bot-dispatch'].includes(drawnAction ?? '');
   if (kind === 'status') return false; // Status admission is factual, not a performed operation.
   if (kind === 'editing' && drawnAction === 'output') return true;
   const action = { reading: 'reading', editing: 'editing', searching: 'browsing', dispatch: 'dispatch', question: 'query', permission: 'permission', organize: 'organizing', verify: 'checking' };
@@ -52,7 +54,7 @@ export function cueMatchesScene(kind: DesktopCompanionScene['kind'], drawnAction
 
 /** A logical target cannot lend another subject's last successful drawing its cue. */
 export function directorCueMatchesPresentation(drawn: { action?: string; cue: DesktopCompanionScene['cue']; context?: string | null } | undefined, context: string | null | undefined, side: 'left' | 'right' | null): boolean {
-  return !!drawn && drawn.context === context && !!drawn.action?.startsWith('director-')
+  return !!drawn && drawn.context === context && (!!drawn.action?.startsWith('director-') || drawn.action === 'bot-dispatch')
     && (!drawn.cue.startsWith('listen-') || drawn.cue === `listen-${side}`)
     && ['listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate'].includes(drawn.cue);
 }

@@ -406,10 +406,23 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
             f.db.fail_child_preparation(&child.operation_id, "distinct preparation failure")
                 .unwrap();
         }
+        // Readiness alone is not receipt by the parent.
+        assert!(f.db.capture_attention_read().load(&|| false).unwrap().delivered_reports.is_empty());
         assert_eq!(
             f.db.deliver_child_waits().unwrap(),
             vec![f.context.run_id.clone()]
         );
+        let received = f.db.capture_attention_read().load(&|| false).unwrap();
+        assert_eq!(received.delivered_reports.len(), 1);
+        let proof = &received.delivered_reports[0];
+        assert_eq!(proof.parent_run_id, child.parent_run_id);
+        assert_eq!(proof.receiving_run_id, f.context.run_id);
+        assert_eq!(proof.child_operation_id, child.operation_id);
+        assert_eq!(proof.execution_id, child.execution_id);
+        assert_eq!(proof.child_thread_id, child.child_thread_id);
+        let delivered_cursor = proof.delivered_cursor;
+        assert!(delivered_cursor > child.cursor && delivered_cursor <= received.event_cursor);
+        assert!(!serde_json::to_string(proof).unwrap().contains("distinct preparation failure"));
         assert!(
             f.db.deliver_child_waits()
                 .unwrap()
@@ -455,6 +468,9 @@ fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_pro
             "only the original pending continuation may be rediscovered"
         );
         assert_eq!(f.db.history("branch:parent").unwrap(), history);
+        let after = f.db.capture_attention_read().load(&|| false).unwrap();
+        assert_eq!(after.delivered_reports.len(), 1);
+        assert_eq!(after.delivered_reports[0].delivered_cursor, delivered_cursor);
         assert!(!f.db.pending_resumptions().unwrap().contains(&wait.id));
         drop(f);
         std::fs::remove_dir_all(root).unwrap();

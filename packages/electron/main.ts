@@ -24,6 +24,7 @@ import {
 } from 'electron';
 import contextMenu from 'electron-context-menu';
 import { CompanionStoolWindows } from './companion-stool.js';
+import { CompanionAssets, readCompanionAssetCatalog } from './companion-assets.js';
 import { CompanionSceneWindows, readCompanionSceneDescriptor, type CompanionSceneViewport } from './companion-scene.js';
 import { CompanionWindowMovement, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect, captureCompanionPlacement, restoreCompanionPlacement } from './companion-window.js';
 import { createComputerFeedback } from './computer-feedback.js';
@@ -1223,7 +1224,6 @@ const injectRuntimeConfigIntoHtml = (html: string): string => {
 };
 
 const registerPackagedUiProtocol = () => {
-  if (!shouldUsePackagedUi()) return;
   protocol.handle(UI_PROTOCOL, async (request) => {
     const distPath = resolveWebDistDir();
     let requestedPath = '/index.html';
@@ -1232,6 +1232,15 @@ const registerPackagedUiProtocol = () => {
       requestedPath = decodeURIComponent(url.pathname || '/index.html');
     } catch {
       requestedPath = '/index.html';
+    }
+    if (requestedPath.startsWith('/companion-assets/')) {
+      const assets = await ensureCompanionAssets();
+      const file = await assets.resolve(requestedPath.slice('/companion-assets/'.length));
+      if (!file) return new Response('Companion artwork is not installed', { status: 404 });
+      const response = await electronNet.fetch(pathToFileURL(file).toString());
+      const headers = new Headers(response.headers);
+      headers.set('Access-Control-Allow-Origin', '*');
+      return new Response(response.body, { status: response.status, headers });
     }
     const normalized = path.normalize(requestedPath).replace(/^([/\\])+/, '');
     const candidate = path.join(distPath, normalized || 'index.html');
@@ -2849,6 +2858,48 @@ const recoverCompanionPlacement = () => {
   void persistCompanionPlacement(window);
 };
 
+let companionAssetStore: CompanionAssets | null = null;
+let companionAssetStoreStart: Promise<CompanionAssets> | null = null;
+let companionControlQueue: Promise<void> = Promise.resolve();
+const withCompanionControl = <T,>(operation: () => Promise<T>): Promise<T> => {
+  const pending = companionControlQueue.then(operation, operation);
+  companionControlQueue = pending.then(() => {}, () => {});
+  return pending;
+};
+const closeCompanionWindows = () => {
+  for (const window of BrowserWindow.getAllWindows() as BrowserWindow[]) if (!window.isDestroyed() && window.__varinLabel === 'companion') window.destroy();
+};
+const selectedCompanionPackId = (): string | null => {
+  const selected = readSettingsRoot().desktopCompanionPackId;
+  if (selected === null) return null;
+  if (typeof selected === 'string') return companionAssetStore?.get(selected) ? selected : null;
+  return companionAssetStore?.list().find(pack => pack.installedVersion)?.id ?? null;
+};
+const ensureCompanionAssets = (): Promise<CompanionAssets> => {
+  if (companionAssetStore) return Promise.resolve(companionAssetStore);
+  return companionAssetStoreStart ??= (async () => {
+    const catalog = readCompanionAssetCatalog(JSON.parse(await fsp.readFile(path.join(resolveWebDistDir(), 'companion-catalog.json'), 'utf8')));
+    const store = new CompanionAssets({ root: path.join(app.getPath('userData'), 'companions'), catalog,
+      fetch: (url, init) => electronNet.fetch(url, init),
+      changed: () => emitToAllWindows('varin:companion-library-changed'),
+      beforeReplace: id => { if (selectedCompanionPackId() === id) closeCompanionWindows(); },
+      afterReplace: id => {
+        // An update must not resurrect a companion the user is putting to sleep or deleting.
+        // Reconcile through the same control owner after the current preference operation settles.
+        void withCompanionControl(async () => {
+          if (readSettingsRoot().desktopCompanionEnabled === true && selectedCompanionPackId() === id) openCompanionWindow();
+        }).catch(error => log.warn('[companion] installed artwork could not be shown', error));
+      },
+    });
+    await store.initialize(); companionAssetStore = store; return store;
+  })().catch(error => { companionAssetStoreStart = null; throw error; });
+};
+const copyCompanionAssetSelection = (url: URL, owner: { webContents: { getURL(): string } }) => {
+  const source = new URL(owner.webContents.getURL());
+  for (const key of ['companionPack', 'companionVersion']) {
+    const value = source.searchParams.get(key); if (value) url.searchParams.set(key, value);
+  }
+};
 const openCompanionWindow = (review = false): BrowserWindow => {
   const existing = BrowserWindow.getAllWindows().find((window: BrowserWindow) => !window.isDestroyed() && window.__varinLabel === 'companion');
   if (existing) { existing.showInactive(); return existing; }
@@ -2856,6 +2907,11 @@ const openCompanionWindow = (review = false): BrowserWindow => {
   if (!base) throw new Error('Local companion UI is not available');
   const url = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
   if (review) url.searchParams.set('review', '1');
+  else {
+    const id = selectedCompanionPackId(), pack = id ? companionAssetStore?.get(id) : null;
+    if (!pack) throw new Error('Download a companion in Settings → Desktop companion before waking it');
+    url.searchParams.set('companionPack', pack.id); url.searchParams.set('companionVersion', pack.version);
+  }
   const placement = restoreCompanionPlacement(companionPlacementMemory ?? readSettingsRoot().desktopCompanionPlacement,
     { width: 360, height: 480 }, screen.getAllDisplays(), screen.getPrimaryDisplay().id);
   return createBrowserWindow({ label: 'companion', presentation: 'companion', ...(placement ? { fixedBounds: placement } : {}), url: url.toString(), runtimeConfig: getWindowRuntimeConfig(state.mainWindow) });
@@ -2865,6 +2921,8 @@ const companionStools = new CompanionStoolWindows((bounds, phase, owner) => {
   if (!base) throw new Error('Local companion UI is unavailable');
   const url = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
   url.searchParams.set('stool', phase);
+  const character = BrowserWindow.fromId(owner.id);
+  if (character) copyCompanionAssetSelection(url, character);
   const window = createBrowserWindow({ label: 'companion-stool', presentation: 'companion-stool', fixedBounds: bounds, url: url.toString() });
   window.setIgnoreMouseEvents(true);
   window.setAlwaysOnTop(BrowserWindow.fromId(owner.id)?.isAlwaysOnTop() ?? false);
@@ -2902,6 +2960,8 @@ const companionScenes = new CompanionSceneWindows((bounds, owner) => {
   if (!base) throw new Error('Local companion UI is unavailable');
   const url = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
   url.searchParams.set('scene', '1');
+  const character = BrowserWindow.fromId(owner.id);
+  if (character) copyCompanionAssetSelection(url, character);
   const window = createBrowserWindow({ label: 'companion-scene', presentation: 'companion-scene', fixedBounds: bounds, url: url.toString() });
   window.setIgnoreMouseEvents(true);
   // Follow the character's native stacking group, not an independent overlay.
@@ -4019,14 +4079,48 @@ const handleInvoke = async (
       return null;
 
     case 'desktop_get_companion': return companionStatus();
-    case 'desktop_set_companion': {
+    case 'desktop_companion_library': {
+      const operation = async () => {
+        const assets = await ensureCompanionAssets();
+        const id = args.id;
+        if (args.action !== 'list' && typeof id !== 'string') throw new Error('Companion identity is required');
+        switch (args.action) {
+          case 'list': break;
+          case 'download': assets.start(id as string); break;
+          case 'cancel': await assets.cancel(id as string); break;
+          case 'remove':
+            if (selectedCompanionPackId() === id) {
+              closeCompanionWindows();
+              await mutateSettingsRoot(root => { root.desktopCompanionEnabled = false; root.desktopCompanionPackId = null; });
+            }
+            await assets.remove(id as string); break;
+          case 'select':
+            await assets.ready(id as string);
+            if (!assets.get(id as string)) throw new Error('Companion artwork is not installed');
+            closeCompanionWindows();
+            await mutateSettingsRoot(root => { root.desktopCompanionPackId = id; });
+            if (readSettingsRoot().desktopCompanionEnabled === true) openCompanionWindow();
+            break;
+          default: throw new Error('Unknown companion library action');
+        }
+        if (args.action !== 'list') emitToAllWindows('varin:companion-library-changed');
+        return { ...companionStatus(), selectedPackId: selectedCompanionPackId(), packs: assets.list() };
+      };
+      return args.action === 'list' ? operation() : withCompanionControl(operation);
+    }
+    case 'desktop_set_companion': return withCompanionControl(async () => {
       if (typeof args.enabled !== 'boolean') throw new Error('Companion requires an explicit boolean');
       const enabled = args.enabled;
-      if (enabled) openCompanionWindow();
+      if (enabled) {
+        const assets = await ensureCompanionAssets();
+        await assets.ready(selectedCompanionPackId());
+        openCompanionWindow();
+      }
       else for (const window of BrowserWindow.getAllWindows() as BrowserWindow[]) if (!window.isDestroyed() && window.__varinLabel === 'companion') window.close();
       await mutateSettingsRoot(root => { root.desktopCompanionEnabled = enabled; });
+      emitToAllWindows('varin:companion-library-changed');
       return companionStatus();
-    }
+    });
 
     case 'desktop_companion_scene': {
       const owner = requireCompanionWindow(browserWindow);
@@ -5672,9 +5766,12 @@ app.whenReady().then(async () => {
   const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
 
-  // Local user opt-in loads only bundled accepted art; review candidates stay explicit.
+  // Restore only artwork already downloaded by the user. Startup never downloads optional art.
   try {
-    if (readSettingsRoot().desktopCompanionEnabled === true) openCompanionWindow();
+    if (readSettingsRoot().desktopCompanionEnabled === true) {
+      await ensureCompanionAssets();
+      if (selectedCompanionPackId()) openCompanionWindow();
+    }
     else if (!app.isPackaged && process.env.VARIN_COMPANION_REVIEW === '1') openCompanionWindow(true);
   } catch {
     // An optional presentation must never interrupt the primary application startup.

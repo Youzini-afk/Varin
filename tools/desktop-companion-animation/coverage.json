@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Visual production coverage only, not Varin business protocol. Required actions are not claims of existing assets.",
+  "note": "Historical 32-intent design catalogue. requires is retained as historical vocabulary, not current missing-action aliases or proof of 32 distinct clips. currentV5 records the implemented shared-body/route interpretation; use actual action entries for playback.",
   "states": [
     {
       "id": "C01",
@@ -9,7 +9,15 @@
       "requires": [
         "idle-closed",
         "idle-open"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "idle-closed",
+          "director-supervise"
+        ],
+        "interpretation": "闭盖/开盖中立，含原画局部呼吸、指尖释放与独立眨眼。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "C02",
@@ -17,7 +25,14 @@
       "family": "SEATED_WORK",
       "requires": [
         "accept"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "director-intake"
+        ],
+        "interpretation": "只在真实新 Bot root run 接单边沿；不是任意新消息。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "C03",
@@ -25,7 +40,14 @@
       "family": "SEATED_WORK",
       "requires": [
         "prepare"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "bot-prepare"
+        ],
+        "interpretation": "当前 Bot 准备阶段，有限准备句；不是整理文件道具动作。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "C04",
@@ -33,7 +55,14 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "think"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "bot-think"
+        ],
+        "interpretation": "当前 Bot 推理阶段，进入托腮后稳定保持；Agent 推理不冒充 Bot 决策。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "C05",
@@ -41,7 +70,14 @@
       "family": "SEATED_WORK",
       "requires": [
         "output"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "work-active"
+        ],
+        "interpretation": "实际运行中的屏幕操作；交流结果仍由真实消息/scene 表达，不新增假讲话身体。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "C06",
@@ -49,7 +85,15 @@
       "family": "USER_ATTENTION",
       "requires": [
         "completion"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "completion",
+          "director-gather-present"
+        ],
+        "interpretation": "确切完成与汇总事实，不凭动画自行完成任务。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "T01",
@@ -57,7 +101,15 @@
       "family": "SEATED_WORK",
       "requires": [
         "reading"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "work-active",
+          "director-supervise"
+        ],
+        "interpretation": "工具类别依最新 v5 共享实际运行屏幕动作与安静监督；读/编辑/搜索等由真实场景事实区分，不增加虚构工具身体。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "T02",
@@ -65,7 +117,15 @@
       "family": "SEATED_WORK",
       "requires": [
         "editing"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "work-active",
+          "director-supervise"
+        ],
+        "interpretation": "工具类别依最新 v5 共享实际运行屏幕动作与安静监督；读/编辑/搜索等由真实场景事实区分，不增加虚构工具身体。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "T03",
@@ -74,7 +134,15 @@
       "requires": [
         "coding-input",
         "execution-observe"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "work-active",
+          "director-supervise"
+        ],
+        "interpretation": "工具类别依最新 v5 共享实际运行屏幕动作与安静监督；读/编辑/搜索等由真实场景事实区分，不增加虚构工具身体。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "T04",
@@ -82,7 +150,15 @@
       "family": "SEATED_WORK",
       "requires": [
         "browsing"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "work-active",
+          "director-supervise"
+        ],
+        "interpretation": "工具类别依最新 v5 共享实际运行屏幕动作与安静监督；读/编辑/搜索等由真实场景事实区分，不增加虚构工具身体。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "T05",
@@ -90,7 +166,15 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "experiment-observe"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "work-active",
+          "director-supervise"
+        ],
+        "interpretation": "工具类别依最新 v5 共享实际运行屏幕动作与安静监督；读/编辑/搜索等由真实场景事实区分，不增加虚构工具身体。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "T06",
@@ -98,7 +182,15 @@
       "family": "SEATED_WORK",
       "requires": [
         "organizing"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "work-active",
+          "director-supervise"
+        ],
+        "interpretation": "工具类别依最新 v5 共享实际运行屏幕动作与安静监督；读/编辑/搜索等由真实场景事实区分，不增加虚构工具身体。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "T07",
@@ -106,7 +198,15 @@
       "family": "SEATED_WORK",
       "requires": [
         "checking"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "work-active",
+          "director-supervise"
+        ],
+        "interpretation": "工具类别依最新 v5 共享实际运行屏幕动作与安静监督；读/编辑/搜索等由真实场景事实区分，不增加虚构工具身体。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "T08",
@@ -115,7 +215,15 @@
       "requires": [
         "dispatch",
         "dispatch-observe"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "bot-dispatch",
+          "director-supervise"
+        ],
+        "interpretation": "新接受的委派边沿触发单次下拍；没有左右空间指向。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "W01",
@@ -123,7 +231,14 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "queued"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "external-wait"
+        ],
+        "interpretation": "与外部等待/退避共享低手休息句，不算三条原画。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "W02",
@@ -131,7 +246,14 @@
       "family": "USER_ATTENTION",
       "requires": [
         "permission"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "permission"
+        ],
+        "interpretation": "完整收手/稳定待授权/恢复；不以交互隐式批准。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "W03",
@@ -139,7 +261,14 @@
       "family": "USER_ATTENTION",
       "requires": [
         "query"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "query"
+        ],
+        "interpretation": "完整询问/稳定未答/恢复。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "W04",
@@ -147,7 +276,14 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "external-wait"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "external-wait"
+        ],
+        "interpretation": "低手安放与稀疏眨眼，事实持续时维持循环。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "W05",
@@ -155,7 +291,14 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "retry-wait"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "external-wait"
+        ],
+        "interpretation": "真实退避/待重试共享等待身体，不虚构倒计时/重试成功。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "E01",
@@ -163,7 +306,14 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "failure"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "failure"
+        ],
+        "interpretation": "已知失败专用；未知和断联不当作失败。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "E02",
@@ -171,7 +321,12 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "cancel-settling"
-      ]
+      ],
+      "currentV5": {
+        "actions": [],
+        "interpretation": "取消是当前来源的收束路径，不是一条通用 cancel 片段；最新意图在安全接触后接续。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "E03",
@@ -179,7 +334,15 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "stopped"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "idle-closed",
+          "director-supervise"
+        ],
+        "interpretation": "仅确认停止后选相容稳态；未确认取消仍保持事实。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "E04",
@@ -187,7 +350,14 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "disconnected"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "disconnected"
+        ],
+        "interpretation": "谨慎离键/看屏/看用户后稳定，不伪造结果。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "E05",
@@ -195,7 +365,14 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "reconnecting"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "disconnected"
+        ],
+        "interpretation": "同步/重连沿用谨慎未知身体，不伪造重新工作事实。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "E06",
@@ -203,7 +380,14 @@
       "family": "OBSERVE_DIAGNOSE",
       "requires": [
         "unknown-effect-check"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "unknown-effect-check"
+        ],
+        "interpretation": "与 disconnected 完全共享一个谨慎身体族；两个事实路由，不多算原画。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "L01",
@@ -212,7 +396,14 @@
       "requires": [
         "welcome-open",
         "welcome-closed"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "welcome"
+        ],
+        "interpretation": "旧目录欢迎语义；最新 v5 的 L01 已指中立局部生命感，编号不可混同。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "L02",
@@ -225,7 +416,17 @@
         "hold-observe-diagnose",
         "hold-rest",
         "hold-carry-airborne"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "idle-closed",
+          "director-supervise",
+          "director-open-attention",
+          "rest-sleep"
+        ],
+        "interpretation": "相容中立有局部呼吸/指尖与独立眨眼；稳定睡姿保留极弱局部呼吸；权限与问题接触保持有意稳定，不宣称所有姿态循环呼吸。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "L03",
@@ -233,7 +434,16 @@
       "family": "USER_ATTENTION",
       "requires": [
         "tap-response"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "open-hover-response",
+          "tap-response",
+          "tap-repeat-response"
+        ],
+        "interpretation": "本地靠近/轻点/重复回应，不改变业务审批。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "L04",
@@ -244,7 +454,12 @@
         "carry-hold",
         "early-release",
         "regrab"
-      ]
+      ],
+      "currentV5": {
+        "actions": [],
+        "interpretation": "源 SHA 配对立即去凳→必要收手→侧握→承托→悬空；包含提前放下与落座中再抓。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "L05",
@@ -255,7 +470,12 @@
         "settle",
         "return-laptop",
         "resume"
-      ]
+      ],
+      "currentV5": {
+        "actions": [],
+        "interpretation": "同一提放图的接触、落座、回机和最新意图恢复，不计为四条独立身体动画。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "L06",
@@ -263,7 +483,15 @@
       "family": "REST",
       "requires": [
         "sleepy-stretch"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "quiet-stretch",
+          "rest-sleep"
+        ],
+        "interpretation": "独立伸展与入睡/稳态/唤醒，非等待时强制困倦。",
+        "independentAnimationCountClaim": false
+      }
     },
     {
       "id": "L07",
@@ -271,7 +499,16 @@
       "family": "REST",
       "requires": [
         "quiet-company"
-      ]
+      ],
+      "currentV5": {
+        "actions": [
+          "quiet-hair-smooth",
+          "quiet-sleeve-smooth",
+          "quiet-seat-adjust"
+        ],
+        "interpretation": "本地安静动作库；最新 L08 为侧握保护、重心调整、回稳与放手。",
+        "independentAnimationCountClaim": false
+      }
     }
   ],
   "requiredBridges": [

@@ -22,6 +22,7 @@ export type BuiltinSettingsRenderer =
   | 'projects'
   | 'model-connections'
   | 'external-agents'
+  | 'companion'
   | 'mcp-connections'
   | 'remote-instances'
   | 'skills'
@@ -35,7 +36,7 @@ export type BuiltinSettingsRenderer =
   | 'varin:tunnel';
 
 export interface BuiltinSettingsPageSpec {
-  availability?: 'not-mobile';
+  availability?: 'not-mobile' | 'desktop';
   meta: SettingsPageMeta;
   renderer: BuiltinSettingsRenderer;
 }
@@ -63,6 +64,7 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
   spec({ slug: 'home', title: 'Settings', titleKey: 'settings.view.home.title', group: 'general', kind: 'single', icon: null, order: -1, keywords: ['search', 'settings'] }, 'empty'),
   spec({ slug: 'general', title: 'General', titleKey: 'settings.page.general.title', group: 'general', kind: 'single', icon: 'settings-3', order: 0, keywords: ['general', 'startup', 'launch at login', 'autostart', 'tray', 'language', 'locale', 'time', 'week', 'pwa'] }, 'varin:general'),
   spec({ slug: 'appearance', title: 'Appearance', titleKey: 'settings.page.appearance.title', group: 'general', kind: 'single', icon: 'palette', order: 1, keywords: ['theme', 'font', 'spacing', 'motion', 'animation', 'reduced motion', '动效', 'padding', 'corner radius', 'radius', 'input bar', 'viewport', 'appearance'] }, 'varin:visual'),
+  spec({ slug: 'companion', title: 'Desktop companion', titleKey: 'companion.library.title', group: 'general', kind: 'single', icon: 'workbench-bot', order: 1.5, keywords: ['companion', 'desktop', 'pet', 'download', 'artwork', 'wake', 'sleep', '桌宠', '形象', '唤醒', '沉睡', '下载'] }, 'companion', 'desktop'),
   spec({ slug: 'chat', title: 'Chat', titleKey: 'settings.page.chat.title', group: 'general', kind: 'single', icon: 'chat-ai-3', order: 2, keywords: ['tools', 'diff', 'reasoning', 'dotfiles', 'draft', 'queue', 'output', 'copy', 'image', 'split messages', 'message actions'] }, 'varin:chat'),
   spec({ slug: 'notifications', title: 'Notifications', titleKey: 'settings.page.notifications.title', group: 'general', kind: 'single', icon: 'notification-3', order: 4, keywords: ['alerts', 'native', 'summary', 'summarization'] }, 'varin:notifications'),
   spec({ slug: 'sessions', title: 'Sessions', titleKey: 'settings.page.sessions.title', group: 'general', kind: 'single', icon: 'chat-history', order: 3, keywords: ['defaults', 'default model', 'thinking', 'auxiliary model', 'title', 'inheritance'] }, 'varin:sessions'),
@@ -82,4 +84,4 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
 export const isBuiltinSettingsPageAvailable = (
   spec: BuiltinSettingsPageSpec,
   context: SettingsRuntimeContext,
-): boolean => spec.availability === 'not-mobile' ? !context.isMobile : true;
+): boolean => spec.availability === 'desktop' ? context.isDesktop && !context.isMobile : spec.availability === 'not-mobile' ? !context.isMobile : true;

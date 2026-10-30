@@ -11,6 +11,7 @@ import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage'
 import { GitPage } from '@/components/sections/git-identities/GitPage';
 import { LanguageSupportPage } from '@/components/sections/language-support/LanguageSupportPage';
 import { VarinSettingsPage } from '@/components/sections/varin/VarinSettingsPage';
+import { CompanionSettings } from '@/components/sections/varin/CompanionSettings';
 import type { VarinSettingsSection } from '@/components/sections/varin/types';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -38,6 +39,7 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
     implementation = varinPage(spec.renderer.slice('varin:'.length) as VarinSettingsSection);
   } else {
     switch (spec.renderer) {
+      case 'companion': implementation = { renderContent: () => <CompanionSettings /> }; break;
       case 'external-agents': implementation = { renderContent: () => <ExternalAgentsPage /> }; break;
       case 'history': implementation = { renderContent: () => <HistorySettingsPage /> }; break;
       case 'storage': implementation = { renderContent: () => <StorageSettingsPage /> }; break;

@@ -4,7 +4,9 @@ import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
 import { toolPurposeFr } from './tool-purpose-locales';
 
+import { companionLibraryMessages } from './companion-library';
 export const dict = {
+  ...companionLibraryMessages('fr'),
   ...toolHeadingMessages('fr'),
   ...toolFailureMessages('fr'),
   ...chatExperienceMessages('fr'),

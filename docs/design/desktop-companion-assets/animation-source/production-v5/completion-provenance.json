@@ -1,0 +1,413 @@
+{
+  "version": 1,
+  "status": "reviewed-authored-source-checkpoint",
+  "generation": {
+    "tool": "built-in image_gen image edits",
+    "inputAndOutput": "1254 × 1254 RGBA full-canvas source pairs",
+    "background": "transparent",
+    "method": "Independently authored full-body foreground and same-pose detached rear-hair restoration. No global sprite scaling animation, mesh warping, or synthesized interpolation. Generation seed/model build was not exposed; no deterministic image-generation replay is claimed. Frozen exact raw files and SHA are the reproducibility authority."
+  },
+  "preparation": {
+    "tool": "tools/desktop-companion-animation/pack_sequence.py --prepare-seated",
+    "canvas": [
+      512,
+      512
+    ],
+    "method": "Whole-canvas Lanczos downsample, unchanged frozen world-stool composition beneath foreground; no bounding-box fitting."
+  },
+  "sources": [
+    {
+      "id": "l08-01-protect",
+      "source": "foreground/completion/l08-01-protect.png",
+      "sha256": "360a497a103ae3de36b142dbcfb9269f5073677092c47241b7a77b1b56142e60",
+      "detached": {
+        "source": "detached/completion/l08-01-protect.png",
+        "sha256": "30732fb509fb89df15b12e690f726769950ce0133d21d3b9935dfb148d43b487"
+      }
+    },
+    {
+      "id": "l08-02-unweight",
+      "source": "foreground/completion/l08-02-unweight.png",
+      "sha256": "d90714e9260df29ead05320a28b3fed74e2e397714c29a8b2fd45bb304f8a9c2",
+      "detached": {
+        "source": "detached/completion/l08-02-unweight.png",
+        "sha256": "a4c9a040c57a4a6cf0ef7bd2fdf0b8fc94317a9680145d1d2556a92b29b0fd16"
+      }
+    },
+    {
+      "id": "l08-03-shift",
+      "source": "foreground/completion/l08-03-shift.png",
+      "sha256": "f1677c6fd427ebc3b1e87fdf0dc48ae261b2dce9fab4277feb221fd210c024af",
+      "detached": {
+        "source": "detached/completion/l08-03-shift.png",
+        "sha256": "ac6f6ed0fdbd58033cb68b88f414f72fc19493062dcf37f0d5ab4100c0246537"
+      }
+    },
+    {
+      "id": "l08-04-reseat",
+      "source": "foreground/completion/l08-04-reseat.png",
+      "sha256": "4a834ec1437d703f364b3eac7a75753902d73c45045a588a88abced34984c61b",
+      "detached": {
+        "source": "detached/completion/l08-04-reseat.png",
+        "sha256": "40956ee8657a1e1c29fa22c2fc67931265af68d718a414e030867b50d80f8969"
+      }
+    },
+    {
+      "id": "l08-05-release",
+      "source": "foreground/completion/l08-05-release.png",
+      "sha256": "c79d8c9d4bbc50a8e4169be2cb719f6a93c4239add7ed8e3469eed60c22b348c",
+      "detached": {
+        "source": "detached/completion/l08-05-release.png",
+        "sha256": "aa21262be9ca7ae0834bc27d0473b6acb0d2582caddb984451a43d6a8be1f293"
+      }
+    },
+    {
+      "id": "l01-closed-onset-r2",
+      "source": "foreground/completion/l01-closed-onset-r2.png",
+      "sha256": "8ab0d05d8689dca7f74481521a46210841f9d0d4910a676dbcb95d989abfebfd",
+      "detached": {
+        "source": "detached/completion/l01-closed-onset-r2.png",
+        "sha256": "07c0f173d55a487b1d93cb78c376ce18931ef57c18c22440f99638d4966d5731"
+      }
+    },
+    {
+      "id": "l01-closed-breath",
+      "source": "foreground/completion/l01-closed-breath.png",
+      "sha256": "f896415d5a2726a99437fa8ede98c0ceb8876bca11d17d1b5c5e75174b7932c3",
+      "detached": {
+        "source": "detached/completion/l01-closed-breath.png",
+        "sha256": "ff256bbcdadfc5084d0161719f319110f14cf450deff9cc299effe40f90fe4db"
+      }
+    },
+    {
+      "id": "l01-closed-fingers",
+      "source": "foreground/completion/l01-closed-fingers.png",
+      "sha256": "a35c5fdc02415bcdb8074289c9d776caa8d4fe62c8e9bc1d78644dda513d2d76",
+      "detached": {
+        "source": "detached/completion/l01-closed-fingers.png",
+        "sha256": "005d572b0938add01796abd8a83b7fcc7110115750c75995150d406df45b0f1e"
+      }
+    },
+    {
+      "id": "l01-open-onset-r2",
+      "source": "foreground/completion/l01-open-onset-r2.png",
+      "sha256": "a309b7242a301e2265482e4ef0e03fba94c9f7553f23ff16cb127228ea6b5b96",
+      "detached": {
+        "source": "detached/completion/l01-open-onset-r2.png",
+        "sha256": "a92e8e6e5798cb08453ae8ebbd4fad93d802f89d4203879f973643001e7b86c5"
+      }
+    },
+    {
+      "id": "l01-open-breath",
+      "source": "foreground/completion/l01-open-breath.png",
+      "sha256": "c447fc8f044405b3c689053c0c6c5a6f4bb372a4419f7d3367a75fea344ca8f4",
+      "detached": {
+        "source": "detached/completion/l01-open-breath.png",
+        "sha256": "c46cf8dd49517ed3a47f19c479b25c76c5bc37ccab2e510c23deb069a68a4998"
+      }
+    },
+    {
+      "id": "l01-open-fingers",
+      "source": "foreground/completion/l01-open-fingers.png",
+      "sha256": "03e19a3249012461d210f369341cb9fc4a31e27dfe69b0703d0c58397e289970",
+      "detached": {
+        "source": "detached/completion/l01-open-fingers.png",
+        "sha256": "25c4d00dd703f8ca2c4a0c366e29a2459ebd5dd919c33d27f1fba7a96a355f9a"
+      }
+    },
+    {
+      "id": "wait-entry",
+      "source": "foreground/completion/wait-entry.png",
+      "sha256": "8b9e2d149990688fe2493c721e6ca0a6bb1f12e757aaa6825beb104e88e3ea00",
+      "detached": {
+        "source": "detached/completion/wait-entry.png",
+        "sha256": "c3ff26807ae64fb3dc4004e286734f75ff0d806f65d8579349378ed998e6736f"
+      }
+    },
+    {
+      "id": "wait-settle",
+      "source": "foreground/completion/wait-settle.png",
+      "sha256": "36169db3736d92172f7f4fa93dde19238eea88a4fbf571a2a53b48a37929596b",
+      "detached": {
+        "source": "detached/completion/wait-settle.png",
+        "sha256": "fe697dbcaa1cf8ce764606cedaa7ec0ceb0ea11832e40f07946ae1e933110b1c"
+      }
+    },
+    {
+      "id": "wait-hold",
+      "source": "foreground/completion/wait-hold.png",
+      "sha256": "24865a24a79b34f888426350917513a1b7edbe03b3da313eaba189c5154375e1",
+      "detached": {
+        "source": "detached/completion/wait-hold.png",
+        "sha256": "2f58c30881ea35ec581bb3f9a535b21e250161b7d40ae5fc527f3ae3a5086968"
+      }
+    },
+    {
+      "id": "wait-half",
+      "source": "foreground/completion/wait-half.png",
+      "sha256": "9d9e8f66674ac14b3dfbcb40b9867f213404895c9809954452822f877093322d",
+      "detached": {
+        "source": "detached/completion/wait-half.png",
+        "sha256": "1371097b6286f91807dee43d6f4c7e68e34aabcfcac65c212e437877aafe5830"
+      }
+    },
+    {
+      "id": "wait-shut",
+      "source": "foreground/completion/wait-shut.png",
+      "sha256": "bb351fc998a7fb63f76e6f8cf33bb7d661c901fda41ab528744f310de37e23b8",
+      "detached": {
+        "source": "detached/completion/wait-shut.png",
+        "sha256": "4428f226e8b25186b0cf2d769ad61cc9c7f4b272ea1f48786dfe78fbe97a1791"
+      }
+    },
+    {
+      "id": "unknown-release",
+      "source": "foreground/completion/unknown-release.png",
+      "sha256": "124a50b2fa5dedca06af9c118dc7a573c64c4aa68bad1642ab811e98a855a2a1",
+      "detached": {
+        "source": "detached/completion/unknown-release.png",
+        "sha256": "883651775b8c7b723195fdd410096ba98b5ee317726c3563c2419bad5ef59262"
+      }
+    },
+    {
+      "id": "unknown-rest",
+      "source": "foreground/completion/unknown-rest.png",
+      "sha256": "cc7fba5d1751f8092a93c1ac696871169babe27199b50a05bac3a9896e093e86",
+      "detached": {
+        "source": "detached/completion/unknown-rest.png",
+        "sha256": "7c6ab48e38e172c850137d143e329ea7a6401b7587fbe25c1d7189ae8b51a7ab"
+      }
+    },
+    {
+      "id": "bot-think-low",
+      "source": "foreground/completion/bot-think-low.png",
+      "sha256": "ec94678eb8e6c287ae1dc52c811fc0936c0f54aed296eaad74d73214adf1b514",
+      "detached": {
+        "source": "detached/completion/bot-think-low.png",
+        "sha256": "7136b719163a60ac32db893c3d7d4d9f2fc2779aca223d65bb5af18246be6a2a"
+      }
+    },
+    {
+      "id": "bot-think-approach",
+      "source": "foreground/completion/bot-think-approach.png",
+      "sha256": "7c91099a17b30847c112f0d965aab2f4c58187928e7c6169926daa3bc7134b25",
+      "detached": {
+        "source": "detached/completion/bot-think-approach.png",
+        "sha256": "e124f8093d3a250fb2cd626b3e5ccb3f6f1be2d94de08f4618b11db8d4c75752"
+      }
+    },
+    {
+      "id": "bot-think-contact",
+      "source": "foreground/completion/bot-think-contact.png",
+      "sha256": "94ecf1836a04b432980ce0f81e42f9a4e4dd05dba766e1c591968765088a3e30",
+      "detached": {
+        "source": "detached/completion/bot-think-contact.png",
+        "sha256": "dfcfd26f930dc5cfab5d4ed4764c37ae080473b586d75806bddc8d594fc2c47a"
+      }
+    },
+    {
+      "id": "bot-think-release",
+      "source": "foreground/completion/bot-think-release.png",
+      "sha256": "bee9e1aea541de736434030c111bd24696dde3efea67662c5ab9046db9df0012",
+      "detached": {
+        "source": "detached/completion/bot-think-release.png",
+        "sha256": "7a4f0050245fd0e464c7f32dcd6b8f0280ca1cf1899656a54fa9ebd2682d9ee0"
+      }
+    },
+    {
+      "id": "bot-think-lower",
+      "source": "foreground/completion/bot-think-lower.png",
+      "sha256": "fde65b9161981887009b9297d9bc43472053ba1ddece9643b6f00efb70349475",
+      "detached": {
+        "source": "detached/completion/bot-think-lower.png",
+        "sha256": "4094502d88ed52463bf41a81694fdd65277453d9735205e5d8abb7231a64b558"
+      }
+    },
+    {
+      "id": "bot-dispatch-high",
+      "source": "foreground/completion/bot-dispatch-high.png",
+      "sha256": "cee2db70b6dba0428dd73853818bac5da9dfe5de49483a5d44c88327a08a7d57",
+      "detached": {
+        "source": "detached/completion/bot-dispatch-high.png",
+        "sha256": "648b0aae525b1bb7dd45f581a78921a02bc8671b6a64a56b33fab8418d5f7726"
+      }
+    },
+    {
+      "id": "bot-dispatch-down",
+      "source": "foreground/completion/bot-dispatch-down.png",
+      "sha256": "f92bfa283d004669db561f0dd73417567847aaeac3ad147bc2050418783ccc11",
+      "detached": {
+        "source": "detached/completion/bot-dispatch-down.png",
+        "sha256": "f40bc62721fdf84332a25823e3ad3342fa8be8ee80310892769d9e00fd464527"
+      }
+    },
+    {
+      "id": "bot-prepare-mid",
+      "source": "foreground/completion/bot-prepare-mid.png",
+      "sha256": "a413c6eb2be71d4d854784b765227e9e8eb54748a3afa0e4d8a66b42dbb6425e",
+      "detached": {
+        "source": "detached/completion/bot-prepare-mid.png",
+        "sha256": "2d34428a6f5974cf1d137676b485fe2a8c09207d57b39d5ec9b35dfdadbc458e"
+      }
+    },
+    {
+      "id": "bot-prepare-press",
+      "source": "foreground/completion/bot-prepare-press.png",
+      "sha256": "7a6b2e4aefa60accd9dbb504dfe9b82503b84da302b01a3bf4c121d6b6a818e5",
+      "detached": {
+        "source": "detached/completion/bot-prepare-press.png",
+        "sha256": "d61786d2d16a2fda3c0f892f3df9c8a44383faa382b57f852b6f1e39b5d2b6fb"
+      }
+    },
+    {
+      "id": "sleep-breath-onset",
+      "source": "foreground/completion/sleep-breath-onset.png",
+      "sha256": "af45b804985628b1f614a3c2b2aa0ddaee9aa840609b51e504033b16a7145371",
+      "detached": {
+        "source": "detached/completion/sleep-breath-onset.png",
+        "sha256": "363fc7ea1459394cdfa1ad7a54b40a53af5b22f855b5e8b22a4b7979f8f889b0"
+      }
+    },
+    {
+      "id": "sleep-breath-inhale",
+      "source": "foreground/completion/sleep-breath-inhale.png",
+      "sha256": "93ed2c9d048c1c764e7fc92f5eb90632c27df430d57d5c13e707c8e8ce420c02",
+      "detached": {
+        "source": "detached/completion/sleep-breath-inhale.png",
+        "sha256": "0aa99e4085890222a2909692d47fe80b4382e3ca3249b60f2c211672f52e8365"
+      }
+    }
+  ],
+  "preparedIdentities": {
+    "l08-01-protect": {
+      "ordinary": "db617e0318689039e6ff44912cb8bff90aae351c7df7c04a1480185eda12232a",
+      "detached": "3d0edf6805ca75a251af9f76619dc237e83c7bdeed85d372af741d8e30a65dee"
+    },
+    "l08-02-unweight": {
+      "ordinary": "6581c00b090a3ceee05fbd127034a3f1b6e83ae6b423ae6f06654876fbe8ca19",
+      "detached": "4707357461629f0d2a8c194596ccf1ef6383e514bd4cf52d5515f3a490a7c079"
+    },
+    "l08-03-shift": {
+      "ordinary": "5ef9698df90cfb09a21e5e0414e8ce7b6ea8ca783e96e589867d8aec7a596e4f",
+      "detached": "43b3c1a57d4828c3914cb19349cfac69d981378d97a818e18617114adf67dad8"
+    },
+    "l08-04-reseat": {
+      "ordinary": "5c57444c024e2d9795f38849f8735550d753456e7d49a018d683d8350d4174f4",
+      "detached": "126d322a104b396a3fc3a273b5251c49e8af97ed28ed1896431dffed09920ce1"
+    },
+    "l08-05-release": {
+      "ordinary": "a2c59bb9a81930e389ef300d4dbf2122d21d70a4fbf7a4c5e4cb9b963b7c4da8",
+      "detached": "da30fbb28b3e5cae917bd2a0429861082b7c4827220e5446a9a7518431fc8f6a"
+    },
+    "l01-closed-onset-r2": {
+      "ordinary": "be9d53df8511e7cd4a47b8d03310ffb2b76dac4eaa5735920a944c18197487f3",
+      "detached": "6e42ed1b2b79cb567288d336f96a1ad026694da359d4a29d2511d7b91e99437e"
+    },
+    "l01-closed-breath": {
+      "ordinary": "7b973a73e89c63143eedeebef7b6c250d7cb827e51b1d994245bf36cb102a2d1",
+      "detached": "aa3f8aa986c4d1af6d80cb683ed05a6721810f8b926f551ddbb88ec53406ebf6"
+    },
+    "l01-closed-fingers": {
+      "ordinary": "a7fa9986c36df17bb2b162a0be44b9107504f813069faca1a14b3eda52d5a9e8",
+      "detached": "3f5f27ac5adcecc74e8b49453f530ec11fc1d2c6863f7bc4c560b5a92d97e97b"
+    },
+    "l01-open-onset-r2": {
+      "ordinary": "2645f60a1536dd1e5b136d1ec686139da87d978d8fa7e364c30f80005ef5160f",
+      "detached": "fe07f5bd98a33435932859b50fbfa5b8c0027f1da9d3b44d57aa67dbf8f82106"
+    },
+    "l01-open-breath": {
+      "ordinary": "48faae23f5ccf58f53f73f9bcb26ec88146f5cb38bf416cd990c4a737c534f84",
+      "detached": "45c3e602ec70fa1e20615791acc454801df4936e5e5c6059c86ba98a98b2de37"
+    },
+    "l01-open-fingers": {
+      "ordinary": "5ec81daa0183f0b16913a4663e15b679831889d4e052320beebb9ddaf0f2bd4a",
+      "detached": "aa248839829ad4d6f55516c73dd118361f8646bbfb2078dd5321c8efbfbb5c3a"
+    },
+    "wait-entry": {
+      "ordinary": "87e63197a387acad006fbc36410feb598eb104b5b9afa82d46585563427ba43e",
+      "detached": "70ef82e1db65f655166f8dd1ed5071ec2e1b7b89485120918363fd4d6563e54c"
+    },
+    "wait-settle": {
+      "ordinary": "c5513c979c6539e425e360e984c2769561dba854f76a07f935c2b809361c7281",
+      "detached": "a3d3657cd5df70e21e283fe0bf85cee51ed36d3685436e5276a59a0190ba05b8"
+    },
+    "wait-hold": {
+      "ordinary": "c0d35efbbcbfb42dd124dbc12cbdbe65d2efa628c058cacbb8b3f2db85c7f787",
+      "detached": "ade109382238aa2cbf05f816b76381d5b99228a69e50dc28c30e5add040b3d7d"
+    },
+    "wait-half": {
+      "ordinary": "237de4b0dce499d616398c6de10a5b64c69bd3e9cf1854d8a791488351669eb5",
+      "detached": "fc96b4466150fb92645f146ec7cd6fa1a513465e3e239facb91e0af0c42b1321"
+    },
+    "wait-shut": {
+      "ordinary": "e27e0d22d15e7bff635a20a7cc2b02f2e1f87582925689f5d712bb36778b9b4c",
+      "detached": "686824c4185489285756dfeb5f1b9d23ed63cae91fc18c3c8b014f154f22ce65"
+    },
+    "unknown-release": {
+      "ordinary": "9a6694dd3f00526948f68b71270f46be473b05551057cb1dcd3c2c767bcb2373",
+      "detached": "ca7348624490a693691e83a026e0ecb8ae9ae7c130d22eaa52dcc0f05c9f09a7"
+    },
+    "unknown-rest": {
+      "ordinary": "682d9b4c8f931f0ae0cf1e9800b4590c583dd02b9ca656b3730ca1e1aebc3f55",
+      "detached": "fa81cb1625ea816905bb95075db2fe28d98f815fe0a7230bd0928203df65ecf8"
+    },
+    "bot-think-low": {
+      "ordinary": "ec8bced4aebe26d3a867c73867c141318a634357fa59d43692306debd7566c86",
+      "detached": "dccf81f00f234b6b433a3b264122033c89677c9163fe51e1e371738def653cfb"
+    },
+    "bot-think-approach": {
+      "ordinary": "f143c7baca5150fea3dce3ca6fe34f8f2ea6389bc77f495d88033d9d0f4b1fa2",
+      "detached": "2215fb4ae92f2c0124944858e8ad1e177add246a4586af6ba50fd213c0a6957b"
+    },
+    "bot-think-contact": {
+      "ordinary": "c4b59b31ed7e9a056835941facfe51cbebe8bf7b1009abc3d54152075c6c324c",
+      "detached": "db303bc865a39dde86e428e6317a0a7fa44ef19ce58a84d9d67a06d0c9d1c6d1"
+    },
+    "bot-think-release": {
+      "ordinary": "4725a1259009826f6a1a15fce2e33fe1cd73217810e403e4ba4f48d3acbe974e",
+      "detached": "297bf158ba415099fdd7788db9f520b93ad3c293c0c34b76cd79f607a9a5c2d4"
+    },
+    "bot-think-lower": {
+      "ordinary": "7ca323fb2afb4452887eccbc5de38e95dcdd4d775725f0997b1a393cd475a110",
+      "detached": "ddcf19fb0d39d1f2f84ef0bc2e4cca3e46a93dc4bb4eab46a982956027ac99df"
+    },
+    "bot-dispatch-high": {
+      "ordinary": "6850eb482f15290aa2cc121dd541e6011a7f917c486f3de3c20796563dd886de",
+      "detached": "f34ecb7a13034c9800b01a9fb97b79d91bc620c04cc23052ee5a134b4ded358a"
+    },
+    "bot-dispatch-down": {
+      "ordinary": "982f2688d6a430ff4396be3bcb2f7f4a2ab73e8a5e0e60455a290ddbf37b56ae",
+      "detached": "09685245ae1ec8cb4f0cbab2fc51e222148545b228c93c740d3bda7ea267e7d7"
+    },
+    "bot-prepare-mid": {
+      "ordinary": "72f5a9c1716e1c8261ccb6670b2d88f501027fe211968f5af5bcab11e3809353",
+      "detached": "028b00dd45f8dd19fd09592f121415b815a03fa8fcace8e8bdaf1402dcb4c6c6"
+    },
+    "bot-prepare-press": {
+      "ordinary": "0961d2682619f6649bdd9041df353f59abb303c2deaaef1c402a66869fb40fc8",
+      "detached": "f1343d2eb3b2d569379066b197686035d3951b1f6f7e4367b54f35ae1a76944e"
+    },
+    "sleep-breath-onset": {
+      "ordinary": "ffb0aea57db4e91e10e10fb70e39157d839f9ea6a6f84397fcdee2e6523fc340",
+      "detached": "39b2f0923c456e56f696a3c8b50102252272738197184bb7ad50f09a046694dc"
+    },
+    "sleep-breath-inhale": {
+      "ordinary": "c6b80e02fd55b8f53af3f46045d6df83a5db58fb4be583b00de6581acf4b695b",
+      "detached": "c04589a3c7d093d3c5ed135630a7579109bafbf5a28356f6729b0d0d5273ce44"
+    }
+  },
+  "semanticFamilies": {
+    "seat-adjust": 5,
+    "neutral-local-life": 6,
+    "quiet-wait-and-cautious-check": 7,
+    "bot-think-dispatch-prepare": 9,
+    "faint-sleep-breath": 2
+  },
+  "notes": [
+    "Two cautious action names share one body family; bridges/gesture nodes are not independent animations.",
+    "FG/D independently authored edits are visually matched, not pixel-identical outside the repaired hair.",
+    "Original 269 prepared drawing identities retained; seven old package contracts intentionally changed as listed in integration evidence.",
+    "Permission/query holds intentionally stable; sleeping adds extremely weak authored local breathing, not a claim of breathing in every pose.",
+    "Supervise reuses existing own-screen read entry/read/recover once per30.63s, with unchanged quiet cue; no new typing or fabricated work."
+  ]
+}

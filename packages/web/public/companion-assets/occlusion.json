@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "bundleSHA256": "9293ab547dd5e0879e9ae4cb9403a408bcab9524f8975c48c649126f713e35b1",
+  "bundleSHA256": "e69fb1bedfaaa16ed4b04483929a59b305561bbb3898595d07095bf135df0d97",
   "pages": {
     "atlas-000.png": {
       "file": "occlusion-atlas-000.png",
@@ -132,10 +132,42 @@
     },
     "atlas-016.png": {
       "file": "occlusion-atlas-016.png",
-      "sha256": "9b79b8d8722d98a433ccf7c022746a0e97ee3caf087c4f07dc130b826e8bbafa",
+      "sha256": "e09d0fa94f44b126e20fc7e5482e9223c6d71babe47a9c08c6d8d80b720f71d2",
       "size": [
         2019,
+        2036
+      ]
+    },
+    "atlas-017.png": {
+      "file": "occlusion-atlas-017.png",
+      "sha256": "b59e177dfee9377cc03d227203abe307711073730a922761652246ef239e4726",
+      "size": [
+        1988,
         2035
+      ]
+    },
+    "atlas-018.png": {
+      "file": "occlusion-atlas-018.png",
+      "sha256": "a4cbf1097cc2e1ca3c6b2ba75b545a9c247fbf9c9b52eab1ab3678928ec53232",
+      "size": [
+        2003,
+        2033
+      ]
+    },
+    "atlas-019.png": {
+      "file": "occlusion-atlas-019.png",
+      "sha256": "627cf62ba3d2efb461fefe6fead6e415abcd61105e66e9a56b2129468f5ac12a",
+      "size": [
+        1985,
+        2035
+      ]
+    },
+    "atlas-020.png": {
+      "file": "occlusion-atlas-020.png",
+      "sha256": "abdfcddc5905a3decf20890667cc2605e55d7bca44574e77383e34e6ac2ae321",
+      "size": [
+        1961,
+        1018
       ]
     }
   }

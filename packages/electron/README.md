@@ -140,6 +140,31 @@ That runs, in order:
 Build output goes to `packages/electron/dist`. Development sources and the duplicate Web-owned kernel
 are excluded from the desktop dependency tree; desktop uses `resources/kernel`.
 
+### Optional desktop companions
+
+Preferences → Desktop companion owns the artwork library, download/cancel/resume, appearance selection,
+deletion and wake/sleep controls. Sleeping closes the native presentation windows; execution remains in
+the existing Host. The selected appearance and wake preference are local desktop settings, independent
+of the Bot the companion speaks for. Accent colors still follow the application theme using one artwork pack.
+
+The base installer includes the player, a small preview and `companion-catalog.json`, not the full atlases,
+alpha pages or developer review bundles. Both Web-resource staging and electron-builder exclude those
+directories; after-pack rejects an accidental full-art payload. Mobile also excludes the preview and player.
+`scripts/companion-assets.mjs` derives the download catalog from the source bundle and matching occlusion
+index, with an immutable GitHub source revision, exact file lengths and SHA-256 hashes.
+
+Electron downloads inert JSON/PNG assets through its system-proxy-aware network stack into
+`userData/companions/downloads`. Verified complete files survive cancellation and restart, while incomplete
+appearances never become selectable. Once every file passes integrity checks, directory renames publish
+the candidate under `userData/companions/packs`; a restart recovers an interrupted rename and reclaims
+retired data. Installed packs work offline and survive application updates. Explicit deletion clears both
+the installed appearance and its download cache. Startup never downloads optional artwork automatically.
+
+The character, stool and decorative masks pin the same installed generation in their native window URL.
+The existing `varin://app/companion-assets/<id>/<version>/...` protocol serves only files declared by that
+installed pack, without falling through to arbitrary filesystem paths or an HTML application fallback.
+New application builds can offer an artwork update while retaining the previously installed appearance.
+
 ### Native workspace components
 
 Normal chats and shared tasks do not require a filesystem component. Explicit independent workspaces

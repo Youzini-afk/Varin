@@ -104,7 +104,8 @@
       },
       {
         "from": "resources/web-dist",
-        "to": "web-dist"
+        "to": "web-dist",
+        "filter": ["**/*", "!companion-assets{,/**/*}", "!companion-review-director{,/**/*}"]
       },
       {
         "from": "resources/kernel",

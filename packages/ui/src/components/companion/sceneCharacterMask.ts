@@ -1,4 +1,5 @@
 import { readCompanionPackage, type CompanionPackage } from './sequencePackage';
+import { companionAssetBase } from '@varin/application-client';
 
 /** Authenticated by the native caller's selected/review resource admission, not an arbitrary URL. */
 export type SceneCharacterBundle = 'selected' | 'review';
@@ -40,6 +41,7 @@ const validDigest = (value: unknown): value is string => typeof value === 'strin
 
 /** Current atlas plus at most one next atlas/job. Predictions never publish or replace current alpha. */
 export class SceneCharacterMaskCache {
+  private readonly base: string;
   private generation = 0;
   private request = 0;
   private epoch: string | null = null;
@@ -54,6 +56,7 @@ export class SceneCharacterMaskCache {
   private disposed = false;
   constructor(private readonly selector: SceneCharacterBundle, private readonly changed: (mask: SceneCharacterMask | null) => void, private readonly environment = browserEnvironment) {
     if (!Object.hasOwn(paths, selector)) throw new Error('Unknown companion mask resource selector');
+    this.base = companionAssetBase(typeof window === 'undefined' ? undefined : window.location?.href, selector === 'review');
   }
   get current(): SceneCharacterMask | null { return this.ready; }
   private publish(value: SceneCharacterMask | null): void { if (this.ready === value) return; this.ready = value; this.changed(value); }
@@ -69,7 +72,7 @@ export class SceneCharacterMaskCache {
   private loadIndex(epoch: string): Promise<Map<string, CompanionPackage>> {
     this.indexAbort = new AbortController(); const signal = this.indexAbort.signal;
     return (async () => {
-      const response = await this.environment.fetch(`${paths[this.selector]}bundle.json`, signal);
+      const response = await this.environment.fetch(`${this.base}bundle.json`, signal);
       if (!response.ok) throw new Error('Character mask bundle unavailable');
       const bytes = await response.arrayBuffer();
       if (await this.environment.sha256(bytes) !== epoch || signal.aborted) throw new Error('Character mask bundle epoch mismatch');
@@ -87,7 +90,7 @@ export class SceneCharacterMaskCache {
   /** Optional: a missing, stale or malformed manifest keeps the colour atlas as the silhouette source. */
   private loadOcclusion(epoch: string, signal: AbortSignal): Promise<OcclusionPages | null> {
     return (async () => {
-      const response = await this.environment.fetch(`${paths[this.selector]}occlusion.json`, signal);
+      const response = await this.environment.fetch(`${this.base}occlusion.json`, signal);
       if (!response.ok) return null;
       const manifest: unknown = await response.json();
       const pages = manifest && typeof manifest === 'object' ? (manifest as { bundleSHA256?: unknown; pages?: unknown }) : null;
@@ -124,12 +127,12 @@ export class SceneCharacterMaskCache {
       const occlusion = (await this.occlusion)?.get(file);
       let bytes: Blob | null = null;
       if (occlusion && !abort.signal.aborted) {
-        const response = await this.environment.fetch(`${paths[this.selector]}${occlusion.file}?epoch=${epoch}`, abort.signal).catch(() => null);
+        const response = await this.environment.fetch(`${this.base}${occlusion.file}?epoch=${epoch}`, abort.signal).catch(() => null);
         const body = response?.ok ? await response.arrayBuffer() : null;
         if (body && await this.environment.sha256(body) === occlusion.sha256) bytes = new Blob([body], { type: 'image/png' });
       }
       if (!bytes) {
-        const response = await this.environment.fetch(`${paths[this.selector]}${file}?epoch=${epoch}`, abort.signal);
+        const response = await this.environment.fetch(`${this.base}${file}?epoch=${epoch}`, abort.signal);
         if (!response.ok || abort.signal.aborted) throw new Error('Character mask atlas unavailable');
         bytes = await response.blob();
       }

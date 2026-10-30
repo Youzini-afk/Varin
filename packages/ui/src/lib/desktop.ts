@@ -69,6 +69,7 @@ export type DesktopSettings = {
   desktopLanAccessEnabled?: boolean;
   desktopKeepAwakeEnabled?: boolean;
   desktopCompanionEnabled?: boolean;
+  desktopCompanionPackId?: string | null;
   desktopMinimizeToTrayEnabled?: boolean;
   desktopMacMenuBarEnabled?: boolean;
   desktopUiPassword?: string;
@@ -283,6 +284,9 @@ export const getDesktopWindowControlsOrder = (
 export const hasDesktopInvoke = (): boolean => {
   return typeof getDesktopBridge()?.invoke === 'function';
 };
+
+export const subscribeDesktopCompanionLibrary = (handler: () => void): Promise<() => void> =>
+  getDesktopBridge()?.listen?.('varin:companion-library-changed', handler) ?? Promise.resolve(() => {});
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
 

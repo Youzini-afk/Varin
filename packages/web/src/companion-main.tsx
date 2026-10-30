@@ -1,3 +1,6 @@
+import { readCompanionWorldPlate, verifyCompanionWorldPlate } from './companionWorldPlate';
+import { companionAssetBase } from '@varin/application-client';
+
 const phase = new URLSearchParams(window.location.search).get('stool');
 if (new URLSearchParams(window.location.search).get('scene') === '1') {
   const { mountCompanionScene } = await import('@varin/ui/components/companion/sceneRenderer');
@@ -27,22 +30,15 @@ if (new URLSearchParams(window.location.search).get('scene') === '1') {
     // New epochs use immutable hash-named plates, so an old decorative cache cannot
     // silently show a different identity's stool after an atomic bundle replacement.
     void (async () => {
-      const base = new URL('./companion-assets/', window.location.href);
+      const base = new URL(companionAssetBase(window.location.href), window.location.href);
       const response = await fetch(new URL('bundle.json', base));
       if (!response.ok) throw new Error('Companion bundle unavailable');
       const bundle = await response.json();
-      const plate = bundle.worldStool;
-      if (bundle.geometryEpoch !== 'varin-upright-v2' || !plate
-        || typeof plate.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(plate.sha256)
-        || plate.file !== `world-stool-${plate.sha256.slice(0,16)}.png`
-        || !Array.isArray(bundle.packages) || bundle.packages.some((p: { geometryReference?: string }) => p.geometryReference !== bundle.geometryEpoch)) {
-        throw new Error('Invalid companion world-plate epoch');
-      }
+      const plate = readCompanionWorldPlate(bundle);
       const result = await fetch(new URL(plate.file, base));
       if (!result.ok) throw new Error('Companion world plate unavailable');
       const bytes = await result.arrayBuffer();
-      const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2,'0')).join('');
-      if (hash !== plate.sha256) throw new Error('Companion world-plate hash mismatch');
+      await verifyCompanionWorldPlate(bytes, plate.sha256);
       const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
       window.addEventListener('pagehide', () => URL.revokeObjectURL(objectUrl), { once: true });
       image.src = objectUrl;

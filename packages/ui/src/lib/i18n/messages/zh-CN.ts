@@ -8,8 +8,10 @@ import { settingsDict } from './zh-CN.settings';
 import { followupPanelZhCN } from './followups';
 import { toolMessagesZhCN } from './tool-interactions';
 
+import { companionLibraryMessages } from './companion-library';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...companionLibraryMessages('zh-CN'),
   ...companionAttentionZh,
   "companion.observing": "正在联动所选会话",
   "companion.unavailable": "暂时无法读取会话状态",

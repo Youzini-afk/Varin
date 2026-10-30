@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { commitWebAssetGeneration } from './commit-web-asset-generation.mjs';
+import { prepareCompanionCatalog, stageDesktopWebAsset } from './companion-assets.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -68,6 +69,7 @@ const copyDir = async (src, dst) => {
   const entries = await fs.readdir(src, { withFileTypes: true });
   for (const entry of entries) {
     const from = path.join(src, entry.name);
+    if (!stageDesktopWebAsset(path.relative(webDistDir, from))) continue;
     const to = path.join(dst, entry.name);
     if (entry.isDirectory()) {
       await copyDir(from, to);
@@ -106,6 +108,7 @@ const backupWebDistDir = path.join(resourcesDir, `web-dist-backup-${process.pid}
 
 try {
   await copyDir(webDistDir, stagedWebDistDir);
+  await prepareCompanionCatalog({ output: path.join(stagedWebDistDir, 'companion-catalog.json') });
   await removeDir(backupWebDistDir);
   // Never delete the active resource generation before the candidate commits.
   // On Windows a running bundled-dev window may hold this directory open; in

@@ -3,7 +3,7 @@ import { CompanionDirector } from './directorPresentation';
 import { DirectorPortfolioProjector } from './directorPortfolio';
 
 /** Explicit offline coordination choreography review, NOT evidence of a real Varin delegation route. These identities must never be used for Host navigation or writes. */
-export type DirectorReviewStep = 'portfolio' | 'team-active' | 'a-child-ended' | 'b-intake' | 'b-result' | 'requests' | 'b-resolved' | 'unknown' | 'reconnected';
+export type DirectorReviewStep = 'portfolio' | 'team-active' | 'a-child-ended' | 'b-intake' | 'b-result' | 'requests' | 'b-resolved' | 'unknown' | 'reconnected' | 'bot-ready' | 'bot-reasoning' | 'bot-output' | 'report-delivered' | 'retry-wait' | 'queued-successor' | 'queue-promoted' | 'executor-stopped';
 export interface DirectorReviewViewOptions {
   visible?: boolean;
   interacting?: boolean;
@@ -69,6 +69,52 @@ function fixture(step: DirectorReviewStep, cursor: number): ThreadAttentionSnaps
     counts: { actionRequired: items.length, affectedBranches: new Set(items.map(item => item.branchId)).size, unknownEffects: 0 } };
 }
 
+/** All timestamps, receipts and identities below are explicit offline DTO examples, never Host writes. */
+const factSteps = new Set<DirectorReviewStep>(['bot-ready', 'bot-reasoning', 'bot-output', 'report-delivered', 'retry-wait', 'queued-successor', 'queue-promoted', 'executor-stopped']);
+function factFixture(step: DirectorReviewStep, cursor: number, precursor: boolean): ThreadAttentionSnapshot {
+  const snapshot = fixture('portfolio', cursor);
+  const root = snapshot.branches.find(value => value.threadId === identity('entry').threadId)!;
+  const lead = snapshot.branches[1]!;
+  snapshot.branches = [root];
+  snapshot.delegations = [];
+  root.currentRun = { ...root.currentRun!, state: 'waiting' };
+  root.latestRun = root.currentRun;
+  if (step === 'bot-ready') root.currentRun.state = 'preparing';
+  if (step === 'bot-reasoning' || step === 'bot-output') {
+    root.currentRun.state = 'generating';
+    root.currentRun.generation = { requestId: 'review-provider-request', phase: step === 'bot-reasoning' ? 'reasoning' : 'output', revision: cursor };
+  }
+  if (step === 'retry-wait') {
+    root.currentRun.state = 'generating';
+    root.currentRun.retry = { requestId: 'review-retry-request', attempt: 2, scheduledAtMs: 1, retryAtMs: 2, revision: cursor };
+  }
+  if (step === 'queued-successor' || step === 'queue-promoted') {
+    root.activeRunId = null; root.currentRun = null; root.queuedRunCount = 1;
+    root.latestRun = { id: 'review-queued-successor', state: 'accepted', revision: cursor, cancelRequested: false, visibleOutput: null };
+    if (step === 'queue-promoted' && !precursor) {
+      root.queuedRunCount = 0; root.currentRun = root.latestRun; root.activeRunId = root.currentRun.id;
+    }
+  }
+  if (step === 'report-delivered' || step === 'executor-stopped') {
+    snapshot.branches.push(lead);
+    snapshot.delegations = (fixture('portfolio', cursor).delegations ?? []).filter(value => value.childThreadId === lead.threadId);
+    lead.currentRun = { ...lead.currentRun!, state: step === 'report-delivered' ? 'completed' : precursor ? 'executing' : 'cancelled' };
+    lead.latestRun = lead.currentRun;
+    lead.activeRunId = precursor && step === 'executor-stopped' ? lead.currentRun.id : null;
+    lead.hasUnsettledWork = step === 'executor-stopped';
+    if (!precursor && step === 'report-delivered') snapshot.deliveredReports = [{
+      parentThreadId: root.threadId, parentBranchId: root.branchId, parentRunId: runId('entry'), receivingRunId: runId('entry'),
+      childOperationId: `review-delegation-${lead.threadId}`, executionId: 'review-delivered-execution-b',
+      childThreadId: lead.threadId, childBranchId: lead.branchId, deliveredCursor: cursor,
+    }];
+    if (!precursor && step === 'executor-stopped') snapshot.stoppedExecutors = [{
+      threadId: lead.threadId, branchId: lead.branchId, runId: lead.currentRun.id,
+      operationId: 'review-stopped-executor-b', revision: cursor, stoppedCursor: cursor,
+    }];
+  }
+  return snapshot;
+}
+
 export function createDirectorReviewFixtureSession() {
   const director = new CompanionDirector();
   const mapper = new DirectorPortfolioProjector();
@@ -89,6 +135,11 @@ export function createDirectorReviewFixtureSession() {
     step(name: DirectorReviewStep): void {
       // A button jump still observes the actual precursor; React batching cannot manufacture edges.
       director.discardTransient(); health = 'current';
+      if (factSteps.has(name)) {
+        attention = factFixture(name, ++cursor, true); view();
+        attention = factFixture(name, ++cursor, false); view();
+        return;
+      }
       attention = fixture(name === 'b-result' || name === 'a-child-ended' ? 'team-active' : name === 'b-resolved' ? 'requests' : name, ++cursor);
       if (name === 'b-intake') attention.branches = attention.branches.filter(value => value.threadId !== identity('b').threadId);
       view();

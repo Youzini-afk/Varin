@@ -11,6 +11,6 @@ export function hasAcceptedDirectorAssets(packages: readonly CompanionPackage[],
   return actions.every(action => accepted.some(asset => asset.action === action && asset.geometryReference === (endpoints?.geometryReference ?? 'varin-upright-v2')));
 }
 
-export function companionDirectorMode(packages: readonly CompanionPackage[], developmentReview: boolean, candidateReview: boolean, endpoints: CompanionEndpoints | null = null): boolean {
-  return developmentReview ? candidateReview : hasAcceptedDirectorAssets(packages, endpoints);
+export function companionDirectorMode(packages: readonly CompanionPackage[], developmentReview: boolean, candidateReview: boolean, endpoints: CompanionEndpoints | null = null, selectedReview = false): boolean {
+  return developmentReview ? candidateReview || selectedReview && hasAcceptedDirectorAssets(packages, endpoints) : hasAcceptedDirectorAssets(packages, endpoints);
 }

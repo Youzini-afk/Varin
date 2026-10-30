@@ -64,6 +64,17 @@ impl Catalog {
 }
 
 impl Persistence for Mutex<Catalog> {
+    fn observe_retry(&self, run: &str, epoch: u64, request: &str, schedule: Option<(u64, u64)>) {
+        if let Ok(mut catalog) = self.lock() { let _ = catalog.record_retry_schedule(run, epoch, request, schedule); }
+    }
+
+    fn observe_generation(&self, run: &str, epoch: u64, request: &str, phase: Option<GenerationPhase>) {
+        if let Ok(mut catalog) = self.lock() {
+            // Presentation must not fail a model exchange. Missing facts remain unknown.
+            let _ = catalog.record_generation_phase(run, epoch, request, phase);
+        }
+    }
+
     fn stop_reason(&self, run: &str, epoch: u64) -> std::result::Result<super::bot::RunStopReason, ExecutionError> {
         self.lock().map_err(catalog_lock_error)?.run_stop_reason(run, epoch).map_err(policy_error)
     }
@@ -1248,6 +1259,7 @@ impl Catalog {
                 } else { relation.parent_thread_id };
                 if run.thread_id!=recipient { continue; }
                 tx.execute("INSERT OR IGNORE INTO deliveries(observer,fact_cursor,request,state) VALUES(?1,?2,?3,'\"committed\"')",params![format!("agent-status:{execution}"),sql_number(cursor)?,request_id])?;
+                super::attention_facts::record_report_delivery(&tx, &run, &execution)?;
             }
         }
         let referenced_request = match record {

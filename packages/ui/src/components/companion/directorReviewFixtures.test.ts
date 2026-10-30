@@ -51,12 +51,12 @@ it('unknown retains identities without stale team and reconnect never replays hi
   expect(session.view({ hideTaskNames: true }).projection.portfolio.projects.every(card => card.caption === undefined)).toBe(true);
 });
 
-it('observes a genuinely new B dispatch even when the snapshot already sees execution before producing intake, independently of A inspection', () => {
+it('observes a genuinely new B dispatch even when the snapshot already sees execution before producing the dispatch beat, independently of A inspection', () => {
   const session = createDirectorReviewFixtureSession();
   session.step('b-intake');
   const frame = session.view();
-  expect(frame.presentation.body.verb).toBe('receive-work');
-  expect(frame.presentation.body.edge).toMatchObject({ kind: 'receive-work', runId: 'review-run-b', project: { threadId: 'review-thread-b', branchId: 'review-branch-b' }, outcome: null });
+  expect(frame.presentation.body.verb).toBe('dispatch-work');
+  expect(frame.presentation.body.edge).toMatchObject({ kind: 'dispatch-work', runId: 'review-run-b', project: { threadId: 'review-thread-b', branchId: 'review-branch-b' }, outcome: null });
   expect(frame.presentation.inspection?.identity.threadId).toBe('review-thread-a');
   expect(frame.attention.branches.find(branch => branch.threadId === 'review-thread-b')?.currentRun?.state).toBe('executing');
   expect(frame.projection.portfolio.mode).toBe('intake');
@@ -77,4 +77,44 @@ it('retires only the exact terminal child squad member, retaining the other proj
   expect(teamFor(after, 'c')?.members[0]?.key).toBe(cKey);
   expect(teamFor(after, 'c')?.members[0]?.state).toBe('running');
   expect(after.presentation.body.edge).toBeNull();
+});
+
+it('routes explicit offline owner facts through the real director and body selector', async () => {
+  const { directorBodyAction } = await import('./directorBody');
+  const cases = [
+    ['bot-ready', 'preparing', 'bot-prepare'],
+    ['bot-reasoning', 'thinking', 'bot-think'],
+    ['bot-output', undefined, 'work-active'],
+    ['retry-wait', 'retry', 'external-wait'],
+    ['queued-successor', 'queued', 'external-wait'],
+  ] as const;
+  for (const [step, activity, action] of cases) {
+    const session = createDirectorReviewFixtureSession(); session.step(step);
+    const frame = session.view();
+    expect(frame.reviewOnly).toBe(true);
+    expect(frame.presentation.body.activity?.kind).toBe(activity);
+    expect(frame.presentation.body.edge).toBeNull();
+    expect(directorBodyAction(frame.presentation, null, true, () => true)).toBe(action);
+  }
+});
+
+it('observes fresh simulated delivery, queue promotion and executor receipts exactly once per explicit scenario', async () => {
+  const { directorBodyAction } = await import('./directorBody');
+  const cases = [
+    ['b-intake', 'dispatch-work', 'bot-dispatch'],
+    ['report-delivered', 'receive-report', 'director-inspect'],
+    ['queue-promoted', 'receive-work', 'director-intake'],
+    ['executor-stopped', 'executor-stopped', 'director-supervise'],
+  ] as const;
+  for (const [step, kind, action] of cases) {
+    const session = createDirectorReviewFixtureSession(); session.step(step);
+    const frame = session.view();
+    expect(frame.presentation.body.edge?.kind).toBe(kind);
+    expect(frame.presentation.body.edge?.outcome).toBeNull();
+    expect(directorBodyAction(frame.presentation, null, true, () => true)).toBe(action);
+    session.consumeEdge(frame.presentation.body.edge!.key);
+    expect(session.view().presentation.body.edge).toBeNull();
+    session.step(step); session.view({ visible: false });
+    expect(session.view({ visible: true }).presentation.body.edge).toBeNull();
+  }
 });

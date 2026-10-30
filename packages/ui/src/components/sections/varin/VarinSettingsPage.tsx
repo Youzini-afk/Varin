@@ -155,6 +155,7 @@ const GeneralSectionContent: React.FC = () => {
         <>
             {showDesktopNetworkSettings && <DesktopNetworkSettings section="general" />}
             <SettingsPageLink page="access">{t('settings.page.access.title')}</SettingsPageLink>
+            {showDesktopNetworkSettings && <SettingsPageLink page="companion">{t('companion.library.settings')}</SettingsPageLink>}
             <VarinVisualSettings visibleSettings={['locale', 'timeFormat', 'weekStart', 'pwaInstallName', 'pwaOrientation', 'mobileKeyboardMode']} />
 
         </>

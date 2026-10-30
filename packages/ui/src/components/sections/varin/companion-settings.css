@@ -1,0 +1,16 @@
+.companion-presence { display:flex; align-items:center; flex-wrap:wrap; gap:20px; padding:24px 0 32px; }
+.companion-presence-status { display:inline-flex; align-items:center; gap:6px; font-size:var(--font-size-meta,12px); color:var(--muted-foreground); }
+.companion-presence-status i { width:6px; height:6px; border-radius:50%; background:var(--muted-foreground); opacity:.6; transition:background-color 180ms,opacity 180ms; }
+.companion-presence-status[data-awake=true] i { background:var(--primary); opacity:1; }
+.companion-library { display:grid; gap:18px; }
+.companion-appearance { display:grid; grid-template-columns:180px minmax(0,1fr); border:1px solid var(--border); border-radius:16px; overflow:hidden; background:var(--background); transition:border-color 180ms,box-shadow 180ms; }
+.companion-appearance[data-selected=true] { border-color:color-mix(in srgb,var(--primary) 42%,var(--border)); }
+.companion-appearance-preview { display:grid; place-items:center; padding:20px 10px; background:color-mix(in srgb,var(--muted) 40%,var(--background)); }
+.companion-appearance-preview img { width:160px; max-width:100%; aspect-ratio:1; object-fit:contain; user-select:none; }
+.companion-appearance-content { min-width:0; padding:24px; }
+.companion-download { margin-top:14px; }
+.companion-download-track { height:4px; margin-top:9px; overflow:hidden; border-radius:9px; background:var(--muted); }
+.companion-download-track span { display:block; width:100%; height:100%; border-radius:inherit; background:var(--primary); transform-origin:left; transition:transform 180ms linear; }
+@container (max-width:540px) { .companion-appearance { grid-template-columns:112px minmax(0,1fr); } .companion-appearance-preview { padding:14px 4px; } .companion-appearance-content { padding:18px 14px; } }
+@container (max-width:380px) { .companion-appearance { grid-template-columns:1fr; } .companion-appearance-preview img { width:128px; } }
+@media(prefers-reduced-motion:reduce) { .companion-appearance,.companion-presence-status i,.companion-download-track span { transition-duration:0ms; } }

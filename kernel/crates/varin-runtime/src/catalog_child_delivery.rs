@@ -513,6 +513,7 @@ impl Catalog {
             // acknowledgement proves append/ancestry visibility, never model understanding.
             tx.execute("INSERT INTO deliveries(observer,fact_cursor,request,state) VALUES(?1,?2,?3,'\"committed\"')",
                     params![format!("child-report-history:{}",child.execution_id),sql_number(fact_cursor)?,item_id])?;
+            super::attention_facts::record_report_delivery(&tx, &run, &child.execution_id)?;
         }
         if !wait.cancelled && child.report.is_some() && super::bot::thread_bot(&tx, &child.child_thread_id)?.is_some() {
             let fact_cursor: u64 = tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='child.report_ready' ORDER BY cursor LIMIT 1", [&child.execution_id], |r| read_number(r, 0))?;

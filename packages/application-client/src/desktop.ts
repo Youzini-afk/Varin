@@ -329,6 +329,7 @@ export type DesktopUpdateProgressEvent =
 export type DesktopTrayAction = { type: string } & Record<string, unknown>;
 
 export type VarinDesktopEventMap = {
+  'varin:companion-library-changed': void;
   'varin:update-progress': DesktopUpdateProgressEvent;
   'varin:open-thread': { directory: string | null; threadId: string; branchId: string; apiBaseUrl?: string | undefined; relayHostId?: string | undefined };
   'varin:open-draft-thread': { directory: string; projectId: string };
@@ -427,11 +428,22 @@ export interface DesktopCompanionScene {
   status?: 'queued' | 'external' | 'retry' | 'failure' | 'cancelling' | 'disconnected' | 'synchronizing' | 'uncertain';
 }
 
+export interface DesktopCompanionPack {
+  id: string; name: string; version: string; downloadBytes: number;
+  installedVersion: string | null; installedBytes: number;
+  download: { state: 'downloading' | 'cancelled' | 'failed'; receivedBytes: number; totalBytes: number; error?: string } | null;
+}
+export interface DesktopCompanionLibrary {
+  enabled: boolean; visible: boolean; selectedPackId: string | null; packs: DesktopCompanionPack[];
+}
+export type DesktopCompanionLibraryAction = { action: 'list' } | { action: 'download' | 'cancel' | 'remove' | 'select'; id: string };
+
 export interface VarinDesktopCommandMap {
   // --- window/chrome ---
   desktop_start_window_drag: { args: void; result: null };
   desktop_get_companion: { args: void; result: { enabled: boolean; visible: boolean } };
   desktop_set_companion: { args: { enabled: boolean }; result: { enabled: boolean; visible: boolean } };
+  desktop_companion_library: { args: DesktopCompanionLibraryAction; result: DesktopCompanionLibrary };
   desktop_companion_scene: { args: { descriptor: DesktopCompanionScene; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number; decorationBottom?: number } }; result: DesktopCompanionSceneLayoutReceipt | null };
   desktop_companion_stool: { args: { phase: 'clear' } | { phase: 'lift' | 'landing'; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number } }; result: null };
   desktop_companion_drag: { args: { phase: 'start'; anchor: { x: number; y: number } } | { phase: 'move' | 'end' }; result: null };
@@ -601,6 +613,7 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_start_window_drag: true,
   desktop_get_companion: true,
   desktop_set_companion: true,
+  desktop_companion_library: true,
   desktop_companion_scene: true,
   desktop_companion_stool: true,
   desktop_companion_drag: true,
@@ -683,6 +696,7 @@ export const isVarinDesktopCommand = (value: unknown): value is VarinDesktopComm
 );
 
 export const VARIN_DESKTOP_EVENT_CATALOG = {
+  'varin:companion-library-changed': true,
   'varin:update-progress': true,
   'varin:open-thread': true,
   'varin:open-draft-thread': true,

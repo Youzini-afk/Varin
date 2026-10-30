@@ -9,7 +9,9 @@ import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
 import { toolMessagesEn } from './tool-interactions';
 
+import { companionLibraryMessages } from './companion-library';
 export const dict = {
+  ...companionLibraryMessages('en'),
   ...companionAttentionEn,
   "companion.observing": "Observing the selected conversation",
   "companion.unavailable": "Conversation status is currently unavailable",

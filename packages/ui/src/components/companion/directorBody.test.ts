@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { directorBodyAction } from './directorBody';
+import { directorBodyAction, directorStopRecoveryReady } from './directorBody';
 import type { DirectorPresentation } from './directorPresentation';
 const project = {runtime:'agent' as const,threadId:'project-1',branchId:'branch-1'};
 const view: DirectorPresentation = { interactionRoute:'bot-coordinator', inspectionRoute:'bot-coordinator', health: 'current', source: null, body: { subjectRoute:'bot-coordinator', verb: 'review-portfolio', subject: project, attentionOwner: null, attentionMode: null, attentionItem: null, edge: null }, cards: [{key:'project-1',identity:project,title:'Project',botId:'bot',lead:{role:'project-lead',identity:'lead',avatar:'slope-lilac',runId:'run',state:'executing'},status:'active',attentionKeys:[],children:[],relation:'project-task'}], overflowCards: 0, inspectedProjectKey: null, inspection: null, counts: null, coverage: null };
@@ -69,7 +69,7 @@ it('selects available scoped question/result expressions but never celebrates ca
  for(const [outcome,expected] of [['completed','completion'],['failed','failure'],['cancelled','director-notify-attention'],[null,'director-notify-attention']] as const){
   const result={...agent,body:{...agent.body,verb:'notify-result' as const,attentionItem:null,edge:{key:'r',kind:'receive-result' as const,project,runId:'run',outcome,workRemains:false}}};
   expect(directorBodyAction(result,null,true,()=>true)).toBe(expected);
-  expect(directorBodyAction({...result,health:'unknown'},null,true,()=>true)).toBe('director-supervise');
+  expect(directorBodyAction({...result,health:'unknown'},null,true,()=>true)).toBe('disconnected');
  }
 });
 
@@ -88,7 +88,7 @@ it('gives Bot pending attention priority over a completed result without consumi
     const before = structuredClone(notice);
     expect(directorBodyAction(notice, 'left', true, () => true)).toBe(expected);
     expect(directorBodyAction(notice, 'right', true, () => false)).toBe('director-notify-attention');
-    expect(directorBodyAction({ ...notice, health: 'unknown' }, null, true, () => true)).toBe('director-supervise');
+    expect(directorBodyAction({ ...notice, health: 'unknown' }, null, true, () => true)).toBe('disconnected');
     expect(notice).toEqual(before);
   }
   for (const [outcome, expected] of [['failed', 'failure'], ['cancelled', 'director-notify-attention']] as const) {
@@ -100,8 +100,45 @@ it('uses working art only for explicit observed work; notices and results still 
  const working={...view,body:{...view.body,workActive:true}};
  expect(directorBodyAction(working,null,true,()=>true)).toBe('work-active');
  expect(directorBodyAction(working,null,true,()=>false)).toBe('director-supervise');
- expect(directorBodyAction({...working,health:'unknown'},null,true,()=>true)).toBe('director-supervise');
+ expect(directorBodyAction({...working,health:'unknown'},null,true,()=>true)).toBe('disconnected');
  expect(directorBodyAction({...working,body:{...working.body,verb:'notify-attention'}},null,true,()=>true)).toBe('director-notify-attention');
  expect(directorBodyAction({...working,body:{...working.body,verb:'receive-result',edge:completed}},null,true,()=>true)).toBe('director-gather-present');
  expect(directorBodyAction({...working,cards:[],body:{...working.body,subject:null}},null,true,()=>true)).toBe('work-active');
+});
+
+it('selects distinct dispatch, root intake, readiness, reasoning and wait bodies with asset fallback', () => {
+ const available=()=>true;
+ const dispatch={...view,body:{...view.body,verb:'dispatch-work' as const}};
+ expect(directorBodyAction(dispatch,null,true,available)).toBe('bot-dispatch');
+ expect(directorBodyAction(dispatch,null,true,()=>false)).toBe('director-supervise');
+ expect(directorBodyAction({...dispatch,interactionRoute:'agent-companion'},null,true,available)).toBe('director-supervise');
+ const root={...view,cards:[],body:{...view.body,verb:'receive-work' as const,edge:{...completed,kind:'receive-work' as const,rootProfileRevision:'exact-root-proof'}}};
+ expect(directorBodyAction(root,null,true,available)).toBe('director-intake');
+ for(const [kind,action] of [['preparing','bot-prepare'],['thinking','bot-think'],['waiting','external-wait']] as const) {
+  const current={...view,body:{...view.body,activity:{kind,key:'exact-current',subject:project}}};
+  expect(directorBodyAction(current,null,true,available)).toBe(action);
+  expect(directorBodyAction({...current,body:{...current.body,verb:'notify-attention'}},null,true,available)).toBe('director-notify-attention');
+ }
+ expect(directorBodyAction({...view,health:'unknown'},null,true,available)).toBe('disconnected');
+ expect(directorBodyAction({...view,health:'synchronizing'},null,true,()=>false)).toBe('director-supervise');
+});
+
+it('hears delivered reports without confusing inspection with receipt and never celebrates a stopped executor', () => {
+ const report={...view,body:{...view.body,verb:'receive-report' as const}};
+ expect(directorBodyAction(report,null,true,()=>true)).toBe('director-inspect');
+ expect(directorBodyAction({...report,interactionRoute:'agent-companion'},null,true,()=>true)).toBe('director-supervise');
+ const stopped={...view,body:{...view.body,verb:'executor-stopped' as const}};
+ expect(directorBodyAction(stopped,null,true,()=>true)).toBe('director-supervise');
+ expect(directorBodyAction({...stopped,body:{...stopped.body,workActive:true}},null,true,()=>true)).toBe('work-active');
+});
+
+
+it('consumes stop recovery only from the actually painted matching safe observation, never selected or mismatched frames', () => {
+ const painted={action:'director-supervise',context:'current',pauseSafe:true};
+ expect(directorStopRecoveryReady('executor-stopped',null,'current')).toBe(false);
+ expect(directorStopRecoveryReady('executor-stopped',{...painted,context:'old'},'current')).toBe(false);
+ expect(directorStopRecoveryReady('executor-stopped',{...painted,action:'work-active'},'current')).toBe(false);
+ expect(directorStopRecoveryReady('executor-stopped',{...painted,pauseSafe:false},'current')).toBe(false);
+ expect(directorStopRecoveryReady('executor-stopped',painted,'current')).toBe(true);
+ expect(directorStopRecoveryReady(undefined,painted,'current')).toBe(false);
 });

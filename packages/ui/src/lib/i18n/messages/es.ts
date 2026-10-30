@@ -5,7 +5,9 @@ import { chatExperienceMessages } from './chat-experience';
 import { settingsDict } from './es.settings';
 import { toolPurposeEs } from './tool-purpose-locales';
 
+import { companionLibraryMessages } from './companion-library';
 export const dict: Record<I18nKey, string> = {
+  ...companionLibraryMessages('es'),
   ...enDict,
   ...toolHeadingMessages('es'),
   ...toolFailureMessages('es'),

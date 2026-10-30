@@ -6,7 +6,6 @@ import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import {
   getDesktopLanAddress,
-  invokeDesktop,
   getDesktopKeepAwake,
   getDesktopLaunchAtLogin,
   getDesktopMinimizeToTray,
@@ -51,14 +50,6 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
   const [isSavingMinimizeToTray, setIsSavingMinimizeToTray] = React.useState(false);
   const [savedMacMenuBarEnabled, setSavedMacMenuBarEnabled] = React.useState(true);
   const [draftMacMenuBarEnabled, setDraftMacMenuBarEnabled] = React.useState(true);
-  const [companionEnabled, setCompanionEnabled] = React.useState(false);
-  const [savingCompanion, setSavingCompanion] = React.useState(false);
-  React.useEffect(() => {
-    if (!isLocalDesktop) return;
-    let active = true;
-    void invokeDesktop('desktop_get_companion').then(status => { if (active) setCompanionEnabled(status?.enabled === true); }).catch(cause => { if (active) setError(String(cause)); });
-    return () => { active = false; };
-  }, [isLocalDesktop]);
   const [keepAwakeSupported, setKeepAwakeSupported] = React.useState(false);
   const [keepAwakeEnabled, setKeepAwakeEnabled] = React.useState(false);
   const [isSavingKeepAwake, setIsSavingKeepAwake] = React.useState(false);
@@ -358,12 +349,6 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
       <div className="space-y-3">
         {section !== 'access' && (isLocalDesktop || launchAtLoginSupported || isMacDesktop || minimizeToTraySupported || keepAwakeSupported) ? (
           <div className={SETTINGS_OPTION_STACK_CLASS}>
-            {isLocalDesktop && <SettingsCheckboxRow settingsItem="sessions.desktop-companion" checked={companionEnabled}
-              disabled={savingCompanion} label={t('settings.varin.desktopNetwork.field.companion')}
-              info={t('settings.varin.desktopNetwork.field.companionDescription')}
-              onChange={enabled => { setSavingCompanion(true); void invokeDesktop('desktop_set_companion', { enabled })
-                .then(status => setCompanionEnabled(status?.enabled === true)).catch(cause => setError(String(cause))).finally(() => setSavingCompanion(false)); }} />}
-
             {launchAtLoginSupported ? (
               <SettingsCheckboxRow
                 settingsItem="sessions.desktop-launch-at-login"

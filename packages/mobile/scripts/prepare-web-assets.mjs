@@ -8,8 +8,8 @@ const mobileDist = path.resolve(mobileRoot, 'dist');
 const mobileHtml = path.join(mobileDist, 'mobile.html');
 const indexHtml = path.join(mobileDist, 'index.html');
 // The desktop companion is a native transparent window that only the desktop shell opens.
-// Its entry page and artwork (about 95 MiB of atlases) are not shipped inside mobile apps.
-const desktopOnly = new Set(['companion.html', 'companion-assets', 'companion-review-director']);
+// Its entry page, artwork and library previews are not shipped inside mobile apps.
+const desktopOnly = new Set(['companion.html', 'companion-assets', 'companion-review-director', 'companion-previews']);
 
 await rm(mobileDist, { recursive: true, force: true });
 await mkdir(mobileDist, { recursive: true });
