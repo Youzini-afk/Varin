@@ -80,6 +80,29 @@ assert.equal(p.gesture,null); assert.equal(p.current.id,'rest'); assert.equal(p.
         self.build()
         self.assertEqual(json.loads((self.root / 'out/bundle.json').read_text())['endpoints'], self.data['endpoints'])
 
+    def test_portable_preparation_rebuilds_declared_bytes_and_rejects_stale_recipe(self):
+        from pack_sequence import prepare_seated
+        recipe = {'version': 1, 'worldStool': {'source': self.data['worldStool']['source'], 'sha256': self.data['worldStool']['sourceSHA256']},
+                  'frames': [{'id': 'pose', 'source': 'seat.png', 'sha256': self.sh, 'detached': {'source': 'body.png', 'sha256': self.dh}}]}
+        recipe_path = self.root / 'recipe.json'; recipe_path.write_text(json.dumps(recipe))
+        prepare_seated(recipe_path, self.root / 'reference')
+        sh, dh = sha(self.root / 'reference/pose-ordinary.png'), sha(self.root / 'reference/pose-detached.png')
+        data = json.loads(json.dumps(self.data).replace(self.sh, sh).replace(self.dh, dh))
+        for row in [*data['nodes'], *data['sequences'][0]['frames']]:
+            row['source'] = 'prepared/pose-' + ('ordinary.png' if row['sourceSHA256'] == sh else 'detached.png')
+        data['sourcePreparation'] = {'recipe': 'recipe.json', 'recipeSHA256': sha(recipe_path), 'detachedOnly': []}
+        portable = self.root / 'portable.json'; portable.write_text(json.dumps(data))
+        receipt = compile_explicit_baseline(portable, self.root / 'portable-out')
+        self.assertEqual(receipt['actualSources'], sorted([sh, dh]))
+        self.assertFalse(receipt['sourceRebuild']['historicalPreparedInputs'])
+        self.assertIn('pillowVersion', receipt['sourceRebuild'])
+        with self.assertRaisesRegex(ValueError, 'fresh output'):
+            compile_explicit_baseline(portable, self.root / 'portable-out')
+        recipe_path.write_text(json.dumps({**recipe, 'changed': True}))
+        with self.assertRaisesRegex(ValueError, 'recipe SHA'):
+            compile_explicit_baseline(portable, self.root / 'stale-out')
+        self.assertFalse((self.root / 'stale-out').exists())
+
     def test_bad_source_or_graph_rejected_before_output(self):
         cases = [
             lambda d: d['counterparts'].clear(),

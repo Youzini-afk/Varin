@@ -26,37 +26,65 @@
     {
       "id": "reminder",
       "source": "foreground/reminder-crest.png",
-      "sha256": "1cf65e8e967902253e77aedb66f94b74ffb10c68fee8945a332822fc81b860e4"
+      "sha256": "1cf65e8e967902253e77aedb66f94b74ffb10c68fee8945a332822fc81b860e4",
+      "detached": {
+        "source": "detached/reminder/crest.png",
+        "sha256": "3bf88e78ede5b2698f8ad7683120e1c523b1dd71f0ab9ee74e391d7600a37d59"
+      }
     },
     {
       "id": "reminder-release",
       "source": "foreground/reminder/release.png",
-      "sha256": "e90a98df1bc5cc0e49056cc1b9ca0a462a17a7b77f05d07a0a2c47afa826c629"
+      "sha256": "e90a98df1bc5cc0e49056cc1b9ca0a462a17a7b77f05d07a0a2c47afa826c629",
+      "detached": {
+        "source": "detached/reminder/release.png",
+        "sha256": "7e5d6cfcf5637b07f559203af43596e43398e02eecb8079cf37873d83fa67ab8"
+      }
     },
     {
       "id": "reminder-ascending-low",
       "source": "foreground/reminder/ascending-low.png",
-      "sha256": "ae4cb5970cf320d9ea2c4033478a7a605a2f4bca895a0405af9a2430ed4c9fe4"
+      "sha256": "ae4cb5970cf320d9ea2c4033478a7a605a2f4bca895a0405af9a2430ed4c9fe4",
+      "detached": {
+        "source": "detached/reminder/ascending-low.png",
+        "sha256": "43a68afa27d2e4d4282ee4a3a259d19832d6b62fec7a088ac7adf90d843ba43f"
+      }
     },
     {
       "id": "reminder-ascending-high",
       "source": "foreground/reminder/ascending-high.png",
-      "sha256": "d5dcaa03b29723c03c98a517d43a5df3eb9a0a3b07c3dab8eb357d50b2d1ff3a"
+      "sha256": "d5dcaa03b29723c03c98a517d43a5df3eb9a0a3b07c3dab8eb357d50b2d1ff3a",
+      "detached": {
+        "source": "detached/reminder/ascending-high.png",
+        "sha256": "09942922391a01ea195a6f531aa1a730ba46fde10915c32c38748c9db212dac1"
+      }
     },
     {
       "id": "reminder-finger-relax",
       "source": "foreground/reminder/finger-relax.png",
-      "sha256": "5ce0a33aac1f7695637686d9d48462e66f9842e6353c028b9db2890916f43db1"
+      "sha256": "5ce0a33aac1f7695637686d9d48462e66f9842e6353c028b9db2890916f43db1",
+      "detached": {
+        "source": "detached/reminder/finger-relax.png",
+        "sha256": "5bdf655b7a7db382d1e9753b420b73e2bf370ce7fcd55da0b5aa90b5bbb04ae6"
+      }
     },
     {
       "id": "reminder-elbow-drop",
       "source": "foreground/reminder/elbow-drop.png",
-      "sha256": "0afa45b1d66b07c39a459353f8048a6422e525392b67c581e8991adb9651dfc3"
+      "sha256": "0afa45b1d66b07c39a459353f8048a6422e525392b67c581e8991adb9651dfc3",
+      "detached": {
+        "source": "detached/reminder/elbow-drop.png",
+        "sha256": "f4a505b646ed832de473ea7a6584a20cce86c01e2d1fa8050870ec4a2ba00a36"
+      }
     },
     {
       "id": "reminder-keyboard-approach",
       "source": "foreground/reminder/keyboard-approach.png",
-      "sha256": "26b7235b1d49376241b1e87776d890ba1030a07dd2a88fb5bdf6922b339413f9"
+      "sha256": "26b7235b1d49376241b1e87776d890ba1030a07dd2a88fb5bdf6922b339413f9",
+      "detached": {
+        "source": "detached/reminder/keyboard-approach.png",
+        "sha256": "032f46e1c90e33fb986567bac7fb751d8aa0736e2200d366f1d8ebe605925889"
+      }
     },
     {
       "id": "permission-release",

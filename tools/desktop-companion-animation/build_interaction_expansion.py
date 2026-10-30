@@ -14,7 +14,7 @@ parser.add_argument('--local-interaction-manifest',type=Path,action='append',hel
 parser.add_argument('--performance-manifest',type=Path,help='Explicit replacement performances and actual-source recovery; excludes legacy v3 display plans, keeps mechanical base; candidate only')
 parser.add_argument('--pickup-manifest',type=Path,help='Optional explicit source-keyed pickup/landing graph for replacement performances; candidate only')
 parser.add_argument('--detached-index',type=Path,help='explicit immutable new-source no-stool index')
-parser.add_argument('--baseline-manifest',type=Path,help='Explicit clean candidate baseline; excludes all legacy base/art inputs')
+parser.add_argument('--baseline-manifest',type=Path,help='Explicit clean candidate baseline; optional sourcePreparation rebuilds selected sources, no legacy base/art inputs')
 a=parser.parse_args()
 if a.baseline_manifest:
  if any((a.root,a.base_source,a.base_bundle,a.detached_index,a.director_manifest,a.local_interaction_manifest,a.performance_manifest,a.pickup_manifest)):

@@ -106,6 +106,79 @@ def compile_pickup(root, inventory, core, *, extra_detached=None, extra_recovery
  return nodes,sources
 
 
+def prepare_explicit_baseline(manifest_path, output):
+    """Reconstruct declared prepared bytes from selected source art, never an old pool.
+
+    Returned manifest is independently compilable. Existing prepared outputs are
+    immutable: use a fresh directory, including when retrying failed preparation.
+    """
+    import copy
+    import io
+    import platform
+    import re
+    from pathlib import Path
+    import PIL
+    from PIL import Image
+    import pack_sequence
+
+    manifest_path, output = Path(manifest_path).resolve(), Path(output).resolve()
+    raw = manifest_path.read_bytes()
+    spec = json.loads(raw)
+    prep = spec['sourcePreparation']
+    recipe_path = (manifest_path.parent / prep['recipe']).resolve()
+    recipe_bytes = recipe_path.read_bytes()
+    if hashlib.sha256(recipe_bytes).hexdigest() != prep['recipeSHA256']:
+        raise ValueError('Source preparation recipe SHA mismatch')
+    if output.exists():
+        raise ValueError('Source preparation requires a fresh output directory')
+    recipe = json.loads(recipe_bytes)
+    targets = {f"prepared/{row['id']}-ordinary.png" for row in recipe['frames']}
+    targets.update(f"prepared/{row['id']}-detached.png" for row in recipe['frames'] if 'detached' in row)
+    bodies = []
+    for row in prep.get('detachedOnly', []):
+        name, level = row['id'], row['compressLevel']
+        target = f'prepared/{name}-detached.png'
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', name) or target in targets or type(level) is not int or not 0 <= level <= 9:
+            raise ValueError('Invalid detached-only preparation identity or encoding')
+        targets.add(target)
+        path = (manifest_path.parent / row['source']).resolve()
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != row['sha256']:
+            raise ValueError('Detached-only raw source SHA mismatch')
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != 'PNG' or image.mode != 'RGBA' or image.size not in ((512, 512), (1254, 1254)):
+                raise ValueError('Expected registered full-canvas detached RGBA source')
+            body = image.copy() if image.size == (512, 512) else image.resize((512, 512), Image.Resampling.LANCZOS)
+        bodies.append((target.removeprefix('prepared/'), body, level))
+    resolved = copy.deepcopy(spec)
+    del resolved['sourcePreparation']
+    for row in [*resolved['nodes'], *[f for seq in resolved['sequences'] for f in seq['frames']]]:
+        if row['source'] not in targets:
+            raise ValueError('Baseline drawing is not a declared prepared source')
+        row['source'] = row['source'].removeprefix('prepared/')
+    stool = resolved['worldStool']
+    stool['source'] = str((manifest_path.parent / stool['source']).resolve())
+    prepared = pack_sequence.prepare_seated(recipe_path, output)
+    for filename, body, level in bodies:
+        body.save(output / filename, format='PNG', optimize=False, compress_level=level)
+    receipt = {'sourceManifestSHA256': hashlib.sha256(raw).hexdigest(), 'recipeSHA256': prep['recipeSHA256'],
+               'pythonVersion': platform.python_version(), 'pillowVersion': PIL.__version__,
+               'toolSHA256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path(__file__), Path(pack_sequence.__file__)]},
+               'operation': prepared['operation'], 'detachedOnlyEncoding': [{'id': row['id'], 'compressLevel': row['compressLevel']} for row in prep.get('detachedOnly', [])],
+               'historicalPreparedInputs': False}
+    (output / 'rebuild-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    # Verify encoded bytes before compiler routing, so Pillow/encoding changes
+    # cannot silently produce a new drawing identity or pose alias.
+    for row in [*resolved['nodes'], *[f for seq in resolved['sequences'] for f in seq['frames']]]:
+        if hashlib.sha256((output / row['source']).read_bytes()).hexdigest() != row['sourceSHA256']:
+            raise ValueError('Prepared source SHA differs; inspect recorded tool/Pillow versions')
+    if manifest_path.read_bytes() != raw or recipe_path.read_bytes() != recipe_bytes:
+        raise ValueError('Source manifest changed during preparation')
+    target = output / 'runtime-baseline.json'
+    target.write_text(json.dumps(resolved, indent=2) + '\n')
+    return target
+
+
 def compile_explicit_baseline(manifest_path, output):
     """Compile only declared source-keyed art for the existing player; never load legacy art.
 
@@ -122,6 +195,12 @@ def compile_explicit_baseline(manifest_path, output):
     manifest_path, output = Path(manifest_path).resolve(), Path(output).resolve()
     raw = manifest_path.read_bytes()
     spec = json.loads(raw)
+    if 'sourcePreparation' in spec:
+        prepared_manifest = prepare_explicit_baseline(manifest_path, output.with_name(output.name + '-prepared'))
+        receipt = compile_explicit_baseline(prepared_manifest, output)
+        receipt['sourceRebuild'] = json.loads((prepared_manifest.parent / 'rebuild-receipt.json').read_text())
+        (output / 'build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+        return receipt
     if spec.get('version') != 1 or spec.get('canvas') != [512, 512]:
         raise ValueError('Explicit baseline requires version 1 and registered 512px canvas')
     geometry = spec.get('geometryReference')

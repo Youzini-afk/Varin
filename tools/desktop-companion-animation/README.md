@@ -196,3 +196,32 @@ Focused验证：`python tools/desktop-companion-animation/test_explicit_baseline
 `{pose, sourceSha256}` 绑定实际 canonical seated 原画；`closedSourceSha256` 明确列出闭盖原画
 （包括生活/睡眠中间画），不得用动作名或旧姿态字符串推断。编译器和运行时 loader 都验证这些
 绑定。元数据只描述原画端点，不授予 accepted 状态；缺少此声明的旧 selected 包仍使用其原有几何合同。
+
+### Portable selected-source baseline
+
+The selected v5 `runtime-baseline.json` freezes the exact ordered action, cue,
+current-source recovery, pickup, landing and endpoint graph. It references only
+relative generated recipe IDs, not previous candidate pools or local studies:
+
+```sh
+python tools/desktop-companion-animation/build_interaction_expansion.py \
+  --baseline-manifest docs/design/desktop-companion-assets/animation-source/production-v5/runtime-baseline.json \
+  --output /tmp/varin-v5-candidate
+```
+
+Its optional `sourcePreparation` first verifies `seated-preparation.json`, prepares
+whole-canvas 512px fixed-stool composites and authored detached bodies, and checks
+all encoded drawing SHAs. Explicit detached-only sources retain their declared
+PNG compression settings; these are not invented seated counterparts. The
+prepared sources and resolved manifest live in the fresh sibling directory
+`/tmp/varin-v5-candidate-prepared`; the compiler never overwrites them. Ordinary
+already-prepared baselines and the legacy default path remain unchanged.
+
+`rebuild-receipt.json` records Python/Pillow versions, compiler/packer hashes,
+raw recipe identity and encoding. Different tool versions may produce different
+PNG bytes: a mismatch fails rather than silently changing pose identities. The
+selected reference build uses Python 3.12 / Pillow 12.3.0; its expected candidate
+bundle SHA is `a225f19fc57d683ae27e2999a18133e9ac4b6f571db98c4645d6eeea7221042f`.
+A full fresh build needs about165MiB for prepared PNGs plus atlases (pool entries
+hardlink the prepared PNGs). No historical pool is required. Output stays
+`candidateOnly`; this command neither installs nor visually accepts a skin.
