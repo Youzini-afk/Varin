@@ -46,3 +46,22 @@ it('rejects a legacy Bot entry instead of constructing a native identity', async
     await assert.rejects(createBotsHttpAPI().list(), error => error instanceof BotRequestError && error.code === 'invalid-response');
   } finally { globalThis.fetch = original; }
 });
+it('decodes Bot conversations on their main branch and refuses foreign navigation identities', async () => {
+  const original = globalThis.fetch; let foreign = false;
+  const thread = { thread_id: 'thread-second', main_branch_id: 'branch-second', title: 'New thread', bot_id: bot.id,
+    branches: [{ branch_id: 'branch-second', head: null, active_run_id: null, latest_run: null }] };
+  const session = () => ({ identity: { runtime: 'agent', threadId: 'thread-second', branchId: foreign ? 'branch-other' : 'branch-second' }, thread, primary: false });
+  const requests: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(`${init?.method ?? 'GET'} ${String(input)}`);
+    return init?.method === 'POST' ? Response.json({ session: session() }) : Response.json({ sessions: [session()] });
+  };
+  try {
+    const api = createBotsHttpAPI();
+    assert.equal((await api.sessions.list(bot.id))[0]?.identity.threadId, 'thread-second');
+    assert.equal((await api.sessions.create(bot.id)).primary, false);
+    assert.deepEqual(requests.map(line => line.replace(/^(\w+) .*\/api/, '$1 /api')), ['GET /api/harness/bots/bot/sessions', 'POST /api/harness/bots/bot/sessions']);
+    foreign = true;
+    await assert.rejects(api.sessions.list(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
+  } finally { globalThis.fetch = original; }
+});

@@ -1409,7 +1409,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         const scope = await agentRuntime.botScope(bot.id);
         const matters = (await agentRuntime.botMatters(bot.id)).filter(matter => !matter.archived);
         const associated = new Map(matters.flatMap(matter => matter.threads.map(link => [link.threadId, link] as const)));
-        const owned = new Set(scope.threads.map(thread => thread.thread_id));
+        const owned = new Map(scope.threads.map(thread => [thread.thread_id, thread] as const));
+        const sessions = new Set(scope.sessions);
+        // Delegated work belongs to the session whose execution ancestry dispatched it.
+        const sessionOf = (threadId: string): string | null => {
+          const seen = new Set<string>();
+          for (let current: string | null = threadId; current && !seen.has(current); current = owned.get(current)?.parent_thread_id ?? null) {
+            if (sessions.has(current)) return current;
+            seen.add(current);
+          }
+          return null;
+        };
         const followed = await Promise.all([...associated.keys()].filter(thread => !owned.has(thread)).map(thread => agentRuntime.thread(thread).catch(error => {
           if (error instanceof KernelClientError && error.code === 'not-found') return null;
           throw error;
@@ -1419,23 +1429,42 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           if (entry && !includeEntry) return [];
           const matterIds = matters.filter(matter => matter.threads.some(link => link.threadId === thread.thread_id && link.branchId === branch.branch_id)).map(matter => matter.id);
           if (!owned.has(thread.thread_id) && !matterIds.length) return [];
+          const purpose = entry ? 'bot-root' as const : sessions.has(thread.thread_id) ? 'session' as const : owned.has(thread.thread_id) ? 'work' as const : 'followed' as const;
           return [{ runtime: 'agent' as const, identity: { runtime: 'agent' as const, threadId: thread.thread_id, branchId: branch.branch_id }, thread,
-            activeRun: branch.latest_run, matterIds, purpose: entry ? 'bot-root' as const : owned.has(thread.thread_id) ? 'work' as const : 'followed' as const }];
+            activeRun: branch.latest_run, matterIds, purpose, sessionThreadId: owned.has(thread.thread_id) ? sessionOf(thread.thread_id) : null }];
         }));
+      },
+      listSessions: async bot => {
+        const scope = await agentRuntime.botScope(bot.id, undefined, true);
+        const threads = new Map(scope.threads.map(thread => [thread.thread_id, thread] as const));
+        return scope.sessions.flatMap(threadId => {
+          const thread = threads.get(threadId);
+          return thread && thread.deleted_at_ms === null ? [{ identity: { runtime: 'agent' as const, threadId, branchId: thread.main_branch_id }, thread, primary: threadId === bot.entry.threadId }] : [];
+        });
+      },
+      createSession: async (bot, identity) => {
+        await agentRuntime.createBotThread(bot.id, identity.threadId, identity.branchId);
+        const thread = await agentRuntime.thread(identity.threadId);
+        return { identity: { runtime: 'agent' as const, threadId: thread.thread_id, branchId: thread.main_branch_id }, thread, primary: false };
       },
       applyProfile: async bot => {
         if (bot.entry.runtime !== 'agent') return;
         const scope = await agentRuntime.botScope(bot.id);
         await threads.refreshPersonalization(scope.threads.flatMap(thread => thread.branches.map(branch => ({ runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id }))));
-        const entry = bot.entry;
-        const thread = await agentRuntime.thread(entry.threadId);
-        const run = thread.branches.find(branch => branch.branch_id === entry.branchId)?.latest_run;
         const model = await botAgentModel(bot);
-        if (run && !run.cancel_requested && model) {
-          const selected = await agentRuntime.modelSelections(run.id);
-          const configuration = (selected.desired?.configuration ?? run.configuration) as { providerId?: string; model?: string };
-          if (configuration.providerId !== model.providerId || configuration.model !== model.modelId) await threads.selectModel({ ...entry, runId: run.id,
-            key: `bot-profile:${bot.id}:${(await botService.executionGate(bot.id)).profileRevision}`, model });
+        if (!model) return;
+        // Every Bot conversation follows the profile model; delegated work keeps its own selection.
+        const sessions = new Set(scope.sessions);
+        const profileRevision = (await botService.executionGate(bot.id)).profileRevision;
+        for (const thread of scope.threads.filter(thread => sessions.has(thread.thread_id))) {
+          for (const branch of thread.branches) {
+            const run = branch.latest_run;
+            if (!run || run.cancel_requested) continue;
+            const selected = await agentRuntime.modelSelections(run.id);
+            const configuration = (selected.desired?.configuration ?? run.configuration) as { providerId?: string; model?: string };
+            if (configuration.providerId !== model.providerId || configuration.model !== model.modelId) await threads.selectModel({ runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id, runId: run.id,
+              key: `bot-profile:${bot.id}:${profileRevision}:${branch.branch_id}`, model });
+          }
         }
       },
     },
@@ -2012,6 +2041,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readSettings: async () => (await modelsService.settings.read()).document,
   });
   const threadTitles = createThreadTitleService({ runtime: agentRuntime, modelText,
+    botSession: async (thread, signal) => {
+      const bot = thread.bot_id ? await botService.get(thread.bot_id) : null;
+      if (!bot || bot.entry.threadId === thread.thread_id) return false;
+      return (await agentRuntime.botScope(bot.id, signal, true)).sessions.includes(thread.thread_id);
+    },
     onError: error => {
       const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'title-generation-failed';
       console.error('[ThreadTitle] Auxiliary title generation failed; the input title is retained:', code);

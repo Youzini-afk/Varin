@@ -1,4 +1,4 @@
-import type { BotsAPI, BotEntry, BotEntryResult, BotSummary, BotWorkItem, BotMemoryItem } from './bots.js';
+import type { BotsAPI, BotEntry, BotEntryResult, BotSession, BotSummary, BotWorkItem, BotMemoryItem } from './bots.js';
 import type { ThreadMemoryDraft, ChatMemoryOwner, ChatMemoryReceipt } from './chat-memory.js';
 import type { MemorySourceExcerpt } from '@varin/protocol';
 import { runtimeFetch } from './transport/runtime-fetch.js';
@@ -63,7 +63,8 @@ export const decodeBotWork = (value: unknown): BotWorkItem => {
   if (work.runtime === 'agent') {
     const identity = entry(work.identity);
     if (identity.threadId !== string(thread.thread_id)
-      || !['bot-root', 'work', 'followed'].includes(string(work.purpose)) || !nullableString(thread.bot_id)) invalid();
+      || !['bot-root', 'session', 'work', 'followed'].includes(string(work.purpose)) || !nullableString(thread.bot_id)
+      || (work.sessionThreadId !== undefined && !nullableString(work.sessionThreadId))) invalid();
     const branchId = identity.branchId;
     const branches = array(thread.branches, value => {
       const branch = record(value); string(branch.branch_id); if (!nullableString(branch.head) || !nullableString(branch.active_run_id)) invalid();
@@ -76,6 +77,17 @@ export const decodeBotWork = (value: unknown): BotWorkItem => {
   if (work.desktops !== undefined) array(work.desktops, value => { const desktop = record(value); string(desktop.id); string(desktop.label); string(desktop.status); });
   if (work.artifacts !== undefined) array(work.artifacts, value => { const artifact = record(value); string(artifact.id); string(artifact.relativePath); });
   return work as unknown as BotWorkItem;
+};
+export const decodeBotSession = (value: unknown): BotSession => {
+  const session = record(value); const identity = entry(session.identity); const thread = record(session.thread);
+  if (identity.threadId !== string(thread.thread_id) || identity.branchId !== string(thread.main_branch_id)
+    || typeof session.primary !== 'boolean' || typeof thread.title !== 'string' || !nullableString(thread.bot_id)) invalid();
+  array(thread.branches, value => {
+    const branch = record(value); string(branch.branch_id); if (!nullableString(branch.head) || !nullableString(branch.active_run_id)) invalid();
+    if (branch.latest_run !== null) { const run = record(branch.latest_run); string(run.id); string(run.state); }
+    return branch;
+  });
+  return session as unknown as BotSession;
 };
 const memoryItem = (value: unknown): BotMemoryItem => {
   const item = record(value);
@@ -169,6 +181,10 @@ export function createBotsHttpAPI(): BotsAPI {
     changeState: async (id, action) => decodeBot((await request(`${path(id)}/${action}`, 'POST')).bot),
     entry: async (id, signal) => decodeBotEntryResult(await request(`${path(id)}/entry`, 'POST', undefined, signal)),
     work: async (id, signal) => array((await request(`${path(id)}/work`, 'GET', undefined, signal)).threads, decodeBotWork),
+    sessions: {
+      list: async (id, signal) => array((await request(`${path(id)}/sessions`, 'GET', undefined, signal)).sessions, decodeBotSession),
+      create: async id => decodeBotSession((await request(`${path(id)}/sessions`, 'POST')).session),
+    },
     memory: {
       list: async (id, signal, includeInactive) => array((await request(`${path(id)}/memory${includeInactive ? '?includeInactive=true' : ''}`, 'GET', undefined, signal)).items, memoryItem),
       history: async (id, memoryId, signal) => array((await request(`${path(id)}/memory/${memoryId}/history`, 'GET', undefined, signal)).items, memoryItem),

@@ -75,6 +75,11 @@ export class WorkbenchShellTransitionAbortedError extends Error {
 export interface WorkbenchProfileTransitionOptions {
   /** Internal commit gate used by the live cover transaction after candidate preparation succeeds. */
   beforeCommit?: () => Promise<void>;
+  /**
+   * Leaving Bot normally restores the ordinary conversation the user left. A caller that
+   * navigates to a specific conversation selects it here instead, before the reveal paints.
+   */
+  selectOnLeavingBot?: () => void;
   beforePrepare?: () => Promise<void>;
   enableShell?: boolean;
 }
@@ -480,7 +485,10 @@ export const selectActiveWorkbenchProfile = async (
   } else {
     // Restore the ordinary conversation before the new Shell crosses its paint boundary.
     // Restoring after it started a second content mount together with the reveal wave.
-    if (leavingBot && useThreadStore.getState().hostKey === runtimeKey) restoreOrdinarySession();
+    if (leavingBot && useThreadStore.getState().hostKey === runtimeKey) {
+      if (options?.selectOnLeavingBot) options.selectOnLeavingBot();
+      else restoreOrdinarySession();
+    }
     const targetPainted = await waitForWorkbenchProfileTransitionTargetPainted(transitionId);
     // A newer selection can supersede this transaction after its persistence completed. Its Shell
     // owns the next reveal, so this stale caller must not expose or complete that newer scene.

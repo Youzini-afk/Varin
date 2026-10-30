@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createBotService, type BotServiceOptions, type BotService, type BotLifecycleRuntime } from "./bot-service.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
+import type { BotSession } from "@varin/application-client";
 
 const dirs: string[] = [];
 const services: BotService[] = [];
@@ -33,6 +34,9 @@ const setup = async () => {
   const ensureEntry = vi.fn<BotServiceOptions['agent']['ensureEntry']>(async bot => bot.entry);
   const applyProfile = vi.fn(async () => {});
   const listWork = vi.fn<BotServiceOptions['agent']['listWork']>(async () => []);
+  const listSessions = vi.fn<BotServiceOptions['agent']['listSessions']>(async () => []);
+  const createSession = vi.fn<BotServiceOptions['agent']['createSession']>(async (_bot, identity) => ({ identity, primary: false,
+    thread: { thread_id: identity.threadId, main_branch_id: identity.branchId } as BotSession['thread'] }));
   const removeData = vi.fn<NonNullable<BotServiceOptions['removeData']>>(async () => {});
   const onDeleted = vi.fn();
   const lifecycle = {
@@ -45,13 +49,13 @@ const setup = async () => {
   };
   const options: BotServiceOptions = {
     client: { subscribeExit: () => () => {}, issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
-    dataDir, hostId: "test", agent: { ensureEntry, model: async bot => bot.model, listWork, applyProfile },
+    dataDir, hostId: "test", agent: { ensureEntry, model: async bot => bot.model, listWork, listSessions, createSession, applyProfile },
     removeData, onDeleted, lifecycle: () => lifecycle,
 
   };
   const recreate = () => { const service = createBotService(options); services.push(service); return service; };
   const service = recreate();
-  return { service, recreate, lifecycle, records, catalog, removeData, onDeleted, ensureEntry, applyProfile, listWork, failWrite: () => { failWrite = true; } };
+  return { service, recreate, lifecycle, records, catalog, removeData, onDeleted, ensureEntry, applyProfile, listWork, listSessions, createSession, failWrite: () => { failWrite = true; } };
 };
 
 it('creates one default assistant under concurrent opens and preserves existing assistants', async () => {
@@ -197,6 +201,24 @@ it('resolves a sleeping native entry without opening admission and applies profi
   await service.update(bot.id, { instructions: 'New instructions', pinned: true });
   expect(applyProfile).toHaveBeenCalledWith(expect.objectContaining({ instructions: 'New instructions', entry: bot.entry }));
   expect(await service.canExecute(bot.id)).toBe(false);
+});
+
+it('starts further conversations under fresh identities only while the Bot can execute', async () => {
+  const { service, createSession, listSessions } = await setup();
+  const bot = await service.create();
+  const [first, second] = await Promise.all([service.createSession(bot.id), service.createSession(bot.id)]);
+  expect(first.identity.threadId).toMatch(new RegExp(`^thread:bot:${bot.id}:`));
+  expect(first.identity.branchId).toMatch(new RegExp(`^branch:bot:${bot.id}:`));
+  expect(new Set([bot.entry.threadId, first.identity.threadId, second.identity.threadId]).size).toBe(3);
+  expect(createSession.mock.calls.every(([owner]) => owner.id === bot.id)).toBe(true);
+  await service.listSessions(bot.id);
+  expect(listSessions).toHaveBeenCalledWith(expect.objectContaining({ id: bot.id }));
+  await service.sleep(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('asleep'));
+  createSession.mockClear();
+  await expect(service.createSession(bot.id)).rejects.toThrow(/Wake the Bot/);
+  expect(createSession).not.toHaveBeenCalled();
+  await expect(service.createSession('missing')).rejects.toThrow(/Unknown Bot/);
 });
 
 it('stops work even when the VM inventory is unavailable, and retains that progress on retry', async () => {

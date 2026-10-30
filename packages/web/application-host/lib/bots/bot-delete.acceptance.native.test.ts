@@ -20,7 +20,7 @@ it('deletes Bot catalog and private resources through the release kernel without
   await mkdir(dataDir);
   const lifecycle: BotLifecycleRuntime = { planWork: async () => [], planMachines: async () => [], stop: async () => {},
     stopScope: async () => {}, machine: async (_bot, machine) => machine, prepareWake: async () => {}, resume: async () => {}, awakened: async () => {} };
-  const service = createBotService({ client, hostId: 'bot-delete', dataDir, agent: { ensureEntry: async bot => bot.entry, model: async bot => bot.model, listWork: async () => [] }, lifecycle: () => lifecycle,
+  const service = createBotService({ client, hostId: 'bot-delete', dataDir, agent: { ensureEntry: async bot => bot.entry, model: async bot => bot.model, listWork: async () => [], listSessions: async () => [], createSession: async () => { throw new Error('No session in this fixture'); } }, lifecycle: () => lifecycle,
     removeData: createBotDataCleanup({ dataDir, hostId: 'bot-delete', deleteAgentScope: async () => {}, closeMemory: async () => {}, releaseRemoteScope: async () => {},
       files: new KernelFileResourceBackend(adapter) }) });
   try {

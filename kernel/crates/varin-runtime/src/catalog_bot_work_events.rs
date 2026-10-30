@@ -2,18 +2,28 @@
 use super::*;
 use crate::execution::{Content, ConversationItem, Provenance};
 
+/// Each Bot that should hear about activity in this conversation, and the session that
+/// receives it. Work in a Bot's own family returns to the session that owns that family;
+/// followed ordinary conversations report to the Bot's primary session. A session never
+/// receives a copy of its own activity.
+fn targets(tx: &Transaction<'_>, thread_id: &str, branch_id: &str) -> Result<Vec<(String, String)>> {
+    let mut targets = std::collections::BTreeMap::new();
+    for bot in super::bot_work::followers(tx, thread_id, branch_id)? {
+        let entry = super::bot_work::entry(tx, &bot)?;
+        targets.insert(bot, entry);
+    }
+    if let Some(owner) = super::bot::thread_owner(tx, thread_id)? {
+        let session = match owner.session_thread_id {
+            Some(session) => session,
+            None => super::bot_work::entry(tx, &owner.bot_id)?,
+        };
+        targets.insert(owner.bot_id, session);
+    }
+    Ok(targets.into_iter().filter(|(_, target)| target != thread_id).collect())
+}
+
 pub(super) fn user_input(tx: &Transaction<'_>, run: &Run, item_id: &str) -> Result<()> {
-    let mut bots = std::collections::BTreeSet::new();
-    if let Some(bot) = super::bot::thread_bot(tx, &run.thread_id)? {
-        if super::bot_work::entry(tx, &bot)? != run.thread_id {
-            bots.insert(bot);
-        }
-    }
-    for bot in super::bot_work::followers(tx, &run.thread_id, &run.branch_id)? {
-        bots.insert(bot);
-    }
-    for bot in bots {
-        let target = super::bot_work::entry(tx, &bot)?;
+    for (bot, target) in targets(tx, &run.thread_id, &run.branch_id)? {
         let branch = super::threads::branch(tx, &target)?;
         event(
             tx,
@@ -29,14 +39,9 @@ pub(super) fn user_input(tx: &Transaction<'_>, run: &Run, item_id: &str) -> Resu
 pub(super) fn observation(
     tx: &Transaction<'_>, owner: &super::context_observations::ContextObservationSource, id: &str, change_id: Option<&str>,
 ) -> Result<()> {
-    let mut bots = super::bot_work::followers(tx, &owner.thread_id, &owner.branch_id)?;
-    if let Some(bot) = super::bot::thread_bot(tx, &owner.thread_id)? { bots.push(bot); }
-    bots.sort(); bots.dedup();
-    for bot in bots {
-        let target = super::bot_work::entry(tx, &bot)?;
-        // The entry already receives this original observation; task intervention is
-        // what needs to cross back to its assistant, not a copy of its own context.
-        if target == owner.thread_id { continue; }
+    // A session already receives its own original observation; task intervention is
+    // what needs to cross back to its assistant, not a copy of its own context.
+    for (bot, target) in targets(tx, &owner.thread_id, &owner.branch_id)? {
         let branch = super::threads::branch(tx, &target)?;
         event(tx, "bot-work-pending", 1, "bot.work_pending", json!({
             "kind":"workspace_change", "botId":bot, "targetThreadId":target,
@@ -47,12 +52,7 @@ pub(super) fn observation(
     Ok(())
 }
 pub(super) fn navigation(tx: &Transaction<'_>, receipt: &super::navigation::NavigationReceipt) -> Result<()> {
-    let mut bots = super::bot_work::followers(tx, &receipt.thread_id, &receipt.branch_id)?;
-    if let Some(bot) = super::bot::thread_bot(tx, &receipt.thread_id)? { bots.push(bot); }
-    bots.sort(); bots.dedup();
-    for bot in bots {
-        let target = super::bot_work::entry(tx, &bot)?;
-        if target == receipt.thread_id { continue; }
+    for (bot, target) in targets(tx, &receipt.thread_id, &receipt.branch_id)? {
         let branch = super::threads::branch(tx, &target)?;
         event(tx, "bot-work-pending", 1, "bot.work_pending", json!({"kind":"history_changed",
             "botId":bot,"targetThreadId":target,"targetBranchId":branch,

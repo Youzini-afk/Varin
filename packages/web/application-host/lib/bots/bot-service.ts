@@ -14,6 +14,7 @@ import type {
   BotSleepMachine,
   BotModelSelection,
   BotProfile,
+  BotSession,
   BotSummary,
   BotWorkItem,
 } from "@varin/application-client";
@@ -43,6 +44,10 @@ export interface BotServiceOptions {
     ensureEntry(bot: BotSummary): Promise<ThreadIdentity>;
     model(bot: BotSummary): Promise<BotModelSelection | null>;
     listWork(bot: BotSummary, includeEntry: boolean): Promise<BotWorkItem[]>;
+    /** Directly bound conversations, primary entry first. */
+    listSessions(bot: BotSummary): Promise<BotSession[]>;
+    /** Bind a new conversation to the Bot under fresh native identities. */
+    createSession(bot: BotSummary, identity: ThreadIdentity): Promise<BotSession>;
     applyProfile?(bot: BotSummary): Promise<void>;
   };
   onError?(error: unknown): void;
@@ -140,6 +145,10 @@ export interface BotService {
   ensureEntry(botId: string): Promise<BotEntryResult>;
   /** Threads owned by the Bot's owner scope, including original executor references. */
   listWork(botId: string, includeEntry?: boolean): Promise<BotWorkItem[]>;
+  /** The Bot's own conversations; each is an independent Thread bound to the Bot. */
+  listSessions(botId: string): Promise<BotSession[]>;
+  /** Start another conversation with the same Bot identity, memory and profile. */
+  createSession(botId: string): Promise<BotSession>;
 }
 
 export function createBotService(options: BotServiceOptions): BotService {
@@ -540,6 +549,23 @@ export function createBotService(options: BotServiceOptions): BotService {
     return options.agent.listWork(bot, includeEntry);
   };
 
+  const listSessions: BotService["listSessions"] = async (botId) => {
+    const bot = await get(botId);
+    if (!bot) throw new HarnessServiceError('not-found', 'Unknown Bot');
+    return options.agent.listSessions(bot);
+  };
+
+  const createSession: BotService["createSession"] = (botId) => serialize(botId, async () => {
+    const bot = await get(botId);
+    if (!bot) throw new HarnessServiceError("not-found", `Unknown Bot "${botId}"`);
+    if (bot.deletion) throw new HarnessServiceError('unavailable', 'This Bot is being deleted');
+    if (bot.archived) throw new HarnessServiceError("invalid-params", `Bot "${botId}" is archived`);
+    // A sleeping Bot cannot start new work; the Catalog gate enforces the same rule.
+    if (!permitted(bot)) throw new HarnessServiceError('unavailable', 'Wake the Bot before starting a new conversation');
+    const id = randomUUID();
+    return options.agent.createSession(bot, { runtime: 'agent', threadId: `thread:bot:${botId}:${id}`, branchId: `branch:bot:${botId}:${id}` });
+  });
+
   return {
     primary: () => serialize('__primary__', async () => {
       const existing = (await list()).find(bot => !bot.archived && !bot.deletion);
@@ -596,5 +622,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     },
     ensureEntry,
     listWork,
+    listSessions,
+    createSession,
   };
 }

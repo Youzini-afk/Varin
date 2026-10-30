@@ -6,8 +6,12 @@ import type { ModelTextService } from './service.js';
 export function createThreadTitleService(options: {
   runtime: Pick<AgentRuntimeClient, 'thread' | 'threads' | 'updateThread' | 'onReady'>;
   modelText: Pick<ModelTextService, 'generate' | 'original' | 'resumeUnsent'>;
+  /** Bot conversations other than the long-lived primary entry are titled like ordinary sessions. */
+  botSession?(thread: ThreadSummary, signal: AbortSignal): Promise<boolean>;
   onError(error: unknown): void;
 }) {
+  const titled = async (thread: ThreadSummary, signal: AbortSignal) => !thread.bot_id
+    || (options.botSession ? await options.botSession(thread, signal) : false);
   const pending = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   const lifetime = new AbortController();
   const firstLine = (text: string) => text.split(/\r?\n/u).map(line => line.trim()).find(Boolean);
@@ -50,7 +54,9 @@ export function createThreadTitleService(options: {
       if (closed) return;
       for (const thread of await options.runtime.threads(lifetime.signal)) {
         if (closed) return;
-        if (thread.parent_thread_id || thread.bot_id || thread.deleted_at_ms !== null) continue;
+        if (thread.parent_thread_id || thread.deleted_at_ms !== null) continue;
+        try { if (!await titled(thread, lifetime.signal)) continue; }
+        catch (error) { if (!closed) options.onError(error); continue; }
         // A metadata lookup must not reserve a new Thread and suppress the
         // first real schedule() arriving while startup discovery is running.
         const key = `thread-title:${thread.thread_id}`;
@@ -74,11 +80,12 @@ export function createThreadTitleService(options: {
   return {
     recover,
     schedule(thread: ThreadSummary, text: string): void {
-      if (closed || pending.has(thread.thread_id) || thread.parent_thread_id || thread.bot_id
+      if (closed || pending.has(thread.thread_id) || thread.parent_thread_id || (thread.bot_id && !options.botSession)
         || thread.title !== 'New thread' || thread.branches.some(branch => branch.latest_run)
         || !text.trim()) return;
       const fallback = firstLine(text)!;
       void start(thread.thread_id, async signal => {
+        if (thread.bot_id && !await titled(thread, signal)) return;
         const result = await options.modelText.generate({ key: `thread-title:${thread.thread_id}`, purpose: 'title', prompt: text,
           system: "Write a concise conversation title for the user's request in the user's language. Return only the title.",
           signal });

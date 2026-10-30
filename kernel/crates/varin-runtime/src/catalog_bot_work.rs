@@ -232,15 +232,23 @@ impl Catalog {
         if let Some(caller) = caller {
             let run = self.run(&caller.run_id)?;
             fence(&run, self.epoch)?;
-            if run.thread_id != root || run.cancel_requested {
+            let session_bot: Option<String> = self
+                .db
+                .query_row(
+                    "SELECT bot_id FROM bot_thread_bindings WHERE thread_id=?1",
+                    [&run.thread_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if session_bot.as_deref() != Some(input.bot_id.as_str()) || run.cancel_requested {
                 return Err(RuntimeError::Conflict(
-                    "matter update is outside its Bot entry execution".into(),
+                    "matter update is outside its Bot session execution".into(),
                 ));
             }
             tool_content::root_tool_context(&self.db, caller, true)?;
             for link in &next.threads {
                 if scheduling::thread_family(&self.db, &link.thread_id)?
-                    != scheduling::thread_family(&self.db, &root)?
+                    != scheduling::thread_family(&self.db, &run.thread_id)?
                     && !prior.as_ref().is_some_and(|matter| {
                         matter.threads.iter().any(|old| {
                             old.thread_id == link.thread_id

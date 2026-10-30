@@ -26,7 +26,7 @@ interface ThreadNavigationState {
   catalogLoading: boolean;
   catalogError: string | null;
   loadCatalog(): Promise<void>;
-  resolveThread(target: { threadId: string; branchId?: string }): Promise<{ identity: ThreadIdentity; botId: string | null }>;
+  resolveThread(target: { threadId: string; branchId?: string }): Promise<{ identity: ThreadIdentity; botId: string | null; parentThreadId: string | null }>;
   selectThread(identity: { threadId: string; branchId?: string }): Promise<ThreadIdentity>;
   openDraft(options?: { workspacePath?: string }): string;
   materializeDraft(draftKey: string): Promise<ThreadIdentity>;
@@ -106,7 +106,7 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     if (owner !== binding) throw new Error('Conversation navigation was superseded');
     if (!thread) throw new Error('Conversation is unavailable on this Host');
     const identity = resolveCatalogIdentity(get().hostKey, thread, target);
-    return { identity, botId: thread.bot_id };
+    return { identity, botId: thread.bot_id, parentThreadId: thread.parent_thread_id };
   },
   async selectThread(target) {
     requireAPI();

@@ -47,3 +47,25 @@ it('reuses the generated title when pinning changes the metadata revision during
   expect(onError).not.toHaveBeenCalled();
   await owner.close();
 });
+
+it('titles additional Bot conversations but never the primary entry or Bots without a session check', async () => {
+  const session = { thread_id: 'bot-session', title: 'New thread', branches: [], parent_thread_id: null, bot_id: 'bot' } as unknown as ThreadSummary;
+  const entry = { ...session, thread_id: 'bot-entry' } as ThreadSummary;
+  const generate = vi.fn(async () => ({ text: '旅行安排', requestId: 'request', providerId: 'auxiliary', modelId: 'title' }));
+  const read = vi.fn(async (threadId: string) => ({ ...session, thread_id: threadId, title: '帮我排一下旅行', revision: 1, deleted_at_ms: null }));
+  const update = vi.fn(async () => session);
+  const botSession = vi.fn(async (thread: ThreadSummary) => thread.thread_id === 'bot-session');
+  const runtime = { thread: read, updateThread: update, threads: async () => [], onReady: () => () => {} };
+  const owner = createThreadTitleService({ modelText: { generate, original: async () => null, resumeUnsent: async () => null }, runtime, botSession, onError: vi.fn() });
+  owner.schedule(entry, '帮我排一下旅行');
+  owner.schedule(session, '帮我排一下旅行');
+  await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+  expect(update).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'bot-session', title: '旅行安排' }), expect.any(AbortSignal));
+  expect(generate).toHaveBeenCalledOnce();
+  await owner.close();
+  const unchecked = createThreadTitleService({ modelText: { generate, original: async () => null, resumeUnsent: async () => null }, runtime, onError: vi.fn() });
+  unchecked.schedule({ ...session, thread_id: 'other-session' } as ThreadSummary, '另一件事');
+  await Promise.resolve();
+  expect(generate).toHaveBeenCalledOnce();
+  await unchecked.close();
+});

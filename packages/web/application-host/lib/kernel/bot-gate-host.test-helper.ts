@@ -55,7 +55,8 @@ async function handle(frame:Record<string,unknown>) {
         if (bot.entry.runtime !== 'agent') throw new Error('Agent Bot entry required');
         await runtime.createBotThread(bot.id, bot.entry.threadId, bot.entry.branchId);
         return bot.entry;
-      }, model: async () => null, listWork: async () => [] },
+      }, model: async () => null, listWork: async () => [], listSessions: async () => [],
+      createSession: async () => { throw new Error('This fixture has no additional Bot conversations'); } },
       publishExecutionGate:gate=>kernel.agentRuntimeRequest<void,'runtime.bot.gate.publish'>('runtime.bot.gate.publish',gate),
       lifecycle:()=>nativeLifecycle ?? ({planWork:async()=>[],planMachines:async()=>[],stop:async()=>{},stopScope:async()=>new Promise<void>(resolve=>{releaseStop=resolve;send({kind:'fixture-stop-entered'});}),machine:async(_bot,machine)=>machine,prepareWake:async()=>{},resume:async()=>{},awakened:async()=>{}}),
     });

@@ -88,7 +88,22 @@ export interface BotWorkItem {
   identity: ThreadIdentity;
   thread: ThreadSummary;
   activeRun: Run | null;
-  purpose: 'bot-root' | 'work' | 'followed';
+  /**
+   * `bot-root` is the primary entry branch, `session` any other branch of a Bot-bound
+   * conversation, `work` delegated work, and `followed` an explicitly followed conversation.
+   */
+  purpose: 'bot-root' | 'session' | 'work' | 'followed';
+  /** The Bot conversation whose execution ancestry owns this work; null for followed threads. */
+  sessionThreadId?: string | null;
+}
+
+/** One of the Bot's own conversations. Every session shares the Bot identity, profile and memory. */
+export interface BotSession {
+  /** The session's main branch. Other branches are listed on `thread.branches`. */
+  identity: ThreadIdentity;
+  thread: ThreadSummary;
+  /** The profile entry that receives followed-conversation and matter updates. */
+  primary: boolean;
 }
 
 export interface BotMemoryItem {
@@ -118,6 +133,10 @@ export interface BotsAPI {
   changeState(botId: string, action: 'sleep' | 'wake' | 'restore' | 'retry'): Promise<BotSummary>;
   entry(botId: string, signal?: AbortSignal): Promise<BotEntryResult>;
   work(botId: string, signal?: AbortSignal): Promise<BotWorkItem[]>;
+  sessions: {
+    list(botId: string, signal?: AbortSignal): Promise<BotSession[]>;
+    create(botId: string): Promise<BotSession>;
+  };
   memory: {
     list(botId: string, signal?: AbortSignal, includeInactive?: boolean): Promise<BotMemoryItem[]>;
     history(botId: string, id: number, signal?: AbortSignal): Promise<BotMemoryItem[]>;

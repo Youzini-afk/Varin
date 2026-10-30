@@ -720,7 +720,7 @@ it('task menus reuse the selected Agent, retain uncertain send identity and rena
   expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
   expect(send.mock.calls[0]).toEqual([identity, expect.objectContaining({ kind: 'request', text: 'Check the new change', targetThreadId: 'child:chosen', targetBranchId: 'branch:chosen' })]);
   expect(changed).toHaveBeenCalledOnce();
-  const resolve = vi.spyOn(useThreadStore.getState(), 'resolveThread').mockResolvedValue({ identity: { runtime: 'agent', threadId: 'child:chosen', branchId: 'branch:chosen' }, botId: null });
+  const resolve = vi.spyOn(useThreadStore.getState(), 'resolveThread').mockResolvedValue({ identity: { runtime: 'agent', threadId: 'child:chosen', branchId: 'branch:chosen' }, botId: null, parentThreadId: null });
   const rename = vi.spyOn(useThreadStore.getState(), 'updateThread').mockResolvedValue(undefined);
   await openMenu(); await act(async () => menuItem('chat.children.rename')!.click());
   await edit('[aria-label="chat.children.taskName"]', 'File fixes');

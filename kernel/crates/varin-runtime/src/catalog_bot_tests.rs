@@ -503,3 +503,32 @@ fn bot_scope_delete_retains_shared_history_atomically_then_removes_only_original
     assert!(db.inspect_thread("unrelated").is_ok());
     db.remove_bot_scope(&suspension(2)).unwrap();
 }
+
+#[test]
+fn bot_session_input_stays_in_its_own_session_and_scope_lists_sessions_in_order() {
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    db.publish_bot_gate(gate(1, true)).unwrap();
+    db.create_bot_thread("thread", "main", "bot").unwrap();
+    db.create_bot_thread("second", "second-main", "bot").unwrap();
+    let mut user = command();
+    user.thread_id = "second".into();
+    user.branch_id = "second-main".into();
+    user.key = "second-user".into();
+    db.submit(&user).unwrap();
+    let owner = std::sync::Mutex::new(db);
+    super::bot_work_events::deliver(&owner).unwrap();
+    let db = owner.into_inner().unwrap();
+    // The second session already holds its own user input; the primary must not receive a copy.
+    let copied: u64 = db
+        .db
+        .query_row("SELECT count(*) FROM input_queue WHERE origin='work_event'", [], |r| read_number(r, 0))
+        .unwrap();
+    assert_eq!(copied, 0);
+    let scope = db.inspect_bot_scope_for("bot", true).unwrap();
+    assert_eq!(scope["sessions"], json!(["thread", "second"]));
+    let owner = super::bot::thread_owner(&db.db, "second").unwrap().unwrap();
+    assert_eq!(owner.bot_id, "bot");
+    assert_eq!(owner.session_thread_id.as_deref(), Some("second"));
+    assert_eq!(db.bot_for_thread("second").unwrap().as_deref(), Some("bot"));
+}

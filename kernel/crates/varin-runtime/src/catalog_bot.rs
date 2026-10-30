@@ -78,6 +78,18 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
 /// Children and auxiliary work retain their existing relationship owners. An absent
 /// Bot binding does not imply that a Thread is a user-facing ordinary main Thread.
 pub(super) fn thread_bot(db: &Connection, thread_id: &str) -> Result<Option<String>> {
+    Ok(thread_owner(db, thread_id)?.map(|owner| owner.bot_id))
+}
+
+/// The Bot and, when one exists, the directly bound session whose execution ancestry
+/// contains this Thread. MemoryWork helpers belong to a Bot scope without a session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ThreadOwner {
+    pub bot_id: String,
+    pub session_thread_id: Option<String>,
+}
+
+pub(super) fn thread_owner(db: &Connection, thread_id: &str) -> Result<Option<ThreadOwner>> {
     let mut current = thread_id.to_owned();
     let mut seen = std::collections::HashSet::new();
     loop {
@@ -93,8 +105,8 @@ pub(super) fn thread_bot(db: &Connection, thread_id: &str) -> Result<Option<Stri
                 |r| r.get(0),
             )
             .optional()?;
-        if direct.is_some() {
-            return Ok(direct);
+        if let Some(bot_id) = direct {
+            return Ok(Some(ThreadOwner { bot_id, session_thread_id: Some(current) }));
         }
         let parent: Option<String> = db.query_row(
             "SELECT json_extract(body,'$.parent_thread_id') FROM child_tasks WHERE child_thread_id=?1",
@@ -122,13 +134,22 @@ pub(super) fn thread_bot(db: &Connection, thread_id: &str) -> Result<Option<Stri
                 scope
                     .strip_prefix("bot:")
                     .filter(|id| !id.is_empty())
-                    .map(str::to_owned)
+                    .map(|bot_id| ThreadOwner { bot_id: bot_id.to_owned(), session_thread_id: None })
                     .ok_or_else(|| {
                         RuntimeError::Invalid("MemoryWork Bot identity is invalid".into())
                     })
             })
             .transpose();
     }
+}
+
+/// Directly bound conversations in creation order. The first is the Bot's primary entry.
+pub(super) fn sessions(db: &Connection, bot_id: &str) -> Result<Vec<String>> {
+    let mut query = db.prepare(
+        "SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1 ORDER BY rowid",
+    )?;
+    let rows = query.query_map([bot_id], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
 pub(super) fn permitted(db: &Connection, bot_id: &str, epoch: u64) -> Result<bool> {
@@ -266,7 +287,7 @@ impl Catalog {
             let run = self.run(id)?;
             Ok(json!({"threadId":run.thread_id,"branchId":run.branch_id,"runId":run.id,"state":run.state,"cancelRequested":run.cancel_requested}))
         }).collect::<Result<Vec<_>>>()?;
-        Ok(json!({"botId":bot_id,"threads":threads,"runs":runs}))
+        Ok(json!({"botId":bot_id,"sessions":sessions(&self.db, bot_id)?,"threads":threads,"runs":runs}))
     }
 
     /// Delete only this Bot's original runtime records after its actual executors drained.

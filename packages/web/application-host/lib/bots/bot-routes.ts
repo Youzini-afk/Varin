@@ -240,6 +240,26 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, work,
     }
   });
 
+  /** The Bot's own conversations, primary entry first. */
+  app.get("/api/harness/bots/:botId/sessions", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      response.json({ sessions: await bots.listSessions(botIdOf(request)) });
+    } catch (error) {
+      sendError(response, error, "Unable to list Bot conversations");
+    }
+  });
+
+  /** Start another conversation that shares the Bot identity, profile and memory. */
+  app.post("/api/harness/bots/:botId/sessions", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      response.json({ session: await bots.createSession(botIdOf(request)) });
+    } catch (error) {
+      sendError(response, error, "Unable to start a Bot conversation");
+    }
+  });
+
   /** The Bot's associated work: threads owned by its owner scope. */
   app.get("/api/harness/bots/:botId/work", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
@@ -255,7 +275,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, work,
         desktops: desktops.filter((desktop) => desktop.work?.some((association) =>
           association.work.runtime === 'agent' && association.work.threadId === item.identity.threadId)),
         artifacts: artifacts.filter((artifact) => artifact.threadId === item.identity.threadId) }))
-        .filter((item) => item.purpose !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
+        .filter((item) => (item.purpose !== 'bot-root' && item.purpose !== 'session') || item.desktops.length > 0 || item.artifacts.length > 0) });
     } catch (error) {
       sendError(response, error, "Unable to list bot work");
     }

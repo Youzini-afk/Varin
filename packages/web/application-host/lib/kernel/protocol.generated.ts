@@ -677,6 +677,7 @@ export interface BotScopeRun {
 
 export interface BotScopeView {
   botId: string;
+  sessions: string[];
   threads: ThreadSummary[];
   runs: BotScopeRun[];
 }

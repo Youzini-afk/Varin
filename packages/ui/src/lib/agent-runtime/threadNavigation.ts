@@ -11,11 +11,14 @@ import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { getBot, openBotConversation } from '@/lib/bots';
 
 let navigation = 0;
-async function selectConversationShell(bot: boolean, assertCurrent: () => void): Promise<void> {
+export const currentWorkbenchProfileId = (): string | null => {
   const workbench = getVarinExtensionCatalogState().snapshot?.workbench;
-  const current = workbench?.authoritative ? resolveVarinWorkbenchLayout(workbench.document, { surface: varinSurfaceRuntime.surface, userId: 'default' }).profileId : null;
+  return workbench?.authoritative ? resolveVarinWorkbenchLayout(workbench.document, { surface: varinSurfaceRuntime.surface, userId: 'default' }).profileId : null;
+};
+async function selectConversationShell(bot: boolean, assertCurrent: () => void, selectOnLeavingBot?: () => void): Promise<void> {
+  const current = currentWorkbenchProfileId();
   if (bot && current !== VARIN_WORKBENCH_BOT_PROFILE_ID) await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true, beforeCommit: async () => assertCurrent() });
-  else if (!bot && current === VARIN_WORKBENCH_BOT_PROFILE_ID) await selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID, undefined, { beforeCommit: async () => assertCurrent() });
+  else if (!bot && current === VARIN_WORKBENCH_BOT_PROFILE_ID) await selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID, undefined, { beforeCommit: async () => assertCurrent(), ...(selectOnLeavingBot ? { selectOnLeavingBot } : {}) });
 }
 export async function openExternalConversationFromNavigation(id: string): Promise<void> {
   const host = getRuntimeEndpointGeneration(), request = ++navigation;
@@ -30,14 +33,18 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
   const current = () => {
     if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded');
   };
-  const { identity, botId } = await useThreadStore.getState().resolveThread(target);
+  const { identity, botId, parentThreadId } = await useThreadStore.getState().resolveThread(target);
   current();
   const bot = botId ? await getBot(botId) : null;
   current();
   if (botId && (!bot || bot.id !== botId)) throw new Error('Conversation Bot is unavailable on this Host');
-  await selectConversationShell(Boolean(bot), current);
+  // A Bot's own conversations stay in the Bot workbench. Its delegated work is an ordinary
+  // execution Thread and opens where its files, terminals and collaboration live.
+  const botConversation = Boolean(bot) && !parentThreadId;
+  const select = () => { void useThreadStore.getState().selectThread(identity).catch(() => {}); };
+  await selectConversationShell(botConversation, current, select);
   current();
-  if (bot) await openBotConversation(bot.id, identity, target.directory ?? bot.homeDir, null, bot.archived);
+  if (bot && botConversation) await openBotConversation(bot.id, identity, target.directory ?? bot.homeDir, null, bot.archived);
   else {
     await useThreadStore.getState().selectThread(identity);
     current();

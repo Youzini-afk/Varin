@@ -7,7 +7,7 @@ import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-t
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import { useUIStore } from '@/stores/useUIStore';
 
-export type { BotModelSelection, BotSummary, BotWorkItem, BotReadyEntry } from '@varin/application-client';
+export type { BotModelSelection, BotSummary, BotWorkItem, BotReadyEntry, BotSession, BotMemoryItem } from '@varin/application-client';
 const api = () => { const bots = getRegisteredRuntimeAPIs()?.bots; if (!bots) throw new Error('Bot service is unavailable'); return bots; };
 export const listBots = (signal?: AbortSignal) => api().list(signal);
 export const ensurePrimaryBot = (signal?: AbortSignal) => api().primary(signal);
@@ -23,6 +23,17 @@ export const readBotMemorySource = (id: string, memoryId: number, signal?: Abort
 export const updateBotMemory = (id: string, item: BotMemoryItem, action: 'correct' | 'forget' | 'archive', content?: string) => api().memory.update(id, item, action, content);
 export const ensureBotEntry = (id: string, signal?: AbortSignal) => api().entry(id, signal);
 export const listBotWork = (id: string, signal?: AbortSignal) => api().work(id, signal);
+export const listBotSessions = (id: string, signal?: AbortSignal) => api().sessions.list(id, signal);
+export const createBotSession = (id: string) => api().sessions.create(id);
+export const listBotMatters = (id: string, signal?: AbortSignal) => api().matters.list(id, signal);
+
+/**
+ * Where the user left the Bot when they opened its delegated work in the ordinary workbench.
+ * Only presentation state: the back control returns to this conversation and reading position.
+ */
+export interface BotReturnPoint { botId: string; botName: string; session: BotReadyEntry; sessionTitle: string; workThreadId: string; scrollTop: number | null }
+export const useBotReturn = create<{ point: BotReturnPoint | null }>(() => ({ point: null }));
+subscribeRuntimeEndpointWillChange(() => useBotReturn.setState({ point: null }));
 
 /** View selection only. Identities are always returned by the Host. */
 export const useBotNavigation = create<{ botId: string | null; entry: BotReadyEntry | null; model: BotModelSelection | null; archived?: boolean }>(() => ({ botId: null, entry: null, model: null }));
@@ -46,9 +57,28 @@ export const openBotEntryFor = async (botId: string): Promise<void> => {
 };
 export const openBotWorkFor = async (bot: BotSummary, work: BotWorkItem): Promise<void> => {
   const entry = botWorkEntry(work); if (!entry) return;
+  if (work.purpose === 'work' || work.purpose === 'followed') {
+    const { openThreadFromNavigation } = await import('@/lib/agent-runtime/threadNavigation');
+    await openThreadFromNavigation(entry);
+    return;
+  }
   const generation = getRuntimeEndpointGeneration();
   await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true });
   if (generation !== getRuntimeEndpointGeneration()) return;
   useUIStore.getState().setSettingsDialogOpen(false);
   await openBotConversation(bot.id, entry);
+};
+/** Open delegated work in the ordinary workbench and remember the Bot conversation to return to. */
+export const openBotWorkInWorkbench = async (point: BotReturnPoint, work: BotReadyEntry): Promise<void> => {
+  useBotReturn.setState({ point });
+  const { openThreadFromNavigation } = await import('@/lib/agent-runtime/threadNavigation');
+  await openThreadFromNavigation(work);
+};
+/** Return from delegated work to the Bot conversation that dispatched it. */
+export const returnToBot = async (point: BotReturnPoint): Promise<void> => {
+  const generation = getRuntimeEndpointGeneration();
+  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true });
+  if (generation !== getRuntimeEndpointGeneration()) return;
+  useUIStore.getState().setSettingsDialogOpen(false);
+  await openBotConversation(point.botId, point.session);
 };
