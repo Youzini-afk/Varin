@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varin 形象提案 · 圈圈</title>
+<style>
+  :root { --bg:#f6f5f1; --card:#fff; --ink:#20272a; --muted:#6d7471; --line:#e4e1d8; --mist:#7aa7ef; --sage:#77837f; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.6 system-ui,"PingFang SC","Microsoft YaHei",sans-serif; }
+  main { max-width:1180px; margin:0 auto; padding:40px 24px 80px; }
+  h1 { font-size:30px; letter-spacing:-.01em; margin:0 0 6px; }
+  h2 { font-size:19px; margin:56px 0 6px; }
+  .lede { color:var(--muted); max-width:760px; margin:0; }
+  .lede a { color:inherit; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:18px; }
+  /* Hero */
+  .hero { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr); margin-top:28px; overflow:hidden; }
+  .stage { position:relative; min-height:460px; display:grid; place-items:center;
+    background:radial-gradient(circle at 50% 45%, #eef3ff 0, #fbfaf7 46%, #fff 70%);
+    background-image:radial-gradient(#d9dce3 1px, transparent 1.2px), radial-gradient(circle at 50% 45%, #eaf1ff 0, #fbfaf7 46%, #fff 72%);
+    background-size:18px 18px, 100% 100%; }
+  .stage .caption { position:absolute; left:20px; top:16px; font:600 11px/1 ui-monospace,Consolas,monospace; letter-spacing:.14em; color:#8b9190; text-transform:uppercase; }
+  .stage .status { position:absolute; left:0; right:0; bottom:22px; text-align:center; color:var(--muted); font-size:13px; }
+  .stage .agent { position:absolute; right:12%; top:56%; transition:transform .2s; }
+  .stage .agent.got { animation:receive .7s cubic-bezier(.2,1.6,.4,1); }
+  @keyframes receive { 0%{transform:scale(1)} 35%{transform:scale(1.18) translateY(-6px)} 100%{transform:scale(1)} }
+  .controls { border-left:1px solid var(--line); padding:20px 22px; display:flex; flex-direction:column; gap:18px; }
+  .group-title { font:600 11px/1 ui-monospace,Consolas,monospace; letter-spacing:.14em; color:#8b9190; text-transform:uppercase; margin-bottom:9px; display:flex; justify-content:space-between; }
+  .chips { display:flex; flex-wrap:wrap; gap:7px; }
+  .chip { border:1px solid var(--line); background:#fff; border-radius:999px; padding:6px 12px; font:inherit; font-size:13px; color:var(--ink); cursor:pointer; transition:background .15s, border-color .15s, transform .15s; }
+  .chip:hover { border-color:#c9cdd6; transform:translateY(-1px); }
+  .chip[aria-pressed=true] { background:var(--ink); border-color:var(--ink); color:#fff; }
+  .swatches { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; }
+  .swatch { aspect-ratio:1; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line); cursor:pointer; position:relative; }
+  .swatch[aria-pressed=true] { box-shadow:0 0 0 2px var(--ink); }
+  .toggle { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
+  /* Concepts */
+  .concepts { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:18px; }
+  .concept { padding:0 0 18px; overflow:hidden; position:relative; }
+  .concept .mini-stage { height:230px; display:grid; place-items:center; background:radial-gradient(circle at 50% 50%, #f1f5ff, #fff 70%); border-bottom:1px solid var(--line); }
+  .concept h3 { margin:16px 18px 2px; font-size:16px; display:flex; gap:8px; align-items:center; }
+  .badge { font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px; background:#eaf1ff; color:#3f63a3; }
+  .concept p, .concept ul { margin:4px 18px; color:var(--muted); font-size:13px; }
+  .concept ul { padding-left:18px; }
+  .concept .state-tag { position:absolute; right:14px; top:12px; font-size:12px; color:#8b9190; }
+  /* Family & sizes */
+  .panel-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:18px; }
+  .panel { padding:22px; border-radius:18px; border:1px solid var(--line); }
+  .panel.dark { background:#171b20; border-color:#262c33; color:#dfe3e6; }
+  .panel.light { background:#fff; }
+  .row { display:flex; align-items:flex-end; gap:22px; flex-wrap:wrap; }
+  .row figure { margin:0; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:12px; color:#8b9190; }
+  .sidebar-mock { margin-top:20px; display:grid; gap:4px; max-width:300px; }
+  .sidebar-mock .item { display:flex; gap:9px; align-items:center; padding:6px 8px; border-radius:8px; font-size:13px; }
+  .panel.light .sidebar-mock .item.on { background:#eef0f3; }
+  .panel.dark .sidebar-mock .item.on { background:#232a31; }
+  .sidebar-mock .indent { padding-left:30px; }
+  table { width:100%; border-collapse:collapse; margin-top:16px; font-size:13px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-weight:600; color:var(--muted); font-size:12px; }
+  td:first-child { white-space:nowrap; font-weight:600; }
+  .anatomy { display:grid; grid-template-columns:300px 1fr; gap:24px; align-items:center; margin-top:18px; padding:22px; }
+  .anatomy ol { margin:0; padding-left:20px; color:var(--muted); }
+  .anatomy li { margin:6px 0; }
+  .anatomy b { color:var(--ink); }
+  .note { color:var(--muted); font-size:13px; margin-top:10px; }
+  @media (max-width:880px) { .hero, .concepts, .panel-row, .anatomy { grid-template-columns:1fr; } .controls { border-left:0; border-top:1px solid var(--line); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Varin 形象提案 · 圈圈</h1>
+  <p class="lede">二次元桌宠保留给喜欢它的人；Bot 的默认形象换成一眼能懂、谁都觉得可爱的软糖小团子。造型从 Varin 本身长出来：桌宠角色左侧唯一的圈丸变成头顶斜飘的一枚珠光圈，Logo 的两片互扣折带化成圈上的两段色。动效参考了 <a href="https://grokbots.ai/studio">Grok bot 头像工作室</a> 的软糖质感和指针跟随，所有动作都用弹簧驱动，状态之间连续过渡。本页是可交互的设计稿，不是正式资源。</p>
+
+  <section class="card hero" aria-label="主形象">
+    <div class="stage" id="hero-stage">
+      <span class="caption" id="hero-caption">圈圈 · 雾蓝 · 空闲</span>
+      <div id="hero"></div>
+      <span class="agent" id="hero-agent" title="被派发的负责人"></span>
+      <span class="status" id="hero-status">空闲</span>
+    </div>
+    <div class="controls">
+      <div><div class="group-title"><span>状态合同</span><span>bot-ui §5.7</span></div><div class="chips" id="state-chips"></div></div>
+      <div><div class="group-title"><span>小动作</span><span>点一下播放</span></div><div class="chips" id="delight-chips"></div></div>
+      <div><div class="group-title"><span>颜色</span><span id="color-name">雾蓝</span></div><div class="swatches" id="swatches"></div>
+        <p class="note">每个 Bot 可选自己的颜色，多个 Bot 一眼能分开；圈始终保留，表示“这是 Bot”。</p></div>
+      <div class="toggle"><input type="checkbox" id="follow" checked><label for="follow">眼睛跟随指针</label></div>
+      <div class="toggle"><input type="checkbox" id="reduced"><label for="reduced">减少动态（只保留姿态淡入淡出）</label></div>
+    </div>
+  </section>
+
+  <h2>三个方向</h2>
+  <p class="lede">三张卡片共用同一套表情和弹簧动效，只换身体和标志物，循环播放全部状态，方便直接比较。推荐 A。</p>
+  <div class="concepts" id="concepts"></div>
+
+  <h2>造型拆解（方向 A）</h2>
+  <div class="card anatomy">
+    <div id="anatomy-figure"></div>
+    <ol>
+      <li><b>软糖身体</b>：上圆下宽的团子轮廓，站得稳、显得亲切；径向渐变加左上高光和底部透光，做出软糖/黏土的体积，区别于 Agent 的平涂头像。</li>
+      <li><b>珠光圈</b>：来自桌宠角色左侧唯一的圈丸。斜飘在左上，造成不对称的剪影，14px 也认得出来。圈由两段互扣的珠光色组成，呼应 Logo 的两片折带。它是最主要的表情道具：思考时绕身体公转，工作时变成进度环，等你时转暖色，有结果时迸出光点，睡觉时落在头顶。</li>
+      <li><b>眼睛</b>：两枚炭黑竖胶囊，带一粒高光，颜色取 Logo 的 #20272a，和 Agent 头像的深色眼睛同一家族。表情只靠眼睛形状、开合、视线和少量腮红/嘴，不画复杂五官。</li>
+      <li><b>层级</b>：Varin 有圈；负责人 Agent 穿披肩、扣菱形扣；子 Agent 是原本的平涂小团子。三者在同一行里一眼能分清。</li>
+    </ol>
+  </div>
+
+  <h2>家族与尺寸</h2>
+  <p class="lede">和产品里真实的 Agent 头像（负责人与子 Agent）放在一起看。40px 以下只显示姿态、不播循环，和现有状态合同一致。</p>
+  <div class="panel-row">
+    <div class="panel light" id="family-light"></div>
+    <div class="panel dark" id="family-dark"></div>
+  </div>
+  <div class="panel-row">
+    <div class="panel light"><div class="group-title"><span>尺寸</span><span>14 · 20 · 32 · 48 · 96 · 160</span></div><div class="row" id="sizes-light"></div></div>
+    <div class="panel dark"><div class="group-title"><span>尺寸 · 深色</span><span>同一组</span></div><div class="row" id="sizes-dark"></div></div>
+  </div>
+
+  <h2>状态与动作（方向 A）</h2>
+  <table>
+    <thead><tr><th>状态</th><th>姿态</th><th>动作</th><th>圈</th></tr></thead>
+    <tbody id="state-table"></tbody>
+  </table>
+  <p class="note">动效规则：身体用欠阻尼弹簧（有轻微回弹），视线和眼睛用接近临界阻尼的弹簧，颜色和光晕慢慢渐变；进入动作（跳一下、压一下、伸懒腰）叠加在弹簧之上，状态切换不会跳帧。窗口不可见时暂停；“减少动态”只保留姿态之间的淡入淡出，不放粒子。</p>
+</main>
+
+<script>
+const FAMILY = {"pebble-blue:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"pebble-blue\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"></path><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"></path></svg>","pebble-blue:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"pebble-blue\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"></path><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","pebble-blue:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"pebble-blue\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"></path><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"></path></svg>","pebble-blue:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"pebble-blue\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit1-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit1-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit1-head\"><path d=\"M-8 -8 H72 V44 H59.5 L56.03 45.27 L52.56 46.47 L49.09 47.59 L45.63 48.64 L42.16 49.6 L38.69 50.5 L35.22 51.31 L32 52 L31.75 51.95 L28.28 51.21 L24.81 50.4 L21.34 49.52 L17.88 48.56 L14.41 47.53 L10.94 46.43 L7.47 45.25 L4 44 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit1-cape\"><path d=\"M4 43.5 Q0 49 -2 63 Q5 67 15.100000000000001 68 L32 63.5 L49.51 68 Q61.5 67 65.5 63 Q63.5 50 59.5 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M4 43.5 Q0 49 -2 63 Q5 67 15.100000000000001 68 L32 63.5 L49.51 68 Q61.5 67 65.5 63 Q63.5 50 59.5 43.5 Z\" fill=\"url(#fit1-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit1-cape)\"><path d=\"M-1 62.5 L15.100000000000001 67 L30 63.5 L9.55 59 Z M35 63.5 L49.51 67 L64.5 62.5 L55.06 59 Z\" fill=\"#a0c3d9\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5 47 Q3 55 0 63 M58.5 47 Q60.5 54 63.5 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit1-head)\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"/><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"/></g><path d=\"M4 44 L7.47 45.25 L10.94 46.43 L14.41 47.53 L17.88 48.56 L21.34 49.52 L24.81 50.4 L28.28 51.21 L31.75 51.95 L32 52 L20.345 58.7 Q12.325 56 7.885 52 Z\" fill=\"url(#fit1-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 52 L35.22 51.31 L38.69 50.5 L42.16 49.6 L45.63 48.64 L49.09 47.59 L52.56 46.47 L56.03 45.27 L59.5 44 L55.615 52 Q51.175 56 43.655 58.7 Z\" fill=\"url(#fit1-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 50.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","slope-lilac:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"slope-lilac\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C7B5EF\" d=\"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z\"></path><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"></path></svg>","slope-lilac:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"slope-lilac\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C7B5EF\" d=\"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z\"></path><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","slope-lilac:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"slope-lilac\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C7B5EF\" d=\"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z\"></path><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"></path></svg>","slope-lilac:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"slope-lilac\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit2-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit2-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit2-head\"><path d=\"M-8 -8 H72 V44 H60.5 L57.22 45.17 L53.94 46.27 L50.66 47.31 L47.38 48.28 L44.09 49.19 L40.81 50.04 L37.53 50.82 L34.25 51.54 L32 52 L30.97 51.75 L27.69 50.92 L24.41 49.99 L21.13 48.97 L17.84 47.86 L14.56 46.66 L11.28 45.38 L8 44 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit2-cape\"><path d=\"M8 43.5 Q4 49 2 63 Q9 67 18.5 68 L32 63.5 L51.05 68 Q62.5 67 66.5 63 Q64.5 50 60.5 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M8 43.5 Q4 49 2 63 Q9 67 18.5 68 L32 63.5 L51.05 68 Q62.5 67 66.5 63 Q64.5 50 60.5 43.5 Z\" fill=\"url(#fit2-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit2-cape)\"><path d=\"M3 62.5 L18.5 67 L30 63.5 L13.25 59 Z M35 63.5 L51.05 67 L65.5 62.5 L56.3 59 Z\" fill=\"#d3c4ef\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9 47 Q7 55 4 63 M59.5 47 Q61.5 54 64.5 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit2-head)\"><path fill=\"#C7B5EF\" d=\"M13 18Q15 14 21 13L43 8Q47 7 50 10L57 17Q59 19 59 24L61 47Q62 54 54 55L13 60Q6 61 7 53L10 26Q11 21 13 18Z\"/><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"/></g><path d=\"M8 44 L11.28 45.38 L14.56 46.66 L17.84 47.86 L21.13 48.97 L24.41 49.99 L27.69 50.92 L30.97 51.75 L32 52 L20.975 58.7 Q15.875 56 11.675 52 Z\" fill=\"url(#fit2-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 52 L34.25 51.54 L37.53 50.82 L40.81 50.04 L44.09 49.19 L47.38 48.28 L50.66 47.31 L53.94 46.27 L57.22 45.17 L60.5 44 L56.825 52 Q52.625 56 43.025 58.7 Z\" fill=\"url(#fit2-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 50.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","notch-ochre:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"notch-ochre\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path></svg>","notch-ochre:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"notch-ochre\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","notch-ochre:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"notch-ochre\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path></svg>","notch-ochre:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"notch-ochre\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit3-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit3-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit3-head\"><path d=\"M-8 -8 H72 V44 H61.75 L58.08 45.25 L54.41 46.42 L50.73 47.52 L47.06 48.55 L43.39 49.5 L39.72 50.39 L36.05 51.19 L32.38 51.93 L32 52 L28.7 51.33 L25.03 50.52 L21.36 49.62 L17.69 48.65 L14.02 47.6 L10.34 46.48 L6.67 45.28 L3 44 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit3-cape\"><path d=\"M3 43.5 Q-1 49 -3 63 Q4 67 14.75 68 L32 63.5 L51.175 68 Q63.75 67 67.75 63 Q65.75 50 61.75 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M3 43.5 Q-1 49 -3 63 Q4 67 14.75 68 L32 63.5 L51.175 68 Q63.75 67 67.75 63 Q65.75 50 61.75 43.5 Z\" fill=\"url(#fit3-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit3-cape)\"><path d=\"M-2 62.5 L14.75 67 L30 63.5 L8.875 59 Z M35 63.5 L51.175 67 L66.75 62.5 L57.05 59 Z\" fill=\"#eece8b\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4 47 Q2 55 -1 63 M60.75 47 Q62.75 54 65.75 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit3-head)\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"/><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"/></g><path d=\"M3 44 L6.67 45.28 L10.34 46.48 L14.02 47.6 L17.69 48.65 L21.36 49.62 L25.03 50.52 L28.7 51.33 L32 52 L19.6625 58.7 Q11.8125 56 7.112500000000001 52 Z\" fill=\"url(#fit3-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 52 L32.38 51.93 L36.05 51.19 L39.72 50.39 L43.39 49.5 L47.06 48.55 L50.73 47.52 L54.41 46.42 L58.08 45.25 L61.75 44 L57.6375 52 Q52.9375 56 44.3375 58.7 Z\" fill=\"url(#fit3-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 50.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","taper-sage:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"taper-sage\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#A8BD96\" d=\"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z\"></path><path fill=\"#202326\" d=\"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z\"></path><path fill=\"none\" stroke=\"#202326\" stroke-width=\"4\" stroke-linecap=\"round\" d=\"M40 33Q44 27 48 33\"></path></svg>","taper-sage:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"taper-sage\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#A8BD96\" d=\"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z\"></path><path fill=\"#202326\" d=\"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z\"></path><path fill=\"none\" stroke=\"#202326\" stroke-width=\"4\" stroke-linecap=\"round\" d=\"M40 33Q44 27 48 33\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","taper-sage:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"taper-sage\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#A8BD96\" d=\"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z\"></path><path fill=\"#202326\" d=\"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z\"></path><path fill=\"none\" stroke=\"#202326\" stroke-width=\"4\" stroke-linecap=\"round\" d=\"M40 33Q44 27 48 33\"></path></svg>","taper-sage:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"taper-sage\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit4-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit4-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit4-head\"><path d=\"M-8 -8 H72 V44 H59.75 L56.36 45.23 L52.97 46.4 L49.58 47.49 L46.19 48.51 L42.8 49.46 L39.41 50.33 L36.02 51.14 L32.63 51.87 L32 52 L29.23 51.39 L25.84 50.57 L22.45 49.67 L19.06 48.69 L15.67 47.64 L12.28 46.5 L8.89 45.29 L5.5 44 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit4-cape\"><path d=\"M5.5 43.5 Q1.5 49 -0.5 63 Q6.5 67 16.35 68 L32 63.5 L49.985 68 Q61.75 67 65.75 63 Q63.75 50 59.75 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M5.5 43.5 Q1.5 49 -0.5 63 Q6.5 67 16.35 68 L32 63.5 L49.985 68 Q61.75 67 65.75 63 Q63.75 50 59.75 43.5 Z\" fill=\"url(#fit4-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit4-cape)\"><path d=\"M0.5 62.5 L16.35 67 L30 63.5 L10.925 59 Z M35 63.5 L49.985 67 L64.75 62.5 L55.41 59 Z\" fill=\"#bbcaaa\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6.5 47 Q4.5 55 1.5 63 M58.75 47 Q60.75 54 63.75 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit4-head)\"><path fill=\"#A8BD96\" d=\"M15 13Q19 8 25 9L45 12Q51 13 53 20L61 48Q63 55 55 55L10 53Q3 53 5 46L11 23Q12 17 15 13Z\"/><path fill=\"#202326\" d=\"M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z\"/><path fill=\"none\" stroke=\"#202326\" stroke-width=\"4\" stroke-linecap=\"round\" d=\"M40 33Q44 27 48 33\"/></g><path d=\"M5.5 44 L8.89 45.29 L12.28 46.5 L15.67 47.64 L19.06 48.69 L22.45 49.67 L25.84 50.57 L29.23 51.39 L32 52 L20.6075 58.7 Q13.6375 56 9.2975 52 Z\" fill=\"url(#fit4-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 52 L32.63 51.87 L36.02 51.14 L39.41 50.33 L42.8 49.46 L46.19 48.51 L49.58 47.49 L52.97 46.4 L56.36 45.23 L59.75 44 L55.9525 52 Q51.6125 56 43.3925 58.7 Z\" fill=\"url(#fit4-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 50.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","overlap-coral:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"overlap-coral\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C4746B\" d=\"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z\"></path><path fill=\"#EE9583\" d=\"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path></svg>","overlap-coral:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"overlap-coral\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C4746B\" d=\"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z\"></path><path fill=\"#EE9583\" d=\"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","overlap-coral:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"overlap-coral\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#C4746B\" d=\"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z\"></path><path fill=\"#EE9583\" d=\"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z\"></path><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"></path></svg>","overlap-coral:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"overlap-coral\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit5-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit5-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit5-head\"><path d=\"M-8 -8 H72 V44 H61.5 Q49 49 34 51 Q19 48.5 7 43 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit5-cape\"><path d=\"M7 42.5 Q1 49 -1 64.5 Q8 68 17 70 L34 65 L53 70 Q61 68 68 64.5 Q66 51 61.5 43.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M7 42.5 Q1 49 -1 64.5 Q8 68 17 70 L34 65 L53 70 Q61 68 68 64.5 Q66 51 61.5 43.5 Z\" fill=\"url(#fit5-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit5-cape)\"><path d=\"M0 64 L17 69 L31 65 L12 61 Z M37 65 L53 69 L67 64 L57 61 Z\" fill=\"#f2ab9b\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M8 46 Q6 55 3 63 M60.5 47 Q62.5 54 65.5 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit5-head)\"><path fill=\"#C4746B\" d=\"M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z\"/><path fill=\"#EE9583\" d=\"M11 18Q14 12 22 11L42 7Q48 6 49 13L51 28Q52 34 47 37L40 40Q35 42 36 47L37 52Q38 57 32 58L13 59Q6 59 6 51L8 28Q9 21 11 18Z\"/><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"/></g><path d=\"M7 43 Q19 48.5 34 51 L22 58 Q14 56 11 53 Z\" fill=\"url(#fit5-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M34 51 Q49 49 61.5 44 L57 55 L46 58.5 Z\" fill=\"url(#fit5-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M34 49.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>","dome-ivory:20:plain":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"dome-ivory\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"></path><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"></path></svg>","dome-ivory:20:lead":"<svg viewBox=\"0 0 64 64\" width=\"20\" height=\"20\" class=\"shrink-0\" data-agent-avatar=\"dome-ivory\" data-agent-role=\"lead\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"></path><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"></path><path d=\"M32 46.5 l7.5 7.5 l-7.5 7.5 l-7.5 -7.5 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"3.2\" stroke-linejoin=\"round\"></path></svg>","dome-ivory:48:plain":"<svg viewBox=\"0 0 64 64\" width=\"48\" height=\"48\" class=\"shrink-0\" data-agent-avatar=\"dome-ivory\" aria-hidden=\"true\" focusable=\"false\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"></path><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"></path></svg>","dome-ivory:48:lead":"<span class=\"inline-flex shrink-0\" style=\"width:48px;height:48px\" data-agent-avatar=\"dome-ivory\" data-agent-role=\"lead\" aria-hidden=\"true\"><svg x=\"0\" y=\"0\" width=\"48\" height=\"48\" viewBox=\"0 0 80 80\"><defs><linearGradient id=\"fit6-cloth\" x1=\"0\" y1=\"0\" x2=\".25\" y2=\"1\"><stop stop-color=\"#5a6279\"/><stop offset=\"1\" stop-color=\"#454c62\"/></linearGradient><linearGradient id=\"fit6-collar\" x2=\".3\" y2=\"1\"><stop stop-color=\"#fffdf4\"/><stop offset=\"1\" stop-color=\"#e7e5dd\"/></linearGradient><clipPath id=\"fit6-head\"><path d=\"M-8 -8 H72 V43 H59.5 L56.09 43.94 L52.69 44.82 L49.28 45.65 L45.88 46.42 L42.47 47.14 L39.06 47.8 L35.66 48.41 L32.25 48.96 L32 49 L28.84 48.48 L25.44 47.87 L22.03 47.2 L18.63 46.48 L15.22 45.69 L11.81 44.85 L8.41 43.96 L5 43 H-8 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath><clipPath id=\"fit6-cape\"><path d=\"M5 42.5 Q1 48 -1 62 Q6 66 15.9 67 L32 62.5 L49.69 67 Q61.5 66 65.5 62 Q63.5 49 59.5 42.5 Z\" fill=\"white\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></clipPath></defs><g transform=\"translate(8 3)\"><path d=\"M5 42.5 Q1 48 -1 62 Q6 66 15.9 67 L32 62.5 L49.69 67 Q61.5 66 65.5 62 Q63.5 49 59.5 42.5 Z\" fill=\"url(#fit6-cloth)\" stroke=\"#4c5268\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><g clip-path=\"url(#fit6-cape)\"><path d=\"M0 61.5 L15.9 66 L30 62.5 L10.45 58 Z M35 62.5 L49.69 66 L64.5 61.5 L55.14 58 Z\" fill=\"#eee4d7\" stroke=\"none\" stroke-width=\"0\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6 46 Q4 55 1 63 M58.5 46 Q60.5 54 63.5 63\" fill=\"none\" stroke=\"#697187\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g clip-path=\"url(#fit6-head)\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"/><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"/></g><path d=\"M5 43 L8.41 43.96 L11.81 44.85 L15.22 45.69 L18.63 46.48 L22.03 47.2 L25.44 47.87 L28.84 48.48 L32 49 L20.555 55.7 Q13.174999999999999 55 8.815000000000001 51 Z\" fill=\"url(#fit6-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 49 L32.25 48.96 L35.66 48.41 L39.06 47.8 L42.47 47.14 L45.88 46.42 L49.28 45.65 L52.69 44.82 L56.09 43.94 L59.5 43 L55.685 51 Q51.325 55 43.445 55.7 Z\" fill=\"url(#fit6-collar)\" stroke=\"#b3bbca\" stroke-width=\"0.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M32 47.400000000000006 l3.3 3.3 l-3.3 3.3 l-3.3 -3.3 Z\" fill=\"#fffaf0\" stroke=\"#c8a267\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g></svg></span>"};
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs = {}, parent) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; };
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const bump = x => x <= 0 || x >= 1 ? 0 : Math.sin(Math.PI * x);
+const wave = (t, period, phase = 0) => Math.sin(2 * Math.PI * (t / period + phase));
+const mixHex = (a, b, t) => { const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); const x = p(a), y = p(b); return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
+let reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const PALETTES = {
+  mist:     { name:'雾蓝', light:'#c9dcfc', base:'#7aa7ef', deep:'#4a6db0', rim:'#e0ebff' },
+  sky:      { name:'天青', light:'#c8eefc', base:'#5cbfe9', deep:'#2d82b0', rim:'#dcf5ff' },
+  aqua:     { name:'湖绿', light:'#c4f1e8', base:'#4ec6b1', deep:'#218d7b', rim:'#d9fff7' },
+  sage:     { name:'鼠尾草', light:'#e2ecd3', base:'#9cba82', deep:'#5f7e4b', rim:'#f0f7e6' },
+  butter:   { name:'奶油黄', light:'#fff1bd', base:'#f0c64a', deep:'#b9871a', rim:'#fff8da' },
+  apricot:  { name:'杏橙', light:'#ffdcc2', base:'#f3a06a', deep:'#c06634', rim:'#ffecde' },
+  coral:    { name:'珊瑚', light:'#ffcdc4', base:'#ee7f6e', deep:'#b4463a', rim:'#ffe4df' },
+  rose:     { name:'玫瑰', light:'#ffd3e4', base:'#e47fa8', deep:'#a84570', rim:'#ffe9f2' },
+  lilac:    { name:'丁香', light:'#e6dcff', base:'#a88bec', deep:'#6c50b6', rim:'#f2edff' },
+  periwinkle:{ name:'长春花', light:'#dde2ff', base:'#8e98ec', deep:'#5560b4', rim:'#eef0ff' },
+  graphite: { name:'石墨', light:'#8b959b', base:'#4a5459', deep:'#20272a', rim:'#aab4b9', eye:'#f3efe6' },
+  cream:    { name:'米白', light:'#ffffff', base:'#ece6d8', deep:'#b4ab95', rim:'#ffffff' },
+};
+const IRIDESCENT = ['#fff4d6', '#ffd2e5', '#d3dcff', '#c6f2e8', '#fff4d6'];
+const IRIDESCENT_SMALL = ['#f4c66a', '#ec8fb8', '#8ea5f0', '#66c9b4', '#f4c66a'];
+const WARM = '#ffbf5e';
+
+// ---- Shared parameters and the nine states of the product contract ----
+const DEFAULTS = { y:0, sx:1, sy:1, rot:0, lookX:0, lookY:0, open:1, eyeScale:1, smile:0, closed:0, mouth:0, blush:.12,
+  glow:0, warm:0, ringX:0, ringY:0, ringTilt:-24, ringScale:1, orbit:0, progress:0, ringDim:0, desat:0, dim:0, zz:0, wink:0 };
+const SPRINGS = { body:{k:230,c:15}, face:{k:200,c:27}, ring:{k:120,c:13}, fx:{k:110,c:21} };
+const GROUP = { y:'body', sx:'body', sy:'body', rot:'body', lookX:'face', lookY:'face', open:'face', eyeScale:'face', smile:'face', closed:'face',
+  mouth:'face', blush:'fx', glow:'fx', warm:'fx', ringX:'ring', ringY:'ring', ringTilt:'ring', ringScale:'ring', orbit:'fx', progress:'fx', ringDim:'fx', desat:'fx', dim:'fx', zz:'fx', wink:'face' };
+
+const STATES = {
+  idle:      { label:'空闲', line:'空闲', T:{}, blink:[2.4, 5],
+    pose:'正视，偶尔眨眼', motion:'慢呼吸；偶尔看看四周；指针靠近时目光跟随', ring:'在左上轻轻浮动',
+    loop:t => ({ y:-.9*wave(t,3.6), sy:.014*wave(t,3.6), sx:-.009*wave(t,3.6), ringY:1.8*wave(t,2.8,.3), ringTilt:3*wave(t,4.6) }) },
+  listening: { label:'倾听', line:'在听', T:{ eyeScale:1.13, rot:-3, y:-1.5, ringY:-2, ringScale:1.05 }, blink:[3, 6],
+    pose:'眼睛略睁大，身体微微前倾', motion:'呼吸更轻更快；目光跟着输入的方向', ring:'稍微抬起、变亮',
+    loop:t => ({ y:-.5*wave(t,2.2), sy:.008*wave(t,2.2), ringY:1*wave(t,2) }) },
+  thinking:  { label:'思考', line:'正在想…', T:{ lookY:-.45, orbit:1, ringScale:.62 }, blink:[4, 8],
+    pose:'看向斜上方', motion:'眼睛追着绕行的圈慢慢转', ring:'缩小成一颗小环，绕身体公转，绕到背后时被身体挡住',
+    loop:t => ({ y:-.6*wave(t,3), rot:1.2*wave(t,6) }) },
+  working:   { label:'工作', line:'写作正在编辑 · 12 分钟', T:{ lookY:.6, ringY:-3, ringTilt:-16, ringScale:1.14, progress:1 }, blink:[3.5, 7],
+    pose:'眼睛向下，专注', motion:'轻快地上下点动，像在敲键', ring:'原位稍稍抬起，变成转动的进度环',
+    loop:t => { const tap = Math.abs(Math.sin(Math.PI * t * 1.6)); return { y:-1.7*tap, sy:.02*tap - .01, sx:-.012*tap, ringY:.6*wave(t,1.25) }; } },
+  waiting:   { label:'等你', line:'写作在等你确认', T:{ eyeScale:1.08, lookY:.08, glow:1, warm:1, blush:.3 }, blink:[2.6, 5],
+    pose:'看向你', motion:'暖色光晕呼吸；进入时轻跳一下', ring:'转成暖橙色并随光晕脉动',
+    enter:'hop', loop:t => ({ glow:.25*wave(t,2.4), y:-.7*wave(t,2.4), ringScale:.05*wave(t,2.4) }) },
+  result:    { label:'有结果', line:'依赖调查返回了结果', T:{ smile:1, mouth:1, blush:.75, ringScale:1.08 }, blink:null,
+    pose:'眯眼笑', motion:'轻压一下再回弹，持续约 3 秒', ring:'翻转一圈，迸出彩色光点',
+    enter:'press', loop:t => ({ y:-.6*wave(t,1.8), ringTilt:6*wave(t,1.8) }) },
+  sleeping:  { label:'休息', line:'休息中 · 叫醒', T:{ open:0, closed:1, y:3, sy:.95, sx:1.04, dim:.28, zz:1, ringX:22, ringY:14, ringTilt:-8, ringScale:.95, ringDim:.5, blush:.25 }, blink:null,
+    pose:'闭眼，身体沉下去一点', motion:'很慢的深呼吸，zz 飘起', ring:'落到头顶歇着，跟着呼吸起伏',
+    enter:'sigh', loop:t => ({ sy:.03*wave(t,4.8), sx:-.018*wave(t,4.8), y:-1.2*wave(t,4.8), ringY:-1.2*wave(t,4.8) }) },
+  waking:    { label:'唤醒中', line:'正在醒来…', T:{}, blink:null,
+    pose:'睁眼', motion:'眨两下眼，伸个懒腰', ring:'从头顶弹回原位',
+    enter:'stretch', loop:t => ({ y:-.8*wave(t,3.6) }) },
+  offline:   { label:'离线', line:'电脑没连上 · 只能查看', T:{ desat:1, dim:.12, open:.55, eyeScale:.92, y:2, ringDim:1, ringTilt:-12 }, blink:null,
+    pose:'去色，眼睛半闭变暗', motion:'不播放循环', ring:'变灰，不动', loop:() => ({}) },
+};
+const STATE_ORDER = ['idle', 'listening', 'thinking', 'working', 'waiting', 'result', 'sleeping', 'waking', 'offline'];
+
+// Pulses: smooth additive moves on top of the springs; they cannot jump a frame.
+const PULSES = {
+  hop:     { d:.62, f:x => ({ y:-8*bump(x/.55), sy:.08*bump(x/.55) - .1*bump((x-.5)/.25), sx:-.05*bump(x/.55) + .08*bump((x-.5)/.25) }) },
+  press:   { d:.7,  f:x => ({ sy:-.13*bump(x/.35) + .06*bump((x-.32)/.3), sx:.1*bump(x/.35) - .04*bump((x-.32)/.3), ringFlip:clamp(x/.75) }), burst:.12 },
+  sigh:    { d:1.2, f:x => ({ sy:-.05*bump(x), y:1.2*bump(x) }) },
+  stretch: { d:1.3, f:x => ({ open:-bump((x-.05)/.12) - bump((x-.3)/.12), sy:.13*bump((x-.35)/.55), sx:-.08*bump((x-.35)/.55), ringY:-7*bump((x-.4)/.45), y:-2*bump((x-.4)/.5) }) },
+  wink:    { d:.9,  f:x => ({ wink:bump(x/.7), rot:5*bump(x/.8), ringFlip:clamp(x/.8) * .5, smile:.25*bump(x) }) },
+  hello:   { d:1.6, f:x => { const env = bump(x); return { ringTilt:24*Math.sin(2*Math.PI*2.4*x)*env, rot:4*Math.sin(2*Math.PI*2.4*x - .6)*env, y:-3*bump(x/.3), mouth:env, smile:.35*env }; } },
+  dispatch:{ d:1.4, f:x => ({ rot:7*bump(x/.8), lookX:.8*bump(x/.9), ringY:-4*bump(x/.35), smile:.4*bump((x-.5)/.5), y:-1.5*bump(x/.4) }), spark:.18 },
+  celebrate:{ d:1.2, f:x => ({ y:-11*bump(x/.5), sy:.1*bump(x/.5) - .12*bump((x-.48)/.25), sx:-.06*bump(x/.5) + .09*bump((x-.48)/.25), smile:bump(x), mouth:bump(x), blush:.6*bump(x), ringFlip:clamp(x/.6) }), burst:.1 },
+  comet:   { d:1.5, f:x => ({ orbit:bump(x), orbitPhase:x, ringScale:-.3*bump(x) }), trail:true },
+};
+const DELIGHTS = [['wink','眨眼'], ['hello','打招呼'], ['dispatch','派发'], ['celebrate','庆祝'], ['comet','彗星']];
+
+// ---- Bodies: one face and motion system, three ways of being Varin ----
+const GUMDROP = 'M60 34C84 34 101 52 101 75C101 93 89 101 60 101C31 101 19 93 19 75C19 52 36 34 60 34Z';
+const MOCHI = 'M60 38C86 38 102 56 102 76C102 94 86 102 60 102C34 102 18 94 18 76C18 56 34 38 60 38Z';
+const SEAM = 'C66 48 77 58 60 68C45 77 54 88 46 106';
+const CONCEPTS = {
+  loop:  { name:'A · 圈圈', body:GUMDROP },
+  fold:  { name:'B · 折纸', body:GUMDROP },
+  mochi: { name:'C · 团子', body:MOCHI },
+};
+
+let serial = 0;
+class Figure {
+  constructor(host, { concept = 'loop', size = 220, palette = 'mist', still = false, state = 'idle', dark = false, framing = size < 120 ? 'tight' : 'stage' } = {}) {
+    this.host = host; this.concept = concept; this.size = size; this.still = still || size < 40; this.dark = dark; this.small = size < 40;
+    this.id = 'f' + (++serial); this.p = { ...DEFAULTS }; this.v = {}; this.pulses = []; this.particles = []; this.trail = [];
+    this.loopBlend = 1; this.prevLoop = null; this.prevBlend = 0; this.cursor = null; this.nextBlink = 1 + Math.random() * 2; this.blinkAt = -1; this.glance = { x:0, y:0, until:0 };
+    const box = framing === 'tight' ? [13, 16, 94, 92] : [-10, -14, 140, 134];
+    this.svg = el('svg', { viewBox:box.join(' '), width:size, height:Math.round(size * box[3] / box[2]), overflow:'visible', role:'img', 'aria-label':'Varin' }, host);
+    this.svg.style.overflow = 'visible';
+    this.build(); this.setPalette(palette); this.setState(state, true);
+    Figure.all.add(this);
+  }
+  build() {
+    const s = this.svg, id = this.id, concept = this.concept;
+    const defs = el('defs', {}, s);
+    this.grad = el('radialGradient', { id:id+'b', cx:'.38', cy:'.3', r:'.78' }, defs);
+    this.gStops = [0, .48, 1].map(o => el('stop', { offset:o }, this.grad));
+    const rim = el('linearGradient', { id:id+'r', x1:0, y1:0, x2:0, y2:1 }, defs);
+    el('stop', { offset:.5, 'stop-color':'#fff', 'stop-opacity':0 }, rim); this.rimMid = el('stop', { offset:.86, 'stop-opacity':.18 }, rim); this.rimStop = el('stop', { offset:1, 'stop-opacity':.5 }, rim);
+    const cream = el('radialGradient', { id:id+'c', cx:'.36', cy:'.28', r:'.8' }, defs);
+    [['0','#fffefa'], ['.5','#f1ece1'], ['1','#c9bfa9']].forEach(([o, c]) => el('stop', { offset:o, 'stop-color':c }, cream));
+    const iri = el('linearGradient', { id:id+'i', x1:0, y1:0, x2:1, y2:1 }, defs);
+    const pearl = this.size < 40 ? IRIDESCENT_SMALL : IRIDESCENT;
+    pearl.forEach((c, i) => el('stop', { offset:i / (pearl.length - 1), 'stop-color':c }, iri));
+    const glow = el('radialGradient', { id:id+'g' }, defs);
+    this.glowStop = el('stop', { offset:0, 'stop-opacity':.85 }, glow); this.glowStop2 = el('stop', { offset:.45, 'stop-opacity':.32 }, glow); el('stop', { offset:1, 'stop-opacity':0, 'stop-color':'#fff' }, glow);
+    const blur = el('filter', { id:id+'f', x:'-50%', y:'-50%', width:'200%', height:'200%' }, defs); el('feGaussianBlur', { stdDeviation:1.3 }, blur);
+    const soft = el('filter', { id:id+'s', x:'-50%', y:'-50%', width:'200%', height:'200%' }, defs); el('feGaussianBlur', { stdDeviation:2.4 }, soft);
+    if (concept === 'fold') {
+      el('clipPath', { id:id+'L' }, defs).appendChild(el('path', { d:`M-10 -14H73V28${SEAM}V130H-10Z` }));
+      el('clipPath', { id:id+'R' }, defs).appendChild(el('path', { d:`M130 -14H73V28${SEAM}V130H130Z` }));
+    }
+    if (concept === 'mochi') el('clipPath', { id:id+'K' }, defs).appendChild(el('path', { d:'M-10 82C28 77 48 87 60 85C74 83 92 77 130 83V130H-10Z' }));
+    this.root = el('g', {}, s);
+    this.glow = el('circle', { cx:60, cy:70, r:58, fill:`url(#${id}g)`, opacity:0 }, this.root);
+    this.shadow = el('ellipse', { cx:60, cy:105, rx:31, ry:4.6, fill:'#1d2733', opacity:.16, filter:`url(#${id}s)` }, this.root);
+    this.ringBack = el('g', {}, this.root);
+    this.body = el('g', {}, this.root);
+    if (concept === 'fold') {
+      this.halfL = el('g', { 'clip-path':`url(#${id}L)` }, this.body);
+      this.halfLInner = el('g', {}, this.halfL); el('path', { d:GUMDROP, fill:`url(#${id}c)` }, this.halfLInner);
+      this.halfR = el('g', { 'clip-path':`url(#${id}R)` }, this.body);
+      this.halfRInner = el('g', {}, this.halfR); this.bodyPath = el('path', { d:GUMDROP, fill:`url(#${id}b)` }, this.halfRInner);
+      el('path', { d:GUMDROP, fill:`url(#${id}r)` }, this.halfRInner);
+      this.seam = el('path', { d:`M73 28${SEAM}`, fill:'none', stroke:'#fff', 'stroke-width':1.3, 'stroke-opacity':.75, 'stroke-linecap':'round' }, this.body);
+      this.seamGlow = el('path', { d:`M73 28${SEAM}`, fill:'none', stroke:WARM, 'stroke-width':2.6, 'stroke-linecap':'round', opacity:0, filter:`url(#${id}f)` }, this.body);
+    } else if (concept === 'mochi') {
+      el('path', { d:MOCHI, fill:`url(#${id}c)` }, this.body);
+      const scarf = el('g', { 'clip-path':`url(#${id}K)` }, this.body);
+      this.bodyPath = el('path', { d:MOCHI, fill:`url(#${id}b)` }, scarf);
+      el('path', { d:'M18 84C30 80 48 88 60 86C74 84 92 79 102 84', fill:'none', stroke:'#fff', 'stroke-opacity':.55, 'stroke-width':1.2 }, this.body);
+      this.clasp = el('path', { d:'M60 81.5l4.5 4.5l-4.5 4.5l-4.5-4.5Z', fill:'#fbe7b4', stroke:'#c8a267', 'stroke-width':1.5, 'stroke-linejoin':'round' }, this.body);
+      this.curl = el('g', {}, this.body);
+      el('path', { d:'M51 40C46 27 58 22 61 29C63 34 56 37 54 33', fill:'none', stroke:'#c9ced8', 'stroke-width':3.4, 'stroke-linecap':'round' }, this.curl);
+      el('path', { d:'M51 40C46 27 58 22 61 29', fill:'none', stroke:'#fff', 'stroke-width':1.2, 'stroke-linecap':'round', 'stroke-opacity':.9 }, this.curl);
+    } else {
+      this.bodyPath = el('path', { d:GUMDROP, fill:`url(#${id}b)` }, this.body);
+      el('path', { d:GUMDROP, fill:`url(#${id}r)` }, this.body);
+    }
+    el('ellipse', { cx:43, cy:concept === 'mochi' ? 51 : 48, rx:11, ry:5.8, fill:'#fff', opacity:.68, transform:'rotate(-28 43 48)', filter:`url(#${id}f)` }, this.body);
+    el('circle', { cx:58, cy:concept === 'mochi' ? 44 : 41, r:2.1, fill:'#fff', opacity:.8 }, this.body);
+    this.blushes = [40, 80].map(x => el('ellipse', { cx:x, cy:76, rx:5.4, ry:3.1, fill:'#ff8fae', opacity:0 }, this.body));
+    this.face = el('g', {}, this.body);
+    this.eyes = [49, 71].map(x => {
+      const g = el('g', {}, this.face);
+      const pill = el('rect', { x:x - 4.3, y:58.6, width:8.6, height:14.8, rx:4.3 }, g);
+      const glint = el('circle', { cx:x - 1.6, cy:62, r:1.45, fill:'#fff', opacity:.9 }, g);
+      const smile = el('path', { d:`M${x-5.6} 67.8Q${x} 60 ${x+5.6} 67.8`, fill:'none', 'stroke-width':3.2, 'stroke-linecap':'round', opacity:0 }, this.face);
+      const shut = el('path', { d:`M${x-5.6} 65Q${x} 70.5 ${x+5.6} 65`, fill:'none', 'stroke-width':3, 'stroke-linecap':'round', opacity:0 }, this.face);
+      return { x, g, pill, glint, smile, shut };
+    });
+    this.mouth = el('path', { d:'M56 77Q60 81 64 77', fill:'none', 'stroke-width':2.4, 'stroke-linecap':'round', opacity:0 }, this.face);
+    this.ringFront = el('g', {}, this.root);
+    this.rings = [this.ringBack, this.ringFront].map(layer => {
+      const g = el('g', {}, layer);
+      const base = el('ellipse', { rx:12.5, ry:4.6, fill:'none', stroke:`url(#${this.id}i)`, 'stroke-width':4.2 }, g);
+      const edge = el('ellipse', { rx:12.5, ry:4.6, fill:'none', stroke:'#4a6db0', 'stroke-opacity':.28, 'stroke-width':.7 }, g);
+      const shine = el('path', { d:'M-9 -2.6Q0 -5.8 9 -2.6', fill:'none', stroke:'#fff', 'stroke-width':1, 'stroke-linecap':'round', opacity:.95 }, g);
+      const warm = el('ellipse', { rx:12.5, ry:4.6, fill:'none', stroke:WARM, 'stroke-width':4.4, opacity:0 }, g);
+      const arc = el('ellipse', { rx:12.5, ry:4.6, fill:'none', stroke:'#fff', 'stroke-width':4.6, 'stroke-linecap':'round', opacity:0 }, g);
+      return { g, base, edge, shine, warm, arc };
+    });
+    if (concept !== 'loop') this.rings.forEach(r => r.g.setAttribute('display', 'none'));
+    if (this.small) {
+      this.shadow.setAttribute('display', 'none');
+      this.rings.forEach(r => { r.base.setAttribute('stroke-width', 5.6); r.edge.setAttribute('stroke-width', 1.4); r.edge.setAttribute('stroke-opacity', .6); r.shine.setAttribute('display', 'none'); });
+      this.face.parentNode.insertBefore(el('g', {}), this.face);
+      this.smallFace = true;
+    }
+    this.trailLayer = el('g', {}, this.root);
+    this.fx = el('g', {}, this.root);
+    this.zz = [0, 1, 2].map(i => { const t = el('text', { x:84, y:40, 'font-size':8 + i * 1.5, 'font-weight':700, fill:'#8aa0c9', opacity:0, 'font-family':'system-ui' }, this.root); t.textContent = 'z'; return t; });
+  }
+  setPalette(name) {
+    const c = PALETTES[name] || PALETTES.mist; this.palette = c;
+    [c.light, c.base, c.deep].forEach((col, i) => this.gStops[i].setAttribute('stop-color', col));
+    this.rimStop.setAttribute('stop-color', c.rim); this.rimMid.setAttribute('stop-color', c.rim);
+    const eye = c.eye || '#20272a';
+    this.eyes.forEach(e => { e.pill.setAttribute('fill', eye); e.smile.setAttribute('stroke', eye); e.shut.setAttribute('stroke', eye); e.glint.setAttribute('fill', c.eye ? '#20272a' : '#fff'); });
+    this.mouth.setAttribute('stroke', eye);
+    this.rings.forEach(r => r.edge.setAttribute('stroke', c.deep));
+  }
+  setState(name, immediate = false) {
+    const st = STATES[name]; if (!st) return;
+    if (this.state && !immediate) { this.prevLoop = STATES[this.state].loop; this.prevBlend = 1; this.loopBlend = 0; }
+    this.state = name; this.stateAt = Figure.now;
+    this.target = { ...DEFAULTS, ...st.T };
+    if (immediate || this.still) { Object.assign(this.p, this.target); this.loopBlend = 1; this.prevLoop = null; }
+    if (st.enter && !immediate && !this.still) this.play(st.enter);
+    this.nextBlink = Figure.now + 0.6 + Math.random();
+  }
+  play(name) {
+    if (this.still) return;
+    const pulse = PULSES[name]; if (!pulse) return;
+    this.pulses = this.pulses.filter(p => p.name !== name);
+    this.pulses.push({ name, at:Figure.now, ...pulse, burstDone:false, sparkDone:false });
+  }
+  burst(x, y, count) {
+    if (reducedMotion) return;
+    const colors = ['#ffd36e', '#ff9fc4', '#9ec3ff', '#8ee6d1', '#fff', this.palette.base];
+    for (let i = 0; i < count; i++) {
+      const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.5, sp = 38 + Math.random() * 46;
+      const node = el(i % 3 ? 'circle' : 'path', i % 3 ? { r:1.2 + Math.random() * 1.6 } : { d:'M0 -3.4L.9 -.9L3.4 0L.9 .9L0 3.4L-.9 .9L-3.4 0L-.9 -.9Z' }, this.fx);
+      node.setAttribute('fill', colors[i % colors.length]);
+      this.particles.push({ node, x, y, vx:Math.cos(a) * sp, vy:Math.sin(a) * sp, life:0, max:.75 + Math.random() * .45, spin:(Math.random() - .5) * 600 });
+    }
+  }
+  ringPose(p, t) {
+    // Rest: floating at the upper left. Orbit: a small ring travelling around the body.
+    const rest = { x:30 + p.ringX, y:30 + p.ringY, tilt:p.ringTilt, depth:1 };
+    if (p.orbit <= .001) return rest;
+    const phase = (this.orbitPhaseOverride ?? (t / 2.6)) * Math.PI * 2;
+    const ox = 60 + Math.cos(phase) * 47, oy = 60 + Math.sin(phase) * 13, depth = Math.sin(phase);
+    const k = p.orbit;
+    return { x:rest.x + (ox - rest.x) * k, y:rest.y + (oy - rest.y) * k, tilt:rest.tilt + (-8 - rest.tilt) * k, depth:k > .5 ? depth : 1, phase };
+  }
+  step(dt, t) {
+    const p = this.p, T = this.target, st = STATES[this.state];
+    if (this.still) { this.render(p, t); return; }
+    // Gaze: cursor in idle/listening, the orbiting ring while thinking, random glances otherwise.
+    let lookX = T.lookX, lookY = T.lookY;
+    if ((this.state === 'idle' || this.state === 'listening') && this.cursor && Figure.follow) { lookX = this.cursor.x; lookY = this.cursor.y; }
+    else if (this.state === 'idle') { if (t > this.glance.until) this.glance = { x:(Math.random() - .5) * 1.2, y:(Math.random() - .5) * .6, until:t + 2.5 + Math.random() * 3 }; lookX = this.glance.x * .7; lookY = this.glance.y * .7; }
+    if (this.state === 'thinking' || this.pulses.some(x => x.name === 'comet')) { const r = this.ringPose(p, t); lookX = clamp((r.x - 60) / 40, -1, 1) * .9; lookY = clamp((r.y - 58) / 20, -1, 1) * .7 - .2; }
+    const goal = { ...T, lookX, lookY };
+    for (const key in DEFAULTS) {
+      const { k, c } = SPRINGS[GROUP[key]], v = this.v[key] || 0;
+      if (reducedMotion && GROUP[key] === 'body') { p[key] += (goal[key] - p[key]) * clamp(dt * 8); continue; }
+      const a = k * (goal[key] - p[key]) - c * v;
+      this.v[key] = v + a * dt; p[key] += this.v[key] * dt;
+    }
+    // Loops crossfade between states; pulses add smooth moves on top.
+    this.loopBlend = clamp(this.loopBlend + dt / .45); this.prevBlend = clamp(this.prevBlend - dt / .45);
+    const out = { ...p }, add = (o, w) => { for (const key in o) if (key in out) out[key] += o[key] * w; };
+    if (!reducedMotion) { add(st.loop(t), this.loopBlend); if (this.prevLoop && this.prevBlend > 0) add(this.prevLoop(t), this.prevBlend); }
+    let flip = 0; this.orbitPhaseOverride = undefined;
+    this.pulses = this.pulses.filter(pulse => {
+      const x = (t - pulse.at) / pulse.d; if (x >= 1) return false;
+      if (reducedMotion) return false;
+      const o = pulse.f(x); flip += o.ringFlip || 0; if (o.orbitPhase !== undefined) this.orbitPhaseOverride = (t / 2.6) + o.orbitPhase * 1.0;
+      add(o, 1);
+      if (pulse.burst !== undefined && !pulse.burstDone && x >= pulse.burst / pulse.d) { pulse.burstDone = true; const r = this.ringPose(out, t); this.burst(r.x, r.y, pulse.name === 'celebrate' ? 26 : 16); }
+      if (pulse.spark !== undefined && !pulse.sparkDone && x >= pulse.spark / pulse.d) { pulse.sparkDone = true; this.onSpark?.(this.ringPose(out, t)); }
+      if (pulse.trail) { const r = this.ringPose(out, t); this.trail.push({ x:r.x, y:r.y, life:0 }); }
+      return true;
+    });
+    // Blinks: quick, smooth, never while asleep or delighted.
+    if (st.blink && t > this.nextBlink) { this.blinkAt = t; this.nextBlink = t + st.blink[0] + Math.random() * (st.blink[1] - st.blink[0]); if (Math.random() < .2) this.doubleBlink = t + .28; }
+    const blink = Math.max(bump((t - this.blinkAt) / .16), this.doubleBlink ? bump((t - this.doubleBlink) / .16) : 0);
+    out.open = clamp(out.open * (1 - blink * .92));
+    out.ringFlip = flip;
+    this.render(out, t, dt);
+  }
+  render(p, t, dt = 0) {
+    const id = this.id, concept = this.concept;
+    this.root.style.filter = p.desat > .01 || p.dim > .01 ? `saturate(${1 - .88 * p.desat}) brightness(${1 - .1 * p.dim})` : '';
+    // Glow
+    const glowColor = mixHex(this.palette.rim, WARM, clamp(p.warm));
+    this.glowStop.setAttribute('stop-color', glowColor); this.glowStop2.setAttribute('stop-color', glowColor);
+    this.glow.setAttribute('opacity', clamp(p.glow) * .9);
+    // Body squash & stretch pivots on its base, so it never floats away from its shadow.
+    this.body.setAttribute('transform', `translate(60 ${101 + p.y}) rotate(${p.rot}) scale(${p.sx} ${p.sy}) translate(-60 -101)`);
+    const lift = clamp(-p.y / 14, -.3, 1);
+    this.shadow.setAttribute('rx', 31 * (1 - lift * .3) * p.sx); this.shadow.setAttribute('opacity', .16 * (1 - lift * .5));
+    // Face
+    const lx = clamp(p.lookX, -1, 1) * 5.2, ly = clamp(p.lookY, -1, 1) * 4;
+    this.face.setAttribute('transform', this.smallFace ? `translate(${lx} ${ly}) translate(60 67) scale(1.14) translate(-60 -67)` : `translate(${lx} ${ly})`);
+    const shape = clamp(p.smile + p.closed), pill = clamp(1 - shape * 2.4);
+    this.eyes.forEach((e, i) => {
+      const open = clamp(p.open * (i === 0 ? 1 - clamp(p.wink) * .95 : 1), .04, 1.2);
+      e.g.setAttribute('transform', `translate(${e.x} 66) scale(${p.eyeScale} ${p.eyeScale * open * (1 - .78 * shape)}) translate(${-e.x} -66)`);
+      e.g.setAttribute('opacity', pill * (1 - p.desat * .35));
+      e.smile.setAttribute('opacity', clamp(p.smile * 1.8 - .35) + (i === 0 ? clamp(p.wink * 1.6 - .3) * clamp(1 - p.smile) : 0));
+      e.shut.setAttribute('opacity', clamp(p.closed * 1.8 - .35));
+    });
+    this.mouth.setAttribute('opacity', clamp(p.mouth + (concept === 'mochi' ? .45 : 0)) * (1 - p.closed));
+    this.blushes.forEach(b => b.setAttribute('opacity', clamp(p.blush + (concept === 'mochi' ? .25 : 0)) * .55));
+    // Signature
+    if (concept === 'loop') this.renderRing(p, t);
+    if (concept === 'fold') {
+      const split = .6 + p.smile * 1.6 + p.orbit * (1.2 + Math.sin(t * 2.4)) + p.progress * Math.abs(Math.sin(t * 5)) * .9 - p.closed * .6 + (p.ringFlip ? bump(p.ringFlip) * 3 : 0);
+      const twist = p.orbit * 3 * Math.sin(t * 2.4) + p.ringTilt * .04;
+      this.halfLInner.setAttribute('transform', `translate(${-split * .9} ${-split * .35}) rotate(${-twist} 60 68)`);
+      this.halfRInner.setAttribute('transform', `translate(${split * .9} ${split * .35}) rotate(${twist} 60 68)`);
+      this.seam.setAttribute('opacity', .75 * (1 - clamp(split / 3)));
+      this.seamGlow.setAttribute('opacity', clamp(p.warm) * (.6 + .4 * Math.sin(t * 2.6)));
+    }
+    if (concept === 'mochi') {
+      const angle = 8 * Math.sin(t * 2.2) * (1 - p.closed) + p.orbit * 25 * Math.sin(t * 1.6) + (p.ringFlip ? 360 * p.ringFlip : 0) - p.closed * 22 + p.ringTilt * .3 + 7;
+      this.curl.setAttribute('transform', `rotate(${angle} 52 40)`);
+      this.clasp.setAttribute('fill', mixHex('#fbe7b4', WARM, clamp(p.warm)));
+    }
+    // zz
+    this.zz.forEach((z, i) => { const ph = ((t * .45) + i / 3) % 1; z.setAttribute('x', 84 + ph * 10 + i * 2); z.setAttribute('y', 40 - ph * 22 - i * 3); z.setAttribute('opacity', clamp(p.zz) * bump(ph) * .9); });
+    // Particles & trail
+    if (dt) {
+      this.particles = this.particles.filter(q => {
+        q.life += dt; if (q.life >= q.max) { q.node.remove(); return false; }
+        q.vy += 95 * dt; q.vx *= 1 - dt * 1.4; q.x += q.vx * dt; q.y += q.vy * dt;
+        q.node.setAttribute('transform', `translate(${q.x} ${q.y}) rotate(${q.spin * q.life})`); q.node.setAttribute('opacity', 1 - q.life / q.max);
+        return true;
+      });
+      this.trail = this.trail.filter(q => (q.life += dt) < .45);
+      this.trailLayer.replaceChildren(...this.trail.map(q => el('circle', { cx:q.x, cy:q.y, r:3.2 * (1 - q.life / .45), fill:'#ffd8ec', opacity:.7 * (1 - q.life / .45) })));
+    }
+  }
+  renderRing(p, t) {
+    const pose = this.ringPose(p, t), behind = pose.depth < 0;
+    const flip = p.ringFlip ? Math.cos(Math.PI * 2 * p.ringFlip) : 1;
+    const sc = p.ringScale * (behind ? .9 : 1);
+    const rx = 12.5 * Math.max(.12, Math.abs(flip)), ry = 4.6;
+    this.rings.forEach((r, i) => {
+      const visible = (i === 0) === behind;
+      r.g.setAttribute('display', visible ? 'inline' : 'none');
+      if (!visible) return;
+      r.g.setAttribute('transform', `translate(${pose.x} ${pose.y}) rotate(${pose.tilt}) scale(${sc})`);
+      for (const n of [r.base, r.edge, r.warm, r.arc]) { n.setAttribute('rx', rx); n.setAttribute('ry', ry); }
+      r.base.setAttribute('opacity', (1 - .55 * p.progress) * (1 - .55 * p.ringDim) * (behind ? .75 : 1));
+      r.shine.setAttribute('opacity', .95 * (1 - p.ringDim) * Math.abs(flip));
+      r.warm.setAttribute('opacity', clamp(p.warm) * (.75 + .25 * Math.sin(t * 2.6)));
+      const L = 2 * Math.PI * Math.sqrt((rx * rx + ry * ry) / 2);
+      r.arc.setAttribute('stroke-dasharray', `${L * .3} ${L}`); r.arc.setAttribute('stroke-dashoffset', -(t * L * .9) % L);
+      r.arc.setAttribute('opacity', clamp(p.progress) * .95);
+    });
+    this.rings[0].g.parentNode.style.opacity = 1;
+    if (p.ringDim > .5) this.rings.forEach(r => r.base.setAttribute('stroke', '#c7cbd1')); else this.rings.forEach(r => r.base.setAttribute('stroke', `url(#${this.id}i)`));
+  }
+}
+Figure.all = new Set(); Figure.now = 0; Figure.follow = true;
+let last = performance.now();
+const frame = now => {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; Figure.now = now / 1000;
+  if (!document.hidden) for (const f of Figure.all) if (f.visible !== false) f.step(dt, Figure.now);
+  requestAnimationFrame(frame);
+};
+requestAnimationFrame(t => { last = t; Figure.now = t / 1000; requestAnimationFrame(frame); });
+const io = new IntersectionObserver(entries => { for (const e of entries) for (const f of Figure.all) if (f.host === e.target) f.visible = e.isIntersecting; });
+
+// ---- Hero ----
+const hero = new Figure(document.getElementById('hero'), { size:300 });
+io.observe(hero.host);
+const heroStage = document.getElementById('hero-stage');
+const agentHost = document.getElementById('hero-agent');
+agentHost.innerHTML = FAMILY['pebble-blue:48:lead'] || '';
+const overlay = el('svg', { width:'100%', height:'100%', style:'position:absolute;inset:0;pointer-events:none;overflow:visible' }, heroStage);
+hero.onSpark = pose => {
+  if (reducedMotion) { agentHost.classList.remove('got'); void agentHost.offsetWidth; agentHost.classList.add('got'); return; }
+  const stage = heroStage.getBoundingClientRect(), svg = hero.svg.getBoundingClientRect(), scale = svg.width / 140;
+  const from = { x:svg.left - stage.left + (pose.x + 10) * scale, y:svg.top - stage.top + (pose.y + 14) * scale };
+  const a = agentHost.getBoundingClientRect(), to = { x:a.left - stage.left + a.width / 2, y:a.top - stage.top + a.height * .35 };
+  const dot = el('circle', { r:6, fill:'#ffd36e' }, overlay), halo = el('circle', { r:13, fill:'#ffd36e', opacity:.25 }, overlay);
+  const start = performance.now(), cx = (from.x + to.x) / 2, cy = Math.min(from.y, to.y) - 90;
+  const fly = now => {
+    const x = clamp((now - start) / 700), e = x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+    const px = (1 - e) * (1 - e) * from.x + 2 * (1 - e) * e * cx + e * e * to.x, py = (1 - e) * (1 - e) * from.y + 2 * (1 - e) * e * cy + e * e * to.y;
+    for (const n of [dot, halo]) { n.setAttribute('cx', px); n.setAttribute('cy', py); }
+    if (x < 1) requestAnimationFrame(fly); else { dot.remove(); halo.remove(); agentHost.classList.remove('got'); void agentHost.offsetWidth; agentHost.classList.add('got'); }
+  };
+  requestAnimationFrame(fly);
+};
+heroStage.addEventListener('pointermove', e => {
+  const r = hero.svg.getBoundingClientRect();
+  hero.cursor = { x:clamp((e.clientX - (r.left + r.width / 2)) / 220, -1, 1), y:clamp((e.clientY - (r.top + r.height * .5)) / 200, -1, 1) };
+});
+heroStage.addEventListener('pointerleave', () => { hero.cursor = null; });
+let paletteName = 'mist';
+const caption = () => { document.getElementById('hero-caption').textContent = `圈圈 · ${PALETTES[paletteName].name} · ${STATES[hero.state].label}`; document.getElementById('hero-status').textContent = STATES[hero.state].line; };
+const stateChips = document.getElementById('state-chips');
+for (const name of STATE_ORDER) {
+  const b = document.createElement('button'); b.className = 'chip'; b.textContent = STATES[name].label; b.setAttribute('aria-pressed', name === 'idle');
+  b.onclick = () => { hero.setState(name); for (const c of stateChips.children) c.setAttribute('aria-pressed', c === b); caption();
+    if (name === 'waking') setTimeout(() => { if (hero.state === 'waking') { hero.setState('idle'); for (const c of stateChips.children) c.setAttribute('aria-pressed', c.textContent === '空闲'); caption(); } }, 1700); };
+  stateChips.appendChild(b);
+}
+const delightChips = document.getElementById('delight-chips');
+for (const [name, label] of DELIGHTS) { const b = document.createElement('button'); b.className = 'chip'; b.textContent = label; b.onclick = () => hero.play(name); delightChips.appendChild(b); }
+const swatches = document.getElementById('swatches');
+for (const [name, c] of Object.entries(PALETTES)) {
+  const b = document.createElement('button'); b.className = 'swatch'; b.title = c.name; b.style.background = `radial-gradient(circle at 35% 30%, ${c.light}, ${c.base} 55%, ${c.deep})`;
+  b.setAttribute('aria-pressed', name === 'mist'); b.setAttribute('aria-label', c.name);
+  b.onclick = () => { paletteName = name; hero.setPalette(name); anatomy.setPalette(name); for (const s of swatches.children) s.setAttribute('aria-pressed', s === b); document.getElementById('color-name').textContent = c.name; caption(); };
+  swatches.appendChild(b);
+}
+document.getElementById('follow').onchange = e => { Figure.follow = e.target.checked; };
+document.getElementById('reduced').onchange = e => { reducedMotion = e.target.checked; };
+caption();
+
+// ---- Concepts ----
+const CONCEPT_TEXT = {
+  loop:  { badge:'推荐', from:'桌宠角色左侧唯一的圈丸 + Logo 的两片互扣', pros:['剪影不对称，14px 也认得出', '圈是现成的表情道具：公转、进度、暖色、迸光', '和 Agent 头像同一家族，又一眼看出是主角'], risk:'圈在浅色背景上偏淡，需要那圈细描边。' },
+  fold:  { badge:'更有设计感', from:'Logo 的两片折带直接做成身体的两半', pros:['最像 Varin 品牌，适合官网和启动画面', '“两半分开又扣上”可以表达派发与汇总'], risk:'小尺寸时接缝看不清，可爱度略低。' },
+  mochi: { badge:'最大众', from:'桌宠角色的奶白外衫、雾蓝针织、发圈和扣饰', pros:['毛绒团子最讨喜，接近 Muse / Dots 的大众口味', '腮红和小嘴让情绪更直白'], risk:'容易和别家吉祥物撞型，Varin 的辨识度最弱。' },
+};
+const conceptsHost = document.getElementById('concepts');
+const conceptFigures = [];
+for (const key of Object.keys(CONCEPTS)) {
+  const card = document.createElement('article'); card.className = 'card concept';
+  const t = CONCEPT_TEXT[key];
+  card.innerHTML = `<div class="mini-stage"></div><span class="state-tag"></span><h3>${CONCEPTS[key].name}<span class="badge">${t.badge}</span></h3><p>来源：${t.from}</p><ul>${t.pros.map(x => `<li>${x}</li>`).join('')}</ul><p>风险：${t.risk}</p>`;
+  conceptsHost.appendChild(card);
+  const f = new Figure(card.querySelector('.mini-stage'), { concept:key, size:190 });
+  f.tag = card.querySelector('.state-tag'); io.observe(f.host); conceptFigures.push(f);
+}
+let cycle = 0;
+const cycleStates = ['idle', 'listening', 'thinking', 'working', 'waiting', 'result', 'sleeping', 'waking', 'offline'];
+const advanceConcepts = () => { const s = cycleStates[cycle++ % cycleStates.length]; for (const f of conceptFigures) { f.setState(s); f.tag.textContent = STATES[s].label; } };
+advanceConcepts(); setInterval(advanceConcepts, 2800);
+
+// ---- Anatomy ----
+const anatomy = new Figure(document.getElementById('anatomy-figure'), { size:280 });
+io.observe(anatomy.host);
+
+// ---- Family & sizes ----
+const family = (host, dark) => {
+  const title = document.createElement('div'); title.className = 'group-title'; title.innerHTML = `<span>家族 · ${dark ? '深色' : '浅色'}</span><span>Varin · 负责人 · 子 Agent</span>`; host.appendChild(title);
+  const row = document.createElement('div'); row.className = 'row'; host.appendChild(row);
+  const add = (label, markup) => { const fig = document.createElement('figure'); const box = document.createElement('div'); if (markup) box.innerHTML = markup; fig.appendChild(box); const cap = document.createElement('figcaption'); cap.textContent = label; fig.appendChild(cap); row.appendChild(fig); return box; };
+  const v = add('Varin', ''); const f = new Figure(v, { size:76, state:'idle' }); io.observe(v);
+  add('负责人', FAMILY['pebble-blue:48:lead']); add('负责人', FAMILY['notch-ochre:48:lead']);
+  add('子 Agent', FAMILY['slope-lilac:48:plain']); add('子 Agent', FAMILY['taper-sage:48:plain']); add('子 Agent', FAMILY['overlap-coral:48:plain']);
+  const mock = document.createElement('div'); mock.className = 'sidebar-mock'; host.appendChild(mock);
+  const item = (cls, icon, text) => { const d = document.createElement('div'); d.className = 'item ' + cls; const i = document.createElement('span'); if (typeof icon === 'string') i.innerHTML = icon; d.appendChild(i); const s = document.createElement('span'); s.textContent = text; d.appendChild(s); mock.appendChild(d); return i; };
+  const vi = item('on', null, 'Varin · 周末旅行'); new Figure(vi, { size:20, state:'working', still:true });
+  item('indent', FAMILY['pebble-blue:20:lead'], '行程整理（负责人）');
+  item('indent', FAMILY['slope-lilac:20:plain'], '酒店比价');
+  item('', FAMILY['notch-ochre:20:lead'], '依赖调查');
+};
+family(document.getElementById('family-light'), false); family(document.getElementById('family-dark'), true);
+const sizes = (host, dark) => { for (const s of [14, 20, 32, 48, 96, 160]) { const fig = document.createElement('figure'); const box = document.createElement('div'); fig.appendChild(box); const cap = document.createElement('figcaption'); cap.textContent = s + (s < 40 ? ' · 静态' : ''); fig.appendChild(cap); host.appendChild(fig); const f = new Figure(box, { size:s, state:'idle' }); io.observe(box); } };
+sizes(document.getElementById('sizes-light'), false); sizes(document.getElementById('sizes-dark'), true);
+
+// ---- Table ----
+document.getElementById('state-table').innerHTML = STATE_ORDER.map(name => { const s = STATES[name]; return `<tr><td>${s.label}</td><td>${s.pose}</td><td>${s.motion}</td><td>${s.ring}</td></tr>`; }).join('');
+</script>
+</body>
+</html>
