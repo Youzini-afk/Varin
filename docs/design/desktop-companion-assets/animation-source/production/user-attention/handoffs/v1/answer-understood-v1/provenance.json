@@ -1,0 +1,30 @@
+{
+  "method": "Exact source-cel copy, no scaling/deformation/fade or new image generation",
+  "sources": [
+    {
+      "frame": "frame-000.png",
+      "source": "registered/query-understand-v1/pose-010.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "frame": "frame-001.png",
+      "source": "registered/query-understand-v1/pose-011.png",
+      "sha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5"
+    },
+    {
+      "frame": "frame-002.png",
+      "source": "registered/query-understand-v1/pose-012.png",
+      "sha256": "a82f21fc77c882592e89f6f318abd1888db691569db353f40e23961e519f7788"
+    },
+    {
+      "frame": "frame-003.png",
+      "source": "registered/query-understand-v1/pose-013.png",
+      "sha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5"
+    },
+    {
+      "frame": "frame-004.png",
+      "source": "registered/query-understand-v1/pose-014.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    }
+  ]
+}

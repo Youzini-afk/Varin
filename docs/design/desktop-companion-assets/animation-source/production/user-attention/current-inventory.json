@@ -1,0 +1,486 @@
+{
+  "scope": "current-three-study-candidates-with-rebuild-dependencies",
+  "notProductionMotionAccepted": true,
+  "externalDependencies": [
+    {
+      "path": "../shared/seated-open-canonical-alpha-v1.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    }
+  ],
+  "rebuildOrder": [
+    "register_single_v1.py",
+    "register_attention_sequence_v1.py",
+    "register_attention_sequence_v2.py",
+    "register_permission_v1.py",
+    "register_permission_v2.py",
+    "register_completion_wave_v1.py",
+    "clean_wave_local_alpha_v2.py"
+  ],
+  "files": [
+    {
+      "path": "clean_wave_local_alpha_v2.py",
+      "bytes": 1992,
+      "sha256": "b61bd27f237b8ac149eb82ba9c25764ed28b97baf999e1f5ed561014a53b5c32"
+    },
+    {
+      "path": "extract_keyposes.py",
+      "bytes": 1506,
+      "sha256": "d8b3b901f94f5ee686adf6cf611a2fea6497531844efa30ab19a2d09c4965b27"
+    },
+    {
+      "path": "metadata/REBUILD_CURRENT.md",
+      "bytes": 2564,
+      "sha256": "558f120aaa79b9577a6072c74b0d1259db401dc74b2bc575d2cbfc3e3134b9dc"
+    },
+    {
+      "path": "metadata/prompt-click-open.txt",
+      "bytes": 776,
+      "sha256": "1f7a068e5e1cd470509d2f97731a74e4d51bd18258b4a1a396a211035d00b5a2"
+    },
+    {
+      "path": "metadata/prompt-click.txt",
+      "bytes": 1212,
+      "sha256": "3506dc0ef459f3a7e56b829fc1cfccec705dcaacdf8206b7b4e6e2d860f1d919"
+    },
+    {
+      "path": "metadata/prompt-single-attention.txt",
+      "bytes": 846,
+      "sha256": "7f5c3160b3fb1e889bea01cad2d5f5be08a9c037bdba9e8fe30956bfbd2d43b9"
+    },
+    {
+      "path": "metadata/prompt-single-closedblink.txt",
+      "bytes": 508,
+      "sha256": "c249f28a917d4a09ce09e361ac8d5570e0de9aad1c029d04e86a6b845a5d548a"
+    },
+    {
+      "path": "metadata/prompt-single-eye-lead.txt",
+      "bytes": 648,
+      "sha256": "2a21113a4728f458a347dd013de151a159a03a48eca78fa49af1f7b857362c57"
+    },
+    {
+      "path": "metadata/prompt-single-halfblink.txt",
+      "bytes": 612,
+      "sha256": "6b802e959125395a3e759c17c47619108ac84cd8693522ff01a1f249eba4372d"
+    },
+    {
+      "path": "metadata/prompt-single-permission-endpoint.txt",
+      "bytes": 899,
+      "sha256": "feed7a78d1310a40535610640505f74b0829400e6725430475922f1f4c31bf2d"
+    },
+    {
+      "path": "metadata/prompt-single-permission-face.txt",
+      "bytes": 669,
+      "sha256": "68fb4b686289e0617d2d3f05d478ea35997fdf1eadc775f4b4b7cd566f97c88b"
+    },
+    {
+      "path": "metadata/prompt-single-permission-return.txt",
+      "bytes": 733,
+      "sha256": "ab5909aa16ea5cb2e93ac6c415979cd260f0a2317c6906fbdca5b260f7517c12"
+    },
+    {
+      "path": "metadata/prompt-single-permission-settle.txt",
+      "bytes": 807,
+      "sha256": "8dff26f8b2214433e6796db5af0e4083e764346778c549cfbabb0d156acd5f56"
+    },
+    {
+      "path": "metadata/prompt-single-permission10.txt",
+      "bytes": 748,
+      "sha256": "4e2852560657a7fdc34f0d8d42cf365681283602280f05806591ad85759ee0c6"
+    },
+    {
+      "path": "metadata/prompt-single-permission30.txt",
+      "bytes": 903,
+      "sha256": "95f2fccbd0c94ef0b6453079b8f4cfe32c80a6c189207c311cfb1e2b95ea737b"
+    },
+    {
+      "path": "metadata/prompt-single-permission60.txt",
+      "bytes": 729,
+      "sha256": "a54a9792657d859b40fdfd8949784644dbb1efb8199bfafe8cd7d78b75658012"
+    },
+    {
+      "path": "metadata/prompt-single-permission70.txt",
+      "bytes": 788,
+      "sha256": "6b74a39cb04a4d1e55646be9b8a45e4ca93c45c31479bb5b741fe58b83c426c9"
+    },
+    {
+      "path": "metadata/prompt-single-permission80.txt",
+      "bytes": 654,
+      "sha256": "9f13e22f5fe88241ae5512dfdd852f23a362f8d8e6f4fbae29d3aef4adda317d"
+    },
+    {
+      "path": "metadata/prompt-single-wave-endpoint.txt",
+      "bytes": 877,
+      "sha256": "a87c369ed7b70c8ae1885ce991a4bfe6ca9d1341b0333cf366d4dba5e6953e2c"
+    },
+    {
+      "path": "metadata/prompt-wave-return.txt",
+      "bytes": 708,
+      "sha256": "945da8c4e6cf66ca55d3a8010fb815d25e292726b3ac7ef4c68e1342b87f0e9f"
+    },
+    {
+      "path": "metadata/prompt-wave-rise20.txt",
+      "bytes": 794,
+      "sha256": "941b9fc23194a9a9cf0c1a755805c2c14d907ef99e95fb160df7eac7a20c3e1b"
+    },
+    {
+      "path": "metadata/prompt-wave-rise50.txt",
+      "bytes": 768,
+      "sha256": "56f523c5ee6b09f15005dd0576c595da6ab456e7021ce507d5c9e51d98273ce6"
+    },
+    {
+      "path": "metadata/prompt-wave-rise80.txt",
+      "bytes": 758,
+      "sha256": "89670d42c013ea7dfd1227c6fe42816fcbf6bc014c596478bb725e92b40b6929"
+    },
+    {
+      "path": "metadata/prompt-wave-sweep.txt",
+      "bytes": 703,
+      "sha256": "cde570c955388a006cecaedaae790a68d46ee31861164e396c8fc305a229f146"
+    },
+    {
+      "path": "metadata/shared-canonical-origin.json",
+      "bytes": 2272,
+      "sha256": "e363b54dfda59599b0a9e699babf3190d45be99b64b3884980211b4a9482c7a2"
+    },
+    {
+      "path": "register_attention_sequence_v1.py",
+      "bytes": 2339,
+      "sha256": "49932be1c51091a60285ee6867105dbf070736afc92c24af2a226353173e6a78"
+    },
+    {
+      "path": "register_attention_sequence_v2.py",
+      "bytes": 2418,
+      "sha256": "2fe032a7af7483411cb1843dc94b5146fad676f90be1453b2f7dea3286948a84"
+    },
+    {
+      "path": "register_completion_wave_v1.py",
+      "bytes": 4341,
+      "sha256": "02d1e131a8b0f4ea2cb9f6fb5525f1363a5bd24724743b232598dd1741bd5b07"
+    },
+    {
+      "path": "register_permission_v1.py",
+      "bytes": 2688,
+      "sha256": "8a1a4386d6cad4d7bd9c5f908a01446bf5f455b075236ba40e97829915954ca9"
+    },
+    {
+      "path": "register_permission_v2.py",
+      "bytes": 4512,
+      "sha256": "5fbd76bc1fe37efa990b756383ab43970bbaf8fbc796e5f831f78f198eb30b4c"
+    },
+    {
+      "path": "register_single_v1.py",
+      "bytes": 1710,
+      "sha256": "8324f5e2c362c90d2230c54f9eb9280949c2382db054779993c840ca55fd00fc"
+    },
+    {
+      "path": "registered/attention-sequence-v2/blink-redraw-region.png",
+      "bytes": 1665,
+      "sha256": "8334f060d7ea92843de39ec04441e33bb57e880d9ef8ebbf5d5fa9b50133a5ff"
+    },
+    {
+      "path": "registered/attention-sequence-v2/pose-000.png",
+      "bytes": 306153,
+      "sha256": "279130a0bcabe34a2b8e78908af71d5be2b7ab02db8496a44a3c365918a550d5"
+    },
+    {
+      "path": "registered/attention-sequence-v2/pose-001.png",
+      "bytes": 319514,
+      "sha256": "c6fac141e72b6f5961f88939e0827ad818ace719457da3dbc9d987411d427048"
+    },
+    {
+      "path": "registered/attention-sequence-v2/pose-002.png",
+      "bytes": 321204,
+      "sha256": "cd99d09d7e3ba480d0cc6626ac056bf86b2ffd92f6e4ff6f0cd2dc230f995ae5"
+    },
+    {
+      "path": "registered/attention-sequence-v2/pose-003.png",
+      "bytes": 305814,
+      "sha256": "9ac14650174359058ad356c0cafe49b50b43dbe688345b4622318c0d984a7a55"
+    },
+    {
+      "path": "registered/attention-sequence-v2/pose-004.png",
+      "bytes": 305318,
+      "sha256": "d696a98820bb12ce672bf3899769d2a21c2708bd756aaf6840b1a743d74c5122"
+    },
+    {
+      "path": "registered/attention-sequence-v2/provenance.json",
+      "bytes": 311,
+      "sha256": "ad44bc1162d2abe132fba91ecf7e2a7517227893d62d11ea2fc2c4aac15a6e28"
+    },
+    {
+      "path": "registered/attention-sequence-v2/sequence.json",
+      "bytes": 1449,
+      "sha256": "ffe340d1c3e721fc3739de9cc819d43f0611e10b2aa26ac92402fef6a5e4f993"
+    },
+    {
+      "path": "registered/completion-wave-v2/alpha-cleanup.json",
+      "bytes": 1234,
+      "sha256": "43979d72103de1bb13016a62a7173e093bb5ae01bff626a8f45f7f9256ff3fbc"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-000.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-001.png",
+      "bytes": 322242,
+      "sha256": "29b55065f6613a9ab687568cbeef48a58d4c30113faf6eb41197c08abb1e7948"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-002.png",
+      "bytes": 325282,
+      "sha256": "97f5f7adbaf8f112b3ec73d2eac5992445b505aea645dc23f273b1c9c1425441"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-003.png",
+      "bytes": 330385,
+      "sha256": "a7fe8e7b98a36a834047b2012d6afd1ed2c2c3e4c8b23cdf7d352468f86a1e07"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-004.png",
+      "bytes": 325406,
+      "sha256": "cc00515a55b9c6e8cc9a493ab5169adeb4029311d367c57221404ced4532f939"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-005.png",
+      "bytes": 324773,
+      "sha256": "ad13c1ebf5db4b4f555f4ae8f3b538729d5df1e5d5c0be2a6aae6f21d4bee21e"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-006.png",
+      "bytes": 322671,
+      "sha256": "bb8cc4c02822e008bd7969e7d464a131c33173f738ca28f71dcd9e19e26a6842"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-007.png",
+      "bytes": 324773,
+      "sha256": "ad13c1ebf5db4b4f555f4ae8f3b538729d5df1e5d5c0be2a6aae6f21d4bee21e"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-008.png",
+      "bytes": 334245,
+      "sha256": "0f22b577e5234cf8da4cf611c1f99f806ddd7bcf9e9acbd880a628220625b34c"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-009.png",
+      "bytes": 325282,
+      "sha256": "97f5f7adbaf8f112b3ec73d2eac5992445b505aea645dc23f273b1c9c1425441"
+    },
+    {
+      "path": "registered/completion-wave-v2/pose-010.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "registered/completion-wave-v2/provenance.json",
+      "bytes": 1604,
+      "sha256": "65ca936b2a27dbfc2b9db91c67d5d7063f10c2833bb911704301d2d4cfee461a"
+    },
+    {
+      "path": "registered/completion-wave-v2/reviewed-hair-background-region.png",
+      "bytes": 672,
+      "sha256": "fdb2051d82e54c10d52263ccc181d5ffa69848f561128f35aeb4ef4a8881f7ca"
+    },
+    {
+      "path": "registered/completion-wave-v2/sequence.json",
+      "bytes": 1812,
+      "sha256": "7eba81773d383e18aa995c0a9f6f0da91c61960007d6559998e56426af47ea4d"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-000.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-001.png",
+      "bytes": 322228,
+      "sha256": "7a7e59882efd7a259186da25c88cfd3f9350a29dac9aa4dd89cb1f6168a4bb7e"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-002.png",
+      "bytes": 321854,
+      "sha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-003.png",
+      "bytes": 323814,
+      "sha256": "c224944557fed9f2da49a7b1073c645deb2f5e44ae3119bc4ea1b3d9f8995c15"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-004.png",
+      "bytes": 322897,
+      "sha256": "a1d49752eca51651f08cab3f76676e49257cb91fbacce6841c83f210736458f4"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-005.png",
+      "bytes": 321971,
+      "sha256": "9d548c5769377748e3ac47908dacf753f6a3a30c2fba44482223aa9809f4fa56"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-006.png",
+      "bytes": 323574,
+      "sha256": "f567b6b4da1b088df7ea92b8190ac5784ccc9de6b38d28b6122a29d045420f18"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-007.png",
+      "bytes": 324842,
+      "sha256": "fa90c96d80c7e95094b0ed3ee1872d467b0b0f5fefef14b4338a041266f54c32"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-008.png",
+      "bytes": 332783,
+      "sha256": "409aa7714ab85498aa01dd353de3c12ae7eb2b77b0970eee2fa316a40b4ba91e"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-009.png",
+      "bytes": 330698,
+      "sha256": "5843feb9a48fe08371ce5667a1718ab49e0c656708996d3335cd51e6580c6ca9"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-010.png",
+      "bytes": 328635,
+      "sha256": "64adb42cea608c7590473bf74844d49aa87b640483361d26e7d3b037061c35d0"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-011.png",
+      "bytes": 321854,
+      "sha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585"
+    },
+    {
+      "path": "registered/permission-cycle-v2/pose-012.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "registered/permission-cycle-v2/provenance.json",
+      "bytes": 1924,
+      "sha256": "a97cfb75791a1837a497bb1ad9a2f2023d6dc498556dce4185039ba089be579d"
+    },
+    {
+      "path": "registered/permission-cycle-v2/sequence.json",
+      "bytes": 1983,
+      "sha256": "3b391a545f664ce6f872cbb18899736e569247aefd2c3e10b56caeccd6351fc6"
+    },
+    {
+      "path": "registered/permission-cycle-v2/whole-upper-redraw-mask.png",
+      "bytes": 4089,
+      "sha256": "7806c211334e85cdafd264decfdfb461fa20b8526147622ee04f3bcaf4055ff0"
+    },
+    {
+      "path": "sources/attention-closedblink-single-v1.png",
+      "bytes": 1834402,
+      "sha256": "9e7b895836cb98e2dec58cbf53ec13c46d72ea94e6809bbe4258c80e33711bfe"
+    },
+    {
+      "path": "sources/attention-eye-lead-single-v1.png",
+      "bytes": 1670724,
+      "sha256": "123973b3bfab96eb704eaf4f9e04a1106907fc47640ba35f99b6edb37939e38f"
+    },
+    {
+      "path": "sources/attention-halfblink-single-v1.png",
+      "bytes": 1839076,
+      "sha256": "f0c0f4bd3c8cc961312799c9aadcc7c0155cbc15430258f68e40b3db9739d8dd"
+    },
+    {
+      "path": "sources/attention-lift-single-01-v1.png",
+      "bytes": 1652649,
+      "sha256": "913cbb579835e2e5c761b47ecb2ad501fedf1d476df71dbfa1693abdda26f2ad"
+    },
+    {
+      "path": "sources/click-closed-cycle-v1.png",
+      "bytes": 2156180,
+      "sha256": "893c1febd583bf3511d44f6680134b67d113e0593f6ab9b04bc012e45d380db2"
+    },
+    {
+      "path": "sources/click-open-cycle-v1.png",
+      "bytes": 2127181,
+      "sha256": "123c6e705fea0c491cc71fa05826bb808c89d5c1a2ab415c7d9fbb86247c816b"
+    },
+    {
+      "path": "sources/click-open-single-master-v1.png",
+      "bytes": 272827,
+      "sha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b"
+    },
+    {
+      "path": "sources/permission-attentive-face-single-v1.png",
+      "bytes": 1897220,
+      "sha256": "3436ad4b971c6ac2cfce41b99b271772dd9275b5c882314103027726c5867cc3"
+    },
+    {
+      "path": "sources/permission-endpoint-single-v1.png",
+      "bytes": 1730607,
+      "sha256": "b1cad7c58695a32718796d18b533d2b768ee9301459732853451eafee4e4efac"
+    },
+    {
+      "path": "sources/permission-lift10-single-v1.png",
+      "bytes": 1699742,
+      "sha256": "46ada42d4e918e3bfb190eabd2e5c6ceea0deca505e2c546207eab81e5075dc3"
+    },
+    {
+      "path": "sources/permission-lift30-single-v1.png",
+      "bytes": 1724087,
+      "sha256": "fab5defce7531ccfeeb7e0dd04a108a913b3f86f951c8ad1276627530aadfc5a"
+    },
+    {
+      "path": "sources/permission-lift60-single-v1.png",
+      "bytes": 1908691,
+      "sha256": "8d6839a75c72286c5a2d400552f3e005853ce3082bb268069868f13869e22391"
+    },
+    {
+      "path": "sources/permission-lift70-single-v1.png",
+      "bytes": 1889263,
+      "sha256": "6e4a2d747fd941c2e4c026124a30ad0f10557e4f99e03c8c727c84666105a043"
+    },
+    {
+      "path": "sources/permission-lift80-single-v1.png",
+      "bytes": 1900721,
+      "sha256": "b064f951dd49224ffcc3b76276f83d44029a861203ce293d0556cdbb3a8005a8"
+    },
+    {
+      "path": "sources/permission-return-single-v1.png",
+      "bytes": 1858873,
+      "sha256": "663da6e70dfeb3bf4761d2529082ada8f11131bdc552e0f8714885f85496094e"
+    },
+    {
+      "path": "sources/permission-settle-single-v1.png",
+      "bytes": 1923504,
+      "sha256": "060c93b6681e056494daccd1442bde73ae486bba15406152d0369abed18cb018"
+    },
+    {
+      "path": "sources/wave-endpoint-single-v1.png",
+      "bytes": 1686842,
+      "sha256": "a3e93ca7f15f03dec82cd2658207c7af9d0d178862ded23269f596859d49f14d"
+    },
+    {
+      "path": "sources/wave-return-single-v1.png",
+      "bytes": 1918214,
+      "sha256": "18fcf9760aa69e690ceb08ccf7206230279737d95745ab6742d167731fb75206"
+    },
+    {
+      "path": "sources/wave-rise20-single-v1.png",
+      "bytes": 1671127,
+      "sha256": "d1ba08bf5acccb716463244d2cb92bbab65886dd56cb83d0660c1b04462f154f"
+    },
+    {
+      "path": "sources/wave-rise50-single-v1.png",
+      "bytes": 1724585,
+      "sha256": "1ce8f3d9aae61b0ac41248a33944149962d96309c3cd40e6a29c794345a01b38"
+    },
+    {
+      "path": "sources/wave-rise80-single-v1.png",
+      "bytes": 1679672,
+      "sha256": "a056e18c26830abab71cf666a9e9ed2253126ecc16fe6e78d49fbae51d311c77"
+    },
+    {
+      "path": "sources/wave-sweep-single-v1.png",
+      "bytes": 1681937,
+      "sha256": "71730b8e363a7db96d384124bad37631bd7981a6a0c561ace0cbb2f32768c755"
+    },
+    {
+      "path": "rebuild_current.py",
+      "bytes": 546,
+      "sha256": "2cd4198446616e6a7b4d60e1c344ddd641706a931a54e814a5de181a041340d6"
+    }
+  ]
+}

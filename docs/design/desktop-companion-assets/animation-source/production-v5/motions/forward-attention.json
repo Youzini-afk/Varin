@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "id": "v5-forward-attention-working-phrase",
+  "action": "director-inspect",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 220,
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "entry-early",
+      "durationMs": 110,
+      "interruptionExitIds": [
+        "entry-early",
+        "recovery-late",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "entry-late",
+      "durationMs": 100,
+      "interruptionExitIds": [
+        "entry-late",
+        "recovery-mid",
+        "recovery-late",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "listen",
+      "durationMs": 300,
+      "interruptionExitIds": [
+        "listen",
+        "recovery-mid",
+        "recovery-late",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "recovery-mid",
+      "durationMs": 130,
+      "interruptionExitIds": [
+        "recovery-mid",
+        "recovery-late",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "recovery-late",
+      "durationMs": 120,
+      "interruptionExitIds": [
+        "recovery-late",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 380,
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    }
+  ],
+  "runtimeApproval": false,
+  "family": "W02",
+  "semantic": "Bot attends to actual selected project; not report receipt, worker thinking or fixed project direction",
+  "role": "Bot-only",
+  "exitRoutes": {
+    "neutral": [
+      {
+        "sourceId": "neutral",
+        "durationMs": 100
+      }
+    ],
+    "entry-early": [
+      {
+        "sourceId": "entry-early",
+        "durationMs": 70
+      },
+      {
+        "sourceId": "recovery-late",
+        "durationMs": 120
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 180
+      }
+    ],
+    "entry-late": [
+      {
+        "sourceId": "entry-late",
+        "durationMs": 70
+      },
+      {
+        "sourceId": "recovery-mid",
+        "durationMs": 110
+      },
+      {
+        "sourceId": "recovery-late",
+        "durationMs": 110
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 180
+      }
+    ],
+    "listen": [
+      {
+        "sourceId": "listen",
+        "durationMs": 80
+      },
+      {
+        "sourceId": "recovery-mid",
+        "durationMs": 130
+      },
+      {
+        "sourceId": "recovery-late",
+        "durationMs": 120
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 180
+      }
+    ],
+    "recovery-mid": [
+      {
+        "sourceId": "recovery-mid",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "recovery-late",
+        "durationMs": 120
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 180
+      }
+    ],
+    "recovery-late": [
+      {
+        "sourceId": "recovery-late",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 180
+      }
+    ]
+  },
+  "pickupPolicy": {
+    "samePoseDetached": true,
+    "recovery": "exitRoutes",
+    "thenExistingE": [
+      "lift-side",
+      "lift-support",
+      "bridge",
+      "float"
+    ],
+    "noDelayToNativeRoot": true
+  }
+}

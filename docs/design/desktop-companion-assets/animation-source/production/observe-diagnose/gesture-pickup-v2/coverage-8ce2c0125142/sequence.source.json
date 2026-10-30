@@ -1,0 +1,83 @@
+{
+  "id": "gesture-pickup.coverage-8ce2c0125142",
+  "stage": "motion-candidate",
+  "reviewStatus": "structural-variant-review",
+  "family": "RELOCATION",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "coverage-8ce2c0125142-detached",
+  "exitPose": "canonical-open-laptop-supported-detached",
+  "loop": null,
+  "sourceStart": "observe-diagnose/canonical-wait-cycle-v1/chin-glance-user.png",
+  "sourceStartSha256": "8ce2c012514281146a422c9369df895242f6642f03c07535568dafd6861bd780",
+  "frames": [
+    {
+      "source": "current-detached.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "detach",
+      "pose": "coverage-8ce2c0125142-transition",
+      "contacts": {}
+    },
+    {
+      "source": "current-supported.png",
+      "durationMs": 60,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-8ce2c0125142-transition",
+      "contacts": {}
+    },
+    {
+      "source": "chin-005-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-8ce2c0125142-transition",
+      "contacts": {}
+    },
+    {
+      "source": "early-detached.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-8ce2c0125142-transition",
+      "contacts": {}
+    },
+    {
+      "source": "pregrip-detached.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-8ce2c0125142-transition",
+      "contacts": {}
+    },
+    {
+      "source": "grip-detached.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "canonical-open-laptop-supported-detached",
+      "contacts": {}
+    }
+  ]
+}

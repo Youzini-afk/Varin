@@ -1,0 +1,139 @@
+{
+  "pathBase": "production-v3",
+  "files": [
+    {
+      "path": "relocation/derive_director_gather.py",
+      "sha256": "437ab360b8357a7efc4c1409544a9215171a0f56220a219b677b7fe31ff13c09",
+      "bytes": 1875
+    },
+    {
+      "path": "relocation/derive_director_listen.py",
+      "sha256": "fad12060a14edebca8f79bf72a89c52fb058c5689d5d2fd6ba8de6a511cf6739",
+      "bytes": 2125
+    },
+    {
+      "path": "relocation/director-derived/38d417e028d5bb35-mask.png",
+      "sha256": "604e23e3354bb4da8f7fbc6b9f6ce02e23232c0215c1b8116dd7886b2b3c0470",
+      "bytes": 2518
+    },
+    {
+      "path": "relocation/director-derived/38d417e028d5bb35.png",
+      "sha256": "645f3ce8f5d6394522e9d10c812984f3ae922e279be08d8679696054b68b3ead",
+      "bytes": 330058
+    },
+    {
+      "path": "relocation/director-derived/44cfbcf18137c43e-mask.png",
+      "sha256": "604e23e3354bb4da8f7fbc6b9f6ce02e23232c0215c1b8116dd7886b2b3c0470",
+      "bytes": 2518
+    },
+    {
+      "path": "relocation/director-derived/44cfbcf18137c43e.png",
+      "sha256": "9f596fa4b55906c2b936524854962fcb837813f3b45ffbd1f3530ccaacb0728a",
+      "bytes": 331093
+    },
+    {
+      "path": "relocation/director-derived/8faafa5486908c7d-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "relocation/director-derived/8faafa5486908c7d.png",
+      "sha256": "e99f36fa4d7e47c65fb662aa62a78bd8cfdaa05e81f3bdc38b4f7c6e840c1f32",
+      "bytes": 333005
+    },
+    {
+      "path": "relocation/director-derived/c359a6e8ccee20bb-mask.png",
+      "sha256": "604e23e3354bb4da8f7fbc6b9f6ce02e23232c0215c1b8116dd7886b2b3c0470",
+      "bytes": 2518
+    },
+    {
+      "path": "relocation/director-derived/c359a6e8ccee20bb.png",
+      "sha256": "9f8d0193e1e3fd3ccefe227bca496bcf8b0441c92a97cd3c69bff25f949a1533",
+      "bytes": 328748
+    },
+    {
+      "path": "relocation/director-derived/ecbadf94a1047de8-mask.png",
+      "sha256": "604e23e3354bb4da8f7fbc6b9f6ce02e23232c0215c1b8116dd7886b2b3c0470",
+      "bytes": 2518
+    },
+    {
+      "path": "relocation/director-derived/ecbadf94a1047de8.png",
+      "sha256": "89dbdaaeab778e0f2dc3ad3562b14e72e0e894c6da814d19a53abe8c77499cb3",
+      "bytes": 330138
+    },
+    {
+      "path": "relocation/director-derived/gather-five-review.jpg",
+      "sha256": "5f493cf988acfc3f665f57ff8e4b589a6ff56dbacf57afe6085aa8cebf209b00",
+      "bytes": 394369
+    },
+    {
+      "path": "relocation/director-derived/gather-tail-review.jpg",
+      "sha256": "facb1c2cef7c696961135e273e278eda82ae48421e85a93c3d67382334701aaa",
+      "bytes": 176812
+    },
+    {
+      "path": "relocation/director-derived/listen-four-review.jpg",
+      "sha256": "388a5d64fe7a519b711164415924c1b25fb9908ddd9abc0f849b9c3eab28b97d",
+      "bytes": 312675
+    },
+    {
+      "path": "relocation/director-derived/listen-lean-v2-mask.png",
+      "sha256": "490b349133af73d7a9118e3b94ae260dfafb738639deedf225be3139ac8c0b4c",
+      "bytes": 2013
+    },
+    {
+      "path": "relocation/director-derived/listen-lean-v2.png",
+      "sha256": "5f833ba1fa4cca2a591a7c06536754b8e28332cc18ff9e055ffcef2f6abde37d",
+      "bytes": 327308
+    },
+    {
+      "path": "relocation/director-derived/listen-left-lean-v1-mask.png",
+      "sha256": "490b349133af73d7a9118e3b94ae260dfafb738639deedf225be3139ac8c0b4c",
+      "bytes": 2013
+    },
+    {
+      "path": "relocation/director-derived/listen-left-lean-v1.png",
+      "sha256": "6b92877fccda6f7ac25fd7b4e920082fbaae642ed7b5226f2813bc553488879c",
+      "bytes": 328995
+    },
+    {
+      "path": "relocation/director-derived/listen-left-turn-reuse-v1-mask.png",
+      "sha256": "490b349133af73d7a9118e3b94ae260dfafb738639deedf225be3139ac8c0b4c",
+      "bytes": 2013
+    },
+    {
+      "path": "relocation/director-derived/listen-left-turn-reuse-v1.png",
+      "sha256": "894286dac0ca1e309db0e0ef097f18e245bf96f41c44664dba3c0479fe302316",
+      "bytes": 330999
+    },
+    {
+      "path": "relocation/director-derived/listen-turn-reuse-v2-mask.png",
+      "sha256": "490b349133af73d7a9118e3b94ae260dfafb738639deedf225be3139ac8c0b4c",
+      "bytes": 2013
+    },
+    {
+      "path": "relocation/director-derived/listen-turn-reuse-v2.png",
+      "sha256": "e82d97c2785127add038e69c44174fdfd6282feb73b5332e86b272d51c909b68",
+      "bytes": 329878
+    },
+    {
+      "path": "relocation/director-reachable-source-coverage.json",
+      "sha256": "853c79b403b2259578111656d1ec7feae67e9ac7fbfd28a5be4dc8a20e2ade8b",
+      "bytes": 210
+    },
+    {
+      "path": "relocation/director-source-detached-index-v2.json",
+      "sha256": "24e14c57d64288360947a500dd04a640b23d67ddb84d0df85030769f7aeb5140",
+      "bytes": 7010
+    },
+    {
+      "path": "relocation/rebuild_director.py",
+      "sha256": "342d4734b0bc0808c2401146955dec834aa5ee7d035867781a95fa6b3dffbdbd",
+      "bytes": 620
+    }
+  ],
+  "totalBytes": 3886153,
+  "requiredExternal": "director-performance current-source-index/manifest/references and integration-support/selected-v1; sibling production-v2 relocation index-v4 and exact listen detached PNG/mask. All paths repository-local, no new-poses workspace layer.",
+  "review": "9 sources finite static light/dark and sleeve/hidden-area review; not full motion/native acceptance",
+  "rebuild": "python relocation/rebuild_director.py: 9/9 SHA exact"
+}

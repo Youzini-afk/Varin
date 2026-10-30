@@ -1,0 +1,133 @@
+{
+  "id": "completion-once-v1",
+  "family": "USER_ATTENTION",
+  "kind": "action",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "stage": "motion-candidate",
+  "reviewStatus": "candidate",
+  "entryPose": "seated-open-neutral-keyboard",
+  "exitPose": "seated-open-neutral-keyboard",
+  "loop": null,
+  "frames": [
+    {
+      "source": "frame-000.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-005.png",
+      "durationMs": 170,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-006.png",
+      "durationMs": 150,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-007.png",
+      "durationMs": 130,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-008.png",
+      "durationMs": 110,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-009.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "completion-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-010.png",
+      "durationMs": 200,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "transition"
+    }
+  ],
+  "warning": "Derived from peer-reviewed drawings, handoff order awaiting finite path review. Application state owns decisions; no approval, answer, success, timeout, or work command inferred from exposure completion.",
+  "trigger": "actual task succeeded once; presentation repeats must not replay success gesture",
+  "safeExitFrames": [
+    0,
+    10
+  ]
+}

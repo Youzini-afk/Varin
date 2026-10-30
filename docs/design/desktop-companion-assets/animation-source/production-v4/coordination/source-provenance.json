@@ -1,0 +1,348 @@
+{
+  "canvas": [
+    512,
+    512
+  ],
+  "sources": [
+    {
+      "source": "frames/release.png",
+      "sha256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+      "originalSHA256": "b8ca0f4c3aecad73903474c0ea2d36f9aa99839cf19581cf8535580b9d25a43a",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/release.png",
+      "sha256": "8ee6b39ad8a117f5db99b42bd09235e90a954007fb8c55c5f96b767d3837625a",
+      "originalSHA256": "0c3adfaa9e0e601ec61bee84935a393398b8caa64c6f381dd70d26f2f1f84781",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/half-lift.png",
+      "sha256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+      "originalSHA256": "97211711102abad497d9cf0a0bd50c36c14dbad0f723c1047a52d8d6dcea4f62",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/half-lift.png",
+      "sha256": "dea284ce267ce275a730caf356c44de266281a2bd2c05429756fcdabce71728f",
+      "originalSHA256": "fe1866d94e916a09b41853be66e109930aa583b175b58307bdf8667c15657258",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/gather.png",
+      "sha256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+      "originalSHA256": "a4dac01e8741023876fbb6db0a8ed6d1561a62b0adad9a581396febb0131f299",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/gather.png",
+      "sha256": "22f1717263b4dba7677eb71f0b72d3bc4caee8404cec41b7b06f08b43b4e022f",
+      "originalSHA256": "5b00eac757ebe45d07f669d6a915da17f328c5d9af915b63faac244f5a71bfea",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/unfold-early.png",
+      "sha256": "265f5b99b142a8026eef41eda9d85e95570ee73ea191df681144345a72772289",
+      "originalSHA256": "296385f341a7036bb820b54656ce50e986981b0b4d7d4a7da2dbcf8bbed1c259",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/unfold-early.png",
+      "sha256": "7ee8e7feed423eb2db070835a8db0b136ddfa6b5632c3ac50e37c413b7302363",
+      "originalSHA256": "793a138fc8fadc7e1fa61f7be5d68b69de36f7ac98e7672dc19bb83f69d303fc",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/unfold-mid.png",
+      "sha256": "287d899efd253686aaff1b498e3dd1285df73fcd6fc513a0ae069e0129d4cf05",
+      "originalSHA256": "032cfeed47e96203278509b46828d63ab309a18ef61e410dde9a3f06010309e2",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/unfold-mid.png",
+      "sha256": "11768a288bbd06550169f97706f398dd893a4d47def8057e341c08da9137b159",
+      "originalSHA256": "b642bed06bab5cb0a3923bde93a6c8d729349e74e178508ca0a1426033c41d8a",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/unfold-open.png",
+      "sha256": "b1b5fa9919ffe4d7753fee4aa22957b69c5a1d94c43b74f9f055a12816d12880",
+      "originalSHA256": "87cc7080dd8c7abfd2354679014b354f258b6d9ec43dddd76fc4639dafc81f6b",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/unfold-open.png",
+      "sha256": "d1dca9e967f981e1bbca69bf4a56e11764d648d362a9a7f44bfc720562255fa7",
+      "originalSHA256": "a8d27a3fe8bd6daac11ca144339a97ba404149b8eecdcc80c1affaf1be9323f5",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/present.png",
+      "sha256": "d49bff65da96300ab68d5402470de7d4239918328a9d1616ccc316e21cf94776",
+      "originalSHA256": "710e4efb7160b334bb7e43672f74468b5b27dba189b02a3406e85980780f9476",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/present.png",
+      "sha256": "f76d8c3b125bc9e2865d7b5c2f91d0c3e3c673a917bc3d2fe89d4427d1fd901b",
+      "originalSHA256": "7b927c8406cdd0330686264194017dbb2da873c70ec0659d0fd829588d3b34c4",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/wrist-return.png",
+      "sha256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+      "originalSHA256": "45dccbe373f59cd6ed65c8618e28372583c3dc0b7c4ca49a6979045c34a8ef34",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/wrist-return.png",
+      "sha256": "d798c7cae04cae5f6a948a3203e839f38137a77499ad596021150b78f9331ce5",
+      "originalSHA256": "fac24cc1f331e38be2f756e643ca6152d582bdf3f2f4bb00dc65cf3895f904f8",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/keyboard-hover.png",
+      "sha256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+      "originalSHA256": "48e0eb03d620037f9688565236bdd07054592adbe19c9d9a3a281d5785d9d8bf",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/keyboard-hover.png",
+      "sha256": "2508af946aabe2c559d2d656c968a8aea9c32c7a8a78730c2db185036ba5f47c",
+      "originalSHA256": "3b77bf5ce80486ac67a64c0bf3a1f3a576c8b8135c37dcbc7951b4e3259e05b6",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    },
+    {
+      "source": "frames/keyboard-contact.png",
+      "sha256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+      "originalSHA256": "48e0eb03d620037f9688565236bdd07054592adbe19c9d9a3a281d5785d9d8bf",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/keyboard-contact.png",
+      "sha256": "31c4a4f8d1294242eb49be7dd5ce49e68d3d78a423899236c814befb1d4ba9e8",
+      "originalSHA256": "593d72891fe7afb3cfe1e21674a1e7c761e006389317a84b8b735319186af933",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; uniform full-canvas scale only; no masks or alpha repaint"
+    }
+  ]
+}

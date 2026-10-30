@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "neutral",
+    "listen-rest",
+    "permission hold using identical listen-rest head"
+  ],
+  "exposureMs": {
+    "closed": 75,
+    "halfClose": 45,
+    "halfOpen": 45
+  },
+  "geometryAnchor": "references/upright-open-neutral-v2.png",
+  "geometryAnchorSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+  "mask": "blink/eye-mask.png",
+  "maskMethod": "two narrowly authored eyelid polygons feather .65px; eyebrows, mouth, silhouette and all non-eye pixels preserved exactly",
+  "prohibited": [
+    "nod-soft",
+    "nod",
+    "turned head",
+    "bowed/leaning head",
+    "other head geometry"
+  ],
+  "states": {
+    "closed": {
+      "prompt": "prompts/blink-closed.txt",
+      "raw": "raw/blink-closed.png",
+      "rawSHA256": "e0a76e2e0e460186fb2d6b8dc79da67c1580d45bb88c24a405e425b3db07bb7d",
+      "source": "references/upright-open-neutral-v2.png"
+    },
+    "half": {
+      "prompt": "prompts/blink-half.txt",
+      "raw": "raw/blink-half.png",
+      "rawSHA256": "1a0480c2d32f491ca837e9a59c2f7ff0c7be66866c2f524c3dbe40d0fdd0d1d7",
+      "source": "references/upright-open-neutral-v2.png"
+    }
+  },
+  "status": "internal artwork reviewed; runtime integration pending; eye animation is not business state",
+  "targetSourceSHA256": {
+    "listen-rest": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+    "neutral": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+  },
+  "timing": "sparse randomized 4\u20137 second interval while event-controlled waiting; no response signal, no nod; interrupt immediately on real event",
+  "verification": {
+    "listen-rest-closed": {
+      "outsideEyeMaskChangedPixels": 0
+    },
+    "listen-rest-half": {
+      "outsideEyeMaskChangedPixels": 0
+    },
+    "neutral-closed": {
+      "outsideEyeMaskChangedPixels": 0
+    },
+    "neutral-half": {
+      "outsideEyeMaskChangedPixels": 0
+    }
+  }
+}

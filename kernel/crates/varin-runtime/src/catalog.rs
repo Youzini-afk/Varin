@@ -199,6 +199,10 @@ fn initialize_metadata(
     // Derived lookup over the original descriptive events; no second matter/task state.
     tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_matter_revisions ON events(subject,json_extract(data,'$.id'),cursor DESC) WHERE kind='bot.matter.updated'")?;
     tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_work_changes ON events(json_extract(data,'$.changeId'),json_extract(data,'$.targetThreadId')) WHERE kind='bot.work_pending'")?;
+    // Derived lookups for the attention read: only unsettled Runs and operations are indexed, so
+    // the read does not scan retained history. Their predicates match attention::OPEN_*.
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS attention_open_runs ON runs(branch_id) WHERE json_extract(body,'$.state') NOT IN ('completed','failed','cancelled');
+        CREATE INDEX IF NOT EXISTS attention_open_operations ON operations(run_id) WHERE (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.effect')='unknown' OR json_extract(body,'$.outcome')='indeterminate' OR (json_extract(body,'$.mcp_resource_subscription') IS NOT NULL AND (json_extract(body,'$.cancel_requested')=0 OR json_extract(body,'$.mcp_resource_subscription.localReleased')=0)))")?;
     if version == 0 {
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;
@@ -232,6 +236,7 @@ pub struct Catalog {
     plan_cursor_key: [u8; 32],
     continuation_stopping: std::sync::Arc<std::sync::atomic::AtomicBool>,
     event_observers: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::sync::mpsc::SyncSender<()>>>>,
+    attention_cache: attention::AttentionCache,
 }
 impl Catalog {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -287,6 +292,7 @@ impl Catalog {
             epoch,
             continuation_stopping: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             event_observers: Default::default(),
+            attention_cache: Default::default(),
             plan_cursor_key: {
                 let mut key = [0; 32];
                 key[..16].copy_from_slice(Uuid::new_v4().as_bytes());
@@ -2023,3 +2029,6 @@ pub mod knowledge_inference;
 
 #[path = "catalog_context_observations.rs"]
 pub mod context_observations;
+
+#[path = "catalog_attention.rs"]
+pub mod attention;

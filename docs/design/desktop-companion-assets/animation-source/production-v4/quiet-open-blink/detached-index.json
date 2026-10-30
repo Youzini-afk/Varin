@@ -1,0 +1,41 @@
+{
+  "geometryReference": "varin-upright-v2",
+  "pathBase": "production-v4",
+  "entries": [
+    {
+      "source": "quiet-open-blink/frames/half.png",
+      "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+      "detachedSource": "quiet-open-blink/detached/half.png",
+      "detachedSHA256": "74e6f961ff0bb6eee5474d9c37901bbc75c443cb9034129820a3367ae5e33be9",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false
+    },
+    {
+      "source": "quiet-open-blink/frames/closed.png",
+      "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+      "detachedSource": "quiet-open-blink/detached/closed.png",
+      "detachedSHA256": "8583319f6974880c065dc4000867e8beab37dd4f85af01a0b1d9d2e78bddf1b8",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false
+    }
+  ],
+  "usage": {
+    "canonicalRest": "../../production-v2/shared/upright-open-neutral-v2.png",
+    "exposures": [
+      {
+        "source": "frames/half.png",
+        "durationMs": 45
+      },
+      {
+        "source": "frames/closed.png",
+        "durationMs": 75
+      },
+      {
+        "source": "frames/half.png",
+        "durationMs": 45
+      }
+    ],
+    "returnSource": "../../production-v2/shared/upright-open-neutral-v2.png",
+    "intent": "Sparse blink inside existing open-rest loop; no separate leisure action or scheduler. Interruption preserves current eyelid source through matching detached variant, then existing pickup recovery."
+  }
+}

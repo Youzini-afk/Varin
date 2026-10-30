@@ -1,0 +1,51 @@
+{
+  "reason": "Isolated rebuild detected identical-image alias paths omitted by source-hash deduplication. Preserve original freeze and include these additional path dependencies.",
+  "externalDependencies": [
+    {
+      "path": "observe-diagnose/canonical-gaze-v1/neutral.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "bytes": 309629
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "bytes": 309436
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/frame-004.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-027.png",
+      "sha256": "1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff",
+      "bytes": 313338
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    }
+  ],
+  "pathBase": "production-root"
+}

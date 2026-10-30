@@ -1,0 +1,588 @@
+{
+  "stage": "core-lifecycle-integration-candidate",
+  "depends": [
+    "CURRENT_EXPORT_SELECTION.json",
+    "CURRENT_EXPORT_INCREMENT_V2.json",
+    "CURRENT_EXPORT_INCREMENT_V3.json",
+    "CURRENT_EXPORT_INCREMENT_V4.json",
+    "CURRENT_EXPORT_INCREMENT_V5.json"
+  ],
+  "files": [
+    {
+      "path": "build_interactive_relocation_v4.py",
+      "bytes": 6792,
+      "sha256": "542e301cd057b91c20656236b03e33a5d732be8f8aea3162ab5f4609bc61db35"
+    },
+    {
+      "path": "build_transition_contract_v5.py",
+      "bytes": 4382,
+      "sha256": "604e84fbb792e887eb04c6efc9c187bbb4ae8795286352b7b7398c62196b870e"
+    },
+    {
+      "path": "compose_family_detach_v1.py",
+      "bytes": 1267,
+      "sha256": "7e1f099a59edb5e38f009e631beefccf6b92f3b9a7580dae0d598c4952ed685b"
+    },
+    {
+      "path": "compose_hug_contact_v1.py",
+      "bytes": 830,
+      "sha256": "53e4fbd7db0b800b1d0f2b391f704a8e529bea7e5fd14001ecad83feb2080164"
+    },
+    {
+      "path": "compose_shared_open_entry_v1.py",
+      "bytes": 863,
+      "sha256": "c4c6728d433b13489bcc55cbde71059c45f483f511849e3c58580f011b4c5668"
+    },
+    {
+      "path": "compose_user_current_pose_detach_v1.py",
+      "bytes": 1182,
+      "sha256": "cfe7645078c7767a77cd1695b4a8bdcee418a47fb7b08552b6d2f17d16a5e588"
+    },
+    {
+      "path": "departure-bridge-v1/detach-protected-v2.png",
+      "bytes": 321711,
+      "sha256": "9bc600c76d6cab4ee16e5fd20a2c19741dd1e002b1e6b022fbc2ae37c1523d16"
+    },
+    {
+      "path": "departure-bridge-v1/detach.png",
+      "bytes": 325200,
+      "sha256": "2f5e3545b604c65e8534451a08928051114c4498f4e47d57e1b9beb131e12707"
+    },
+    {
+      "path": "departure-bridge-v1/stool-replacement-mask-v2.png",
+      "bytes": 1965,
+      "sha256": "f9f5176a5493ccc705daf9bf2bc97be16463a4047f5d71705db6a4862a6d32cb"
+    },
+    {
+      "path": "departure-bridge-v2/mid.png",
+      "bytes": 307823,
+      "sha256": "a595ae58c8608f5802cb0872904e771560561a05125cbdda49d7d473a8f51fe7"
+    },
+    {
+      "path": "departure-bridge-v3/boot-edit-mask.png",
+      "bytes": 726,
+      "sha256": "93be6bad225020048e13b01dd5f3ce588e7fdc7dab52ced890e6232907c8101e"
+    },
+    {
+      "path": "departure-bridge-v3/mid-protected.png",
+      "bytes": 303729,
+      "sha256": "47716ba3c66ba5caa66c4d55cd3acc8356fe48584c56971cea49aa52bc095e4d"
+    },
+    {
+      "path": "departure-bridge-v3/mid.png",
+      "bytes": 301989,
+      "sha256": "e2afd36e70dea755c1c20d3154d031934b71c7e19ba0424f41240e0127842264"
+    },
+    {
+      "path": "derive_departure_bridge_v1.py",
+      "bytes": 1854,
+      "sha256": "c16110d3b6fe2c8234055284dd5ed37589633d75bb3006b09f0e9dc06b1215a9"
+    },
+    {
+      "path": "derive_departure_bridge_v2.py",
+      "bytes": 1845,
+      "sha256": "61d41f956987dbf3c7b154cd7af33967342c2d00c8e3bcbbceea4e036c7fa61b"
+    },
+    {
+      "path": "derive_departure_bridge_v3.py",
+      "bytes": 1845,
+      "sha256": "b33f88268983ee684ce487527afdd135b5d8beebcee4d8cf25029a65cdec324d"
+    },
+    {
+      "path": "derive_hug_landing_v2.py",
+      "bytes": 1842,
+      "sha256": "8c48c9eaf690573329689fec363969c3ec9711b340248557216592c8fd2754fb"
+    },
+    {
+      "path": "family-detach-v1/permission-detach.png",
+      "bytes": 336103,
+      "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+    },
+    {
+      "path": "family-detach-v1/query-detach.png",
+      "bytes": 317012,
+      "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+    },
+    {
+      "path": "family-detach-v1/replacement-excluding-authored-arms.png",
+      "bytes": 2391,
+      "sha256": "f1573bbdac7b2233e1a53f236e60fe99b01475b5bfae88f3f7f88d80fdcf82e9"
+    },
+    {
+      "path": "family-detach-v1/sources.json",
+      "bytes": 1710,
+      "sha256": "68e36fadc0b1847f1a4b2dcb691cf7683b8f468fbe77007932901839100b1b88"
+    },
+    {
+      "path": "family-detach-v1/wait-000-detach.png",
+      "bytes": 333304,
+      "sha256": "90f7842ee613457dd9801bf98ceae2f67e587eaa802a428deaef3638c9f0f3b1"
+    },
+    {
+      "path": "family-detach-v1/wait-001-detach.png",
+      "bytes": 332793,
+      "sha256": "88b2093a99905aa34a12e26016f2d3f62e322e38541914f57ba8d8db6b623038"
+    },
+    {
+      "path": "family-detach-v1/wait-002-detach.png",
+      "bytes": 332005,
+      "sha256": "0efc75c8198a7a922b4db89b468d7a0e6232de89647af6ca370da79abd42ee0e"
+    },
+    {
+      "path": "family-detach-v1/wait-005-detach.png",
+      "bytes": 338921,
+      "sha256": "d65fbbb445e857437c96e1611ad3ebcffe3f5d8b4f11e84f2e24b344241afb7c"
+    },
+    {
+      "path": "hug-landing-v2/mid.png",
+      "bytes": 298530,
+      "sha256": "d846382b9fefd95911d594a4821f110cb5f806e9f3faedb47e624d469a29ffad"
+    },
+    {
+      "path": "hug-landing-v3/contact-no-stool.png",
+      "bytes": 314095,
+      "sha256": "e745d29f3c7c43a96ce263e900139b9f02caffffefe901be63907da40f415b7a"
+    },
+    {
+      "path": "hug-landing-v3/replacement-excluding-hug-arms.png",
+      "bytes": 1960,
+      "sha256": "205dde7b5632e772ebf22fbc77baa4e06ea5a26e415ee734a749b31cf377f109"
+    },
+    {
+      "path": "protect_departure_geometry_v2.py",
+      "bytes": 1032,
+      "sha256": "f1668df4d66daa7ab2c95e24aca6c7c1e79c5cab582b292d468420d380c3aa9d"
+    },
+    {
+      "path": "protect_mid_boot_edit_v1.py",
+      "bytes": 616,
+      "sha256": "1cedb25ca8b04da9ae887ec75b253b831e778ca659a8626a15b1ded2002a900a"
+    },
+    {
+      "path": "shared-entry-v1/closed-detached.png",
+      "bytes": 321916,
+      "sha256": "3bb724ce23581ac2c1656706205a3eeab8909a33a886ad2f1298bda297f9e59b"
+    },
+    {
+      "path": "shared-entry-v1/open-current.png",
+      "bytes": 314108,
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+    },
+    {
+      "path": "shared-entry-v1/open-supported.png",
+      "bytes": 318069,
+      "sha256": "4f4488cf08f92b09ec123a3771bdc89c606d2f40fa83093922f254efa3b0d065"
+    },
+    {
+      "path": "source/canonical-departure-detach-v1.png",
+      "bytes": 1804218,
+      "sha256": "3af030487b86841d21241aecb07373dec0d2657c11138a5e5ac5bd9f4eb3ea73"
+    },
+    {
+      "path": "source/canonical-departure-detach-v1.prompt.txt",
+      "bytes": 773,
+      "sha256": "6fb236a74c56d257a9621217d6a32968b58bd926f0f764887845b92e9d16d391"
+    },
+    {
+      "path": "source/canonical-departure-mid-v1.png",
+      "bytes": 1758612,
+      "sha256": "9773253a16885b2f0e7da18628bfb7500cde0c2475dcb610273fbd4993eb49e5"
+    },
+    {
+      "path": "source/canonical-departure-mid-v1.prompt.txt",
+      "bytes": 923,
+      "sha256": "356ce96c3a0c6bd87b74477f44acd770e97b1cc1a0134b6372366577ef7fc5e4"
+    },
+    {
+      "path": "source/canonical-departure-mid-v2.png",
+      "bytes": 1961506,
+      "sha256": "6c297de0eacd7afe19d17756ccaf3e8f312271f4ee0f5569610147f701d8ecf3"
+    },
+    {
+      "path": "source/canonical-departure-mid-v2.prompt.txt",
+      "bytes": 541,
+      "sha256": "6be38b309e8d4c978742e7642c0d2b4a8e141516899ebc8787afb11e4a788f65"
+    },
+    {
+      "path": "source/canonical-departure-mid-v3.png",
+      "bytes": 1928924,
+      "sha256": "90e4d4eaf62a406256e4a5eb4b9612375b580b2ef16326681232a095bf5b92f1"
+    },
+    {
+      "path": "source/canonical-departure-mid-v3.prompt.txt",
+      "bytes": 683,
+      "sha256": "340d403244f1a1431670fb80277f4b9d060daff854614592890aa95b6cd2fc0f"
+    },
+    {
+      "path": "source/canonical-hug-landing-mid-v2.png",
+      "bytes": 1890947,
+      "sha256": "4ad448c28b088957792df8089645285b0ec0a782deb22597c61bf7b6409eb57c"
+    },
+    {
+      "path": "source/canonical-hug-landing-mid-v2.prompt.txt",
+      "bytes": 721,
+      "sha256": "af357ce191b95451a84a1c5f4b0d711f876ee9157b01d259a5a351276dfd66f5"
+    },
+    {
+      "path": "transition-contract-v5/relocation.source.json",
+      "bytes": 74497,
+      "sha256": "c727a38bc72c797b0e95db5e8cf5797c2ce4f0a338355e2ef4df2686eb6702d2"
+    },
+    {
+      "path": "user-current-detach-v1/current-pose-map.json",
+      "bytes": 13048,
+      "sha256": "72f8b3e928ed8d294a085f54e151f5606993611a38ac9e9fbafc2d5a1782ea57"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-000.png",
+      "bytes": 314108,
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-001.png",
+      "bytes": 327296,
+      "sha256": "c925a3bb1a9ff59a7d44276b39785a079669a7f97e09bd1c0f8d15aafa08b87f"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-002.png",
+      "bytes": 326912,
+      "sha256": "de11a5f5e01af2853b16b0bc11f6cc788dcc1dacd9c49f1e8e42c27b1584011f"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-003.png",
+      "bytes": 328788,
+      "sha256": "a2becf71720fcf4667bc998221dc16898d1f0de50eae6c00bb48d6c2f3403831"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-004.png",
+      "bytes": 327927,
+      "sha256": "3394698a08d9736b5804e7a613a2317ab10ccb73367966a98536f8d1a5ad47ba"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-005.png",
+      "bytes": 327039,
+      "sha256": "ae28f9344df812702de9b99a10aeac65d728b52167fed59935e2aa5431a5ae03"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-006.png",
+      "bytes": 328714,
+      "sha256": "e3077cdd773d79bdf7fa8d028b7a737ecc49e57c5c6f17f8a1b6825b69383186"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-007.png",
+      "bytes": 329819,
+      "sha256": "50fefa1901587c9bb0a2458dbbf2482285048b186b7e0592d1f88871909b281f"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-008.png",
+      "bytes": 337826,
+      "sha256": "9cef65c75171f182a9940b572838a73d0ac98205efe7aec4402f505d38eb160a"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-009.png",
+      "bytes": 335837,
+      "sha256": "747d3ff6761930b17f50e98fa083fa9b8dc9dda182a67d4f47ed579886490b09"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-010.png",
+      "bytes": 333729,
+      "sha256": "d18c316f7adb9c754d9d6ad934426fa7dcf76f67a29cd2d537af54aec5a25a4c"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-011.png",
+      "bytes": 326912,
+      "sha256": "de11a5f5e01af2853b16b0bc11f6cc788dcc1dacd9c49f1e8e42c27b1584011f"
+    },
+    {
+      "path": "user-current-detach-v1/permission-cycle-v2/pose-012.png",
+      "bytes": 314108,
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-000.png",
+      "bytes": 314108,
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-001.png",
+      "bytes": 314269,
+      "sha256": "266df2615f67a7b87482f377c0ac8e213b4f856153fa278c95cffaceb00b2310"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-002.png",
+      "bytes": 314957,
+      "sha256": "1f967909e938dc6c19892a576b0ea5d37f2b5ec43e7a9758da49e8d29fb5630c"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-003.png",
+      "bytes": 314787,
+      "sha256": "2b915a7594ecb8060288dca9cbcf3a79e80d9e7a1a9005b76a903597ca947b47"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-004.png",
+      "bytes": 314852,
+      "sha256": "7ebc6b07328d4a4227be5119f5771f0a2f4dc443ba40c7082df5777dbee0b297"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-005.png",
+      "bytes": 314527,
+      "sha256": "5c86eb71263acd398b0430bcbba5ff5c719b4caac34a317d19e23ad0601ff75f"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-006.png",
+      "bytes": 314852,
+      "sha256": "7ebc6b07328d4a4227be5119f5771f0a2f4dc443ba40c7082df5777dbee0b297"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-007.png",
+      "bytes": 314187,
+      "sha256": "75a354996d4c973b95228c79586ea1d98d75d36ff9c981fe3497dc91c5336ded"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-008.png",
+      "bytes": 314302,
+      "sha256": "61cdcbabddf8cdeb42d0a98f10d5f53f20f092a6ebf974e71428d106b32563d5"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-009.png",
+      "bytes": 314269,
+      "sha256": "266df2615f67a7b87482f377c0ac8e213b4f856153fa278c95cffaceb00b2310"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-010.png",
+      "bytes": 314108,
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-011.png",
+      "bytes": 329495,
+      "sha256": "2ae6044de40cf3f1e983e3e5559cd9c1d1312e2c21f1614d7fa43150ab2f9474"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-012.png",
+      "bytes": 329492,
+      "sha256": "5c674f396892ee59d04561dc8c07b01303b36fb06e22efdf1fc4a17cd9c795f5"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-013.png",
+      "bytes": 329495,
+      "sha256": "2ae6044de40cf3f1e983e3e5559cd9c1d1312e2c21f1614d7fa43150ab2f9474"
+    },
+    {
+      "path": "user-current-detach-v1/query-understand-v1/pose-014.png",
+      "bytes": 314108,
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+    },
+    {
+      "path": "user-current-detach-v1/wait-relaxed-v1/pose-000.png",
+      "bytes": 329564,
+      "sha256": "602839d83cacd4308682317f19bce15894a3ec6bdd1bf85fb286fefb4910b9b2"
+    },
+    {
+      "path": "user-current-detach-v1/wait-relaxed-v1/pose-001.png",
+      "bytes": 329074,
+      "sha256": "3fce2a20dc6e4d16bfe10cb06cd4fdd29ff25980e8c257706a4ea665458eab33"
+    },
+    {
+      "path": "user-current-detach-v1/wait-relaxed-v1/pose-002.png",
+      "bytes": 328274,
+      "sha256": "76d87fef2244594bbaeefd3f4fcae4ea7fa2620de5e5f479efd9a6fa02c464ee"
+    },
+    {
+      "path": "user-current-detach-v1/wait-relaxed-v1/pose-003.png",
+      "bytes": 329074,
+      "sha256": "3fce2a20dc6e4d16bfe10cb06cd4fdd29ff25980e8c257706a4ea665458eab33"
+    },
+    {
+      "path": "user-current-detach-v1/wait-relaxed-v1/pose-004.png",
+      "bytes": 329564,
+      "sha256": "602839d83cacd4308682317f19bce15894a3ec6bdd1bf85fb286fefb4910b9b2"
+    },
+    {
+      "path": "user-current-detach-v1/wait-relaxed-v1/pose-005.png",
+      "bytes": 334859,
+      "sha256": "fda14556907cde6a1f73b1742e0c828bc83111ddb19747dff8f0b864e5e5dfe7"
+    },
+    {
+      "path": "user-current-detach-v1/wait-relaxed-v1/pose-006.png",
+      "bytes": 329564,
+      "sha256": "602839d83cacd4308682317f19bce15894a3ec6bdd1bf85fb286fefb4910b9b2"
+    }
+  ],
+  "externalDependencies": [
+    {
+      "path": "../user-attention/drag-bridges-v1/permission-support-registered.png",
+      "sha256": "a2dea7efc5a10c4ff31694dc49f4d3b8511e3c6dd21e2fbd31cbe1a500b0b965"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/query-support-registered.png",
+      "sha256": "8e47edf77d3ff3aa0ad8c3c9892a99ba8a7d83dceaaea512d256768fa943947b"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/authored-arms-mask.png",
+      "sha256": "a3eee976279a80c173192fe8e07ac06fc74ef7e67b95034d6736e4f1341960c5"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/grab-next-map-candidate.json",
+      "sha256": "b861d57cbf1fe98568a73cd2c48735747ad0a9d354e0a12aa76075ca0d08da80"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/wait-000-support-registered.png",
+      "sha256": "0e47d979683820d316ee237f2ea0539304529d45349eb0987f80d05559fb8dd5"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/wait-001-support-registered.png",
+      "sha256": "0da0defba0c5a09d072383f8459cf4f4dc7f278ae11f9653e01b2e8ee41246d5"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/wait-002-support-registered.png",
+      "sha256": "d9118cb151af1749e766d5f9bc6a94a54103446c2ef17b6af3d579667c26f7dc"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/wait-005-support-registered.png",
+      "sha256": "f1e58e66c0ed3999d9e112a83dba56dd014aef4d4cd4e134026e976cae5595bf"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-009.png",
+      "sha256": "5843feb9a48fe08371ce5667a1718ab49e0c656708996d3335cd51e6580c6ca9"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-006.png",
+      "sha256": "f567b6b4da1b088df7ea92b8190ac5784ccc9de6b38d28b6122a29d045420f18"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-011.png",
+      "sha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-003.png",
+      "sha256": "c224944557fed9f2da49a7b1073c645deb2f5e44ae3119bc4ea1b3d9f8995c15"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-002.png",
+      "sha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-012.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-007.png",
+      "sha256": "fa90c96d80c7e95094b0ed3ee1872d467b0b0f5fefef14b4338a041266f54c32"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-004.png",
+      "sha256": "a1d49752eca51651f08cab3f76676e49257cb91fbacce6841c83f210736458f4"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-010.png",
+      "sha256": "64adb42cea608c7590473bf74844d49aa87b640483361d26e7d3b037061c35d0"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-001.png",
+      "sha256": "7a7e59882efd7a259186da25c88cfd3f9350a29dac9aa4dd89cb1f6168a4bb7e"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-008.png",
+      "sha256": "409aa7714ab85498aa01dd353de3c12ae7eb2b77b0970eee2fa316a40b4ba91e"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-005.png",
+      "sha256": "9d548c5769377748e3ac47908dacf753f6a3a30c2fba44482223aa9809f4fa56"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-009.png",
+      "sha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-006.png",
+      "sha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-011.png",
+      "sha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-003.png",
+      "sha256": "071577bc01dcbae22f0d12b0204153cd79e1fc43fc79e17785b45abc14eefa33"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-002.png",
+      "sha256": "026ccb6ed968c03e11ae922c4dc94f88492193ea66920582df6b9ef37cf694b3"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-012.png",
+      "sha256": "a82f21fc77c882592e89f6f318abd1888db691569db353f40e23961e519f7788"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-007.png",
+      "sha256": "9388abed6cd5ef04e649837b6faf1e191f2c1a89850d3ad5c3945c7bebf324ff"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-004.png",
+      "sha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-014.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-010.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-001.png",
+      "sha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-008.png",
+      "sha256": "034855f9a5c3a419f92338610892b2d9e7621b4b1bc70f7c296e23c21f8f36fb"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-005.png",
+      "sha256": "594ebbb8f66a066882a82e1ead4b1d5508d82c6aceef08aa7b39c9e8cd27d49e"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-013.png",
+      "sha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-006.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-003.png",
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-002.png",
+      "sha256": "84fd24637cc576f83afd8b1cf29cf08ff4e2f3d130d70c6f61fb3e0a7bc60a7f"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-004.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-000.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-001.png",
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-005.png",
+      "sha256": "07db95e7a079b4b84bf7ef6e7dd9794fae6f9ed9c5815d93d02c20c1c0863ccf"
+    }
+  ],
+  "bytes": 25916599,
+  "peer": "entry/early-release/hug-tail limited acceptance; source contract separates unreviewed per-node coverage"
+}

@@ -1,0 +1,94 @@
+{
+  "id": "gesture-pickup.coverage-85668658799a",
+  "stage": "motion-candidate",
+  "reviewStatus": "structural-variant-review",
+  "family": "RELOCATION",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "coverage-85668658799a-detached",
+  "exitPose": "canonical-open-laptop-supported-detached",
+  "loop": null,
+  "sourceStart": "observe-diagnose/canonical-stop-v1/raised-surprise.png",
+  "sourceStartSha256": "85668658799a6c27e9f810f83b65f1031c9f320c897bcabd0d64e056ce5d8622",
+  "frames": [
+    {
+      "source": "current-detached.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "detach",
+      "pose": "coverage-85668658799a-transition",
+      "contacts": {}
+    },
+    {
+      "source": "current-supported.png",
+      "durationMs": 60,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-85668658799a-transition",
+      "contacts": {}
+    },
+    {
+      "source": "chin-002-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-85668658799a-transition",
+      "contacts": {}
+    },
+    {
+      "source": "chin-003-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-85668658799a-transition",
+      "contacts": {}
+    },
+    {
+      "source": "early-detached.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-85668658799a-transition",
+      "contacts": {}
+    },
+    {
+      "source": "pregrip-detached.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-85668658799a-transition",
+      "contacts": {}
+    },
+    {
+      "source": "grip-detached.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "canonical-open-laptop-supported-detached",
+      "contacts": {}
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "pathBase": "manifest directory",
+  "status": "narrow cleanup candidate; parent/owner normal-scale visual check required",
+  "records": {
+    "ask": {
+      "source": "../question-permission/poses/ask.png",
+      "sourceSHA256": "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020",
+      "patch": "ask-tail-clean-patch.png",
+      "extraRemovalMask": "ask-extra-removal.png",
+      "finalOverrideMask": "ask-tail-patch-mask.png",
+      "order": "apply common donor+foreground exclusion first, then this cleaned local patch with finalOverrideMask",
+      "donorOffsetPx": [
+        5,
+        0
+      ],
+      "patchSHA256": "b5c4205e8cf79403b242f63d642a317fdf6bf4ce1826b3884631b497ef14c65c",
+      "maskSHA256": "60bea74106a20c96b5fa781861bd329768c3f3d92e8e9bec8eaff46493d5faa5"
+    },
+    "offer": {
+      "source": "../question-permission/poses/offer.png",
+      "sourceSHA256": "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570",
+      "patch": "offer-tail-clean-patch.png",
+      "extraRemovalMask": "offer-extra-removal.png",
+      "finalOverrideMask": "offer-tail-patch-mask.png",
+      "order": "apply common donor+foreground exclusion first, then this cleaned local patch with finalOverrideMask",
+      "donorOffsetPx": [
+        5,
+        0
+      ],
+      "patchSHA256": "b8993b618bd34401070edec3f60c963a485024faf6c9104503e4d57ed6ffb001",
+      "maskSHA256": "60bea74106a20c96b5fa781861bd329768c3f3d92e8e9bec8eaff46493d5faa5"
+    },
+    "offer-mid": {
+      "source": "../question-permission/poses/offer-mid.png",
+      "sourceSHA256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+      "patch": "offer-mid-tail-clean-patch.png",
+      "extraRemovalMask": "offer-mid-extra-removal.png",
+      "finalOverrideMask": "offer-mid-tail-patch-mask.png",
+      "order": "apply common donor+foreground exclusion first, then this cleaned local patch with finalOverrideMask",
+      "donorOffsetPx": [
+        5,
+        0
+      ],
+      "patchSHA256": "651e88be060d0f58606562ead7b9bea1846f0c10c403a59237799f81b33fe6ef",
+      "maskSHA256": "60bea74106a20c96b5fa781861bd329768c3f3d92e8e9bec8eaff46493d5faa5"
+    },
+    "attend-corrected": {
+      "source": "../question-permission/poses/attend-corrected.png",
+      "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+      "patch": "attend-corrected-tail-clean-patch.png",
+      "extraRemovalMask": "attend-corrected-extra-removal.png",
+      "finalOverrideMask": "attend-corrected-tail-patch-mask.png",
+      "order": "apply common donor+foreground exclusion first, then this cleaned local patch with finalOverrideMask",
+      "donorOffsetPx": [
+        5,
+        0
+      ],
+      "patchSHA256": "742d68df733f74d8c3331e3ff817750cde96687303af76992f08c940db1e9459",
+      "maskSHA256": "60bea74106a20c96b5fa781861bd329768c3f3d92e8e9bec8eaff46493d5faa5"
+    },
+    "listen-rest": {
+      "source": "../question-permission/poses/listen-rest.png",
+      "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+      "patch": "listen-rest-tail-clean-patch.png",
+      "extraRemovalMask": "listen-rest-extra-removal.png",
+      "finalOverrideMask": "listen-rest-tail-patch-mask.png",
+      "order": "apply common donor+foreground exclusion first, then this cleaned local patch with finalOverrideMask",
+      "donorOffsetPx": [
+        5,
+        0
+      ],
+      "patchSHA256": "f79ca59a31b02a87c384ffa8934d3a0aca15bbb1d3b8a06f4a2575cd49f76812",
+      "maskSHA256": "60bea74106a20c96b5fa781861bd329768c3f3d92e8e9bec8eaff46493d5faa5"
+    },
+    "listen-rest-half": {
+      "aliasPatch": "listen-rest",
+      "reason": "same lower body pixels; eye-only difference"
+    },
+    "listen-rest-closed": {
+      "aliasPatch": "listen-rest",
+      "reason": "same lower body pixels; eye-only difference"
+    }
+  },
+  "edge": [
+    [
+      374,
+      332
+    ],
+    [
+      377,
+      337
+    ],
+    [
+      380,
+      343
+    ],
+    [
+      383,
+      349
+    ],
+    [
+      386,
+      355
+    ],
+    [
+      389,
+      361
+    ],
+    [
+      389,
+      365
+    ]
+  ],
+  "donor": "../relocation/frames/secure-no-stool-clean-donor-v1.png",
+  "donorSHA256": "8a79e84bf2266d7565079aaa1c957a2a160bdc33a4247d9b0976409d16a92db8",
+  "note": "Preserve genuine sleeve fold line at x371\u2013372 above the seat wedge. Do not erase that anatomy line merely because it is dark. No frozen source changed."
+}

@@ -1,0 +1,293 @@
+{
+  "status": "selected source preparation; actual graph behavior checked; full-suite visual/native acceptance remains separate",
+  "sources": [
+    {
+      "node": "restSeated",
+      "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "originalSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "sourceRect": [
+        0,
+        0,
+        512,
+        512
+      ],
+      "uniformScale": 1.0,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "restDetached",
+      "source": "../../production-v2/relocation/current-source-detached-v2/55eeda4052ec2055.png",
+      "sha256": "1bad548f14e043ea7b7721964a67f3e07d27ad0308d8f48aa7bc309369020f8e",
+      "originalSHA256": "1bad548f14e043ea7b7721964a67f3e07d27ad0308d8f48aa7bc309369020f8e",
+      "sourceRect": [
+        0,
+        0,
+        512,
+        512
+      ],
+      "uniformScale": 1.0,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "approachSeated",
+      "source": "frames/approach-seated.png",
+      "sha256": "30fcae5b0ed29c1aa847cb6daa2f71bfd7885c08afa52b546b5b793ee2a96110",
+      "originalSHA256": "61c4e74471223fccc80f8812a2ac8b83aba7d7bdf2df48d90c3777b220888e4c",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "approachDetached",
+      "source": "frames/approach-detached.png",
+      "sha256": "da5d45d49f0305be39059d762a618e1d332508ed1586762ffdf0bfb597b26b01",
+      "originalSHA256": "757185e690094a507ee935c47480cf75a2a8621319ddc6b3d2883a80d78fbf0a",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "secureSeated",
+      "source": "frames/secure-seated.png",
+      "sha256": "b94b7cad7e4a4421591ffa5607fb9b0d2ae6d76e79dc7744b21ecd1daf24148c",
+      "originalSHA256": "5ef5a870d3fdd7d6d08788c658231ee6e84fa0d436f71172bb4f1d2206234669",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "secureDetached",
+      "source": "frames/secure-detached.png",
+      "sha256": "ed744ad6443b5f6815fbd89942f61bc1f1c6bddc271cdbd70ed030a6c7993ed5",
+      "originalSHA256": "4401171e20067252289176b15c8411ad1932b5eb144070ad4a59345ef06bf649",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "liftHalf",
+      "source": "frames/lift-half.png",
+      "sha256": "65e14a852f1fff60900ca6ef362fa8f77e4e8980affcee328a1b7f6e9acc382a",
+      "originalSHA256": "a399b4160ea334a7376caa28713dae5bd03c9000c23246335fd29f1edc0af0ad",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "airborne",
+      "source": "frames/airborne.png",
+      "sha256": "b44668623bd93962d30cbfbc54f232b8f085f864456df6e8a74799608b4daf66",
+      "originalSHA256": "718e867b0f4d71c7ddfcb352440d67cf0ec25dd4a75a45cb0b32748e6f8142dd",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "landContactDetached",
+      "source": "frames/land-contact-detached.png",
+      "sha256": "bab6e856ad48ef4c3f0673cde914a9736d73216dc06293e53a7d9948ad5854f2",
+      "originalSHA256": "f7042c71a5ceb187fd440c785d475a33cfe5fdde9b92533ab66e7775516d1164",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "landContactSeated",
+      "source": "frames/land-contact-seated.png",
+      "sha256": "1414b8451f47acbdddf451f4ce4bc1d9832123dd1386e548529e6c09ade8e555",
+      "originalSHA256": "758e703890716ec281f2be1896b487a51ee48592a2e9f0711aeabccd11116c16",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "returnHover",
+      "source": "../response/frames/keyboard-hover.png",
+      "sha256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+      "originalSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+      "sourceRect": [
+        0,
+        0,
+        512,
+        512
+      ],
+      "uniformScale": 1.0,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "returnContact",
+      "source": "../response/frames/keyboard-contact.png",
+      "sha256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+      "originalSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+      "sourceRect": [
+        0,
+        0,
+        512,
+        512
+      ],
+      "uniformScale": 1.0,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "returnMidSeated",
+      "source": "frames/return-mid-seated.png",
+      "sha256": "9ae12017ead98ca86853a12787d1fd3fbe443b3853532ea06f6642ef1fb6fafa",
+      "originalSHA256": "6a48307ca59536d6b4fa5837fe769b80ca343e956fe58118b5772a2c3fa23569",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "returnMidDetached",
+      "source": "frames/return-mid-detached.png",
+      "sha256": "7b63dc9b4728f575965144a226d81109a53032e7c6631ccc2e9a65228ee3bf2d",
+      "originalSHA256": "aef5e6605296c0b92b102651ad3fe95f321f50f951775f7880751d9708880e85",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "returnHoverDetached",
+      "source": "../response/detached/keyboard-hover.png",
+      "sha256": "e5b059183df98633f8b28558e9b7e3989b46e46f61e8c0e43bef12a8bca5737c",
+      "originalSHA256": "4357cd31b498bfb6313d48c1c7d69930a8695d19d1e25aebd69eb08ec46489fb",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    },
+    {
+      "node": "returnContactDetached",
+      "source": "../response/detached/keyboard-contact.png",
+      "sha256": "ac4845ca2e98f8fdde9fb25f80dd64f9b4ec9e3eed00f5e65e73495ac6eea691",
+      "originalSHA256": "01a8817fc2952d72c80be65eec3e5ad77285c709d83467e3d90047c7bb60b765",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "fixed full-canvas export; no geometry adjustment"
+    }
+  ]
+}

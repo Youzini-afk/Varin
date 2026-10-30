@@ -1,0 +1,128 @@
+{
+  "id": "permission-unresolved-hold-v1",
+  "family": "USER_ATTENTION",
+  "kind": "action",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "stage": "motion-candidate",
+  "reviewStatus": "candidate",
+  "entryPose": "seated-open-permission-palm-attentive",
+  "exitPose": "seated-open-watch-user-relaxed",
+  "loop": [
+    3,
+    10
+  ],
+  "frames": [
+    {
+      "source": "frame-000.png",
+      "durationMs": 220,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-permission-palm-attentive",
+      "phase": "hold"
+    },
+    {
+      "source": "frame-001.png",
+      "durationMs": 110,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-release-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-release-moving",
+      "phase": "transition"
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 1800,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed",
+      "phase": "hold"
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 50,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-halfblink",
+      "phase": "hold"
+    },
+    {
+      "source": "frame-005.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-closedblink",
+      "phase": "hold"
+    },
+    {
+      "source": "frame-006.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-halfblink",
+      "phase": "hold"
+    },
+    {
+      "source": "frame-007.png",
+      "durationMs": 1500,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed",
+      "phase": "hold"
+    },
+    {
+      "source": "frame-008.png",
+      "durationMs": 1600,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed-settled",
+      "phase": "hold"
+    },
+    {
+      "source": "frame-009.png",
+      "durationMs": 1000,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed",
+      "phase": "hold"
+    }
+  ],
+  "warning": "Derived from peer-reviewed drawings, handoff order awaiting finite path review. Application state owns decisions; no approval, answer, success, timeout, or work command inferred from exposure completion.",
+  "trigger": "same request remains unresolved; lowering hand does NOT resolve it",
+  "safeExitFrames": [
+    3,
+    7,
+    8,
+    9
+  ]
+}

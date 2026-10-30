@@ -1,0 +1,16 @@
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/build.py
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-contact-v1-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-contact-v1.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-detach-v1-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-detach-v1.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-near-v2-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-near-v2.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-raise-v1-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-raise-v1.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-smooth-v1-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/frames/hair-smooth-v1.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/index.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/review.jpg
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/verification.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/selection.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/quiet-hair-touch/COMMIT_FILES.txt

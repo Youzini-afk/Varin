@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "frames/rest-settled-v2.png",
+  "sourceSHA256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+  "raw": "raw/wake-alert-v1.png",
+  "rawSHA256": "bf1a0337fd2135fa90b2a8d3dca32c5d91a2820e060e39d309fe95d712916587",
+  "prompt": "prompts/wake-alert-v1.txt",
+  "output": "frames/wake-alert-v1.png",
+  "sha256": "4dad71dfc26bda1bb3481d3888faec88f4c4eeaf03a620923fff9d54567bbeb2",
+  "mask": "masks/wake-alert-v1.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

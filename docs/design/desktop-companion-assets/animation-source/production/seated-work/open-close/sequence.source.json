@@ -1,0 +1,88 @@
+{
+  "id": "seated-work.open-laptop-v1",
+  "family": "SEATED_CLOSED",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "keyposes",
+  "reviewStatus": "needs-intermediates-and-contact-review",
+  "warning": "Six full-character opening drawings; support registration provisional, lid and hand contact require intermediate drawings and normal-speed review. Not production accepted.",
+  "entryPose": "seated-closed.hands-on-lid-v1",
+  "exitPose": "seated-work.ready-open-v1",
+  "loop": null,
+  "frames": [
+    {
+      "source": "open-001.png",
+      "durationMs": 300,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "open",
+      "pose": "closed-rest",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "open-002.png",
+      "durationMs": 140,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "open",
+      "pose": "lid-grip",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "open-003.png",
+      "durationMs": 140,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "open",
+      "pose": "lid-partial",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "open-004.png",
+      "durationMs": 160,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "open",
+      "pose": "lid-open-lifting",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "open-005.png",
+      "durationMs": 140,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "open",
+      "pose": "lid-open-hand-held",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "open-006.png",
+      "durationMs": 300,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "open",
+      "pose": "keyboard-ready",
+      "contacts": {},
+      "exitTo": []
+    }
+  ]
+}

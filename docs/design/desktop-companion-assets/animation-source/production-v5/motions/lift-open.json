@@ -1,0 +1,327 @@
+{
+  "version": 1,
+  "id": "v5-open-laptop-lift-working-phrase",
+  "action": "open-laptop-lift",
+  "stage": "authored-source-checkpoint-not-runtime-acceptance",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids-with-explicit-detached-sources",
+  "detachedSources": [
+    {
+      "id": "lift-bridge",
+      "source": "../detached/lift/bridge.png",
+      "sha256": "82014752faf61d1284f1f37f44821426113813e54ae8a3afae54292c7d0ac6b0",
+      "canvas": [
+        1254,
+        1254
+      ],
+      "role": "detached-only"
+    },
+    {
+      "id": "lift-float",
+      "source": "../detached/lift/float.png",
+      "sha256": "d4c64492ac01465c5084e99c212534bb855bb9f847986baf39743ba288001ec9",
+      "canvas": [
+        1254,
+        1254
+      ],
+      "role": "detached-only"
+    }
+  ],
+  "loop": false,
+  "durationMs": 2910,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "presentation": "seated-fixed-plate",
+      "phase": "rest",
+      "durationMs": 450
+    },
+    {
+      "sourceId": "lift-side",
+      "presentation": "seated-fixed-plate",
+      "phase": "hands-approach",
+      "durationMs": 160
+    },
+    {
+      "sourceId": "lift-support",
+      "presentation": "seated-fixed-plate",
+      "phase": "secure-shared-support",
+      "durationMs": 190
+    },
+    {
+      "sourceId": "lift-support",
+      "presentation": "detached",
+      "phase": "detach-same-pose",
+      "durationMs": 80
+    },
+    {
+      "sourceId": "lift-bridge",
+      "presentation": "detached",
+      "phase": "legs-relax",
+      "durationMs": 130
+    },
+    {
+      "sourceId": "lift-float",
+      "presentation": "detached",
+      "phase": "airborne-hold",
+      "durationMs": 650
+    },
+    {
+      "sourceId": "lift-bridge",
+      "presentation": "detached",
+      "phase": "release-leg-return",
+      "durationMs": 130
+    },
+    {
+      "sourceId": "lift-support",
+      "presentation": "detached",
+      "phase": "precontact-body",
+      "durationMs": 90
+    },
+    {
+      "sourceId": "lift-support",
+      "presentation": "seated-fixed-plate",
+      "phase": "seat-contact-weight-acceptance",
+      "durationMs": 220
+    },
+    {
+      "sourceId": "lift-side",
+      "presentation": "seated-fixed-plate",
+      "phase": "hands-release-to-side",
+      "durationMs": 150
+    },
+    {
+      "sourceId": "lift-return",
+      "presentation": "seated-fixed-plate",
+      "phase": "hands-return",
+      "durationMs": 160
+    },
+    {
+      "sourceId": "neutral",
+      "presentation": "seated-fixed-plate",
+      "phase": "settle",
+      "durationMs": 500
+    }
+  ],
+  "routes": {
+    "pickupFromNeutral": [
+      {
+        "sourceId": "neutral",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-side",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-bridge",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-float",
+        "presentation": "detached"
+      }
+    ],
+    "releaseFromFloat": [
+      {
+        "sourceId": "lift-float",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-bridge",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-side",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-return",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "neutral",
+        "presentation": "seated-fixed-plate"
+      }
+    ],
+    "earlyReleaseAtSideBeforeDetach": [
+      {
+        "sourceId": "lift-side",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-return",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "neutral",
+        "presentation": "seated-fixed-plate"
+      }
+    ],
+    "earlyReleaseAtSupportBeforeDetach": [
+      {
+        "sourceId": "lift-support",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-side",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-return",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "neutral",
+        "presentation": "seated-fixed-plate"
+      }
+    ],
+    "earlyReleaseAtBridgeAfterDetach": [
+      {
+        "sourceId": "lift-bridge",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-side",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-return",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "neutral",
+        "presentation": "seated-fixed-plate"
+      }
+    ],
+    "regrabAtSeatContact": [
+      {
+        "sourceId": "lift-support",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-bridge",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-float",
+        "presentation": "detached"
+      }
+    ],
+    "regrabAtSideHandoff": [
+      {
+        "sourceId": "lift-side",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-side",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-bridge",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-float",
+        "presentation": "detached"
+      }
+    ],
+    "regrabAtReturn": [
+      {
+        "sourceId": "lift-return",
+        "presentation": "seated-fixed-plate"
+      },
+      {
+        "sourceId": "lift-return",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-side",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-support",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-bridge",
+        "presentation": "detached"
+      },
+      {
+        "sourceId": "lift-float",
+        "presentation": "detached"
+      }
+    ]
+  },
+  "authoringNotes": {
+    "eventSemantics": "Authoring notes only, not a new runtime API.",
+    "nativeRoot": "Follow pointer immediately at native drag threshold, independently of body animation.",
+    "stool": "Visual hide at matched support S\u2192D; show frozen original plate at target matched support D\u2192S seat contact. Do not move or scale stool with body.",
+    "hold": "650 ms is preview only; airborne lasts until release. Early release bypasses hold immediately.",
+    "support": "Both palms carry laptop before legs relax; on landing retain palms through body seat contact, then return laptop weight to thighs before fingers.",
+    "coverage": "Only neutral, lift-side, lift-support and lift-return have actual S/D pairs. Routes list existing source entry points, not every interpolated pose.",
+    "remaining": "Small raster contour/laptop perspective redraw remains; actual timed runtime/root/seat target integration not accepted."
+  },
+  "stageEvents": [
+    {
+      "at": "native-drag-threshold",
+      "event": "native-root-follows-pointer-immediately; no dependency on visual support animation"
+    },
+    {
+      "atFrame": 2,
+      "event": "both-palms-under-base-before-leg-unloading"
+    },
+    {
+      "atFrame": 3,
+      "event": "visual-only: hide-world-stool; swap-FG-to-matching-D; native-root-follow-is-independent-and-already-active-from-drag-threshold"
+    },
+    {
+      "atFrame": 5,
+      "event": "hold-until-release; 650ms-is-preview-only"
+    },
+    {
+      "atFrame": 7,
+      "event": "root-approach-target-seat; stool-still-hidden-in-source-preview"
+    },
+    {
+      "atFrame": 8,
+      "event": "show-frozen-world-stool-at-target; matching-D-to-FG; accept-body-weight"
+    },
+    {
+      "atFrame": 9,
+      "event": "transfer-laptop-weight-to-thighs-before-returning-fingers"
+    }
+  ]
+}

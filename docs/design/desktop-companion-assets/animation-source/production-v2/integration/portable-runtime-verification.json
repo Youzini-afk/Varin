@@ -1,0 +1,15 @@
+{
+  "source": "Only repository-contained production-v2 sources and tools",
+  "candidateSha256": "f9200cb984d6938979a6068f42343957f46552bfe4612a3d2ea3964cc649c5b9",
+  "selectedBundleSha256": "399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268",
+  "filesCompared": 12,
+  "differentFiles": [
+    "acceptance.json"
+  ],
+  "independentOutputDirectory": true,
+  "externalSourceDependencies": [],
+  "runtimeArtifactBytesExact": true,
+  "acceptanceLedgerByteDifference": "Initial rebuild differed only in fileSha256 JSON key ordering; subsequent selector output sorts it. NativeV2Status/nativeV2Evidence were appended after final native QA and are not part of source-art selection reproduction.",
+  "acceptanceLedgerSemanticallyExactAtRebuild": true,
+  "nativeValidation": "native-validation.json"
+}

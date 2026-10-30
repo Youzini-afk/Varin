@@ -1,0 +1,95 @@
+{
+  "id": "welcome-closed-v2",
+  "family": "USER_ATTENTION",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "keyposes",
+  "loop": false,
+  "entryPose": "seated-closed-neutral-hands-on-lid",
+  "exitPose": "seated-closed-neutral-hands-on-lid",
+  "warning": "Authored closed-laptop welcome candidate, normal-speed quality pending. No success or approval semantics. Separate return hand drawing with retained blue-eye head cel because raw return eyes drifted. v2 locally clears visually reviewed new left-hair white background pockets.",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 320,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 140,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 170,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 130,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-007.png",
+      "durationMs": 110,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-008.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-009.png",
+      "durationMs": 450,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  ]
+}

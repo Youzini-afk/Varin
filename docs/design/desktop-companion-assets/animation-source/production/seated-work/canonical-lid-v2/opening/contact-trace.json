@@ -1,0 +1,301 @@
+[
+  {
+    "frame": 0
+  },
+  {
+    "frame": 1,
+    "angle": 0,
+    "drawing": 20,
+    "registration": [
+      22.071594304681952,
+      30.56207926937975
+    ],
+    "note": "Actual low-angle grip drawing at shut-lid lip; acquisition remains a review point."
+  },
+  {
+    "frame": 2,
+    "angle": 0.4672,
+    "drawing": 20,
+    "registration": [
+      21.932604768220216,
+      29.809572828641762
+    ]
+  },
+  {
+    "frame": 3,
+    "angle": 1.8175999999999999,
+    "drawing": 20,
+    "registration": [
+      21.50403765244471,
+      27.641333446199837
+    ]
+  },
+  {
+    "frame": 4,
+    "angle": 3.9743999999999997,
+    "drawing": 20,
+    "registration": [
+      20.737360957182034,
+      24.20176089399962
+    ]
+  },
+  {
+    "frame": 5,
+    "angle": 6.8608,
+    "drawing": 20,
+    "registration": [
+      19.554890903394067,
+      19.651292740252188
+    ]
+  },
+  {
+    "frame": 6,
+    "angle": 10.4,
+    "drawing": 20,
+    "registration": [
+      17.864714326650898,
+      14.169500460515167
+    ]
+  },
+  {
+    "frame": 7,
+    "angle": 14.5152,
+    "drawing": 20,
+    "registration": [
+      15.57481404235594,
+      7.957109052674809
+    ]
+  },
+  {
+    "frame": 8,
+    "angle": 19.129600000000003,
+    "drawing": 20,
+    "registration": [
+      12.606060094036508,
+      1.2355001340809508
+    ]
+  },
+  {
+    "frame": 9,
+    "angle": 24.1664,
+    "drawing": 20,
+    "registration": [
+      8.90354059000461,
+      -5.757122883869101
+    ]
+  },
+  {
+    "frame": 10,
+    "angle": 29.5488,
+    "drawing": 20,
+    "registration": [
+      4.445573882098955,
+      -12.773105988774091
+    ]
+  },
+  {
+    "frame": 11,
+    "angle": 35.2,
+    "drawing": 45,
+    "registration": [
+      13.111780744793151,
+      9.197805360230973
+    ]
+  },
+  {
+    "frame": 12,
+    "angle": 41.0432,
+    "drawing": 45,
+    "registration": [
+      7.237384721201039,
+      2.8611492153790437
+    ]
+  },
+  {
+    "frame": 13,
+    "angle": 47.001599999999996,
+    "drawing": 45,
+    "registration": [
+      0.7842238843599603,
+      -2.813895290311251
+    ]
+  },
+  {
+    "frame": 14,
+    "angle": 52.9984,
+    "drawing": 45,
+    "registration": [
+      -6.11239293623413,
+      -7.662012065184314
+    ]
+  },
+  {
+    "frame": 15,
+    "angle": 58.95680000000001,
+    "drawing": 70,
+    "registration": [
+      13.892772703812767,
+      4.705231686855967
+    ]
+  },
+  {
+    "frame": 16,
+    "angle": 64.8,
+    "drawing": 70,
+    "registration": [
+      6.61472071638039,
+      1.7961075467302692
+    ]
+  },
+  {
+    "frame": 17,
+    "angle": 70.4512,
+    "drawing": 70,
+    "registration": [
+      -0.5781892658496304,
+      -0.12007499592678528
+    ]
+  },
+  {
+    "frame": 18,
+    "angle": 75.8336,
+    "drawing": 70,
+    "registration": [
+      -7.505074155826776,
+      -1.1073044004245958
+    ]
+  },
+  {
+    "frame": 19,
+    "angle": 80.8704,
+    "drawing": 70,
+    "registration": [
+      -13.9993889038399,
+      -1.2827529853972521
+    ]
+  },
+  {
+    "frame": 20,
+    "angle": 85.48479999999999,
+    "drawing": 100,
+    "registration": [
+      18.9682571272064,
+      -6.406775616142539
+    ]
+  },
+  {
+    "frame": 21,
+    "angle": 89.6,
+    "drawing": 100,
+    "registration": [
+      13.751229838035442,
+      -5.471531314402
+    ]
+  },
+  {
+    "frame": 22,
+    "angle": 93.1392,
+    "drawing": 100,
+    "registration": [
+      9.330446322926363,
+      -4.285562465571047
+    ]
+  },
+  {
+    "frame": 23,
+    "angle": 96.0256,
+    "drawing": 100,
+    "registration": [
+      5.782680893898899,
+      -3.060309354198779
+    ]
+  },
+  {
+    "frame": 24,
+    "angle": 98.18239999999999,
+    "drawing": 100,
+    "registration": [
+      3.171312495082475,
+      -1.9954021651631138
+    ]
+  },
+  {
+    "frame": 25,
+    "angle": 99.53280000000001,
+    "drawing": 100,
+    "registration": [
+      1.5554195287457162,
+      -1.2643574939090172
+    ]
+  },
+  {
+    "frame": 26,
+    "angle": 100.0,
+    "drawing": 100,
+    "registration": [
+      1.0,
+      -1.0
+    ]
+  },
+  {
+    "frame": 27,
+    "angle": 100
+  },
+  {
+    "frame": 28,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 0.0
+  },
+  {
+    "frame": 29,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 0.125
+  },
+  {
+    "frame": 30,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 0.25
+  },
+  {
+    "frame": 31,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 0.375
+  },
+  {
+    "frame": 32,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 0.5
+  },
+  {
+    "frame": 33,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 0.625
+  },
+  {
+    "frame": 34,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 0.75
+  },
+  {
+    "frame": 35,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 0.875
+  },
+  {
+    "frame": 36,
+    "angle": 100,
+    "releaseDrawing": true,
+    "t": 1.0
+  },
+  {
+    "frame": 37
+  }
+]

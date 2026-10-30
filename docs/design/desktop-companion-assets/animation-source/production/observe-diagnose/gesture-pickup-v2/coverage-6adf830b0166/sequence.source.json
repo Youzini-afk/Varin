@@ -1,0 +1,83 @@
+{
+  "id": "gesture-pickup.coverage-6adf830b0166",
+  "stage": "motion-candidate",
+  "reviewStatus": "structural-variant-review",
+  "family": "RELOCATION",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "coverage-6adf830b0166-detached",
+  "exitPose": "canonical-open-laptop-supported-detached",
+  "loop": null,
+  "sourceStart": "observe-diagnose/canonical-recovery-v1/check-005.png",
+  "sourceStartSha256": "6adf830b01666d5c23b4e45e97ce5b08057e94f129312efc63722a6a931b7e18",
+  "frames": [
+    {
+      "source": "current-detached.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "detach",
+      "pose": "coverage-6adf830b0166-transition",
+      "contacts": {}
+    },
+    {
+      "source": "current-supported.png",
+      "durationMs": 60,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-6adf830b0166-transition",
+      "contacts": {}
+    },
+    {
+      "source": "chin-005-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-6adf830b0166-transition",
+      "contacts": {}
+    },
+    {
+      "source": "early-detached.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-6adf830b0166-transition",
+      "contacts": {}
+    },
+    {
+      "source": "pregrip-detached.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-6adf830b0166-transition",
+      "contacts": {}
+    },
+    {
+      "source": "grip-detached.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "canonical-open-laptop-supported-detached",
+      "contacts": {}
+    }
+  ]
+}

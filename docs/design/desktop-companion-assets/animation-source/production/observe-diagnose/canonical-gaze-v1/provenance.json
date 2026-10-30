@@ -1,0 +1,9 @@
+{
+  "entryPose": "seated-open-neutral",
+  "exitPose": "seated-open-read-screen",
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "method": "Authored new lower-left gaze pasted through shared eyelid mask; no moved head; same 512 viewport",
+  "exactProtectedPixels": 259346,
+  "visualIntent": "Irises visibly left/down, larger eye white on right versus neutral eye contact",
+  "status": "Static gaze candidate, not complete reading animation"
+}

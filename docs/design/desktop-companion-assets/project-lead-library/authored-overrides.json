@@ -1,0 +1,18 @@
+{
+  "curve-mint": {
+    "neck": "M6 43 Q12 44 18 45 Q23 47.5 32 51 Q45 48 58.75 43",
+    "headClip": "M-8 -8 H72 V43 H58.75 Q45 48 32 51 Q23 47.5 18 45 Q12 44 6 43 H-8 Z",
+    "collarL": "M6 43 Q12 44 18 45 Q23 47.5 32 51 L20.9225 57.7 Q13.9125 55 9.6925 51 Z",
+    "collarR": "M32 51 Q45 48 58.75 43 L55.0575 51 Q50.8375 55 43.0775 57.7 Z",
+    "neckPoints": null,
+    "manualFitNote": "After large/native-size audit, smoothed concave lower-contour contact with explicit continuous quadratic seams. No pixel-following notch kink; geometry remains above original lower silhouette."
+  },
+  "fold-sage": {
+    "neck": "M7.25 44 Q12 45.5 17 45.8 Q23 49.5 32 52 Q47 49 60.25 44",
+    "headClip": "M-8 -8 H72 V44 H60.25 Q47 49 32 52 Q23 49.5 17 45.8 Q12 45.5 7.25 44 H-8 Z",
+    "collarL": "M7.25 44 Q12 45.5 17 45.8 Q23 49.5 32 52 L20.87 58.7 Q15.2 56 10.96 52 Z",
+    "collarR": "M32 52 Q47 49 60.25 44 L56.54 52 Q52.3 56 43.129999999999995 58.7 Z",
+    "neckPoints": null,
+    "manualFitNote": "After large/native-size audit, smoothed concave lower-contour contact with explicit continuous quadratic seams. No pixel-following notch kink; geometry remains above original lower silhouette."
+  }
+}

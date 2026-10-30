@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "id": "v5-work-active",
+  "action": "work-active",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": [
+    2,
+    19
+  ],
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 1,
+      "phase": "canonical"
+    },
+    {
+      "sourceId": "active-work-entry",
+      "durationMs": 200,
+      "phase": "active-work-entry"
+    },
+    {
+      "sourceId": "active-work-engage",
+      "durationMs": 180,
+      "phase": "active-work-engage"
+    },
+    {
+      "sourceId": "active-work-key-left",
+      "durationMs": 120,
+      "phase": "active-work-key-left"
+    },
+    {
+      "sourceId": "active-work-engage",
+      "durationMs": 100,
+      "phase": "active-work-engage"
+    },
+    {
+      "sourceId": "active-work-key-right",
+      "durationMs": 150,
+      "phase": "active-work-key-right"
+    },
+    {
+      "sourceId": "active-work-engage",
+      "durationMs": 90,
+      "phase": "active-work-engage"
+    },
+    {
+      "sourceId": "active-work-key-left",
+      "durationMs": 100,
+      "phase": "active-work-key-left"
+    },
+    {
+      "sourceId": "active-work-key-right",
+      "durationMs": 140,
+      "phase": "active-work-key-right"
+    },
+    {
+      "sourceId": "active-work-engage",
+      "durationMs": 200,
+      "phase": "active-work-engage"
+    },
+    {
+      "sourceId": "active-work-read",
+      "durationMs": 1500,
+      "phase": "active-work-read"
+    },
+    {
+      "sourceId": "active-work-engage",
+      "durationMs": 180,
+      "phase": "active-work-engage"
+    },
+    {
+      "sourceId": "active-work-key-right",
+      "durationMs": 140,
+      "phase": "active-work-key-right"
+    },
+    {
+      "sourceId": "active-work-key-left",
+      "durationMs": 110,
+      "phase": "active-work-key-left"
+    },
+    {
+      "sourceId": "active-work-key-right",
+      "durationMs": 130,
+      "phase": "active-work-key-right"
+    },
+    {
+      "sourceId": "active-work-engage",
+      "durationMs": 90,
+      "phase": "active-work-engage"
+    },
+    {
+      "sourceId": "active-work-key-left",
+      "durationMs": 160,
+      "phase": "active-work-key-left"
+    },
+    {
+      "sourceId": "active-work-engage",
+      "durationMs": 300,
+      "phase": "active-work-engage"
+    },
+    {
+      "sourceId": "active-work-read",
+      "durationMs": 1900,
+      "phase": "active-work-read"
+    },
+    {
+      "sourceId": "active-work-release",
+      "durationMs": 180,
+      "phase": "active-work-release"
+    },
+    {
+      "sourceId": "active-work-recover",
+      "durationMs": 220,
+      "phase": "active-work-recover"
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 200,
+      "phase": "canonical"
+    }
+  ],
+  "runtimeApproval": false,
+  "semantics": "Actual current execution only; not idle Bot mode, queued task, waiting, unknown or tool-specific proof.",
+  "pickup": "Immediate same-pose authored detached; release hands then shared open-laptop side/support/bridge/float. Never neutral before pickup.",
+  "release": "Finite same-pose seated landing then current recovery. Resolve latest intent; do not replay old typing burst."
+}

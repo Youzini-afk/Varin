@@ -1,0 +1,52 @@
+{
+  "checkpoint": "seated-closed-endpoint-20261028T2145Z",
+  "status": "frozen-production-endpoint-candidate-not-full-lid-animation-approval",
+  "files": [
+    {
+      "path": "varin-animation-production/seated-work/canonical-lid-v1/closed-canonical-candidate.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-lid-v1/closed-edit-source.png",
+      "sha256": "dd777ca520fee154da418f01a07df7c2d7128994dc3f5dfdcf0eeb4dcc0a22f9",
+      "bytes": 1670572
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-lid-v1/closed-edit-prompt.json",
+      "sha256": "4eb3128de85d9c2582178d949c424cc06c436d00c6997011acb3c82299665ecc",
+      "bytes": 1129
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-lid-v1/build_closed_study.py",
+      "sha256": "a383974dd474e01579550242748071b904df3d054c4a373b6fc04a79007e7ed7",
+      "bytes": 1301
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-lid-v1/closed-redraw-mask.png",
+      "sha256": "fb01e374a534bb802088b98d339fc7ab2ac8e55d98e3b45302dd142317956c6b",
+      "bytes": 1968
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-lid-v1/closed-qa.json",
+      "sha256": "057055b4009963294b32a632228eca1a5cfb0caa9975a6385a28b5e8c69bf968",
+      "bytes": 367
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-lid-v1/closed-comparison.jpg",
+      "sha256": "74af1251ff776f9b6e915581aeb78a542d3e8becf9758be65f263b4f8f73d63f",
+      "bytes": 80051
+    }
+  ],
+  "externalDependencies": [
+    {
+      "path": "varin-animation-production/shared/seated-open-canonical-alpha-v1.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    }
+  ],
+  "qa": {
+    "outsideEditMaskChangedPixels": 0,
+    "hiddenRgbNote": "Dark RGB in fully transparent pixels is not a visible residual screen; verify by alpha compositing."
+  }
+}

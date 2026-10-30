@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "references/closed-rest-rigid-v2.png",
+  "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+  "raw": "raw/closed-tap-playful-v1.png",
+  "rawSHA256": "57b904a687f95b7e956c34b6cb303655522bf66443a6fe204d7db98d90d76e70",
+  "prompt": "prompts/closed-tap-playful-v1.txt",
+  "output": "frames/closed-tap-playful-v1.png",
+  "sha256": "8dde658ad824907c8aab61d5a3a37c0062f2c11d93d11f044732e1c89a19b697",
+  "mask": "masks/closed-tap-playful-v1.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

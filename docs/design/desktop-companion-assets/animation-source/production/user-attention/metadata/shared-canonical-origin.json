@@ -1,0 +1,41 @@
+{
+  "sharedCanonicalOrigin": "seated-open-canonical-v1 is exactcopy of laststep",
+  "upstreamApprovedReferences": [
+    "varin-keyframes/masters/Varin-chibi-original-reference.png",
+    "varin-storyboards/07-daily-interactions.png",
+    "varin-storyboards/01-work-cycle.png"
+  ],
+  "steps": [
+    {
+      "path": "sources/click-closed-cycle-v1.png",
+      "sha256": "893c1febd583bf3511d44f6680134b67d113e0593f6ab9b04bc012e45d380db2",
+      "operation": "Built-in imagegen raw 1536x1024 sixpose sheet, created from approved standing master +07 daily interactions; output lacked save_hint during temporary environment unavailability, preserved exact returned PNG from image_url base64 without recompression.",
+      "promptOrScript": "metadata/prompt-click.txt"
+    },
+    {
+      "path": "sources/click-open-cycle-v1.png",
+      "sha256": "123c6e705fea0c491cc71fa05826bb808c89d5c1a2ab415c7d9fbb86247c816b",
+      "operation": "Built-in imagegen edited closed-sheet to open laptop; raw output exec-33f620e7-5f3d-446c-9bba-b184cec35f21.png,1536x1024, sources clickclosed +01workcycle.",
+      "promptOrScript": "metadata/prompt-click-open.txt"
+    },
+    {
+      "path": "frames/click-open-cycle-v1/pose-001.png",
+      "sha256": "c00fe0c6decc2dfc4ce3a32d16fb050ad173c5ee6ab122303262afc01c5a6988",
+      "operation": "Exact top-left crop (0,0,512,512) then border-connected white alpha derivation via extract_keyposes.py; no scaling/rotation/registration.",
+      "promptOrScript": "extract_keyposes.py"
+    },
+    {
+      "path": "sources/click-open-single-master-v1.png",
+      "sha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "operation": "Alpha composite pose001 onto opaque white512x512 then convertRGB; no geometry/color edits beyond alpha compositing.",
+      "promptOrScript": null
+    },
+    {
+      "path": "registered/attention-lift-v1/pose-000.png",
+      "sha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "operation": "RGB base saved from click-open-single-master-v1; no generated edit applied to pose000.",
+      "promptOrScript": "register_single_v1.py"
+    }
+  ],
+  "baselinePolicy": "Do not regenerate or change sharedcanonical; these raw sheets and prompts frozen in phase1 checkpoint."
+}

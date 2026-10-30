@@ -1,0 +1,22 @@
+{
+  "anchors": {
+    "references/open-screen-read-v2.png": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+    "references/upright-open-neutral-v2.png": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+  },
+  "raw": {
+    "ask.png": "d75e2b313d88154f11346af32cd5c2934390ead51cf224e16791522b30d94e25",
+    "attend-corrected.png": "439da4dce0d79fc81a3caf981cb084966fc15efbb861ca8075d99855c81e671b",
+    "attend.png": "b5b69347e3c309ef42493f08f9370be126497796218a354fc54cbdb7c17e3ee5",
+    "blink-closed.png": "e0a76e2e0e460186fb2d6b8dc79da67c1580d45bb88c24a405e425b3db07bb7d",
+    "blink-half.png": "1a0480c2d32f491ca837e9a59c2f7ff0c7be66866c2f524c3dbe40d0fdd0d1d7",
+    "listen-rest.png": "2b0c665e5ec49dc79fe1289939c454c3ad31a17728801354508507122fc1990a",
+    "nod-soft.png": "f5a22095f15cfd2f0afb2f73704719bb20bcc053b6c96c03f1d229958d9a675e",
+    "nod.png": "d10aefa105ddbd5ce6f0bad5e050bd60058a36698363dcacb43f2b07d697d230",
+    "offer-mid.png": "798484e741f9ec2e1068ba158d4ecf2c1c5456efa182976fc159a4d4815e316a",
+    "offer.png": "776580747d4e45936d314c91ddd3a9cfdebdebb29f518c474430aadb9d92fe49",
+    "wave-closed-corrected.png": "cd12ccf8a413ec629863a2559dafcb339c78e72cb223d4dc8dc858acf17debe8",
+    "wave-closed.png": "493e15424e8b19ddb463cf263a12e76a06107d75f69d24e86205fef489e974c5",
+    "wave-mid.png": "3ab6beaf377ab2af4ab497bc5e5a0c2cc30c7be1feb6f42c49416755838abca9",
+    "wave-peak.png": "5fc567856a739ea59ae381868970332cae10634106eb73dac00dd4be99d666e0"
+  }
+}

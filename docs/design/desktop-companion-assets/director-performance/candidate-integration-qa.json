@@ -1,0 +1,64 @@
+{
+  "recordedAt": "2026-10-29T13:33:14.856836+00:00",
+  "status": "review-only candidate; not production selected",
+  "publicBundleSHA256": "399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268",
+  "candidateBundleSHA256": "542cc7688b6dfd2195f589abd569a03cf7fd0134c42089f58c0645daffa1e5b2",
+  "routes": {
+    "candidateSHA": "542cc7688b6dfd2195f589abd569a03cf7fd0134c42089f58c0645daffa1e5b2",
+    "actionPairs": 1444,
+    "interruptCases": 435,
+    "uniqueActionSources": 68,
+    "grabCases": 204,
+    "actualCueTraces": {
+      "organizing": [
+        "READ",
+        "ORGANIZE_ALIGN",
+        "OBSERVE_REST"
+      ],
+      "checking": [
+        "READ",
+        "VERIFY_SCAN",
+        "OBSERVE_REST"
+      ]
+    },
+    "failures": [],
+    "scope": "Production controller routes, exact-source early release and actual entrance cues; not visual/native acceptance"
+  },
+  "checks": {
+    "applicationClientBuildRaw": "passed",
+    "uiTypecheck2048MiB": "passed",
+    "electronTypecheck1536MiB": "passed",
+    "sceneTransportTests": 8,
+    "bodyCueControllerTests": 14,
+    "context": "same-action new subject recovers before context admission; delayed decoding and superseding third request covered; scene consumes only matching successful drawing context and acknowledged native LISTEN side",
+    "displayedPickupContext": "Last successful drawing carries package/exposure/context together; logical C ahead of displayed B, grab B, receive D, release restores B before decoding/entering D (focused controller test passed). Manual review carries explicit null; legacy omitted context compatible."
+  },
+  "nativeScope": "Only separately recorded attention-foundation smoke is validated; director portfolio/native art not yet verified",
+  "visualFiniteEvidence": {
+    "browserTab": 66,
+    "actorCSSPixels": 340,
+    "observed": [
+      "actual HANDOFF_LEAD exposure in complete project intake",
+      "B authorization lock and C question coexist distinctly",
+      "GATHER paper reaches the computer/hand region",
+      "After large-brief yielding fix: actual HANDOFF_LEAD palm and sleeve remain visible",
+      "During B GATHER_IN, explicit fixture switches to C: immediate C question card, actual RECOVERY_ONLY drawing before a newly entered C GATHER_IN; B lock does not transfer",
+      "A still-working team count remains at its A leader seat when B/C owns the brief"
+    ],
+    "openIssue": null,
+    "reviewOnlyLayout": "Controls may wrap; actor now positioned below measured controls plus 48px so all three fixed leader seats remain visible",
+    "scope": "Finite normal-speed browser observations of labelled fixtures; not full native or production acceptance"
+  },
+  "notClaimed": [
+    "No final director animation acceptance",
+    "No new Host task or permission event was submitted: review controls are explicit fixtures",
+    "No per-frame native pickup or Windows/macOS acceptance"
+  ],
+  "portableRebuild": {
+    "source": "Independent disk copy of repository archived production-v2 + production-v3, archived director index with normalized source paths; immutable selected base 399bf textures",
+    "candidateBundleSHA256": "542cc7688b6dfd2195f589abd569a03cf7fd0134c42089f58c0645daffa1e5b2",
+    "filesCompared": 15,
+    "mismatches": [],
+    "sourceArchiveNoWorkspaceArtDependency": true
+  }
+}

@@ -39,6 +39,7 @@
 - [工具契约与执行环境优化](design/tool-contracts-and-execution-environment.md)：Windows Shell、PATH 与原生 rg、进程输入回执、完整工具目录、文件与文档默认读取及错误反馈；已实现，当前契约见上面的领域文档。
 
 ## 正在评审的设计
+- [Q 版桌宠与主题差分](design/desktop-companion.md)：32 类表现规划、坐姿电脑工作、默认色[母版与8张分镜](design/desktop-companion-assets/README.md)、真实状态映射及换位置交互；2026-10-29 设计checkpoint，桌宠功能尚未实施。
 - [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：按需隔离、实际 Host 依赖准入与清晰失败、各平台安装交付、稳定来源和增量分叉；已有引擎与挂载适配器继续完善，新准入合同和性能改造的实施状态见原文。
 - [外部 Harness 接入与跨 Agent 协作](design/external-harness-integration.md)：直接会话、外部预设、派发、消息与文件交换已接入；CLI / Skills / MCP 共享按产品决定暂缓。当前支持边界见[外部 Agent](external-agents.md)。
 - [快速检索、按需隔离与工具可靠性](design/retrieval-isolation-and-tool-reliability.md)：检索真实启动、默认共享与按次隔离、基线复用／延迟物化及资源回收已实施，边界见原文第 17 节；隔离的后续架构由上面的版本化工作区设计接续。

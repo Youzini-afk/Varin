@@ -1,0 +1,56 @@
+{
+  "stage": "frozen QA and integration metadata, actual source closures in referenced inventories",
+  "files": [
+    {
+      "path": "user-attention/drag-bridges-v1/finite-peer-review-20261028-2320.json",
+      "sha256": "c2ee45d588ec7d0156fe876686b5fa0992e9988f505b8ec732aa33d2675bca57",
+      "bytes": 2397
+    },
+    {
+      "path": "user-attention/drag-bridges-v1/user-grab-acceptance-ledger-v1.json",
+      "sha256": "1074bb24b62093c05752f5a2b522ac8d0e8e2e06b0728b601545ff83aa9f34b5",
+      "bytes": 35664
+    },
+    {
+      "path": "user-attention/drag-bridges-v1/derive_acceptance_ledger_v1.py",
+      "sha256": "ab73e3ada81cbff2533d2dfc942cd95644f8b4c19d9430b70813bda12791b6a4",
+      "bytes": 3059
+    },
+    {
+      "path": "user-attention/drag-bridges-v1/build_group_reviews.py",
+      "sha256": "a921115a5f546dcaa906b61fdd1838511f84e959558bfbb21b04b74dc4ecd09c",
+      "bytes": 2058
+    },
+    {
+      "path": "user-attention/drag-bridges-v1/build_review_v2.py",
+      "sha256": "3b801ec83a9d2f85026376acbd1bf1c43c0423ecb8a3e0709fec4d59547155e5",
+      "bytes": 1758
+    },
+    {
+      "path": "user-attention/drag-bridges-v1/grab-next-map-candidate.json",
+      "sha256": "b861d57cbf1fe98568a73cd2c48735747ad0a9d354e0a12aa76075ca0d08da80",
+      "bytes": 16252
+    },
+    {
+      "path": "user-attention/drag-bridges-v1/frozen-upper-contact-inventory.json",
+      "sha256": "8ddfd8a0c9f0e9ad6bd0be6e5185f91b9b3585adb358b735fcbdb38a38ea543f",
+      "bytes": 4260
+    },
+    {
+      "path": "user-attention/drag-bridges-v1/frozen-mid-reach-inventory.json",
+      "sha256": "b8964af31b50f29ee3ea3c41ffffa032eb41ce42e73264992c3fb00452fe4c96",
+      "bytes": 1972
+    },
+    {
+      "path": "user-attention/local-events-v1/tap-open-v1/sequence.source.json",
+      "sha256": "223a72efbfc8c3c8808f586de15451e000fc9fc2589067e07b004bcd9e875b3d",
+      "bytes": 2245
+    },
+    {
+      "path": "user-attention/local-events-v1/tap-open-v1/provenance.json",
+      "sha256": "541089b953d42acbce188d3f0dce077239fc975bf3cfdf951faf16bbf4662d44",
+      "bytes": 1540
+    }
+  ],
+  "pathBase": "production-root"
+}

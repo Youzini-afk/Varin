@@ -1,0 +1,22 @@
+{
+  "sources": [
+    {
+      "source": "accepted-runtime/v1/typing/sequence.json",
+      "sha256": "3662013f7bc39ee819daff0f56b0cd78eb80076b497108c4e8227944c188af66",
+      "finalNeutralAddedMs": 1600
+    },
+    {
+      "source": "accepted-runtime/v1/typing/sequence.json",
+      "sha256": "3662013f7bc39ee819daff0f56b0cd78eb80076b497108c4e8227944c188af66",
+      "finalNeutralAddedMs": 3100
+    },
+    {
+      "source": "accepted-runtime/v1/typing/sequence.json",
+      "sha256": "3662013f7bc39ee819daff0f56b0cd78eb80076b497108c4e8227944c188af66",
+      "finalNeutralAddedMs": 2200
+    }
+  ],
+  "newDrawingCount": 0,
+  "safeExits": "Only exact common neutral source pixels; all other original exits retained",
+  "normalSpeedCompositeReview": "pending"
+}

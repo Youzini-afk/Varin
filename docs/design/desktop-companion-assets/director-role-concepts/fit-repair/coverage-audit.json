@@ -1,0 +1,600 @@
+{
+  "source": "packages/ui/src/components/ui/agent-avatar-art.ts",
+  "sourceSha256": "4b206489693a6f0ad75b79c0eae58d4e850da3474151887b9381a3c8a265e542",
+  "protocolSource": "packages/protocol/src/agent-runtime.generated.ts",
+  "protocolAvatarCount": 64,
+  "artEntryCount": 64,
+  "primitiveBodyFamilyCount": 64,
+  "uniqueBodyGeometryCount": 64,
+  "uniqueCompositeGeometryCount": 64,
+  "accentedAvatarCount": 7,
+  "explicitFitCount": 4,
+  "unreviewedCount": 60,
+  "explicitFitIds": [
+    "ribbon-blue",
+    "scoop-pistachio",
+    "lens-lilac",
+    "overlap-coral"
+  ],
+  "identicalCompositeGeometryGroups": [],
+  "profileReuseRule": "Only identical original body AND accent path geometry may share a garment fit profile, retaining each saved face/color; additional face/cloth visual review is still required. This catalog currently has no duplicate composite geometry groups.",
+  "fallback": "none: fitted() throws for unreviewed IDs; no generic cape is applied",
+  "entries": [
+    {
+      "id": "slope-lilac",
+      "bodyFamily": "slope",
+      "bodyGeometrySha256": "30d3e594d8a1593b5feb5fc92311391188b913cfca1d5970dea91dbb71a686d5",
+      "compositeGeometrySha256": "6bf01fa9ab255348b20c54f49a2e15e95679fba130a183e9f19fb53956b2c8d5",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "dome-ivory",
+      "bodyFamily": "dome",
+      "bodyGeometrySha256": "225ed0dd67cad924eb84a3674b329f89220ce0a2f99e791e944f4714065ecbb7",
+      "compositeGeometrySha256": "2175fa8a61061e4005f4318080bbd2e39e12eaada3f24151025a749aa1eeecb0",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "taper-sage",
+      "bodyFamily": "taper",
+      "bodyGeometrySha256": "ea9c26b275cbe59f37b2d34be528a8371c35b3efc0032d8cf9ec3e5ad1eb2023",
+      "compositeGeometrySha256": "49dc2ed4045caf2378130c68e760a045b617dc3ff6c2b11d053f25cbbf5a445e",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "pebble-blue",
+      "bodyFamily": "pebble",
+      "bodyGeometrySha256": "fdd9183bb2aaf3bdef5992c2957b55b7d40ba3e0fba9d4bd20962fe461e7be55",
+      "compositeGeometrySha256": "c410a48daec9440b0ba491704b47495ef1c7d834195a7e9caa8af19af1644b6b",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "overlap-coral",
+      "bodyFamily": "overlap",
+      "bodyGeometrySha256": "f1cf986d8dce58c7b72b832a8889533c5a39750a80604114d25651ffb13a485e",
+      "compositeGeometrySha256": "f77bcfd783446095dfbe9952e726719f64f37160ada4371a9aec185797e9d02e",
+      "hasAccentGeometry": true,
+      "fitProfile": "overlap-coral",
+      "status": "four-example static fit reviewed by parent; not runtime promoted"
+    },
+    {
+      "id": "notch-ochre",
+      "bodyFamily": "notch",
+      "bodyGeometrySha256": "76f36905b9e8f970c30f7ccf067d077da87448e214c7717746a6c375de713ad3",
+      "compositeGeometrySha256": "20595646573102e9e19ec9668febb96b9c1f3672a21ab7221389dad0d330c7b1",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "slant-mint",
+      "bodyFamily": "slant",
+      "bodyGeometrySha256": "bc89d083aeea5e885d0eaf2b52ee74cbe885ba01b85d1f6418015c38a0b53d64",
+      "compositeGeometrySha256": "e7d82fdec2a2f716bb7f646ce3538d26d3eb684f8eb0f6c5e93686376015d313",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "round-lilac",
+      "bodyFamily": "round",
+      "bodyGeometrySha256": "bd761f18acc38402648be47953b34d5cab72b6fadd5f8d7f2033516980db66bc",
+      "compositeGeometrySha256": "92a185409b1f9eb4169f7fae77b9a56e5a02269fb199c6e92b532798466ff897",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "tile-blue",
+      "bodyFamily": "tile",
+      "bodyGeometrySha256": "c248e978d1b861a2c3d1614dedb5c5416047906827b716efb39d6a74e8567c6b",
+      "compositeGeometrySha256": "c586b0708fc20afe5d7ae69f130a58339c6c9b82bc3a3ec58ce7fbd011abc8e0",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "fold-sage",
+      "bodyFamily": "fold",
+      "bodyGeometrySha256": "b00a34db13327b4b81016edcdc10a9f1ebfac6f21d624911893f760c88607259",
+      "compositeGeometrySha256": "dcde0a2205f9c9159090b8df42682415ce8e5ed3007ed48d17ef48eee937c734",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "cap-coral",
+      "bodyFamily": "cap",
+      "bodyGeometrySha256": "0262cbb8761029cfb0d23de3b9020eb04cb9fc3b4bafacbf11ffc7a286d61b1c",
+      "compositeGeometrySha256": "a9a0d43889c6b01cfeffeb71ee7d03d32c1d0afaca3ccbe408e24aaf173b26c9",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "wave-ivory",
+      "bodyFamily": "wave",
+      "bodyGeometrySha256": "04d8876408441735f014e1c18201bbdf3b9792221d83d6e087f8fd729d224769",
+      "compositeGeometrySha256": "efbb23e3f9cdcf1ff250e54e20e36069d49661862e2c3cb230f44f8d94648c2b",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "capsule-sky",
+      "bodyFamily": "capsule",
+      "bodyGeometrySha256": "d37e51204a94c0a050b9c98ebade9bca6f5469eec2684f5c4506c433bdc6922c",
+      "compositeGeometrySha256": "91ce0c646c9f49ab462df7afe9d6526c4bd4fa24e076b28d599f91bd8ace20be",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "pillar-lilac",
+      "bodyFamily": "pillar",
+      "bodyGeometrySha256": "3ce98fd313afbb552a1f35595d38fbc35515ce00d3b08ea73fb440271b65c8fb",
+      "compositeGeometrySha256": "860b80652757f91769af3b089b01bfa728143fb6a0ec5886fb32bf84281bdd06",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "lozenge-mint",
+      "bodyFamily": "lozenge",
+      "bodyGeometrySha256": "8d24c93f6025c225a3c5b43d423c60fbb1ff25f4e4530613d5ff46d39550113c",
+      "compositeGeometrySha256": "851012e6a6d89342ea9514783c7460dc2b27fc3e6fc88e85b0b84e32b5fc2a04",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "wedge-apricot",
+      "bodyFamily": "wedge",
+      "bodyGeometrySha256": "156084d7889911b7d6d82ee803ad52253c5d9d484db3684767ef2efde0c565a0",
+      "compositeGeometrySha256": "4b8ae1edb6f18a87faa672d1b331a7c8c8b8574cef07514f084898f067489f2b",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "arch-butter",
+      "bodyFamily": "arch",
+      "bodyGeometrySha256": "e44da1c4c27894648e683afbdba6ca0d7c610deaf39f65b13c264eba3f86e8c6",
+      "compositeGeometrySha256": "087c6f40188876727af6d97c019c316dad0ce4b564931938f71acff399360a53",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "oval-rose",
+      "bodyFamily": "oval",
+      "bodyGeometrySha256": "dee45a78e864c89fdbbc6b659fb157328f5b3bc6aeffe4d581892884dad66832",
+      "compositeGeometrySha256": "2cc203216d9977063642707df6978f89e8b33e5eac7a4a497dca1a4f04fa98ff",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "squircle-periwinkle",
+      "bodyFamily": "squircle",
+      "bodyGeometrySha256": "e240b340fffe03af75262cbb5c52a10230a06a7490f4a8652b3c6b1adf29a0e3",
+      "compositeGeometrySha256": "ef049744c18ab089e5a6283dcadf1e02862df18a3aa4d53956297dd0fd626db6",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "shield-sage",
+      "bodyFamily": "shield",
+      "bodyGeometrySha256": "0179ceb9521140bc815dcf1ac290a98420b099c60beb3e864461b638cdace260",
+      "compositeGeometrySha256": "fe87121656a401f0a650d2185e9ada34df0ff7fb674a928aec932c5619913f95",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "sail-ivory",
+      "bodyFamily": "sail",
+      "bodyGeometrySha256": "3482e05da1cf807fcc22ae5fdfad92507b11635f7877f45728e9e59573154e1b",
+      "compositeGeometrySha256": "44eb54c3fd44669629deb9fd9e3df871c99bc5962454996bf3f9ca5380d990bd",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "lean-coral",
+      "bodyFamily": "lean",
+      "bodyGeometrySha256": "900faf5e9103f05f85a2c2bb6bb5cb8013b462f38238b66823bf095063270801",
+      "compositeGeometrySha256": "2d858752bb3494ad472253aa1f953bfc4f063ade162b2356be6be328e1fd2219",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "bridge-aqua",
+      "bodyFamily": "bridge",
+      "bodyGeometrySha256": "e41996e703cd145dac66fe7780e3ec77a02175622ed1174159e0900374b1fe0e",
+      "compositeGeometrySha256": "cddf3d4dd3f0da5fb6f9ada6b6985fe406f1882b0c1e5fa2bde44e0f2090ed18",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "crest-lilac",
+      "bodyFamily": "crest",
+      "bodyGeometrySha256": "23de6bd445b8a697a32e285523660fe25f2bdeddfd4c1b1d070903a2db2f3e4a",
+      "compositeGeometrySha256": "3f77b4a40409d0ab328031a75bdb9357cdffeed050769f1835e0a1fea96bac47",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "step-blue",
+      "bodyFamily": "step",
+      "bodyGeometrySha256": "217ba8456813b5f7b4788b1dc5ff01eaa6adde030bfb3e7d94a29b1f8a389c39",
+      "compositeGeometrySha256": "f013236d8b163d59bc97928764af722b8a9af237f780b3a6b8e31737ac59f429",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "offset-peach",
+      "bodyFamily": "offset",
+      "bodyGeometrySha256": "12d6ab7abb7c01b67be3b5a161800144894750a4b3954f848931dfa01223ae13",
+      "compositeGeometrySha256": "5dc51d6bc0e453c4ee3ff7fa09d0ab0dc653005f87b5565aedc1f65927ecde1e",
+      "hasAccentGeometry": true,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "orbit-sage",
+      "bodyFamily": "orbit",
+      "bodyGeometrySha256": "3670341d5e130b3db2d5fbf3fd62c3b86b6e7b18f369b36985bc8f8f2c66e6a6",
+      "compositeGeometrySha256": "007129544f39103aba84a05832f2150da0f92ba542db6bfd2cf62edff14ccc63",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "cushion-ochre",
+      "bodyFamily": "cushion",
+      "bodyGeometrySha256": "ccbaa15f6e7307f00250d51da5aec550b73a7468ab96e3c069090f5b660ea79f",
+      "compositeGeometrySha256": "b2852c4ba06d426778448196c8d2069011479c47c2dae8131d7dc2ce071a9c64",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "curve-mint",
+      "bodyFamily": "curve",
+      "bodyGeometrySha256": "668f08a4a4ed4e3ea5d65a9fbaa69e6b4b0cafc9c1bad4339e68ce5ec9c8ea51",
+      "compositeGeometrySha256": "73f556f3c6624c3212d96be9512bd61495db964511af28bf1f07812c25e28158",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "bevel-rose",
+      "bodyFamily": "bevel",
+      "bodyGeometrySha256": "3383f497f685e1fc2706f6bd85cfbea71eb89a7227a20dcd14ee1f66e4d2fd13",
+      "compositeGeometrySha256": "12788050c4a348ed65eab4cfa351e3c1bfe34f567d6e06288d678acf6695b302",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "drift-blue",
+      "bodyFamily": "drift",
+      "bodyGeometrySha256": "14e67de394d849f7bf1d68245949d36588067170b0b092d504a2f25c40b9599a",
+      "compositeGeometrySha256": "2cd0ce1bb49cc52b3983c13153fa7e16bb12b82e985472f71d2e496b98738fef",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "stack-ivory",
+      "bodyFamily": "stack",
+      "bodyGeometrySha256": "ac5e4c83c80aef5093dd8681f5b2c3dcdc826e686d6a2477603a2f224bc3757f",
+      "compositeGeometrySha256": "5f409f1ecc9c119cb56832b78b5f917dbf868a914df432fc626cd9dfa237e8bc",
+      "hasAccentGeometry": true,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "tilt-pistachio",
+      "bodyFamily": "tilt",
+      "bodyGeometrySha256": "44c5ead36a4efb6cf0fbc181e9e033f00c0b56e3e63356ec0bc9a5b0f385e1e5",
+      "compositeGeometrySha256": "68ee9d89877b3e76da88c02e5ffff51d4f5befa828066ad531b5454ac3919119",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "fan-coral",
+      "bodyFamily": "fan",
+      "bodyGeometrySha256": "eb74b70bb948ae4c6e7d92aaefedaec89f9190a31ae77cc94b38bda916b16631",
+      "compositeGeometrySha256": "d5a650fe1dc9490f2d98fcd2a1f2744d41e9e17e221ffc8d3fbfc743e1e5a7d6",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "mound-lavender",
+      "bodyFamily": "mound",
+      "bodyGeometrySha256": "78b16a0de45097f1c65a29b92cc2672df03689c28018e58d86c961b6e0742cc0",
+      "compositeGeometrySha256": "45b6739df993c14d79cfe9f3688f3865c9af231034d124143bd9a786efab12e5",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "tab-butter",
+      "bodyFamily": "tab",
+      "bodyGeometrySha256": "4d89840ef6275a93a3e88d2f457d2827cb42db80d8a348e815b197bbef8575dd",
+      "compositeGeometrySha256": "80aedfdb5a1897bfb35593837b923044ad708e235e7031152e60b869189e5caa",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "span-jade",
+      "bodyFamily": "span",
+      "bodyGeometrySha256": "01f7354bef1dd3fb172306597cf09ab22329794b3884605db437b42ce7a505be",
+      "compositeGeometrySha256": "6d39677d418b48443dd7ac3b65b7613453f0795225362040cedf8e961a21d7d7",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "ripple-peach",
+      "bodyFamily": "ripple",
+      "bodyGeometrySha256": "0d0dd5d2dbcf7efcfd8b4ca68ed412786f5505303263306d062543d4b352c0cb",
+      "compositeGeometrySha256": "c38d3ccf6ef575ab0264be1b88abedb92ad7aa4f85af86239b3009a5f0b38596",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "facet-blue",
+      "bodyFamily": "facet",
+      "bodyGeometrySha256": "41d94969abd0e2c2b3c2468ab79c0bc200336b33dcc0463620d6052e6fae6a71",
+      "compositeGeometrySha256": "052f0bfd426119015a1b3aaaffc302f38c212acbac6b18c0fe98ad6668cc8548",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "comma-lilac",
+      "bodyFamily": "comma",
+      "bodyGeometrySha256": "a05c122f5ad0ce27dedcba41d212ca88e6a089d48db46e85d4babfc508e5abe1",
+      "compositeGeometrySha256": "d13fd5f85e6d20a3c44f98af92951b128c00f643a286f29ad0a726f1abf738a2",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "inset-sage",
+      "bodyFamily": "inset",
+      "bodyGeometrySha256": "36ee07264c3445a775ed185339094b3ec130bca28ac29aa87abd927af52bfa49",
+      "compositeGeometrySha256": "741aa82bcafe38ef8a256909b65f6ac95c1dfd97b5c3df5ae9d01f32f25e4b53",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "pocket-rose",
+      "bodyFamily": "pocket",
+      "bodyGeometrySha256": "589a0d48dda7371fdd2153f20b214a14ab19f041cd9ba45b13edd58e5a277f8b",
+      "compositeGeometrySha256": "8d0de5c72d3ebf8a0be4e8a6eb87ae0f1a5e54df217e91c8bf125d654902db59",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "rise-ivory",
+      "bodyFamily": "rise",
+      "bodyGeometrySha256": "cb5e8af7df9f853d017d1f3e9694b4226fcf10ea13ae61032e43be3ba14aabdd",
+      "compositeGeometrySha256": "390c51601656a13c1c5a02d2130e2b06dc8c076d17019fb3121ca937cc8a40bc",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "sweep-aqua",
+      "bodyFamily": "sweep",
+      "bodyGeometrySha256": "96b0b4385b57175a3d622060ef8ec3759f69c8ca72c56498663cd728b6a57f10",
+      "compositeGeometrySha256": "381cc17c55718cc6f737d32f29cac6817fcc76e6a90fa682bb8c857be7545bd6",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "bend-ochre",
+      "bodyFamily": "bend",
+      "bodyGeometrySha256": "a8d3e1a8616faae533c748d5f505ac909be477bad4a555b505e100d35e717f65",
+      "compositeGeometrySha256": "20d644ec6a381a25eba6a178705600db999e2f6f31f39332daedff6aa81c69cd",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "twin-periwinkle",
+      "bodyFamily": "twin",
+      "bodyGeometrySha256": "100f5693c7df2b9e5f8a2bc210142e5b43656b87a2c6f8cd9febf2688cbec367",
+      "compositeGeometrySha256": "d0174eda8826b85281580c1cfb0ecada123f224c8f92474af4566901eae89ac6",
+      "hasAccentGeometry": true,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "arc-apricot",
+      "bodyFamily": "arc",
+      "bodyGeometrySha256": "4d71e6e7f3f1375cd3ab3123dc5ea881be42b7db01e06ac1f3ae48e636ee6d5f",
+      "compositeGeometrySha256": "2006d013c587e4b9d4ccd2d528d4f40e31498d8d066cc1ca1543e97c6eca26c4",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "tuck-jade",
+      "bodyFamily": "tuck",
+      "bodyGeometrySha256": "8ab843da0dbc972fe2fe9932b5b82affc04cd8d9901f1f689d68e56acef1105b",
+      "compositeGeometrySha256": "9cf4b5b2dde5d839dee4dde32017930f804e7164afb8a2df513d64300e679949",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "plate-lavender",
+      "bodyFamily": "plate",
+      "bodyGeometrySha256": "b324a2c5391437a78baa8057c8876ce0436136f82ce7879e7be6c9a6d1a50103",
+      "compositeGeometrySha256": "460e08a187d33de8850a22d3e8c0af7d29c5d2a6edf013b96318aec65cb7be83",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "drop-melon",
+      "bodyFamily": "drop",
+      "bodyGeometrySha256": "85ed97d5b5b8ac6c0042d07c0f83134db07672bc85b726bfbf042dfa2c814a34",
+      "compositeGeometrySha256": "b3d029d5b6123dcaff7a8375d2bac9da6c20748c4df7c66b2bdccd3d52d58b5e",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "ribbon-blue",
+      "bodyFamily": "ribbon",
+      "bodyGeometrySha256": "67a477452559fb0e023be26a951be064f155c8e9d2912cf717511c676ec6bbdf",
+      "compositeGeometrySha256": "5955e6d78c85a28719d805d5454ac3d51f7989525b952249c9bd13db4e808f94",
+      "hasAccentGeometry": false,
+      "fitProfile": "ribbon-blue",
+      "status": "four-example static fit reviewed by parent; not runtime promoted"
+    },
+    {
+      "id": "cove-sage",
+      "bodyFamily": "cove",
+      "bodyGeometrySha256": "2e6a992637e86970e904ba19615287c0529abd26919c848673a7a81cc87b2e69",
+      "compositeGeometrySha256": "488e23007404979177bed2096c58e1bc2e954cebf18d6e1ec260efa66a8f8e05",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "terrace-ivory",
+      "bodyFamily": "terrace",
+      "bodyGeometrySha256": "3f4a29069b85c8d1f717cabb171c734f47bf533d57b163d2e3f663deda50d3c0",
+      "compositeGeometrySha256": "754f622112286eadb843cc50a57ec270fc163eed4636b196f0ca449b7807ba83",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "slide-rose",
+      "bodyFamily": "slide",
+      "bodyGeometrySha256": "7630642df6b819d781efed97d72712bbead1ebe70a01f39bcfe3e58dd22fb176",
+      "compositeGeometrySha256": "c2a1132b678881276081add1c28c661d19ef4a9b2bdf8646114405de5096a10d",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "ramp-mint",
+      "bodyFamily": "ramp",
+      "bodyGeometrySha256": "6fb155590e69ccd3904f2d56ccac135731dfa2223d5697004b2ef121a80dff5b",
+      "compositeGeometrySha256": "40f56d0c1739ea4ea5e1d5b9074761a5a207f5ff51d1a40fa78a71b1a9d48d79",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "echo-ochre",
+      "bodyFamily": "echo",
+      "bodyGeometrySha256": "50d011858ea05c63f8ff68df91e66e881142c0e8ff162c4ab2da773c9c16701d",
+      "compositeGeometrySha256": "3c8884561f3502780dd1d67ae71c6cd046bd847c16938385e95a354be7d7a75c",
+      "hasAccentGeometry": true,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "lens-lilac",
+      "bodyFamily": "lens",
+      "bodyGeometrySha256": "ddb88a0ccd91c09fc123260548d48e783afe0f652212a0a096a64848ee8669f4",
+      "compositeGeometrySha256": "feec3b2f6543c95b2e0c0bba04833881bdb450279c7825b870dc1ffd3f972bea",
+      "hasAccentGeometry": false,
+      "fitProfile": "lens-lilac",
+      "status": "four-example static fit reviewed by parent; not runtime promoted"
+    },
+    {
+      "id": "ledge-aqua",
+      "bodyFamily": "ledge",
+      "bodyGeometrySha256": "6b2d53d5d6f5bd22ed6e5b971d4105351f148c796f034ab383dcc73c11a150b3",
+      "compositeGeometrySha256": "cb7a7d8492d0a7283237f96b7df0e3841d2c1e3100d25274d3044af82802724f",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "swell-apricot",
+      "bodyFamily": "swell",
+      "bodyGeometrySha256": "87699bfeaa2c1d63d5a54dca0b6b2110aa49005325bd9c297cef7685bc2e75cf",
+      "compositeGeometrySha256": "1556b23d1a54e5c3f733c753e16e74e976a181044a700b2013e69c0b86fdfd34",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "parcel-periwinkle",
+      "bodyFamily": "parcel",
+      "bodyGeometrySha256": "2dc6cb0b2e01d2cffbc80d61d6d9a2413cb70624447befaaa72435ff1e2f9a03",
+      "compositeGeometrySha256": "0e7e63e1419de755123cefa2ec91fa953f0e8111d42e9ab45633d07d54405106",
+      "hasAccentGeometry": true,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "scoop-pistachio",
+      "bodyFamily": "scoop",
+      "bodyGeometrySha256": "b7a2445506779baf6337c2e2e5df2d05465e48b7ff212feb63c6d2dc3916800f",
+      "compositeGeometrySha256": "ebf181615520caa1a27f600d957aa5953eeb16e0a2655ca6a1fbe33a8da9da68",
+      "hasAccentGeometry": false,
+      "fitProfile": "scoop-pistachio",
+      "status": "four-example static fit reviewed by parent; not runtime promoted"
+    },
+    {
+      "id": "beam-coral",
+      "bodyFamily": "beam",
+      "bodyGeometrySha256": "690a6c6354f8d1fef3a47c4cfba466c8b27adf30de3f8deb6a80262fe20a8aae",
+      "compositeGeometrySha256": "472cea848341a318513d3a387c1ff4d6460e61319f534f2998294c18f83e801d",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "chamfer-jade",
+      "bodyFamily": "chamfer",
+      "bodyGeometrySha256": "31ac638e09f3d2310dc063a151f1382c9e2ba72271de4f501bc4c57507cb1a4c",
+      "compositeGeometrySha256": "1cbe7672d0e3d905e39e3a94c7d538ec11f9d9c5052d77fe9f3f15b2361e6d70",
+      "hasAccentGeometry": false,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    },
+    {
+      "id": "float-butter",
+      "bodyFamily": "float",
+      "bodyGeometrySha256": "8ff3e117b3a86bf128685edc04e24b38da2e28254619267401e0eee9968ee794",
+      "compositeGeometrySha256": "49e9e4a369ebe8e3a3b054b7804868dc308a9369dec30b44dd92c4c3dccf37f6",
+      "hasAccentGeometry": true,
+      "fitProfile": null,
+      "status": "unreviewed; no captain costume fallback"
+    }
+  ]
+}

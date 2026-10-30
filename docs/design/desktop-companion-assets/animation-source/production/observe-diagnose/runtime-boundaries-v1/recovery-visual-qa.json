@@ -1,0 +1,129 @@
+{
+  "reviewer": "produce_observation_rest_animation",
+  "independentPeer": false,
+  "method": "Author self-review in managed tab14,320px1x playback sampled with screenshots; offline composite chains explicitly simulate changed Host facts and do not auto-authorize transitions. Additional independent review requested on failure-entry, uncertain-release, neutral-recovery.",
+  "results": [
+    {
+      "id": "observe.cancel-entry-boundary-v1",
+      "manifest": "cancel-entry/sequence.source.json",
+      "manifestSha256": "d30d4ed34ccb00f5274aab4fc276b07402a19efcd7e4abf19ad76fadf35ed035",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept as a hand-lift attention hold and neutral hand-lowering recovery. Laptop/shoulders stay stable; return has no typing or celebration. Cannot assert executor stopped.",
+      "sampledChainTimesMs": [
+        0,
+        250,
+        5383,
+        5583,
+        6815
+      ]
+    },
+    {
+      "id": "observe.cancel-hold-boundary-v1",
+      "manifest": "cancel-hold/sequence.source.json",
+      "manifestSha256": "0746d8f154d77990bbeef6d6a1e3c7c019a274ac6c7719231e6c11451e7b4fd5",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept as a hand-lift attention hold and neutral hand-lowering recovery. Laptop/shoulders stay stable; return has no typing or celebration. Cannot assert executor stopped.",
+      "sampledChainTimesMs": [
+        0,
+        250,
+        5383,
+        5583,
+        6815
+      ]
+    },
+    {
+      "id": "observe.neutral-recovery-boundary-v1",
+      "manifest": "neutral-recovery/sequence.source.json",
+      "manifestSha256": "5c1b3f2d0254b62ef708466d41262050751df690d925f18213261553c2b8b9ae",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept as a hand-lift attention hold and neutral hand-lowering recovery. Laptop/shoulders stay stable; return has no typing or celebration. Cannot assert executor stopped.",
+      "sampledChainTimesMs": [
+        0,
+        250,
+        5383,
+        5583,
+        6815
+      ]
+    },
+    {
+      "id": "observe.unknown-entry-boundary-v1",
+      "manifest": "unknown-entry/sequence.source.json",
+      "manifestSha256": "d3e29e2cea3aa8aafd7934254b03c918e3ee3ef386bf814873bf3158aa4ebadc",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept short surprise then serious user-directed hold; repeated hold contains blink not repeated surprise. Resynchronization returns attention to screen, not a success gesture.",
+      "sampledChainTimesMs": [
+        0,
+        283,
+        7067,
+        7417,
+        8310
+      ]
+    },
+    {
+      "id": "observe.unknown-hold-boundary-v1",
+      "manifest": "unknown-hold/sequence.source.json",
+      "manifestSha256": "6e60b1799545bfe6a263cfc751044b308e617aff4ed70f18089a452ce0d1eebb",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept short surprise then serious user-directed hold; repeated hold contains blink not repeated surprise. Resynchronization returns attention to screen, not a success gesture.",
+      "sampledChainTimesMs": [
+        0,
+        283,
+        7067,
+        7417,
+        8310
+      ]
+    },
+    {
+      "id": "observe.sync-attention-boundary-v1",
+      "manifest": "sync-attention/sequence.source.json",
+      "manifestSha256": "5fa613a9074486d3ae0ed1cf34482897cb9845dfc11fddc983ed6653aab92a02",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept short surprise then serious user-directed hold; repeated hold contains blink not repeated surprise. Resynchronization returns attention to screen, not a success gesture.",
+      "sampledChainTimesMs": [
+        0,
+        283,
+        7067,
+        7417,
+        8310
+      ]
+    },
+    {
+      "id": "observe.uncertain-check-boundary-v1",
+      "manifest": "uncertain-check/sequence.source.json",
+      "manifestSha256": "8652ef420d630a442932c71eb7418b783240f5a92895013a538f702d51c81d07",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept same-head chin contact and safe authored hand descent. Reading gaze and serious mouth remain consistent; no nod or claim of resolved uncertainty.",
+      "sampledChainTimesMs": [
+        250,
+        1795,
+        2711,
+        2795
+      ]
+    },
+    {
+      "id": "observe.uncertain-release-boundary-v1",
+      "manifest": "uncertain-release/sequence.source.json",
+      "manifestSha256": "4cf62428bf35fa6784f5b4ccdbaa18028feb083c5ace7bca22f90bc8e6693f26",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept same-head chin contact and safe authored hand descent. Reading gaze and serious mouth remain consistent; no nod or claim of resolved uncertainty.",
+      "sampledChainTimesMs": [
+        250,
+        1795,
+        2711,
+        2795
+      ]
+    },
+    {
+      "id": "observe.failure-entry-boundary-v1",
+      "manifest": "failure-entry/sequence.source.json",
+      "manifestSha256": "6a707adfa48e737a25336b8a79381bc3375f55268d06b539b9cd7fa68a970b57",
+      "decision": "accept-for-integration",
+      "visualFinding": "Accept a single short surprised entry followed by serious focused pose. Must not repeat whole entry as waiting loop.",
+      "sampledChainTimesMs": [
+        0,
+        217
+      ]
+    }
+  ],
+  "blockingVisualFixes": []
+}

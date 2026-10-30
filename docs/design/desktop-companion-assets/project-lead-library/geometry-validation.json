@@ -1,0 +1,398 @@
+{
+  "profileCount": 64,
+  "checks": [
+    {
+      "id": "slope-lilac",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "dome-ivory",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "taper-sage",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "pebble-blue",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "overlap-coral",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "notch-ochre",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "slant-mint",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "round-lilac",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "tile-blue",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "fold-sage",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "cap-coral",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "wave-ivory",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "capsule-sky",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "pillar-lilac",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "lozenge-mint",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "wedge-apricot",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "arch-butter",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "oval-rose",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "squircle-periwinkle",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "shield-sage",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "sail-ivory",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "lean-coral",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "bridge-aqua",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "crest-lilac",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "step-blue",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "offset-peach",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "orbit-sage",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "cushion-ochre",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "curve-mint",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "bevel-rose",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "drift-blue",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "stack-ivory",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "tilt-pistachio",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "fan-coral",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "mound-lavender",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "tab-butter",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "span-jade",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "ripple-peach",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "facet-blue",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "comma-lilac",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "inset-sage",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "pocket-rose",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "rise-ivory",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "sweep-aqua",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "bend-ochre",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "twin-periwinkle",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "arc-apricot",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "tuck-jade",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "plate-lavender",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "drop-melon",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "ribbon-blue",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "cove-sage",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "terrace-ivory",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "slide-rose",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "ramp-mint",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "echo-ochre",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "lens-lilac",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "ledge-aqua",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "swell-apricot",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "parcel-periwinkle",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "scoop-pistachio",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "beam-coral",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "chamfer-jade",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    },
+    {
+      "id": "float-butter",
+      "faceRoiDifferences": 0,
+      "borderAlpha": 0,
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "rejectsUnknown": true,
+  "faceRoi": {
+    "x": 14,
+    "y": 23,
+    "width": 39,
+    "height": 17
+  },
+  "note": "Sparse geometry/identity checks; does not replace visual review. No per-avatar snapshot files."
+}

@@ -1,0 +1,37 @@
+{
+  "at": "2026-10-29T14:54:00.728Z",
+  "candidate": "40c6f4f9f0c46c2b4c248fcf798fe3c726b77bb6dac7a59accbd485db2eeb4d2",
+  "defaultBundleSHA256": "399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268",
+  "filesVerified": 15,
+  "mainSHA256": "953f3ca2d529ee2b4297ac77be551a8c2a4d622d33e38113d7905bc1cb04151c",
+  "preloadSHA256": "9f539b0ccdd646c3c679cb38be253d14a12a773b4ce72330dcf42cffd5d97dd4",
+  "nativeGUI": "pending",
+  "defaultSelectionChanged": false,
+  "validationDateUTC": "2026-10-29T15:00:29Z",
+  "kind": "finite native development-review smoke, not release certification",
+  "observed": [
+    "Default selected 399 artwork loads before explicit director switch",
+    "Explicit candidate 40c6 identity shown in native review",
+    "Real Host empty state remains empty; offline fixtures separately labelled",
+    "A and C teams retain own child identities; A child exit leaves C team present",
+    "B permission and C question visibly distinct; removing B keeps C pending",
+    "Actual screen-pointer drag moved companion from x535,y245 to x985,y190; detached landing drawing followed by restored stool",
+    "Native edge-aware squad placement changed from right to left after relocation",
+    "Unknown state preserves three project identities and removes child teams; reconnection restores current state",
+    "Closing companion removes auxiliary squad window; main application closes gracefully"
+  ],
+  "interactionScope": [
+    "Native actor tap returned to supervised pose without clearing pending C",
+    "Short 180ms facial peak independently observed through same renderer browser review; not resolved in native screenshot sampling"
+  ],
+  "notClaimed": [
+    "Real simultaneous paid model tasks",
+    "Every animation frame individually reviewed in native GUI",
+    "Release performance or full CI pass",
+    "Default director activation or final product completeness"
+  ],
+  "qaSettingsRestoredSHA256": "87ee5fe4ec53a5fd4226d8ca790df57bd94e82c597dc8b72e94a6353a39bdcab",
+  "director-native-web-build.logSHA256": "b3104cd41e4fa652283a744cccf75e16e235779f26c684e735eb900b0b123493",
+  "director-native-main-build.logSHA256": "b0533856e837c8335c8e4a854c5db14564437462ff39fa40b6df901e1364799d",
+  "nativeLogSHA256": "0bb7a792b8edd9fac3f058175dd24d80f673b7f7c4a03dbee6e09cd9c9e546d4"
+}

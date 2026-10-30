@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "lid-closed-relax-d",
+      "source": "detached/lid-supported/closed-relax-canonical-d-r7.png",
+      "sha256": "98ec7f72e66fc23e5c128807d67d08ef3d3a07925cc3289524c2ee46713da313",
+      "heldUntilRelease": true,
+      "seatedCounterpart": null,
+      "releaseViaIds": [
+        "lid-closed-secure",
+        "lid-closed-side",
+        "closed-neutral"
+      ]
+    }
+  ],
+  "policy": "Hold reuses this exact relax PNG; never invent a separate hold or seated-relax source."
+}

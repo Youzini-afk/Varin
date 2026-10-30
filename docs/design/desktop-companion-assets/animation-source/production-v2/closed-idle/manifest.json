@@ -1,0 +1,375 @@
+{
+  "status": "candidate, parent visual review and integration pending",
+  "geometryReference": "varin-upright-v2",
+  "canvas": [
+    512,
+    512
+  ],
+  "canonicalClosedSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+  "entryPose": "upright-v2:closed",
+  "exitPose": "upright-v2:closed",
+  "loop": [
+    0,
+    17
+  ],
+  "durationMs": 28030,
+  "frames": [
+    {
+      "source": "frames/closed-rest.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "durationMs": 4100,
+      "phase": "hold",
+      "cue": "QUIET",
+      "pose": "upright-v2:closed",
+      "exitTo": [
+        "upright-v2:closed"
+      ]
+    },
+    {
+      "source": "frames/blink-half.png",
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "durationMs": 45,
+      "phase": "act",
+      "cue": "BLINK_CLOSE",
+      "pose": "upright-v2:closed-idle:blink-half",
+      "exitTo": []
+    },
+    {
+      "source": "frames/blink-closed.png",
+      "sha256": "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6",
+      "durationMs": 75,
+      "phase": "act",
+      "cue": "BLINK_CLOSED",
+      "pose": "upright-v2:closed-idle:blink-closed",
+      "exitTo": []
+    },
+    {
+      "source": "frames/blink-half.png",
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "durationMs": 45,
+      "phase": "act",
+      "cue": "BLINK_OPEN",
+      "pose": "upright-v2:closed-idle:blink-half",
+      "exitTo": []
+    },
+    {
+      "source": "frames/closed-rest.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "durationMs": 6350,
+      "phase": "hold",
+      "cue": "QUIET",
+      "pose": "upright-v2:closed",
+      "exitTo": [
+        "upright-v2:closed"
+      ]
+    },
+    {
+      "source": "frames/look-left-middle.png",
+      "sha256": "25efd7fb746e9650425cccb15f1f77e6029080101fdbaa898cb40bcc9c457df8",
+      "durationMs": 110,
+      "phase": "enter",
+      "cue": "NOTICE_SIDE",
+      "pose": "upright-v2:closed-idle:look-left-middle",
+      "exitTo": []
+    },
+    {
+      "source": "frames/look-left-peak.png",
+      "sha256": "b2bbc33f62b529e7be2dc4dceb2e6fd98f28f725e611be173cb18e9080dfacf3",
+      "durationMs": 780,
+      "phase": "hold",
+      "cue": "LOOK_SIDE",
+      "pose": "upright-v2:closed-idle:look-left-peak",
+      "exitTo": []
+    },
+    {
+      "source": "frames/look-left-middle.png",
+      "sha256": "25efd7fb746e9650425cccb15f1f77e6029080101fdbaa898cb40bcc9c457df8",
+      "durationMs": 120,
+      "phase": "exit",
+      "cue": "RETURN_ATTENTION",
+      "pose": "upright-v2:closed-idle:look-left-middle",
+      "exitTo": []
+    },
+    {
+      "source": "frames/closed-rest.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "durationMs": 3180,
+      "phase": "hold",
+      "cue": "QUIET",
+      "pose": "upright-v2:closed",
+      "exitTo": [
+        "upright-v2:closed"
+      ]
+    },
+    {
+      "source": "frames/blink-half.png",
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "durationMs": 45,
+      "phase": "act",
+      "cue": "BLINK_CLOSE",
+      "pose": "upright-v2:closed-idle:blink-half",
+      "exitTo": []
+    },
+    {
+      "source": "frames/blink-closed.png",
+      "sha256": "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6",
+      "durationMs": 75,
+      "phase": "act",
+      "cue": "BLINK_CLOSED",
+      "pose": "upright-v2:closed-idle:blink-closed",
+      "exitTo": []
+    },
+    {
+      "source": "frames/blink-half.png",
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "durationMs": 45,
+      "phase": "act",
+      "cue": "BLINK_OPEN",
+      "pose": "upright-v2:closed-idle:blink-half",
+      "exitTo": []
+    },
+    {
+      "source": "frames/closed-rest.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "durationMs": 7580,
+      "phase": "hold",
+      "cue": "QUIET",
+      "pose": "upright-v2:closed",
+      "exitTo": [
+        "upright-v2:closed"
+      ]
+    },
+    {
+      "source": "frames/blink-half.png",
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "durationMs": 45,
+      "phase": "act",
+      "cue": "BLINK_CLOSE",
+      "pose": "upright-v2:closed-idle:blink-half",
+      "exitTo": []
+    },
+    {
+      "source": "frames/blink-closed.png",
+      "sha256": "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6",
+      "durationMs": 85,
+      "phase": "act",
+      "cue": "BLINK_CLOSED",
+      "pose": "upright-v2:closed-idle:blink-closed",
+      "exitTo": []
+    },
+    {
+      "source": "frames/blink-half.png",
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "durationMs": 50,
+      "phase": "act",
+      "cue": "BLINK_OPEN",
+      "pose": "upright-v2:closed-idle:blink-half",
+      "exitTo": []
+    },
+    {
+      "source": "frames/closed-rest.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "durationMs": 5300,
+      "phase": "hold",
+      "cue": "QUIET",
+      "pose": "upright-v2:closed",
+      "exitTo": [
+        "upright-v2:closed"
+      ]
+    }
+  ],
+  "safeRecoveryFromActualExposure": {
+    "0": [
+      0
+    ],
+    "1": [
+      1,
+      0
+    ],
+    "2": [
+      2,
+      3,
+      0
+    ],
+    "3": [
+      3,
+      0
+    ],
+    "4": [
+      4
+    ],
+    "5": [
+      5,
+      0
+    ],
+    "6": [
+      6,
+      7,
+      0
+    ],
+    "7": [
+      7,
+      0
+    ],
+    "8": [
+      8
+    ],
+    "9": [
+      9,
+      0
+    ],
+    "10": [
+      10,
+      3,
+      0
+    ],
+    "11": [
+      11,
+      0
+    ],
+    "12": [
+      12
+    ],
+    "13": [
+      13,
+      0
+    ],
+    "14": [
+      14,
+      3,
+      0
+    ],
+    "15": [
+      15,
+      0
+    ],
+    "16": [
+      16
+    ]
+  },
+  "newUniqueSourceCount": 4,
+  "sources": [
+    {
+      "pose": "blink-half",
+      "source": "frames/blink-half.png",
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "authorSource": "references/neutral-blink-half.png",
+      "authorSourceSHA256": "efc14d3eaa97fcb1dafdfa8f21142286b3b06674940e4c16f180424895c9ab6f",
+      "mask": "frames/blink-half-mask.png",
+      "outsideMaskExact": true,
+      "closedLaptopHandsKneesStoolProtectedY250PlusExact": true
+    },
+    {
+      "pose": "blink-closed",
+      "source": "frames/blink-closed.png",
+      "sha256": "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6",
+      "authorSource": "references/neutral-blink-closed.png",
+      "authorSourceSHA256": "dd320f6b55172c9ef31c2ed617a49ddb14bb9a2686f39f22168b2337bc65678a",
+      "mask": "frames/blink-closed-mask.png",
+      "outsideMaskExact": true,
+      "closedLaptopHandsKneesStoolProtectedY250PlusExact": true
+    },
+    {
+      "pose": "look-left-middle",
+      "source": "frames/look-left-middle.png",
+      "sha256": "25efd7fb746e9650425cccb15f1f77e6029080101fdbaa898cb40bcc9c457df8",
+      "authorSource": "references/left-middle-authored.png",
+      "authorSourceSHA256": "7e13d4a99fa6f8e9341ca31dee7bc4091fc08f1342316116830aff2ec8e0b5a3",
+      "mask": "frames/look-left-middle-mask.png",
+      "outsideMaskExact": true,
+      "closedLaptopHandsKneesStoolProtectedY250PlusExact": true
+    },
+    {
+      "pose": "look-left-peak",
+      "source": "frames/look-left-peak.png",
+      "sha256": "b2bbc33f62b529e7be2dc4dceb2e6fd98f28f725e611be173cb18e9080dfacf3",
+      "authorSource": "references/left-peak-authored.png",
+      "authorSourceSHA256": "b4b3d3922a94acc52f99079a90faca64d2f2b8897baa32c00a84afeaf0f57e94",
+      "mask": "frames/look-left-peak-mask.png",
+      "outsideMaskExact": true,
+      "closedLaptopHandsKneesStoolProtectedY250PlusExact": true
+    }
+  ],
+  "rules": [
+    "Do not replay a side glance merely because a new business state arrives.",
+    "Latest real intent interrupts quiet hold immediately; actual gaze/eyelid drawing follows listed short recovery.",
+    "No blink over yawed head; all blinks occur on canonical head.",
+    "Reduced motion uses canonical closed-rest; no optional repeating gaze/blink.",
+    "No fake operations, completion or waiting receipt are conveyed.",
+    "Root pointer movement has priority; source-grab map must cover the four added actual SHA."
+  ],
+  "reuseEvidence": "Blink eye support pixels match canonical neutral exactly; yaw authored neck/head uses original coherent motion mask, all pixels y>=250 exactly canonical mechanical closed.",
+  "safeRecoveryExposureOverridesMs": {
+    "0": [
+      1
+    ],
+    "1": [
+      45,
+      80
+    ],
+    "2": [
+      75,
+      45,
+      80
+    ],
+    "3": [
+      45,
+      80
+    ],
+    "4": [
+      1
+    ],
+    "5": [
+      60,
+      80
+    ],
+    "6": [
+      60,
+      110,
+      80
+    ],
+    "7": [
+      60,
+      80
+    ],
+    "8": [
+      1
+    ],
+    "9": [
+      45,
+      80
+    ],
+    "10": [
+      75,
+      45,
+      80
+    ],
+    "11": [
+      45,
+      80
+    ],
+    "12": [
+      1
+    ],
+    "13": [
+      45,
+      80
+    ],
+    "14": [
+      75,
+      45,
+      80
+    ],
+    "15": [
+      50,
+      80
+    ],
+    "16": [
+      1
+    ]
+  },
+  "blinkSourceAliases": {
+    "blink-half": "../question-permission/local-closures/closed-quiet-blink-half.png",
+    "blink-closed": "../question-permission/local-closures/closed-quiet-blink-closed.png"
+  }
+}

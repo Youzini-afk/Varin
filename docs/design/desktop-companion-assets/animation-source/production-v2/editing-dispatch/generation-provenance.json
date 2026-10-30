@@ -1,0 +1,184 @@
+[
+  {
+    "pose": "type-burst",
+    "tool": "builtin image_gen",
+    "raw": "raw/type-burst.png",
+    "rawSHA256": "74203e76c5176c72da70673e71743737f90561eff38beb607d048a19b96ad341",
+    "exactPrompt": "exactprompts/type-burst.txt",
+    "referenceImage": "references/open-screen-read-v2.png",
+    "referenceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "review",
+    "tool": "builtin image_gen",
+    "raw": "raw/review.png",
+    "rawSHA256": "6cd7613e584524bdc54610bbc5203d69eb7da0b6d9b6e1231cb5c024cba7e69a",
+    "exactPrompt": "exactprompts/review.txt",
+    "referenceImage": "references/open-screen-read-v2.png",
+    "referenceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "dispatch-a",
+    "tool": "builtin image_gen",
+    "raw": "raw/dispatch-a.png",
+    "rawSHA256": "aa60223cf8208f6ea977b646951f60097b9e24738a3f2ca73035c24159305991",
+    "exactPrompt": "exactprompts/dispatch-a.txt",
+    "referenceImage": "references/upright-open-neutral-v2.png",
+    "referenceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "dispatch-b",
+    "tool": "builtin image_gen",
+    "raw": "raw/dispatch-b.png",
+    "rawSHA256": "ce9003566cc49ac570fc0babf98264b99a72b52de3f2d39bc6de5dc6cbcb6a24",
+    "exactPrompt": "exactprompts/dispatch-b.txt",
+    "referenceImage": "references/upright-open-neutral-v2.png",
+    "referenceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "dispatch-b-v2",
+    "tool": "builtin image_gen",
+    "raw": "raw/dispatch-b-v2.png",
+    "rawSHA256": "a9ab4b89c35d778070d0bafadde3147cd821fd6531fed29761d4ad426461e06a",
+    "exactPrompt": "exactprompts/dispatch-b-v2.txt",
+    "referenceImage": "raw/dispatch-a.png",
+    "referenceSHA256": "aa60223cf8208f6ea977b646951f60097b9e24738a3f2ca73035c24159305991",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "review-v2",
+    "tool": "builtin image_gen",
+    "raw": "raw/review-v2.png",
+    "rawSHA256": "ba06d82d586cd2e05dbbdabdc468854c5417e923f1e24c3c449d6087de088c0b",
+    "exactPrompt": "exactprompts/review-v2.txt",
+    "referenceImage": "references/open-screen-read-v2.png",
+    "referenceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "gaze-right",
+    "tool": "builtin image_gen",
+    "raw": "raw/gaze-right.png",
+    "rawSHA256": "d21794e9df32e4d8159efeb53477eb1286c4bb5eeba7bc06719af41ce39d9a3b",
+    "exactPrompt": "exactprompts/gaze-right.txt",
+    "referenceImage": "references/upright-open-neutral-v2.png",
+    "referenceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "dispatch-rise",
+    "tool": "builtin image_gen",
+    "raw": "raw/dispatch-rise.png",
+    "rawSHA256": "6c1b45f9787282c8be46a944098fb783073a6abff2dd78b416474b2e33b6e7f8",
+    "exactPrompt": "exactprompts/dispatch-rise.txt",
+    "referenceImage": "raw/dispatch-a.png",
+    "referenceSHA256": "aa60223cf8208f6ea977b646951f60097b9e24738a3f2ca73035c24159305991",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "review-rise",
+    "tool": "builtin image_gen",
+    "raw": "raw/review-rise.png",
+    "rawSHA256": "deb167f4d773444096db06c733261ff7c037a8ea7643e99b500f794ebf4c4220",
+    "exactPrompt": "exactprompts/review-rise.txt",
+    "referenceImage": "raw/review.png",
+    "referenceSHA256": "6cd7613e584524bdc54610bbc5203d69eb7da0b6d9b6e1231cb5c024cba7e69a",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "type-forward",
+    "tool": "builtin image_gen",
+    "raw": "raw/type-forward.png",
+    "rawSHA256": "caf89af78e31a3779c5aaadb7cfa8cd8c7d18cdeff3448d4e78d6ec08a600f4b",
+    "exactPrompt": "exactprompts/type-forward.txt",
+    "referenceImage": "references/open-screen-read-v2.png",
+    "referenceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "select",
+    "tool": "builtin image_gen",
+    "raw": "raw/select.png",
+    "rawSHA256": "3fbe82216ea6408738bc6270af22dc178d2003f6ed65128637f27b21ad730c58",
+    "exactPrompt": "exactprompts/select.txt",
+    "referenceImage": "references/open-screen-read-v2.png",
+    "referenceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "dispatch-transit",
+    "tool": "builtin image_gen",
+    "raw": "raw/dispatch-transit.png",
+    "rawSHA256": "a7a6cc54d5113352704453d14e2b8ba781a0f89c5a9b4e273e0e6cdfc9980c72",
+    "exactPrompt": "exactprompts/dispatch-transit.txt",
+    "referenceImage": "raw/dispatch-rise.png",
+    "referenceSHA256": "6c1b45f9787282c8be46a944098fb783073a6abff2dd78b416474b2e33b6e7f8",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  },
+  {
+    "pose": "type-prepare",
+    "tool": "builtin image_gen",
+    "raw": "raw/type-prepare.png",
+    "rawSHA256": "8b2425e8c09b12eca4431f0c7281ddd0ce8fae38480d4caabd77c7c95f862e96",
+    "exactPrompt": "exactprompts/type-prepare.txt",
+    "referenceImage": "raw/type-forward.png",
+    "referenceSHA256": "caf89af78e31a3779c5aaadb7cfa8cd8c7d18cdeff3448d4e78d6ec08a600f4b",
+    "postprocess": [
+      "clean_raw.py edge-only matte cleanup",
+      "register.py local anatomical mask, fullviewport 512, no bbox/rig",
+      "build_sequences.py timed discrete authored frame holds"
+    ]
+  }
+]

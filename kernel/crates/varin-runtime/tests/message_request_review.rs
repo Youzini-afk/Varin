@@ -437,6 +437,9 @@ fn request_preserves_real_manual_pause_and_unanswered_question_across_reopen() {
                 arguments: json!({"questions":[{"id":"question","question":"A real unanswered question"}]}),
             });
             let wait = f.db.open_question(&call).unwrap();
+            assert!(!f.db.capture_attention_read().load(&|| false).unwrap().items.iter()
+                .any(|item| item.kind == "question" && item.operation_id.as_deref() == Some(call.operation_id.as_str())),
+                "an unconsumed Job acceptance is not an answerable question");
             f.settle_policy_call(&call, "awaiting_user");
             f.db.commit_execution(
                 &run,
@@ -447,6 +450,10 @@ fn request_preserves_real_manual_pause_and_unanswered_question_across_reopen() {
                 },
             )
             .unwrap();
+            let attention = f.db.capture_attention_read().load(&|| false).unwrap();
+            assert!(attention.items.iter().any(|item| item.kind == "question" && item.actionable
+                && item.operation_id.as_deref() == Some(call.operation_id.as_str())));
+            assert!(!serde_json::to_string(&attention).unwrap().contains("A real unanswered question"));
             wait
         } else {
             f.db.commit_execution(

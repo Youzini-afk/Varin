@@ -1,0 +1,45 @@
+{
+  "status": "original authored outputs, expected invariant PNG bytes and RGBA pixels",
+  "candidates": [
+    {
+      "path": "read-prepare-v2-candidate.png",
+      "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482"
+    },
+    {
+      "path": "read-middle-v1-candidate.png",
+      "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa"
+    },
+    {
+      "path": "read-settle-v1-candidate.png",
+      "sha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3"
+    },
+    {
+      "path": "read-hand-prepare-v1-candidate.png",
+      "sha256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825"
+    },
+    {
+      "path": "read-turn-v1-candidate.png",
+      "sha256": "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742"
+    },
+    {
+      "path": "search-left-middle-v1-candidate.png",
+      "sha256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce"
+    },
+    {
+      "path": "search-left-v1-candidate.png",
+      "sha256": "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263"
+    },
+    {
+      "path": "search-right-middle-v1-candidate.png",
+      "sha256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5"
+    },
+    {
+      "path": "search-right-v1-candidate.png",
+      "sha256": "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852"
+    },
+    {
+      "path": "search-focus-v1-candidate.png",
+      "sha256": "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b"
+    }
+  ]
+}

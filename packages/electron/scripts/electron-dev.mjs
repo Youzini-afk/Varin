@@ -244,7 +244,9 @@ async function main() {
     console.log('[electron:dev] HMR UI and API are ready; launching Electron...');
   }
 
-  const electron = spawnProcess(electronExecutable, ['./dist-bundle/main.mjs'], {
+  // Load package.json -> bootstrap.mjs so Electron knows the app identity.
+  // Keep the argument absolute: main changes cwd before a possible relaunch.
+  const electron = spawnProcess(electronExecutable, [electronDir], {
     cwd: electronDir,
     env: {
       ...process.env,

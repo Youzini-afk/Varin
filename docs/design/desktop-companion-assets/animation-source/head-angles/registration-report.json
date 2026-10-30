@@ -1,0 +1,88 @@
+{
+  "sourceCrop": [
+    350,
+    100,
+    1030,
+    700
+  ],
+  "canonicalNeckPivot": [
+    738,
+    510
+  ],
+  "registration": [
+    {
+      "pose": "up",
+      "sourceSize": [
+        1335,
+        1178
+      ],
+      "normalizedCropSize": [
+        680,
+        600
+      ],
+      "similarityTransformAfterResize": [
+        [
+          0.9985963544810914,
+          0.0017148135952994232,
+          0.1587383739312963
+        ],
+        [
+          -0.0017148135952994232,
+          0.9985963544810914,
+          1.9496522577688762
+        ]
+      ],
+      "parameters_scale_angleRadians_tx_ty": [
+        0.99859782683951,
+        -0.001717222281081528,
+        0.5389056951521018,
+        0.6647928759128245
+      ],
+      "stationaryTorsoFitROI": [
+        250,
+        465,
+        470,
+        590
+      ],
+      "rgbResidualRMSE": 0.24717359617252618,
+      "note": "Approximate torso texture registration, not exact source pixel preservation. Full crop is a reference; do not replace canonical torso or simply crossfade full heads."
+    },
+    {
+      "pose": "down",
+      "sourceSize": [
+        1335,
+        1178
+      ],
+      "normalizedCropSize": [
+        680,
+        600
+      ],
+      "similarityTransformAfterResize": [
+        [
+          1.0016793730428217,
+          -0.004898048016183144,
+          0.9354961142287134
+        ],
+        [
+          0.004898048016183144,
+          1.0016793730428217,
+          0.4500347985951869
+        ]
+      ],
+      "parameters_scale_angleRadians_tx_ty": [
+        1.001691348297383,
+        0.004889797184910801,
+        -0.9425410593034668,
+        2.955057645508294
+      ],
+      "stationaryTorsoFitROI": [
+        250,
+        465,
+        470,
+        590
+      ],
+      "rgbResidualRMSE": 0.09432461167632476,
+      "note": "Approximate torso texture registration, not exact source pixel preservation. Full crop is a reference; do not replace canonical torso or simply crossfade full heads."
+    }
+  ]
+}

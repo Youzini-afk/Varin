@@ -1,0 +1,16 @@
+{
+  "geometricReference": {
+    "file": "seated-open-canonical-v1.png",
+    "sha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b"
+  },
+  "origin": {
+    "file": "../user-attention/frames/click-open-cycle-v1/pose-001.png",
+    "operation": "Alpha composite the exact extracted source cel on opaque white512x512 and convert RGB; no resizing or geometry changes. PIL PNG output reproduces exact geometricReference sha256."
+  },
+  "upstream": "../user-attention/extract_keyposes.py and ../user-attention/metadata/prompt-click-open.txt preserve source extraction/generation.",
+  "alphaReference": {
+    "file": "seated-open-canonical-alpha-v1.png",
+    "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+  },
+  "status": "Internal production geometry/matte baseline, not whole-motion or final-user visual acceptance"
+}

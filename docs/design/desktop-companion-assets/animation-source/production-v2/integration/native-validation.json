@@ -1,0 +1,27 @@
+{
+  "completedAtUtc": "2026-10-29T09:54:27Z",
+  "observer": "parent actual native GUI validation",
+  "platform": "Linux",
+  "bundleSha256": "399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268",
+  "mainSha256": "72e20e939004319524bf48cdeecb6e09c2d10c3f689ca8e2f82dcea8de505d92",
+  "worldPlateSha256": "b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7",
+  "passed": [
+    "Cold upright reading and scroll-away/return scene restoration",
+    "All six scene identities; unresolved permission stays locked and question stays a question",
+    "Visible decorative paper click passes to underlying input; test text cleared without sending",
+    "Pin and left-edge paper reflow with inward laptop connector",
+    "Repeated actual pointer quick drag/release from closed idle",
+    "Two immediate successive drags from open reading, then settled reading with scene restored",
+    "Normal main close removes main, companion, scene and stool windows",
+    "QA settings backup restored byte-identically"
+  ],
+  "narrowRerunLogSha256": "0e37dde63a642bd8eb9f7b00dc86603bd9e9aad1c492803665bf479a3dd2d61e",
+  "narrowRerunAuxiliaryWarnings": 0,
+  "gracefulShutdownObserved": true,
+  "limits": [
+    "No claim of pixel-by-pixel native held-airborne intermediate-frame verification",
+    "Windows and macOS not tested",
+    "No physical multi-display hot unplug test"
+  ],
+  "oldLogs": "Previous generic auxiliary errors discarded their causes and remain inconclusive; corrected visibility/diagnostics were separately rerun."
+}

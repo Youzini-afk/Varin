@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "frames/gather-in-v1.png",
+  "sourceSHA256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf",
+  "raw": "raw/gather-user-v1.png",
+  "rawSHA256": "70f762347393d1b826ccf05c2f8dc6e28cbe21164a098d13649f3fe21fdbfcad",
+  "prompt": "prompts/gather-user-v1.txt",
+  "output": "frames/gather-user-v1.png",
+  "sha256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20",
+  "mask": "masks/gather-user-v1.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

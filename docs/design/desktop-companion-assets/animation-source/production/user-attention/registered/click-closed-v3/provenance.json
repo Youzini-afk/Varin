@@ -1,0 +1,51 @@
+{
+  "sharedAlpha": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+  "normalization": "fixed full viewport only",
+  "frames": [
+    {
+      "sourceDrawing": "closed-shared-reference-v1.png",
+      "region": "base",
+      "protectedRgbaPixelsExact": 262144
+    },
+    {
+      "sourceDrawing": "attention-eye-lead-single-v1.png",
+      "region": "eye",
+      "protectedRgbaPixelsExact": 257431
+    },
+    {
+      "sourceDrawing": "click-closed-notice-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 187977
+    },
+    {
+      "sourceDrawing": "click-closed-halfblink-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 187977
+    },
+    {
+      "sourceDrawing": "click-closed-fullblink-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 187977
+    },
+    {
+      "sourceDrawing": "click-closed-halfblink-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 187977
+    },
+    {
+      "sourceDrawing": "click-closed-notice-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 187977
+    },
+    {
+      "sourceDrawing": "attention-eye-lead-single-v1.png",
+      "region": "eye",
+      "protectedRgbaPixelsExact": 257431
+    },
+    {
+      "sourceDrawing": "closed-shared-reference-v1.png",
+      "region": "base",
+      "protectedRgbaPixelsExact": 262144
+    }
+  ]
+}

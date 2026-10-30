@@ -1,0 +1,2753 @@
+{
+  "packageCount": 35,
+  "uniqueDrawings": 134,
+  "exactFileMapped": 46,
+  "mappedIncludingSameVisiblePixels": 46,
+  "scope": "Candidate entry presence, not blanket acceptance. Pixel aliases normalize alpha-zero RGB and premultiply; never normalize body geometry.",
+  "drawings": [
+    {
+      "sourceSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "visiblePixelSha256": "49092b2220356393e1bc317b1fcb269745b584638ae9aeed77a52165eb2222a0",
+      "uses": [
+        {
+          "package": "seated-work.canonical-typing-v2-pose-v1",
+          "exposure": 0,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "seated-work.canonical-typing-v2-pose-v1",
+          "exposure": 5,
+          "source": "frame-006.png"
+        },
+        {
+          "package": "seated-work.canonical-scroll-v2-pose-v1",
+          "exposure": 0,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "seated-work.canonical-scroll-v2-pose-v1",
+          "exposure": 5,
+          "source": "frame-006.png"
+        },
+        {
+          "package": "observe.gaze-to-screen-v1-pose-v1",
+          "exposure": 3,
+          "source": "read-screen.png"
+        },
+        {
+          "package": "observe.gaze-to-user-v1-pose-v1",
+          "exposure": 0,
+          "source": "read-screen.png"
+        },
+        {
+          "package": "observe.wait-enter-v1-boundary-v1",
+          "exposure": 0,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "observe.wait-exit-v1-boundary-v1",
+          "exposure": 5,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "observe.cancel-entry-boundary-v1",
+          "exposure": 0,
+          "source": "read.png"
+        },
+        {
+          "package": "observe.failure-entry-boundary-v1",
+          "exposure": 0,
+          "source": "read.png"
+        },
+        {
+          "package": "observe.unknown-entry-boundary-v1",
+          "exposure": 0,
+          "source": "read.png"
+        },
+        {
+          "package": "observe.sync-attention-boundary-v1",
+          "exposure": 4,
+          "source": "read.png"
+        },
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 0,
+          "source": "read.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 6,
+          "source": "read.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 7,
+          "source": "read.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1"
+      ]
+    },
+    {
+      "sourceSha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "visiblePixelSha256": "973ab30998e641802ff19a4ca64e1f1439c608b08a2d77f38133c7d79cf3e123",
+      "uses": [
+        {
+          "package": "seated-work.canonical-typing-v2-pose-v1",
+          "exposure": 1,
+          "source": "frame-002.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "visiblePixelSha256": "cb22fb707cd0d3513043fe69ab0cd15e49ee755a47dc251e0bdfe9482fef9af7",
+      "uses": [
+        {
+          "package": "seated-work.canonical-typing-v2-pose-v1",
+          "exposure": 2,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+      "visiblePixelSha256": "ec1955f185f151a6a0b8ba39c7015d189de5aacf0210e4bb1e3b055a318fb9d8",
+      "uses": [
+        {
+          "package": "seated-work.canonical-typing-v2-pose-v1",
+          "exposure": 3,
+          "source": "frame-004.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+      "visiblePixelSha256": "2a56a8e4a3053d4068a2b4754b88ebd0913f37e6866a86ee0f2dc88272c86f12",
+      "uses": [
+        {
+          "package": "seated-work.canonical-typing-v2-pose-v1",
+          "exposure": 4,
+          "source": "frame-005.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343",
+      "visiblePixelSha256": "807ccdaa2d196de69c2c9a30847c13a18f9217e69707fde7fe77a0659dd51173",
+      "uses": [
+        {
+          "package": "seated-work.canonical-scroll-v2-pose-v1",
+          "exposure": 1,
+          "source": "frame-002.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c",
+      "visiblePixelSha256": "34a1d164cd3b2d82d742b212b56398c531a1846277388b23ebce3f8469138421",
+      "uses": [
+        {
+          "package": "seated-work.canonical-scroll-v2-pose-v1",
+          "exposure": 2,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316",
+      "visiblePixelSha256": "83e8543073b1f400ffc63858d089a368debcde996baaf9db63ce07fd01661d79",
+      "uses": [
+        {
+          "package": "seated-work.canonical-scroll-v2-pose-v1",
+          "exposure": 3,
+          "source": "frame-004.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef",
+      "visiblePixelSha256": "61f0f028b127a489e360436f89ab02a6a45c9a88d39249bdf131e458b9e47025",
+      "uses": [
+        {
+          "package": "seated-work.canonical-scroll-v2-pose-v1",
+          "exposure": 4,
+          "source": "frame-005.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "visiblePixelSha256": "deeb8f95ed1f0139ebad8be01649280e0949874719516b58d4198de35101faff",
+      "uses": [
+        {
+          "package": "observe.gaze-to-screen-v1-pose-v1",
+          "exposure": 0,
+          "source": "neutral.png"
+        },
+        {
+          "package": "observe.gaze-to-user-v1-pose-v1",
+          "exposure": 3,
+          "source": "neutral.png"
+        },
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 37,
+          "source": "frame-037.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "permission-palm-release-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        },
+        {
+          "package": "question-ask-enter-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "question-chin-release-v1",
+          "exposure": 5,
+          "source": "frame-005.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 5,
+          "source": "frame-005.png"
+        },
+        {
+          "package": "relaxed-to-neutral-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        },
+        {
+          "package": "relaxed-settled-to-neutral-v1",
+          "exposure": 5,
+          "source": "frame-005.png"
+        },
+        {
+          "package": "answer-understood-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "answer-understood-v1",
+          "exposure": 4,
+          "source": "frame-004.png"
+        },
+        {
+          "package": "completion-once-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "completion-once-v1",
+          "exposure": 10,
+          "source": "frame-010.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+      ]
+    },
+    {
+      "sourceSha256": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824",
+      "visiblePixelSha256": "ca7308d38c980042818ec81cdd2f88bb07f853b6baeda00a93786abba28a33bc",
+      "uses": [
+        {
+          "package": "observe.gaze-to-screen-v1-pose-v1",
+          "exposure": 1,
+          "source": "half.png"
+        },
+        {
+          "package": "observe.gaze-to-user-v1-pose-v1",
+          "exposure": 1,
+          "source": "half.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f",
+      "visiblePixelSha256": "222fa828f149c64bf3cd837c2cb7dc056f14a9ea53683ae9f016b92b3d141f2a",
+      "uses": [
+        {
+          "package": "observe.gaze-to-screen-v1-pose-v1",
+          "exposure": 2,
+          "source": "closed.png"
+        },
+        {
+          "package": "observe.gaze-to-user-v1-pose-v1",
+          "exposure": 2,
+          "source": "closed.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "e0757a3837d659b3f6015eb168932667fdaeaca537abcd43c4b6dff04eea3404",
+      "visiblePixelSha256": "7350a11e9bf76fddfd4f23c635f7068edb92313808beb93f23c6d9e06270ce6f",
+      "uses": [
+        {
+          "package": "observe.wait-enter-v1-boundary-v1",
+          "exposure": 1,
+          "source": "pose-001.png"
+        },
+        {
+          "package": "observe.wait-exit-v1-boundary-v1",
+          "exposure": 4,
+          "source": "pose-001.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "e0757a3837d659b3f6015eb168932667fdaeaca537abcd43c4b6dff04eea3404"
+      ]
+    },
+    {
+      "sourceSha256": "3d432405b24022b9f068293624f0cf63940f5a0a1f3550cc58551f6467024e43",
+      "visiblePixelSha256": "cc8d4ac431d670d10cbc89002cd2063898fd46de6904cc1af38cf49a35ca44de",
+      "uses": [
+        {
+          "package": "observe.wait-enter-v1-boundary-v1",
+          "exposure": 2,
+          "source": "pose-002.png"
+        },
+        {
+          "package": "observe.wait-exit-v1-boundary-v1",
+          "exposure": 3,
+          "source": "pose-002.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "3d432405b24022b9f068293624f0cf63940f5a0a1f3550cc58551f6467024e43"
+      ]
+    },
+    {
+      "sourceSha256": "ae13c9f58666b277628768a528885b88e05c984490f13aa454c8a6cc8831d191",
+      "visiblePixelSha256": "4e0f24501f666dfa07120b39b36b037928232d1e85f657f10d855dae4d417d73",
+      "uses": [
+        {
+          "package": "observe.wait-enter-v1-boundary-v1",
+          "exposure": 3,
+          "source": "pose-003.png"
+        },
+        {
+          "package": "observe.wait-exit-v1-boundary-v1",
+          "exposure": 2,
+          "source": "pose-003.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "ae13c9f58666b277628768a528885b88e05c984490f13aa454c8a6cc8831d191"
+      ]
+    },
+    {
+      "sourceSha256": "878b9db63ea007ef20b94d3b244ebd2d1272b7d9a64c6a16f1da9b02e7ce346d",
+      "visiblePixelSha256": "b9eb25d52dd05e68917377c270f5ba661bd79e981343c22d7f998df510563d90",
+      "uses": [
+        {
+          "package": "observe.wait-enter-v1-boundary-v1",
+          "exposure": 4,
+          "source": "pose-004.png"
+        },
+        {
+          "package": "observe.wait-exit-v1-boundary-v1",
+          "exposure": 1,
+          "source": "pose-004.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "878b9db63ea007ef20b94d3b244ebd2d1272b7d9a64c6a16f1da9b02e7ce346d"
+      ]
+    },
+    {
+      "sourceSha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87",
+      "visiblePixelSha256": "5dd0058cbbf85fef465b0f078b672741ea70a593ab46582f1311fa084599794c",
+      "uses": [
+        {
+          "package": "observe.wait-enter-v1-boundary-v1",
+          "exposure": 5,
+          "source": "pose-005.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 0,
+          "source": "pose-005.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 4,
+          "source": "pose-005.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 6,
+          "source": "pose-005.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 10,
+          "source": "pose-005.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 16,
+          "source": "pose-005.png"
+        },
+        {
+          "package": "observe.wait-exit-v1-boundary-v1",
+          "exposure": 0,
+          "source": "pose-005.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87"
+      ]
+    },
+    {
+      "sourceSha256": "fa76ec4c24fdcee17b55ce1701ff9dc55283a4752443a1244ba69325c3d3a956",
+      "visiblePixelSha256": "1ccad284a5540ea83926316a9535e1650caf906c2126314c192f5d464152f6d3",
+      "uses": [
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 1,
+          "source": "hold-half.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 3,
+          "source": "hold-half.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 11,
+          "source": "hold-half.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 14,
+          "source": "hold-half.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "fa76ec4c24fdcee17b55ce1701ff9dc55283a4752443a1244ba69325c3d3a956"
+      ]
+    },
+    {
+      "sourceSha256": "cb3bbea7be2e9282e380587c36ad6d08ca43a4682647407f5af64a2482c90bd9",
+      "visiblePixelSha256": "fa0423aecef36b1e1471814632735efa36eb8ff3fb8f5f1e95f956d3668cad77",
+      "uses": [
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 2,
+          "source": "hold-closed.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 12,
+          "source": "hold-closed.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 15,
+          "source": "hold-closed.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "cb3bbea7be2e9282e380587c36ad6d08ca43a4682647407f5af64a2482c90bd9"
+      ]
+    },
+    {
+      "sourceSha256": "916e137dc07b3dc9e8e5ff6ce3dc6a80761fdc37d0821d1ffc4e6b728447baf8",
+      "visiblePixelSha256": "b9b5e0e23823d07d7e2d7d42f4b195c1bdf216b11edd40c3fa36ebe9f0c2b202",
+      "uses": [
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 5,
+          "source": "chin-settled.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "916e137dc07b3dc9e8e5ff6ce3dc6a80761fdc37d0821d1ffc4e6b728447baf8"
+      ]
+    },
+    {
+      "sourceSha256": "09da09c185209721f9890563d264267c8a99a660bafcebd5242b515aa6c7bbdb",
+      "visiblePixelSha256": "ec2e2109bbefb463bcbde14cff4e4dd32c86e9b28a5c9cd8441a0b29857e7786",
+      "uses": [
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 7,
+          "source": "rim-approach.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 9,
+          "source": "rim-approach.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "aec5891fd40471c2d4dfd4dd370d95fe5b450bdf2bcaaad86124ca21fa6a5722",
+      "visiblePixelSha256": "ac1b1e9b1f860b1fefadce267c4d50d28dfcfde21afb12b120a0784db5a96c1f",
+      "uses": [
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 8,
+          "source": "rim-rest.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "aec5891fd40471c2d4dfd4dd370d95fe5b450bdf2bcaaad86124ca21fa6a5722"
+      ]
+    },
+    {
+      "sourceSha256": "8ce2c012514281146a422c9369df895242f6642f03c07535568dafd6861bd780",
+      "visiblePixelSha256": "79899ac0f949172b6a3d70b3df8d30b1be017ee9345b10d2d1e79cd60ad44788",
+      "uses": [
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 13,
+          "source": "chin-glance-user.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "visiblePixelSha256": "0d2524fde26229a4ad69a69ada0df60896afc7b2b999f2b66d2bba688ddce619",
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 0,
+          "source": "neutral.png"
+        },
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 4,
+          "source": "neutral.png"
+        },
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 8,
+          "source": "neutral.png"
+        },
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 0,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 8,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 0,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 16,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 36,
+          "source": "frame-036.png"
+        },
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 0,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 9,
+          "source": "pose-009.png"
+        },
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 0,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 10,
+          "source": "pose-010.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+      ]
+    },
+    {
+      "sourceSha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "visiblePixelSha256": "59c66bf48d4290737d0f06223d824a16d98ad19a12bdfe40d4b23c64ae41095b",
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 1,
+          "source": "half.png"
+        },
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 3,
+          "source": "half.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "visiblePixelSha256": "611b6c713286b47ade4ee8e4df19de4ba9fad142d92a08b4ca93531d9048f652",
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 2,
+          "source": "closed.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "visiblePixelSha256": "f57c96aace66535484627b210305e8c056d18c438aae4cd17ee66ab4a852b85a",
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 5,
+          "source": "between.png"
+        },
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 7,
+          "source": "between.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "visiblePixelSha256": "f2bb8e1d331c6f722d35c20584149948b15d5f1531de33171f98f4174d1eab65",
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 6,
+          "source": "settle.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "visiblePixelSha256": "5a5b1da6cbb507dbed6f421dc7e0ccee3acde683e4fd285e8aa0ab819d29c18e",
+      "uses": [
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 1,
+          "source": "pose-001.png"
+        },
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 7,
+          "source": "pose-001.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 1,
+          "source": "pose-001.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 15,
+          "source": "pose-001.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b"
+      ]
+    },
+    {
+      "sourceSha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "visiblePixelSha256": "e2aed8388c2a38a1e856ed416550060bda3192035a91de8e1e07f4beab26011e",
+      "uses": [
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 2,
+          "source": "pose-002.png"
+        },
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 6,
+          "source": "pose-002.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 2,
+          "source": "pose-002.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 14,
+          "source": "pose-002.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5"
+      ]
+    },
+    {
+      "sourceSha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "visiblePixelSha256": "bb409e2efd006f3e7a1a22d0214c060e369c1ad562d95439f60b00b440d55fa6",
+      "uses": [
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 3,
+          "source": "pose-003.png"
+        },
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 5,
+          "source": "pose-003.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 3,
+          "source": "pose-003.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 13,
+          "source": "pose-003.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985"
+      ]
+    },
+    {
+      "sourceSha256": "ebe9c0ce1fc1ef0fb2527229155c211c248c061e52ef21c17dec26e8eb7fccce",
+      "visiblePixelSha256": "7288545b8b77d8b0818f84579e4984c1576ba51c0d0ee5b9836907d8c11ed2b2",
+      "uses": [
+        {
+          "package": "rest.closed-eye-rub-v1-boundary-v1",
+          "exposure": 4,
+          "source": "pose-004.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "ebe9c0ce1fc1ef0fb2527229155c211c248c061e52ef21c17dec26e8eb7fccce"
+      ]
+    },
+    {
+      "sourceSha256": "3e8510d61b4fba530ba26c0d1a248a394dd18ecf8bc542ed2ad311f3f97acefa",
+      "visiblePixelSha256": "0c65f7cf47c2bb129b9f997b73cd0bddea05cfea9ac9ab225ba3f1e6dd2c0f50",
+      "uses": [
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 4,
+          "source": "pose-004.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 12,
+          "source": "pose-004.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "3e8510d61b4fba530ba26c0d1a248a394dd18ecf8bc542ed2ad311f3f97acefa"
+      ]
+    },
+    {
+      "sourceSha256": "83cf11a74ce177e7d10326aa2c4ab9be5c05dc6ab863a9b64f8fcb0e31fde8e7",
+      "visiblePixelSha256": "d6cd7f4db8b2706868403eefebc555f21b9f2116d11bd7389f0a88f4775e0164",
+      "uses": [
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 5,
+          "source": "pose-005.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 11,
+          "source": "pose-005.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "83cf11a74ce177e7d10326aa2c4ab9be5c05dc6ab863a9b64f8fcb0e31fde8e7"
+      ]
+    },
+    {
+      "sourceSha256": "7d9897deb4e13e0a15002b281e6f64a2ff255abeb7398fd010f09448b57ccacd",
+      "visiblePixelSha256": "fc654b139775fc687e0a13482437f8e04ac8fcbd18b9049566fb1feed5be4073",
+      "uses": [
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 6,
+          "source": "pose-006.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 10,
+          "source": "pose-006.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "7d9897deb4e13e0a15002b281e6f64a2ff255abeb7398fd010f09448b57ccacd"
+      ]
+    },
+    {
+      "sourceSha256": "511cb52602068b691562161a69cf80af2c82141a781c727ba86c9315cdaaef90",
+      "visiblePixelSha256": "9360edb6e92b2ff2167aa4cc4e8e56ed2905b46c97b2222205e3f385d5ac8ca0",
+      "uses": [
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 7,
+          "source": "pose-007.png"
+        },
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 9,
+          "source": "pose-007.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "511cb52602068b691562161a69cf80af2c82141a781c727ba86c9315cdaaef90"
+      ]
+    },
+    {
+      "sourceSha256": "a178622139811eeb1a4f1c17c78430028c5026cf55351e11b216fec0f3e755e8",
+      "visiblePixelSha256": "a08f243566f5b272d42cc6123215bd51a5257c0ff2c9be6a3bdb287f59b390c6",
+      "uses": [
+        {
+          "package": "rest.closed-stretch-v1-boundary-v1",
+          "exposure": 8,
+          "source": "pose-008.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "a178622139811eeb1a4f1c17c78430028c5026cf55351e11b216fec0f3e755e8"
+      ]
+    },
+    {
+      "sourceSha256": "8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9",
+      "visiblePixelSha256": "e7d3145823aa461b8c5cab77cb3403ff04752fde241c569d20114b99170f9c1a",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 1,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 35,
+          "source": "frame-035.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8",
+      "visiblePixelSha256": "e0d88909796341a120c6aca5bd78d29c96779fa0f0d9119e44556f5bc5c1956e",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 2,
+          "source": "frame-002.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 34,
+          "source": "frame-034.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6",
+      "visiblePixelSha256": "0a5aef08a10e8dfeb0dbce46f4ec2c635549c8166297eb226a76beddf1801507",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 3,
+          "source": "frame-003.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 33,
+          "source": "frame-033.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99",
+      "visiblePixelSha256": "455ed62f705dcfd1dd5925a5924e9e848716db9cde65e3a7989aeb635552be5c",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 4,
+          "source": "frame-004.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 32,
+          "source": "frame-032.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f",
+      "visiblePixelSha256": "3cdc3dfae4a553f0753fc45bd12604b28fb61cd2fc8a4ddcf3c86b5a5b3a0e3b",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 5,
+          "source": "frame-005.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 31,
+          "source": "frame-031.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81",
+      "visiblePixelSha256": "7836839846b97a50e53a952478526133a175224ceb05420aff41d3e77d08bdd8",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 6,
+          "source": "frame-006.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 30,
+          "source": "frame-030.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80",
+      "visiblePixelSha256": "e5e254602ffb819237c183e17357b0ccb3b847336ccc5a62a80cd236d7dd6d74",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 7,
+          "source": "frame-007.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 29,
+          "source": "frame-029.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67",
+      "visiblePixelSha256": "deda2c4f306d5ade8078e238da90210d99dad1848bb83327ba48922b854d2261",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 8,
+          "source": "frame-008.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 28,
+          "source": "frame-028.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9",
+      "visiblePixelSha256": "b82db9a6af88f521901a5aa584fe6cf393954796f8277d8b4c772b435a8cdb6f",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 9,
+          "source": "frame-009.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 27,
+          "source": "frame-027.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611",
+      "visiblePixelSha256": "6b454aeb34893989b596f41594adfedcefc7413db4ab6466912a3f2876a0db28",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 10,
+          "source": "frame-010.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 26,
+          "source": "frame-026.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6",
+      "visiblePixelSha256": "319bce0087e57b09b577846b7ec186c4c49816e55b8d9b212f01428ade08cb3b",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 11,
+          "source": "frame-011.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 25,
+          "source": "frame-025.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05",
+      "visiblePixelSha256": "6f290c197f83f4a2c8bb5875207c561f6a345b0796007a6bb096b57f6333d88b",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 12,
+          "source": "frame-012.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 24,
+          "source": "frame-024.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3",
+      "visiblePixelSha256": "7d6eeb592168247d9339acbd4cd9699ea14dceae6a571df55e8cc201dd154f29",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 13,
+          "source": "frame-013.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 23,
+          "source": "frame-023.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba",
+      "visiblePixelSha256": "9e4aeefbac25c20b0ad993fbbc10d3ded64ac5b9331fc30b51b7cbc219e32f4e",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 14,
+          "source": "frame-014.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 22,
+          "source": "frame-022.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16",
+      "visiblePixelSha256": "edfdebb62c721d282a7d0f9e5ff434b6f6618d3ef0c0a893b293801d859931da",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 15,
+          "source": "frame-015.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 21,
+          "source": "frame-021.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9",
+      "visiblePixelSha256": "5faa7e2d621d2cbf07afbc71c2c4abc57352c5834b73f416dfecba7a8e0ca8ae",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 16,
+          "source": "frame-016.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 20,
+          "source": "frame-020.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1",
+      "visiblePixelSha256": "c40973ad5dfe8b9eedefb709d9d5ddfc47f1d138c2376b3eef291f2b01137ca1",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 17,
+          "source": "frame-017.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 19,
+          "source": "frame-019.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a",
+      "visiblePixelSha256": "7e2123a5b45e8d791bb4543e2e56fe51c585b4fdc2d0f4d7fd17b434d64bca1e",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 18,
+          "source": "frame-018.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 18,
+          "source": "frame-018.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f",
+      "visiblePixelSha256": "2e0df437863f3212574ec4dc3d7d5d03b697c6a5818a91b90f384ae6d3655dd6",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 19,
+          "source": "frame-019.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 17,
+          "source": "frame-017.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287",
+      "visiblePixelSha256": "f5357bd66fbb658c20ce9494c4b4a502581ab3bae6393d637aaa9902b62d57a3",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 20,
+          "source": "frame-020.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 16,
+          "source": "frame-016.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b",
+      "visiblePixelSha256": "1f21a0d7791eda657f5014657421ec331143a881718a49cb61f4332186c20a2f",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 21,
+          "source": "frame-021.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 15,
+          "source": "frame-015.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646",
+      "visiblePixelSha256": "d553532d1c81f8adbf3f690b4a8acc17d2a7a62e7f44172ad8247fcd5650bf79",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 22,
+          "source": "frame-022.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 14,
+          "source": "frame-014.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc",
+      "visiblePixelSha256": "d81afed494a33be24e489b8f36a64d4b38457980684f0bb8a643e8be93de99a5",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 23,
+          "source": "frame-023.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 13,
+          "source": "frame-013.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9",
+      "visiblePixelSha256": "326f4c8d7df851566df2a21947007abfedde8c3d7f11dda9e089a626b3ccd879",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 24,
+          "source": "frame-024.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 12,
+          "source": "frame-012.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d",
+      "visiblePixelSha256": "3ed19d59871c055d296b6a3e43cecea399184c723682b9723204fd220f8b3f23",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 25,
+          "source": "frame-025.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 11,
+          "source": "frame-011.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff",
+      "visiblePixelSha256": "47b1e9d2b076fdecba603a788f7f92f12c0428b9e224932dbf4359466d8402fd",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 26,
+          "source": "frame-026.png"
+        },
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 27,
+          "source": "frame-027.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 10,
+          "source": "frame-010.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548",
+      "visiblePixelSha256": "df5a45bc98776bf164d44b638a4b0ec57d6e7937aaa835993cf8ff8ed4d2ceb0",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 28,
+          "source": "frame-028.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 9,
+          "source": "frame-009.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd",
+      "visiblePixelSha256": "4f45cedb147b30353615a7fe11262d46e7dad9371e632b0c145c1259a69ddde2",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 29,
+          "source": "frame-029.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 8,
+          "source": "frame-008.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20",
+      "visiblePixelSha256": "9d4340834c1b73454830856bd3840863c6d7c9a91c1c0f166a22c39c6f04f2b8",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 30,
+          "source": "frame-030.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 7,
+          "source": "frame-007.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8",
+      "visiblePixelSha256": "e5558830fa0d2e386778d949125b7f08a48fcb4ec5061be0d656df2d7738c4c7",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 31,
+          "source": "frame-031.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 6,
+          "source": "frame-006.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2",
+      "visiblePixelSha256": "d06248234f1041567959774976cc88fbb50e6923547f5f5f97785e7c5fac1164",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 32,
+          "source": "frame-032.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 5,
+          "source": "frame-005.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15",
+      "visiblePixelSha256": "09ade601aa301961041ffdb5b6d09b35c07f302bb768dd4dcc13eed1381907df",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 33,
+          "source": "frame-033.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 4,
+          "source": "frame-004.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285",
+      "visiblePixelSha256": "211c39f06e097ad0e565183a4217a114a0ee8ae9d6679959596ebca5466131c7",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 34,
+          "source": "frame-034.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 3,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69",
+      "visiblePixelSha256": "48e7bec596e05feb1dc97b02148bdeae4b91f305b2546fef995c504612962a94",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 35,
+          "source": "frame-035.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 2,
+          "source": "frame-002.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f",
+      "visiblePixelSha256": "2a14e7fbd9b4960a16142bca364e2a3993d914f93660249f6a9605a9a3bde056",
+      "uses": [
+        {
+          "package": "seated-work.opening-hybrid-v2",
+          "exposure": 36,
+          "source": "frame-036.png"
+        },
+        {
+          "package": "seated-work.closing-hybrid-v2",
+          "exposure": 1,
+          "source": "frame-001.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "7a7e59882efd7a259186da25c88cfd3f9350a29dac9aa4dd89cb1f6168a4bb7e",
+      "visiblePixelSha256": "4a80b43bcd6368931a44f5d9be9da2c7a97a477a65d5792785aef461e425188d",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "7a7e59882efd7a259186da25c88cfd3f9350a29dac9aa4dd89cb1f6168a4bb7e"
+      ]
+    },
+    {
+      "sourceSha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585",
+      "visiblePixelSha256": "53ef15b39c289286f7e9020a696268c79ad2cf90a498e9fd196e53a2a0b11630",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        },
+        {
+          "package": "permission-palm-release-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        },
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585"
+      ]
+    },
+    {
+      "sourceSha256": "c224944557fed9f2da49a7b1073c645deb2f5e44ae3119bc4ea1b3d9f8995c15",
+      "visiblePixelSha256": "cd669b6fedf34f816bd670ddc2397668ab1d1245f01785dc15eb2c2e1ac3bd5a",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "c224944557fed9f2da49a7b1073c645deb2f5e44ae3119bc4ea1b3d9f8995c15"
+      ]
+    },
+    {
+      "sourceSha256": "a1d49752eca51651f08cab3f76676e49257cb91fbacce6841c83f210736458f4",
+      "visiblePixelSha256": "db68a48ae18516b08f0e1c160a619215b78da1fdbea7fa09852c84e3f3b63db1",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 4,
+          "source": "frame-004.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "a1d49752eca51651f08cab3f76676e49257cb91fbacce6841c83f210736458f4"
+      ]
+    },
+    {
+      "sourceSha256": "9d548c5769377748e3ac47908dacf753f6a3a30c2fba44482223aa9809f4fa56",
+      "visiblePixelSha256": "088e720c8b223fe7245905ac0bf28ac69a0cf7e46cdb4631eebd5fbfa9e028d5",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 5,
+          "source": "frame-005.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "9d548c5769377748e3ac47908dacf753f6a3a30c2fba44482223aa9809f4fa56"
+      ]
+    },
+    {
+      "sourceSha256": "f567b6b4da1b088df7ea92b8190ac5784ccc9de6b38d28b6122a29d045420f18",
+      "visiblePixelSha256": "e930bb08558ed1d7d675491a89593b30617f72ff8c4d9c85aa6f57ff185c80e5",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 6,
+          "source": "frame-006.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "f567b6b4da1b088df7ea92b8190ac5784ccc9de6b38d28b6122a29d045420f18"
+      ]
+    },
+    {
+      "sourceSha256": "fa90c96d80c7e95094b0ed3ee1872d467b0b0f5fefef14b4338a041266f54c32",
+      "visiblePixelSha256": "75d95871f2721252b71181225831bf7ef30f8a0202b3ce5540d7b7e6b2ea6c54",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 7,
+          "source": "frame-007.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "fa90c96d80c7e95094b0ed3ee1872d467b0b0f5fefef14b4338a041266f54c32"
+      ]
+    },
+    {
+      "sourceSha256": "409aa7714ab85498aa01dd353de3c12ae7eb2b77b0970eee2fa316a40b4ba91e",
+      "visiblePixelSha256": "0d0186628f003347ac0f83613ef8bcc7c166ca64bb9564b7594ba978ea205bc1",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 8,
+          "source": "frame-008.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "409aa7714ab85498aa01dd353de3c12ae7eb2b77b0970eee2fa316a40b4ba91e"
+      ]
+    },
+    {
+      "sourceSha256": "5843feb9a48fe08371ce5667a1718ab49e0c656708996d3335cd51e6580c6ca9",
+      "visiblePixelSha256": "e71e9aa745f9cb56ec3e1dbf429264b67d7448bd209805becefd88b887d45872",
+      "uses": [
+        {
+          "package": "permission-ask-enter-v1",
+          "exposure": 9,
+          "source": "frame-009.png"
+        },
+        {
+          "package": "permission-palm-release-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "5843feb9a48fe08371ce5667a1718ab49e0c656708996d3335cd51e6580c6ca9"
+      ]
+    },
+    {
+      "sourceSha256": "64adb42cea608c7590473bf74844d49aa87b640483361d26e7d3b037061c35d0",
+      "visiblePixelSha256": "c34c4a892f940769e3ad04331b711c779097d5654814fa95527164243e4ec88e",
+      "uses": [
+        {
+          "package": "permission-palm-release-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "64adb42cea608c7590473bf74844d49aa87b640483361d26e7d3b037061c35d0"
+      ]
+    },
+    {
+      "sourceSha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e",
+      "visiblePixelSha256": "ab891273cc6ad5bc4f2bb4c096343a8cdbdf165c80520ce68e73d5eedd572aeb",
+      "uses": [
+        {
+          "package": "question-ask-enter-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "question-chin-release-v1",
+          "exposure": 4,
+          "source": "frame-004.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 4,
+          "source": "frame-004.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e"
+      ]
+    },
+    {
+      "sourceSha256": "026ccb6ed968c03e11ae922c4dc94f88492193ea66920582df6b9ef37cf694b3",
+      "visiblePixelSha256": "024ca689f9d56c7d86cecbc643a001b162d5ba18b377331a94c9715660711614",
+      "uses": [
+        {
+          "package": "question-ask-enter-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "026ccb6ed968c03e11ae922c4dc94f88492193ea66920582df6b9ef37cf694b3"
+      ]
+    },
+    {
+      "sourceSha256": "071577bc01dcbae22f0d12b0204153cd79e1fc43fc79e17785b45abc14eefa33",
+      "visiblePixelSha256": "3fc53b5c5fd8a7b0b5753f33a9cd4b5966ef92413f23be964c30096fe9a75755",
+      "uses": [
+        {
+          "package": "question-ask-enter-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "071577bc01dcbae22f0d12b0204153cd79e1fc43fc79e17785b45abc14eefa33"
+      ]
+    },
+    {
+      "sourceSha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53",
+      "visiblePixelSha256": "1760eaa2334b0c935802091d1e3564091fdce311a26339f5b2b5565ab8ef4add",
+      "uses": [
+        {
+          "package": "question-ask-enter-v1",
+          "exposure": 4,
+          "source": "frame-004.png"
+        },
+        {
+          "package": "question-chin-release-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53"
+      ]
+    },
+    {
+      "sourceSha256": "594ebbb8f66a066882a82e1ead4b1d5508d82c6aceef08aa7b39c9e8cd27d49e",
+      "visiblePixelSha256": "5a7a01b9dedd7a986cd03ca17d6a7a453aff822ce07efc56bb1054758ec9e1d6",
+      "uses": [
+        {
+          "package": "question-ask-enter-v1",
+          "exposure": 5,
+          "source": "frame-005.png"
+        },
+        {
+          "package": "question-chin-release-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "594ebbb8f66a066882a82e1ead4b1d5508d82c6aceef08aa7b39c9e8cd27d49e"
+      ]
+    },
+    {
+      "sourceSha256": "9388abed6cd5ef04e649837b6faf1e191f2c1a89850d3ad5c3945c7bebf324ff",
+      "visiblePixelSha256": "f2fa28e82185fa5adab0e221e8fa9b58fbb745d2d911385aa107cd0179ac0619",
+      "uses": [
+        {
+          "package": "question-chin-release-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "9388abed6cd5ef04e649837b6faf1e191f2c1a89850d3ad5c3945c7bebf324ff"
+      ]
+    },
+    {
+      "sourceSha256": "034855f9a5c3a419f92338610892b2d9e7621b4b1bc70f7c296e23c21f8f36fb",
+      "visiblePixelSha256": "16fa2164504542d6101e7796e5c4336c1fb22f9585d6b6cc856510e3bd77c12a",
+      "uses": [
+        {
+          "package": "question-chin-release-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "034855f9a5c3a419f92338610892b2d9e7621b4b1bc70f7c296e23c21f8f36fb"
+      ]
+    },
+    {
+      "sourceSha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0",
+      "visiblePixelSha256": "a7fefd166a53dbd405284880ab127f3b74b059c32ba08cf8bd3afbbc22f97c91",
+      "uses": [
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        },
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 7,
+          "source": "frame-007.png"
+        },
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 9,
+          "source": "frame-009.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 6,
+          "source": "frame-006.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 10,
+          "source": "frame-010.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 12,
+          "source": "frame-012.png"
+        },
+        {
+          "package": "relaxed-to-neutral-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        },
+        {
+          "package": "relaxed-settled-to-neutral-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "relaxed-settled-to-neutral-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+      ]
+    },
+    {
+      "sourceSha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2",
+      "visiblePixelSha256": "cfe1507a2857a487d14ee780ad4aa0db5409d5dd631a66491b858d92423244eb",
+      "uses": [
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 4,
+          "source": "frame-004.png"
+        },
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 6,
+          "source": "frame-006.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 7,
+          "source": "frame-007.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 9,
+          "source": "frame-009.png"
+        },
+        {
+          "package": "relaxed-to-neutral-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "relaxed-settled-to-neutral-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+      ]
+    },
+    {
+      "sourceSha256": "84fd24637cc576f83afd8b1cf29cf08ff4e2f3d130d70c6f61fb3e0a7bc60a7f",
+      "visiblePixelSha256": "7fc546d2321884c73edcf63a076ddfd8b453352e9d91bb73667bfa3539d84776",
+      "uses": [
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 5,
+          "source": "frame-005.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 8,
+          "source": "frame-008.png"
+        },
+        {
+          "package": "relaxed-to-neutral-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        },
+        {
+          "package": "relaxed-settled-to-neutral-v1",
+          "exposure": 4,
+          "source": "frame-004.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "84fd24637cc576f83afd8b1cf29cf08ff4e2f3d130d70c6f61fb3e0a7bc60a7f"
+      ]
+    },
+    {
+      "sourceSha256": "07db95e7a079b4b84bf7ef6e7dd9794fae6f9ed9c5815d93d02c20c1c0863ccf",
+      "visiblePixelSha256": "4b0effb301e16c0bacbbd92fe3de4ea0224259b3045a072b9a13620234acdf0d",
+      "uses": [
+        {
+          "package": "permission-unresolved-hold-v1",
+          "exposure": 8,
+          "source": "frame-008.png"
+        },
+        {
+          "package": "question-unanswered-hold-v1",
+          "exposure": 11,
+          "source": "frame-011.png"
+        },
+        {
+          "package": "relaxed-settled-to-neutral-v1",
+          "exposure": 0,
+          "source": "frame-000.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "07db95e7a079b4b84bf7ef6e7dd9794fae6f9ed9c5815d93d02c20c1c0863ccf"
+      ]
+    },
+    {
+      "sourceSha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5",
+      "visiblePixelSha256": "bb036dc978dba636ab592205038bf2efa86cad43b12630d48fa36eab396b5873",
+      "uses": [
+        {
+          "package": "answer-understood-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        },
+        {
+          "package": "answer-understood-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5"
+      ]
+    },
+    {
+      "sourceSha256": "a82f21fc77c882592e89f6f318abd1888db691569db353f40e23961e519f7788",
+      "visiblePixelSha256": "c9e5812d07bf8c8661745ecce2af6da60d905b6f4395c2a2e0240f42430ea0ab",
+      "uses": [
+        {
+          "package": "answer-understood-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "a82f21fc77c882592e89f6f318abd1888db691569db353f40e23961e519f7788"
+      ]
+    },
+    {
+      "sourceSha256": "29b55065f6613a9ab687568cbeef48a58d4c30113faf6eb41197c08abb1e7948",
+      "visiblePixelSha256": "92fccdbe885821a0db4f4df5971e2048f01f15efb7d54fd53cf424f3cb6b8bd5",
+      "uses": [
+        {
+          "package": "completion-once-v1",
+          "exposure": 1,
+          "source": "frame-001.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "97f5f7adbaf8f112b3ec73d2eac5992445b505aea645dc23f273b1c9c1425441",
+      "visiblePixelSha256": "90c9de30535903d8e8d9d28aea877f2c8a9053a82d6cf2198057406c74415e8a",
+      "uses": [
+        {
+          "package": "completion-once-v1",
+          "exposure": 2,
+          "source": "frame-002.png"
+        },
+        {
+          "package": "completion-once-v1",
+          "exposure": 9,
+          "source": "frame-009.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "a7fe8e7b98a36a834047b2012d6afd1ed2c2c3e4c8b23cdf7d352468f86a1e07",
+      "visiblePixelSha256": "c9052a44d75882dde462517907498f726fd684ab3b258d4aabc44049cbe52a6c",
+      "uses": [
+        {
+          "package": "completion-once-v1",
+          "exposure": 3,
+          "source": "frame-003.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "cc00515a55b9c6e8cc9a493ab5169adeb4029311d367c57221404ced4532f939",
+      "visiblePixelSha256": "83ddc0589177f55ead5874db33289fde8744e05029a84e92305b8156654c5e7d",
+      "uses": [
+        {
+          "package": "completion-once-v1",
+          "exposure": 4,
+          "source": "frame-004.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "ad13c1ebf5db4b4f555f4ae8f3b538729d5df1e5d5c0be2a6aae6f21d4bee21e",
+      "visiblePixelSha256": "2e806f70e9d8498d190a0a07ac90cab7cbc9be9b38605b74d35fc668e7de2d96",
+      "uses": [
+        {
+          "package": "completion-once-v1",
+          "exposure": 5,
+          "source": "frame-005.png"
+        },
+        {
+          "package": "completion-once-v1",
+          "exposure": 7,
+          "source": "frame-007.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "bb8cc4c02822e008bd7969e7d464a131c33173f738ca28f71dcd9e19e26a6842",
+      "visiblePixelSha256": "ef2b118563aee3c025f6ce5cec7834d2fb899dda8503480f554ce44518d6fb14",
+      "uses": [
+        {
+          "package": "completion-once-v1",
+          "exposure": 6,
+          "source": "frame-006.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "0f22b577e5234cf8da4cf611c1f99f806ddd7bcf9e9acbd880a628220625b34c",
+      "visiblePixelSha256": "c5dcfe670507f666af5ebed61f7b52cde2566b8b1ac701384e7e1be7897e67b4",
+      "uses": [
+        {
+          "package": "completion-once-v1",
+          "exposure": 8,
+          "source": "frame-008.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "cfe5597e8d81ab00bcd7362883e1c29692d79478ce5d275ccc78d9027a65e33f",
+      "visiblePixelSha256": "65982a424228be3dba48ec159408e236ac2ace42dbcd9cab30758a4c344b14b1",
+      "uses": [
+        {
+          "package": "observe.cancel-entry-boundary-v1",
+          "exposure": 1,
+          "source": "middle-focused.png"
+        },
+        {
+          "package": "observe.sync-attention-boundary-v1",
+          "exposure": 2,
+          "source": "middle-focused.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 1,
+          "source": "middle-focused.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "2bcfdde1bbc9e690cc705ea3cded5edf9ebcd4ec316f4a76a8e1621fa8d92030",
+      "visiblePixelSha256": "37b982c61f54158a2a02d7f81b83c3935dd9c766c7f465ee4715643b035551e5",
+      "uses": [
+        {
+          "package": "observe.cancel-entry-boundary-v1",
+          "exposure": 2,
+          "source": "raised-focused.png"
+        },
+        {
+          "package": "observe.cancel-hold-boundary-v1",
+          "exposure": 0,
+          "source": "raised-focused.png"
+        },
+        {
+          "package": "observe.cancel-hold-boundary-v1",
+          "exposure": 4,
+          "source": "raised-focused.png"
+        },
+        {
+          "package": "observe.failure-entry-boundary-v1",
+          "exposure": 3,
+          "source": "raised-focused.png"
+        },
+        {
+          "package": "observe.sync-attention-boundary-v1",
+          "exposure": 1,
+          "source": "raised-focused.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 0,
+          "source": "raised-focused.png"
+        },
+        {
+          "package": "observe.raised-focus-to-unknown-boundary-v1",
+          "exposure": 0,
+          "source": "raised-focused.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "2bcfdde1bbc9e690cc705ea3cded5edf9ebcd4ec316f4a76a8e1621fa8d92030"
+      ]
+    },
+    {
+      "sourceSha256": "f2ec68ed05f9553053d4c8c55ab5b53e1efce256a1ac5d495c801169644fa41f",
+      "visiblePixelSha256": "2655a1b8e41df8a52fe82ac922bc294787e95f7274d8ee093c5d1d86195d4e25",
+      "uses": [
+        {
+          "package": "observe.cancel-hold-boundary-v1",
+          "exposure": 1,
+          "source": "raised-half.png"
+        },
+        {
+          "package": "observe.cancel-hold-boundary-v1",
+          "exposure": 3,
+          "source": "raised-half.png"
+        },
+        {
+          "package": "observe.unknown-hold-boundary-v1",
+          "exposure": 1,
+          "source": "raised-half.png"
+        },
+        {
+          "package": "observe.unknown-hold-boundary-v1",
+          "exposure": 3,
+          "source": "raised-half.png"
+        },
+        {
+          "package": "observe.raised-focus-to-unknown-boundary-v1",
+          "exposure": 1,
+          "source": "raised-half.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "b87df537bb124afa25bd9be7ec9cc775decf2f10c417efbf692850a9336d0823",
+      "visiblePixelSha256": "d050f428bea5e33a6ce3296e927a524395f6d5b768355a3d7754ce4ae722c96f",
+      "uses": [
+        {
+          "package": "observe.cancel-hold-boundary-v1",
+          "exposure": 2,
+          "source": "raised-closed.png"
+        },
+        {
+          "package": "observe.unknown-hold-boundary-v1",
+          "exposure": 2,
+          "source": "raised-closed.png"
+        },
+        {
+          "package": "observe.raised-focus-to-unknown-boundary-v1",
+          "exposure": 2,
+          "source": "raised-closed.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "41004ce0b9730cd5d53d3ad5170edabc99e6278f3c159a989965b02c013433f9",
+      "visiblePixelSha256": "da99a316aa31fa54508dd5eb931abfd4d176f6dc31e47893dc0424161550ce58",
+      "uses": [
+        {
+          "package": "observe.failure-entry-boundary-v1",
+          "exposure": 1,
+          "source": "middle-surprise.png"
+        },
+        {
+          "package": "observe.unknown-entry-boundary-v1",
+          "exposure": 1,
+          "source": "middle-surprise.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "85668658799a6c27e9f810f83b65f1031c9f320c897bcabd0d64e056ce5d8622",
+      "visiblePixelSha256": "15ae34375cdf3e9a2d2468576b79c6cff83dfe3b6facae0d7d0a899631fbcd5d",
+      "uses": [
+        {
+          "package": "observe.failure-entry-boundary-v1",
+          "exposure": 2,
+          "source": "raised-surprise.png"
+        },
+        {
+          "package": "observe.unknown-entry-boundary-v1",
+          "exposure": 2,
+          "source": "raised-surprise.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "12e9d291a7fb5c479d76f3b445c93b3b80a4312f86840153d4b8622ee5fe93b3",
+      "visiblePixelSha256": "4e6a4f0e98173c68629457deda364c315f3643420cfdd11ed629149919df7e15",
+      "uses": [
+        {
+          "package": "observe.unknown-entry-boundary-v1",
+          "exposure": 3,
+          "source": "raised-serious.png"
+        },
+        {
+          "package": "observe.unknown-hold-boundary-v1",
+          "exposure": 0,
+          "source": "raised-serious.png"
+        },
+        {
+          "package": "observe.unknown-hold-boundary-v1",
+          "exposure": 4,
+          "source": "raised-serious.png"
+        },
+        {
+          "package": "observe.sync-attention-boundary-v1",
+          "exposure": 0,
+          "source": "raised-serious.png"
+        },
+        {
+          "package": "observe.raised-focus-to-unknown-boundary-v1",
+          "exposure": 3,
+          "source": "raised-serious.png"
+        }
+      ],
+      "mapped": true,
+      "sameVisiblePixelEntrySha256": [
+        "12e9d291a7fb5c479d76f3b445c93b3b80a4312f86840153d4b8622ee5fe93b3"
+      ]
+    },
+    {
+      "sourceSha256": "5eedd7d91a13f90106550b7329816bf826b7a3dfd4012c04e5f453b347ee3fb9",
+      "visiblePixelSha256": "97a7bd869961943c48da434efe705effab167748d814c2ad62049e287c2e3932",
+      "uses": [
+        {
+          "package": "observe.sync-attention-boundary-v1",
+          "exposure": 3,
+          "source": "rest-focused.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 2,
+          "source": "rest-focused.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 6,
+          "source": "rest-focused.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "84ee8a6abd9d9a0c7b4aa4bff3ad5e77f162c75024114cca542f041e9e928270",
+      "visiblePixelSha256": "d55c0c648b6599c44ed066c5f7ebcd0b052612e6b5de0bbe33afb38b00f1540e",
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 1,
+          "source": "check-000.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 5,
+          "source": "check-000.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "326d4fcce29ffa40fadb3d8d14186ac23d91d92e1e5c03c989e618aae377e81f",
+      "visiblePixelSha256": "8330b4058b6420da9dd1c821420e36e69a6cab406d14c6d974dcce2e91ef1933",
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 2,
+          "source": "check-001.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 4,
+          "source": "check-001.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "639ea19851dedc963e9dd5d88cdea9b3ee83079746da4654203e9cddf6911b00",
+      "visiblePixelSha256": "9282072f7461c83209ffc06e6e72956d17d6cc139eb1a518eabad448815c3554",
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 3,
+          "source": "check-002.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 3,
+          "source": "check-002.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "a1c931bef3b940bf8e50af0a506b6695a0d9dce602309e0e150adfe01f3d9e25",
+      "visiblePixelSha256": "1a02f845c294469fd3294e0926c83a7fb79c8a7c103b87495790583bf81a26c8",
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 4,
+          "source": "check-003.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 2,
+          "source": "check-003.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "c8c4ec19eb6fcf1f68cc8cd68fc2f2f2d07682a6675e8c6c42819d663de4f621",
+      "visiblePixelSha256": "8e42819b9f3195fd2fe66e2e377941607d4513bbe63e0261ad93135dbf083801",
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 5,
+          "source": "check-004.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 1,
+          "source": "check-004.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "6adf830b01666d5c23b4e45e97ce5b08057e94f129312efc63722a6a931b7e18",
+      "visiblePixelSha256": "0d2456117696cee17f28a0919e7da223c906c5a4c454c3a1087b079ed7028b36",
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 6,
+          "source": "check-005.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 0,
+          "source": "check-005.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "f26683c6d0f669c5a1bf2e431dcc287218b1b89883f051fe94759a055c62bf41",
+      "visiblePixelSha256": "26ae48df758d5f8e309f7f19eb1c205fef804b203a0e1b8990cc8cf49315f904",
+      "uses": [
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 3,
+          "source": "rest-half.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 5,
+          "source": "rest-half.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "5b1454b39deb72781973b9f6f0bd2fba1ae702eec87ac12804e0f76e421743c6",
+      "visiblePixelSha256": "a49ecac992d9ba083ac7f0367e6aac925341662a2c0256d073ccfc24e4067349",
+      "uses": [
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 4,
+          "source": "rest-closed.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4",
+      "visiblePixelSha256": "7f28d8a59183231b29886925e0d23776a04964d6e3a1b296374a97fad810812c",
+      "uses": [
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 1,
+          "source": "pose-001.png"
+        },
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 8,
+          "source": "pose-008.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "68709b429a10eb1a5abfda2dfe9009738dd10c6debf899b7dd33def9d2de5dcf",
+      "visiblePixelSha256": "d002d1a152c32969fd9c644f7f7b52d810c8fbd6f17aa8c259326921cdf06c8c",
+      "uses": [
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 2,
+          "source": "pose-002.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "ac8f871a2058c73fbe4db1fbb3e3544efefdc058144b5bb5b96ed0e4cf14137a",
+      "visiblePixelSha256": "f27021925f16842c62db0b5e89886d349f09098f4d10f114171562e519226b4a",
+      "uses": [
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 3,
+          "source": "pose-003.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db",
+      "visiblePixelSha256": "245b755a9b7522689c06292080990e61ff8eee0ea57f1df5ba2401c0314c73d8",
+      "uses": [
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 4,
+          "source": "pose-004.png"
+        },
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 6,
+          "source": "pose-006.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "64b656a090ce6d1d04c60eec2fe6d9658a48709693ed49c7223723b0a4c0d9ae",
+      "visiblePixelSha256": "92de8f64ecc0973f8808fb15bf0e49ed7cc55c195ff7c0a91fab1d058c6a52d8",
+      "uses": [
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 5,
+          "source": "pose-005.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "96d72d685bdf9ca74a88bce9684b88468167904e4cbe40a844e46562d7b83b78",
+      "visiblePixelSha256": "3df552b424cf264801424d25e57594ca924ca076e578337d48bd90d00227d401",
+      "uses": [
+        {
+          "package": "user.welcome-closed-v2",
+          "exposure": 7,
+          "source": "pose-007.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+      "visiblePixelSha256": "8e83178b587f84964cef7a181b28ff727f9337a11da8fbc25303dfb33c388399",
+      "uses": [
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 1,
+          "source": "pose-001.png"
+        },
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 9,
+          "source": "pose-009.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+      "visiblePixelSha256": "91f061e1d193486cfebb09f6e8899a72b31d9ad838b0b255e0fa0ec5f9e06357",
+      "uses": [
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 2,
+          "source": "pose-002.png"
+        },
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 8,
+          "source": "pose-008.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+      "visiblePixelSha256": "26f8794afd7acf72f9368a436078cb578ebb70ed9169d064a802802582c0e1a2",
+      "uses": [
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 3,
+          "source": "pose-003.png"
+        },
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 7,
+          "source": "pose-007.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+      "visiblePixelSha256": "f67996badb91d86cf2a7b06216e7cdef54159211c4a18bea74321c344aa8d0b6",
+      "uses": [
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 4,
+          "source": "pose-004.png"
+        },
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 6,
+          "source": "pose-006.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "d3a75fbc6057bbe1b9e88eb341911074d99d5fd2b1fbed2c4bb17c11fe87228e",
+      "visiblePixelSha256": "6b725d43669b6e8a478d01be134292b9312d5798d66160e75d704ece1ded8f73",
+      "uses": [
+        {
+          "package": "user.click-closed-v5",
+          "exposure": 5,
+          "source": "pose-005.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "279130a0bcabe34a2b8e78908af71d5be2b7ab02db8496a44a3c365918a550d5",
+      "visiblePixelSha256": "3438348f8f0f897bf9d1e62ac850316eb8521c2adee21e3db01e052bb5c274a6",
+      "uses": [
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 0,
+          "source": "pose-000.png"
+        },
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 8,
+          "source": "pose-000.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "c6fac141e72b6f5961f88939e0827ad818ace719457da3dbc9d987411d427048",
+      "visiblePixelSha256": "49321c497c56a26553de52eb677742992b344e74690f3e1b400ced4df59cd2c6",
+      "uses": [
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 1,
+          "source": "pose-001.png"
+        },
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 7,
+          "source": "pose-001.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "cd99d09d7e3ba480d0cc6626ac056bf86b2ffd92f6e4ff6f0cd2dc230f995ae5",
+      "visiblePixelSha256": "190adcf9103fd153628b04141f4617b69350e5be3d15b4c5642a3a59630b9832",
+      "uses": [
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 2,
+          "source": "pose-002.png"
+        },
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 6,
+          "source": "pose-002.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "9ac14650174359058ad356c0cafe49b50b43dbe688345b4622318c0d984a7a55",
+      "visiblePixelSha256": "74629d22851644f9f665e669f8c27ec38a5af89bcdcfa759a36cd28fbd4c0966",
+      "uses": [
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 3,
+          "source": "pose-003.png"
+        },
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 5,
+          "source": "pose-003.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    },
+    {
+      "sourceSha256": "d696a98820bb12ce672bf3899769d2a21c2708bd756aaf6840b1a743d74c5122",
+      "visiblePixelSha256": "8f1a17f9a5a4288506fd31e57476a15934b104e377917960d6022ad8fe489e4e",
+      "uses": [
+        {
+          "package": "user.tap-open-v1",
+          "exposure": 4,
+          "source": "pose-004.png"
+        }
+      ],
+      "mapped": false,
+      "sameVisiblePixelEntrySha256": []
+    }
+  ]
+}

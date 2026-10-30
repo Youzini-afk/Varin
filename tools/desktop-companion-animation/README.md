@@ -1,0 +1,245 @@
+# 全帧原画序列工具
+
+本目录只整理已经制作的连续原画，不生成中间动作、不绑定骨骼、不做全身淡化，也不修改业务状态。质量依据是正常速度下的整个人物表演，不是图集成功导出。
+
+## 原画与时间轴
+
+动作目录建议使用 `user-attention/<action>/` 等描述性名字，避免跨方案的 P 编号歧义。原画用 `enter-001.png`、`hold-001.png`、`exit-001.png` 等名称；编号是绘画顺序，不代表固定帧时长。相邻动作共享明确命名的起止姿态。
+
+`sequence.source.json` 与原画放在同一动作目录。`canvas` 是该动作登记画布；同一动作族共用画布和角色尺度，不由打包器推断或缩放。原图可裁切，`offset` 指其左上角在登记画布的位置。所有 `contacts` 坐标也以登记画布为基准，裁切不会改变它们。图像须含实际透明背景，工具不会自动抠图。
+
+下面是结构示例，不是已完成的动作或帧时长建议：
+
+```json
+{
+  "id": "attention.ask",
+  "family": "USER_ATTENTION",
+  "canvas": [1024, 1024],
+  "entryPose": "seated-work.rest-hands",
+  "exitPose": "user-attention.open-palm",
+  "loop": null,
+  "frames": [
+    {
+      "source": "enter-001.png",
+      "durationMs": 125,
+      "offset": [0, 0],
+      "phase": "enter",
+      "pose": "seated-work.rest-hands",
+      "contacts": {"seat": [512, 760]},
+      "exitTo": []
+    }
+  ]
+}
+```
+
+- `durationMs` 是每张原画的明确时长，无固定 FPS 合同。
+- `loop` 可为 `[start, endExclusive]` 原画索引；作者负责末尾与开头视觉连续。工具不自动倒放，不自动补帧。
+- `exitTo` 是该画允许接续的姿态名称，尚不驱动任何运行时业务。接触变化及连接画必须实际制作。
+- 不完整动作可以记录源稿，但不能把少量原画反复循环冒称完整连续动画。
+
+## 打包
+
+需要 Python 3.10+ 与 Pillow。当前环境已提供，无新增应用运行依赖。
+
+```sh
+python tools/desktop-companion-animation/pack_sequence.py \
+  path/to/sequence.source.json path/to/output
+```
+
+工具保留原像素与显式时长，仅裁去全透明外边缘、保留坐标偏移、按顺序装入 PNG 图集，并输出 `sequence.json`。透明 texel 边缘外扩防止采样串色。`--max-size` 默认 2048 是可调整的打包参数，不是艺术尺寸上限；无法容纳时明确报错，不缩小素材。输出文件夹应专用于该次导出，旧的多余页面不自动删除。
+
+运行消费者依照 `startMs` / `durationMs` 选择画面，用 `rect` 从对应 `page` 裁出，并在统一画布的 `offset` 处绘制。恢复或打断选择已制作的相容姿态与连接画，不将任意两幅全身图做透明叠化。离线图集成功只证明资源整理成立，尚不证明 Electron 已接入。
+
+## 连续审阅
+
+```sh
+python tools/desktop-companion-animation/make_review.py \
+  path/to/output/sequence.json path/to/review.html --stage keyposes
+```
+
+HTML 内嵌图集，可独立打开，提供正常速度、慢放、逐原画和时间拖动。只有已制作中间运动的序列才标为 `--stage motion-candidate`；它仍是待验收候选，不是自动通过。默认不循环，作者尚未制作首尾衔接时不能暗示能循环。重复选项仅用于人工反复查看整段；不会使用任意两帧混合或补运动。审阅文件是可重导产物，不需要每轮都永久提交其内嵌图集副本。
+
+## 全32类覆盖与连接诊断
+
+`coverage.json` 保存生产目录的32类表现及其动作依赖、跨姿态族必需连接。它不是应用协议枚举，列出动作也不代表素材已存在。`make_catalog_review.py` 只按显式关联载入真实包：
+
+```sh
+python tools/desktop-companion-animation/make_catalog_review.py review.html \
+  --asset completion=path/to/completion/sequence.json \
+  --asset permission=path/to/permission/sequence.json
+```
+
+整页逐项显示缺少资源、候选或已视觉接受；原画审阅模式可以查看候选，但不会授予其正式播放资格。相同动作的不同候选以不同ID保存。`sequence_graph.mjs` 只为离线诊断按实际 `entryPose` / `exitPose` 搜索已登记连接包；只有 `reviewStatus: "accepted"` 且非 `keyposes` 的资源才有正式路由资格。`kind: "bridge"` 表示实际连接资源，不是让工具自动生成过渡。
+
+姿态名称代表同机位、同支撑、同道具接触的真实匹配画，不可仅为让路由通过而把不同姿势起同一个名字。画布不一致会阻止直接连接。紧急改向没有已画退出时保持当前画并显示连接缺口，不通过继续装饰性输入假装已响应。此工具不发任务、批准、取消或执行命令；实际业务仍由Varin现有运行时负责。
+
+每组原画登记以固定座面、靴子或电脑的真实支撑为依据，保留有意的头肩与重心变化；不得按每帧头部或全身包围框归一缩放。未核验的接触点明确作为估计，不把它们包装成稳定几何。全透明像素的隐藏RGB不是可见背景；检查抠图时应合成到浅/深色背景，而不是仅看忽略alpha的图片预览。
+
+原生视频工具审阅可使用 `render_review_video.py package/sequence.json review.mp4 --stage keyposes`。它把透明原画合成到固定底色，烧录候选阶段标签，保留作者指定时间戳，并重复末幅最后一个时间采样以保住结束停留；不制作中间运动。时间戳采用毫秒精度，不是要求角色用某固定帧率生产。可用 `ffprobe` 对照时间轴和总时长；视频能导出仍不等于视觉通过。
+
+整套关联可存为相对路径清单 `[{"action":"completion","package":"relative/sequence.json"}]`，通过 `make_catalog_review.py review.html --inventory review-assets.json` 重导，无需把内嵌图集HTML当唯一可恢复来源。
+
+后续按共同几何基准制作的资源应显式记录 `geometryReference`（基准源的SHA256）。只有实际沿该基准制作并经视觉比对后才填，不能为了通过检查给旧候选补同一个hash。正式跨资源连接要求基准一致；仅同为512画布不证明头身、电脑和机位一致。当前工作区的 `shared/canonical.json` 记录内部制作基准来源，并不冒称用户再次批准了成品。
+
+### Native development consumer
+
+The Electron companion entry is explicitly opt-in: start the existing Electron development command with `VARIN_COMPANION_REVIEW=1`. Packaged releases do not open it. `companion.html` reuses the existing trusted preload and runtime bootstrap, not a second Host. The auxiliary window is excluded from conversation-window focus, tray/menu targets, last-main-window handling and saved main geometry.
+
+Select an existing thread/branch to observe its `ThreadProjection`. Observation does not create drafts, mark messages read, approve permission, cancel work or restart tools. The **Host presentation** readout derives from current branch facts; the 32-item **Review target** menu is separate developer presentation input, not synthetic Host events. Unknown/disconnected facts supersede stale terminal snapshots; cancellation requests remain settling while operations or children remain active. Unclassified execution stays unclassified rather than guessing reading/coding from tool names.
+
+For artwork inspection, explicitly select one packed `sequence.json` together with all referenced PNG atlas pages. This uses browser file handles, never arbitrary filesystem IPC. Stop/Replay uses the authored exposure durations; it is not a fixed drawing-rate target. Candidate art is clearly labeled and cannot enter the accepted-art loader. This development consumer is **not the completed production desktop-pet UX**: accepted state assets, event-gated entry/hold/exit playback, native lift/landing choreography and user settings remain production integration work. In particular a timed permission review sequence must never automatically end a real permission wait.
+
+Focused validation: `cd packages/ui && bunx vitest run src/components/companion/companion.test.ts`; prepare existing workspace type dependencies, then run UI and Electron `tsc --noEmit` checks. No new test framework or dependency was added.
+
+### Upright source selection
+
+`build_upright_bundle.py --root <production-v2-source-root> --repo <checkout> --output <candidate-directory>` compiles the supplied inventory and exact-source recovery contracts with the existing atlas packer and playback graph. Prepare its source inventory with `prepare_upright_inventory.py --root <source-root>` and `prepare_upright_recovery.py --root <source-root>`; it must include the selected mechanical lid, six performance families, closed idle, and source-specific relocation contracts. Generated internal nodes are not extra user-facing states.
+
+The result remains candidate-only. `select_upright_bundle.py <candidate/bundle.json> <selected-directory> --expected-sha <reviewed-candidate-sha256>` selects only that exact reviewed artifact and records its source/atlas hashes and finite acceptance basis. It does not automatically accept a rebuilt or later candidate. Install the selected directory as one generation, including its hash-named world stool; do not mix identity epochs or overwrite only the character pages.
+
+Repository-only reproduction (no original workspace required):
+
+```sh
+SOURCE=docs/design/desktop-companion-assets/animation-source/production-v2
+python tools/desktop-companion-animation/prepare_upright_inventory.py --root "$SOURCE"
+python tools/desktop-companion-animation/prepare_upright_recovery.py --root "$SOURCE"
+python tools/desktop-companion-animation/build_upright_bundle.py --root "$SOURCE" --output /tmp/varin-upright-candidate
+```
+
+Preparation writes only reproducible inventory/recovery JSON below the source root's `integration` directory. The source-specific authored recovery mapping and local-event manifest are included in the repository. `integration/portable-runtime-verification.json` records the independent rebuild: candidate and selected runtime artifact bytes match, with no external source dependency. The original acceptance ledger's JSON key ordering differs from the first independent reconstruction but its parsed contents are identical; subsequent selections sort filenames deterministically. Final native QA fields are appended afterward and are intentionally separate from the reproducible source-art selection.
+
+### Authored performance replacement
+
+`build_interaction_expansion.py --performance-manifest <manifest>` replaces explicitly named display actions while retaining the frozen upright mechanical base. It is mutually exclusive with the older director/local manifest inputs and does not import their v3 display plans. Without this option, the existing build path is unchanged.
+
+The manifest declares `canvas: [512, 512]`, `geometryReference: "varin-upright-v2"`, `replaceActions`, and nonempty `sequences` with unique `id`, `kind` (`action` or `bridge`), actual source hashes and positive finite `durationMs`. Actions must exactly cover the declared replacements; bridges do not trigger actions. Optional loops use authored `[start, endExclusive]` frame indices. `ordinaryRecoveryByActualSource` records each actual source path/hash and its real recovery frames; the detached index must cover new source and recovery contacts. Source images must already use the actual 512×512 registered canvas: the builder does not resize raw artwork or infer compatible anatomy from metadata. Visual registration, complete motion and contact review precede this input.
+
+The output remains a candidate. Successful compilation neither selects artwork nor installs it into the application; rejected drawings and diagnostic previews stay outside the repository.
+
+### Explicit source-keyed pickup replacement
+
+With `--performance-manifest`, optional `--pickup-manifest <manifest>` supplies genuinely authored pickup/landing nodes instead of forcing an open-laptop performance through the legacy lid-closing route. The default build remains unchanged. The manifest contains `replaceEntrySources` (exact seated source SHA256 values) and `nodes`. Each node has a unique `v2-`-prefixed `id`, relative `source`, actual `sourceSHA256`, positive finite `durationMs`, and `gesture` using the existing player contract:
+
+- `grabNext` and `releaseNext` are **complete ordered continuation lists**, not adjacency edges.
+- `embeddedStool`, `settled`, and `restoreOnRelease` are explicit booleans. A seated node needs `grabImmediate` pointing to its real same-pose no-stool node; its `grabNext` excludes this already-immediate node.
+- An authoritative detached entry carries `entrySourceSha256`. Declared replacements must exactly match installed entry bindings. Old internal nodes remain available to existing routes, but their superseded entry bindings are cleared. Duplicate final IDs or source entries are rejected rather than relying on consumer iteration order.
+- Drawn landing uses `releaseViaFrames: true` and a finite `releaseNext` ending at a settled node. A `restoreSourceSha256` cannot silently supersede a drawn route. Settling without `restorePreviousOnSettle` lets the player resolve the latest presentation instead of replaying a canceled phrase.
+
+Ordinary source recovery joins the first exact authored entry it reaches, before any legacy lid-closing suffix. Every source remains on the registered 512-square canvas; the compiler neither invents missing contact drawings nor proves visual continuity. Compile and inspect complete pickup, early-release, and regrab routes in the existing consumers before selecting a candidate. Diagnostic quiet bookends must not become queued live-action delays.
+
+### 显式固定凳源图准备（仅候选）
+
+`pack_sequence.py --prepare-seated source.json prepared/` 是独立于默认打包路径的显式准备模式：
+仅把作者提供的 **seated foreground** 整幅画布从1254×1254统一缩放为512×512（512输入不缩放），
+再以零偏移叠在原冻结凳上。不得使用完整去凳身体代替座姿前景：原本被凳遮住的后发会错误盖住凳。
+不抠图、不按包围框对齐、不修脸、不生成运动、不批准接触，也不修改冻结base或selector。
+默认打包行为及原画不缩放约束保持不变。
+
+```json
+{
+  "version": 1,
+  "worldStool": {"source": "/absolute/path/world-stool-grounded-v4.png", "sha256": "b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7"},
+  "frames": [{
+    "id": "neutral",
+    "source": "seated-foreground.png",
+    "sha256": "实际输入文件SHA256"
+  }]
+}
+```
+
+所有输入必须是RGBA PNG、含准确SHA；凳还必须匹配上述冻结摘要和512画布。`source` 相对于输入manifest目录解析；
+provenance保留原始字符串。若显式提供绝对路径则如实保留，不声称该manifest可跨checkout原样迁移。输出目录应专用于此次准备。
+输出 `*-ordinary.png` 和 `prepared.json` 记录实际合成PNG的 `sourceSHA256`、原FG/凳摘要、画布及Pillow版本。
+相同输入和工具版本可重建；这是源图候选，不自动声明几何通过、动作时长或视觉验收。
+
+某帧若已有作者明确提供的完整pickup身体，可另加
+`"detached": {"source": "pickup-body.png", "sha256": "实际输入SHA256"}`。
+工具只做相同整幅缩放，并在 `detached-index.json` 以 **实际ordinary输出SHA** 关联其真实detached输出SHA，
+绝不以FG输入SHA冒充显示图身份。未提供时保持 `missing-authored-counterpart` 且不造映射；
+已提供也仍为未视觉验收。后续接入必须核验每张实际显示图的恢复/提起链。
+
+Focused验证：`python tools/desktop-companion-animation/test_prepare_seated.py`。
+
+### 独立原画基线候选
+
+`build_interaction_expansion.py --baseline-manifest <manifest> --output <local-directory>`
+复用既有打包器与播放器合同，从空包编译显式的新原画基线。它与所有旧base/expansion输入互斥，
+不读取旧人物图集、不继承旧动作、不改变默认追加模式，也不选定或安装候选。
+
+Manifest version 1 包含 `canvas: [512,512]`、独立 `geometryReference`、
+`canonicalSources: {实际坐姿PNG的SHA: 姿态名}`、`worldStool: {source, sourceSHA256}`、
+`sequences`、`nodes`、`counterparts` 及可选 `excludedScope`。固定凳必须保持既有冻结SHA；
+基准名称只标识制作批次，不证明视觉一致性或被用户接受。
+
+- `sequences` 使用唯一 `id`、`kind: action|bridge`、action绑定（仅action）、可选loop，
+  以及 `frames: [{source, sourceSHA256, durationMs, exitSafe?, pauseSafe?, phase?, cue?}]`。
+  可选非空 `cue` 原样传给既有场景词汇适配器，仅标注实际曝光，不创建Host事实或权限。
+  所有输入已是512 RGBA原画；`source` 相对manifest解析，也可明确给绝对路径。
+- `nodes` 使用唯一 `id`、同样的单张source/SHA/duration与既有 `gesture` 合同。
+  `grabNext/releaseNext` 是完整有序continuation，不是相邻边。编译器不推断动作或补帧。
+- `counterparts: [{sourceSHA256, detachedSHA256}]` 必须精确覆盖本候选每张实际显示坐姿图，
+  包括落座手势中间图；每张必须有唯一 `entrySourceSha256` 绑定到其真实D。
+  坐姿手势的 `grabImmediate` 必须指向它自己的真实D，release须有限终止于真实settled坐姿，
+  或明确恢复到真实坐姿来源。缺图、错误SHA或悬空图直接拒绝，不借旧皮肤补齐。
+- `canonicalSources` 只接受本候选实际出现的坐姿SHA，且不同来源不能别名为同一个姿态。
+  其他姿态按完整实际SHA命名，因此跨资源连接要求真正共享原图。
+- 动作子集可以编译，`build-receipt.json` 明列actions、实际来源、入口及excludedScope。
+  子集候选不代表所有产品状态或所有提放已覆盖。普通动作退出需提供真实bridge；
+  W10等待由Host事实保持，预览静止时长不得成为native拖动启动延迟。
+
+输出仍为既有 `bundle.json`（全部candidate）及PNG图集；池中的源尽可能硬链接、只读使用。
+输出目录不得包含输入源。原画完整路线仍需正常速度、浅/深背景、native root与世界凳检查。
+Focused验证：`python tools/desktop-companion-animation/test_explicit_baseline.py`（包含真实共享播放器roundtrip，
+测试色块只检查编译合同，不是候选皮肤），以及既有 `test_prepare_seated.py`。
+
+显式基线可声明 `endpoints`：`geometryReference` 必须与基线一致；`open` / `closed` 各用
+`{pose, sourceSha256}` 绑定实际 canonical seated 原画；`closedSourceSha256` 明确列出闭盖原画
+（包括生活/睡眠中间画），不得用动作名或旧姿态字符串推断。编译器和运行时 loader 都验证这些
+绑定。元数据只描述原画端点，不授予 accepted 状态；缺少此声明的旧 selected 包仍使用其原有几何合同。
+
+### Portable selected-source baseline
+
+The selected v5 `runtime-baseline.json` freezes the exact ordered action, cue,
+current-source recovery, pickup, landing and endpoint graph. It references only
+relative generated recipe IDs, not previous candidate pools or local studies:
+
+```sh
+python tools/desktop-companion-animation/build_interaction_expansion.py \
+  --baseline-manifest docs/design/desktop-companion-assets/animation-source/production-v5/runtime-baseline.json \
+  --output /tmp/varin-v5-candidate
+```
+
+Its optional `sourcePreparation` first verifies `seated-preparation.json`, prepares
+whole-canvas 512px fixed-stool composites and authored detached bodies, and checks
+all encoded drawing SHAs. Explicit detached-only sources retain their declared
+PNG compression settings; these are not invented seated counterparts. The
+prepared sources and resolved manifest live in the fresh sibling directory
+`/tmp/varin-v5-candidate-prepared`; the compiler never overwrites them. Ordinary
+already-prepared baselines and the legacy default path remain unchanged.
+
+`rebuild-receipt.json` records Python/Pillow versions, compiler/packer hashes,
+raw recipe identity and encoding. Different tool versions may produce different
+PNG bytes: a mismatch fails rather than silently changing pose identities. The
+selected reference build uses Python 3.12 / Pillow 12.3.0; its expected candidate
+bundle SHA with the committed `atlasSourceOrder` is `f1062fe37476af76c18302850c94ef0e90949ba992ede1699daec236a59b119b`.
+Omitting that optional order uses SHA-sorted atlas layout instead.
+A full fresh build needs about173MiB for prepared PNGs plus atlases (pool entries
+hardlink the prepared PNGs). No historical pool is required. Output stays
+`candidateOnly`; this command neither installs nor visually accepts a skin.
+
+### Isolated explicit-baseline selection
+
+`select_interaction_bundle.py` keeps the existing `--base-bundle` incremental path unchanged. For a complete independently rebuilt baseline, use the mutually exclusive opt-in:
+
+```sh
+python tools/desktop-companion-animation/select_interaction_bundle.py \
+  /tmp/candidate/bundle.json /tmp/selected-proposal \
+  --explicit-baseline docs/design/desktop-companion-assets/animation-source/production-v5/runtime-baseline.json \
+  --build-receipt /tmp/candidate/build-receipt.json \
+  --rebuild-receipt /tmp/candidate-prepared/rebuild-receipt.json \
+  --review-record /tmp/exact-artifact-review.json
+```
+
+The review record must bind `candidateSHA256`, `baselineSHA256`, `buildReceiptSHA256`, `rebuildReceiptSHA256`, the complete `newPackageIds`, `uniqueDrawingSha256` and `fileSha256` map. It must explicitly name `reviewer: "assistant"`, `decision: "selected"`, `scope: "feature-branch default candidate"`, and nonempty `basis`/`notClaimed` evidence scopes. Selection is not a claim of user approval of every frame. Source rebuilding must be standalone and retain its prepared manifest beside the rebuild receipt. The tool checks these bindings, source/package/geometry/endpoints and plate before writing a fresh output; PNGs are immutable hardlinks where supported, otherwise copied. Never modify linked textures in place.
+
+The isolated selected generation changes only acceptance metadata and records `publicInstalled: false`; it does not install public resources or adopt a branch default. Actual normal-mode loading/native review and the separate adoption decision remain separate.

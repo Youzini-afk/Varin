@@ -1,0 +1,549 @@
+{
+  "schemaVersion": 1,
+  "stage": "motion-candidate",
+  "coordinateRoot": "varin-animation-production",
+  "frames": {
+    "open": {
+      "source": "relocation/rapid-pickup-v1/open.png",
+      "sha256": "3af122cea75c3533699dd7fa6c26441005fc43db937baa0018a41b19225957fb",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "lid65",
+        "half",
+        "closed",
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "lid65",
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "half": {
+      "source": "relocation/rapid-pickup-v1/half.png",
+      "sha256": "50ff730ed917d9326049257a61532b29ec7de9310bce9c7374151fc51b2fcdca",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "closed",
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "closed": {
+      "source": "relocation/rapid-pickup-v1/closed.png",
+      "sha256": "ca135e539b6621f8f4245a5359cc3e3ed98cbae07aafb64e28eac45edac7a55e",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "turn": {
+      "source": "relocation/rapid-pickup-v1/turn.png",
+      "sha256": "77ca66133cb5be06fa457d6819c786aeec1e6c2a887e6015df48840e0f59cf79",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "turn70",
+        "hug",
+        "hugPrecontact",
+        "hugContact",
+        "hugSettle",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn70",
+        "hug"
+      ]
+    },
+    "hug": {
+      "source": "relocation/rapid-pickup-v1/hug.png",
+      "sha256": "c2cb7b48ddb11d1b7a9a877f1847675e891b9f2fcf9121b6db3859012af50469",
+      "durationMs": 110,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "hugPrecontact",
+        "hugContact",
+        "hugSettle",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": []
+    },
+    "lid65": {
+      "source": "relocation/rapid-pickup-v5/lid65.png",
+      "sha256": "fa43c3df8176f3f95e6814d2e86261236bf53423e3e9a263065d467ce0d15aaf",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "half",
+        "closed",
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "turn70": {
+      "source": "relocation/rapid-pickup-v4/turn70.png",
+      "sha256": "726298cd1039ce8ac40015fbdf447966848da4b5639df274ec45b398affbc8ad",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "hug",
+        "hugPrecontact",
+        "hugContact",
+        "hugSettle",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hug"
+      ]
+    },
+    "turn20": {
+      "source": "relocation/rapid-pickup-v3/turn20.png",
+      "sha256": "bc8d298b56d85dd4610baa38685b7313e919f938bc4ea68cafbc376a02fe40e8",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "closed",
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "precontact": {
+      "source": "relocation/rapid-pickup-v2/precontact.png",
+      "sha256": "5907bdd35b5c0a19cb053d5e7a1de6f2bbe60ffdb9d202dd6549e13c76810e8a",
+      "durationMs": 90,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "contact": {
+      "source": "relocation/canonical-static-v1/closed.png",
+      "sha256": "43c4150df0ea0dbbd8efbe97d9c8cb33393ebff29c1b09cfa4a991e087d5749f",
+      "durationMs": 80,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "release": {
+      "source": "relocation/canonical-static-v2/lap-release.png",
+      "sha256": "88bce77bad478a010102cf7ab270fc73d2fe8ec1e15b894a2ad376d886fbb495",
+      "durationMs": 80,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "settle": {
+      "source": "relocation/closed-handoff-v1/near-settled.png",
+      "sha256": "d31a3c129539f503b716459a8347f372bee77f656a3c2ba71d20613b03747aaa",
+      "durationMs": 70,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [
+        "seated"
+      ],
+      "grabNext": [
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "seated": {
+      "source": "seated-work/canonical-lid-v1/closed-canonical-candidate.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "durationMs": 300,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [],
+      "grabNext": [
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "seatedOpen": {
+      "source": "shared/seated-open-canonical-alpha-v1.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [],
+      "grabNext": [
+        "open",
+        "lid65",
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "hugPrecontact": {
+      "source": "relocation/canonical-registered-v1/preland-no-stool-white-alpha.png",
+      "sha256": "71051eb5d9c66298446f420aba3c428aa152466319bbedd9a00e940e4ef31673",
+      "durationMs": 90,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "hugContact",
+        "hugSettle",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hug"
+      ]
+    },
+    "hugContact": {
+      "source": "relocation/canonical-registered-v1/contact-skirt-restored-v3.png",
+      "sha256": "e1cdf1ed6ad2331d6e88cc032d95b1ff38f95da402b8e84a9d682ba4fbd4e35b",
+      "durationMs": 80,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": true,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "hugSettle",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hugPrecontact",
+        "hug"
+      ]
+    },
+    "hugSettle": {
+      "source": "relocation/canonical-registered-v2/contact-settle-bridge-white-alpha.png",
+      "sha256": "c906acd49b12457ab9a9c8c0c78e62d9ff78d177db027a898be35b3aa0e19a35",
+      "durationMs": 80,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": true,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hugPrecontact",
+        "hug"
+      ]
+    },
+    "seatedHug": {
+      "source": "relocation/canonical-static-v1/hug.png",
+      "sha256": "c6899d1960bb41138879c08f5ae173b7a7b9f7d2bf691b247d3f557269746598",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hugPrecontact",
+        "hug"
+      ]
+    },
+    "seatedTurn": {
+      "source": "relocation/canonical-static-v1/turn.png",
+      "sha256": "f442fb7b7e7a438d2f22eeae204c6e4333708cdad544736b4e6f4a80ffdd8fae",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn",
+        "hug"
+      ]
+    },
+    "seatedGrip": {
+      "source": "relocation/canonical-static-v1/grip-lift-white.png",
+      "sha256": "f57d5e3ff63474aa2319b093cfd3e96eb8fb7f25d6e36f7d3c3260b4c9cd9cc9",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    }
+  },
+  "worldStool": {
+    "source": "relocation/canonical-registered-v1/stool-world-candidate-v2.png",
+    "viewport": [
+      512,
+      512
+    ],
+    "seatSupportEstimate": [
+      300,
+      347
+    ],
+    "visibleRim": [
+      434,
+      365
+    ],
+    "fadeOutMs": 150,
+    "fadeInMs": 100,
+    "interactive": false,
+    "movesWithCharacter": false,
+    "hideIndependentPlateWhenEmbeddedStool": true
+  },
+  "semantics": {
+    "pointerDown": "capture pointer; follow immediately; route grabNext from actually displayed frame, no seated closing prerequisite",
+    "pointerUp": "freeze destination world anchor; replace unplayed queue with releaseNext from displayed frame",
+    "repeatedRelease": "no-op if already landing; do not restart",
+    "regrab": "cancel pending release queue; world plate fades in place; route grabNext from displayed contact/grip",
+    "poseBlend": "none",
+    "windowTranslation": "pointer root only, never interpreted as body-pose synthesis"
+  },
+  "acceptance": {
+    "contactStatic": "independent review observed supported laptop across pickup and early landing",
+    "playback": "v6 early release reviewed in browser; full interaction product QA pending",
+    "knownGaps": [
+      "normal hug landing uses earlier family hair/cloth states, still needs whole path visual acceptance",
+      "directional inertia/response artwork not complete",
+      "cadence and additional small-angle exposures remain under whole-path review"
+    ]
+  }
+}

@@ -1,0 +1,156 @@
+{
+  "closedEndpointOwner": "produce_relocation_animation_frames; new rigid v2 closed endpoint, not old shared static closed projection",
+  "historicalGenerationReference": {
+    "path": "references/closed-rest-rigid-v1.png",
+    "role": "exact historical imagegen reference only; never runtime base",
+    "sha256": "6f645f8d97acdfab4938b2ae1622a2ae4495dd04c586161cd035600392a35860"
+  },
+  "prompts": {
+    "wave-closed-corrected.txt": "3ed401a98bc8e8a7098a5f4942145cba683cdc483cef7f1c651974b0ff5693e0",
+    "wave-closed.txt": "fc7303c48f925231f8cf5aad7b70245c250050ce3db7b03697f61552106bed25",
+    "wave-mid.txt": "575cd86efe991f8fcd98bfdbd8e69eddecfe7611717e698e99483481213b144c",
+    "wave-peak.txt": "cd109abd86ae477b2827c2738462e836bff44ced71030d68228bfdd23b112b9d"
+  },
+  "provenance": {
+    "closed": "same generated arm with raw/wave-closed-corrected exposed contact region, frozen mechanical closed endpoint, exact lid-angle-000 and base-original-visible restore prop pixels",
+    "open-mid": "raw/wave-mid.png plus frozen open outside arm mask",
+    "open-peak": "raw/wave-peak.png plus frozen open outside arm mask",
+    "smile": "expression-only mask from wave-peak; body unchanged"
+  },
+  "rawSHA256": {
+    "wave-closed-corrected.png": "cd12ccf8a413ec629863a2559dafcb339c78e72cb223d4dc8dc858acf17debe8",
+    "wave-closed.png": "493e15424e8b19ddb463cf263a12e76a06107d75f69d24e86205fef489e974c5",
+    "wave-mid.png": "3ab6beaf377ab2af4ab497bc5e5a0c2cc30c7be1feb6f42c49416755838abca9",
+    "wave-peak.png": "5fc567856a739ea59ae381868970332cae10634106eb73dac00dd4be99d666e0"
+  },
+  "references": {
+    "base-original-visible.png": "5dfaa1b339983cf8e64c838cf383e5e6f8a99a0edbda3656e740499b5bb619cd",
+    "closed-rest-rigid-v2.png": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+    "lid-angle-000.png": "b33ccb47fff6c6469554b1922d881a1391e9ac374895ee384af015b89265dc94",
+    "upright-open-neutral-v2.png": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+  },
+  "rejected": {
+    "raw/wave-closed.png": "wrong arm; retained for provenance only"
+  },
+  "semantics": {
+    "completion": {
+      "cue": "no baked symbols; any completion visual must derive from actual completion receipt",
+      "entry": "references/upright-open-neutral-v2.png",
+      "exit": "references/upright-open-neutral-v2.png",
+      "frames": [
+        {
+          "cue": "ADDRESS",
+          "durationMs": 180,
+          "path": "references/upright-open-neutral-v2.png"
+        },
+        {
+          "cue": "LIFT",
+          "durationMs": 130,
+          "path": "wave/open-mid.png"
+        },
+        {
+          "cue": "WAVE",
+          "durationMs": 280,
+          "path": "wave/open-peak.png"
+        },
+        {
+          "cue": "LOWER",
+          "durationMs": 150,
+          "path": "wave/open-mid.png"
+        },
+        {
+          "cue": "SOFT_SMILE",
+          "durationMs": 260,
+          "path": "wave/open-smile.png"
+        },
+        {
+          "cue": "REST",
+          "durationMs": 180,
+          "path": "references/upright-open-neutral-v2.png"
+        }
+      ],
+      "interruption": "neutral lower via mid then matching open/closed rest; no implied business result",
+      "trigger": "only actual successful completion receipt, deduplicate receipt ID; never elapsed time/pending/permission allow alone"
+    },
+    "tap": {
+      "cue": "no baked symbols; any completion visual must derive from actual completion receipt",
+      "entry": "references/closed-rest-rigid-v2.png",
+      "exit": "references/closed-rest-rigid-v2.png",
+      "frames": [
+        {
+          "cue": "ADDRESS",
+          "durationMs": 80,
+          "path": "references/closed-rest-rigid-v2.png"
+        },
+        {
+          "cue": "LIFT",
+          "durationMs": 80,
+          "path": "wave/closed-mid.png"
+        },
+        {
+          "cue": "WAVE",
+          "durationMs": 130,
+          "path": "wave/closed-peak.png"
+        },
+        {
+          "cue": "LOWER",
+          "durationMs": 90,
+          "path": "wave/closed-mid.png"
+        },
+        {
+          "cue": "SOFT_SMILE",
+          "durationMs": 100,
+          "path": "wave/closed-smile.png"
+        },
+        {
+          "cue": "REST",
+          "durationMs": 80,
+          "path": "references/closed-rest-rigid-v2.png"
+        }
+      ],
+      "interruption": "neutral lower via mid then matching open/closed rest; no implied business result",
+      "trigger": "only actual user tap, shorter local acknowledgement; no completion receipt"
+    },
+    "welcome": {
+      "cue": "no baked symbols; any completion visual must derive from actual completion receipt",
+      "entry": "references/closed-rest-rigid-v2.png",
+      "exit": "references/closed-rest-rigid-v2.png",
+      "frames": [
+        {
+          "cue": "ADDRESS",
+          "durationMs": 160,
+          "path": "references/closed-rest-rigid-v2.png"
+        },
+        {
+          "cue": "LIFT",
+          "durationMs": 110,
+          "path": "wave/closed-mid.png"
+        },
+        {
+          "cue": "WAVE",
+          "durationMs": 300,
+          "path": "wave/closed-peak.png"
+        },
+        {
+          "cue": "LOWER",
+          "durationMs": 140,
+          "path": "wave/closed-mid.png"
+        },
+        {
+          "cue": "SOFT_SMILE",
+          "durationMs": 240,
+          "path": "wave/closed-smile.png"
+        },
+        {
+          "cue": "REST",
+          "durationMs": 150,
+          "path": "references/closed-rest-rigid-v2.png"
+        }
+      ],
+      "interruption": "neutral lower via mid then matching open/closed rest; no implied business result",
+      "trigger": "one local welcome event, once, never periodic background timer"
+    }
+  },
+  "sharedMotion": "one small palm-facing-viewer lift-mid-peak-mid-rest action, no permission-palm reuse",
+  "status": "internal artwork reviewed; runtime integration pending, no runtime install"
+}

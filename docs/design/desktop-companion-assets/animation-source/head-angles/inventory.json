@@ -1,0 +1,95 @@
+{
+  "status": "source_references_not_runtime_validated",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2834,
+      "sha256": "853c0f3685a2860d3822d21831f5442b69cb5fd3f1a8b0365829cf5d415b2c8b",
+      "sourceSha256": "92164035c61a684240418abe665d12c6107f91177e5dfa92069bed1d88f3410c"
+    },
+    {
+      "path": "annotate_landmarks.py",
+      "bytes": 2601,
+      "sha256": "02b7310bd7d54b5db41c472e1427d959475e14dafac9d4c31bc558935ec5b95c",
+      "sourceSha256": "02b7310bd7d54b5db41c472e1427d959475e14dafac9d4c31bc558935ec5b95c"
+    },
+    {
+      "path": "head-neck-source.png",
+      "bytes": 512746,
+      "sha256": "bef2e503690c3611ecfac23a9d9438b68dad0e4fd09fff5d8887142e977b5c27",
+      "sourceSha256": "bef2e503690c3611ecfac23a9d9438b68dad0e4fd09fff5d8887142e977b5c27"
+    },
+    {
+      "path": "head-pitch-down-generated.png",
+      "bytes": 1782411,
+      "sha256": "1194600d3bd384958d946c9c7d600555e0018d1c3606287d9a00d94c59f37349",
+      "sourceSha256": "1194600d3bd384958d946c9c7d600555e0018d1c3606287d9a00d94c59f37349"
+    },
+    {
+      "path": "head-pitch-down-registered-crop.png",
+      "bytes": 541897,
+      "sha256": "e5e5fc6936ad7cf91dabb6d77a54035969a4058f1c6b9212f744df9dbf71a827",
+      "sourceSha256": "e5e5fc6936ad7cf91dabb6d77a54035969a4058f1c6b9212f744df9dbf71a827"
+    },
+    {
+      "path": "head-pitch-down-registered-reference.png",
+      "bytes": 563726,
+      "sha256": "8362d668b0558a5516b3b7be9c704b0054779ee0140100e29a88dbaefa8d0bf2",
+      "sourceSha256": "8362d668b0558a5516b3b7be9c704b0054779ee0140100e29a88dbaefa8d0bf2"
+    },
+    {
+      "path": "head-pitch-up-generated.png",
+      "bytes": 1783203,
+      "sha256": "801d8acbe2ec4d05357e8917814bd27bef9e141eaa98f619b701077f6c4fbc85",
+      "sourceSha256": "801d8acbe2ec4d05357e8917814bd27bef9e141eaa98f619b701077f6c4fbc85"
+    },
+    {
+      "path": "head-pitch-up-registered-crop.png",
+      "bytes": 543827,
+      "sha256": "f91f345d9e6eec31646d6d4641552ba6226b5c70c9e4b37f16bf958368db2391",
+      "sourceSha256": "f91f345d9e6eec31646d6d4641552ba6226b5c70c9e4b37f16bf958368db2391"
+    },
+    {
+      "path": "head-pitch-up-registered-reference.png",
+      "bytes": 567880,
+      "sha256": "05de98ee9d539a6ad0580d744ca0951c14096c0b657aabeb66cf545671ce7322",
+      "sourceSha256": "05de98ee9d539a6ad0580d744ca0951c14096c0b657aabeb66cf545671ce7322"
+    },
+    {
+      "path": "landmark-qa.jpg",
+      "bytes": 375676,
+      "sha256": "a1a6aa0988b4415b0bfb84afdd30075de3cf3142d2e3e32adce883b0f2b11d33",
+      "sourceSha256": "a1a6aa0988b4415b0bfb84afdd30075de3cf3142d2e3e32adce883b0f2b11d33"
+    },
+    {
+      "path": "landmarks.json",
+      "bytes": 7549,
+      "sha256": "279228b38bc4af3e821245feb41c19b6fc654de7a6b507a8d9d6615fd50a687d",
+      "sourceSha256": "279228b38bc4af3e821245feb41c19b6fc654de7a6b507a8d9d6615fd50a687d"
+    },
+    {
+      "path": "pitch-comparison-qa.jpg",
+      "bytes": 368198,
+      "sha256": "e09d1fa161587412ac04c20355ec3ddf88c0dc24272cdca742db6b47c54e5d95",
+      "sourceSha256": "e09d1fa161587412ac04c20355ec3ddf88c0dc24272cdca742db6b47c54e5d95"
+    },
+    {
+      "path": "prompts.json",
+      "bytes": 2411,
+      "sha256": "aa34a4456ea99639f77611d53fecee6fe26a29073ed829fcf8c3aab0c6962216",
+      "sourceSha256": "aa34a4456ea99639f77611d53fecee6fe26a29073ed829fcf8c3aab0c6962216"
+    },
+    {
+      "path": "register_head_angles.py",
+      "bytes": 2371,
+      "sha256": "22066224c3307f03da47edc7cf4298a3f5256b0d253ac4cc8ac7075278c2f128",
+      "sourceSha256": "22066224c3307f03da47edc7cf4298a3f5256b0d253ac4cc8ac7075278c2f128"
+    },
+    {
+      "path": "registration-report.json",
+      "bytes": 1976,
+      "sha256": "9762428da0419916a26fce75d6529f7d4e9d3ff67ed726dfa3b4e77cd83379f5",
+      "sourceSha256": "9762428da0419916a26fce75d6529f7d4e9d3ff67ed726dfa3b4e77cd83379f5"
+    }
+  ]
+}

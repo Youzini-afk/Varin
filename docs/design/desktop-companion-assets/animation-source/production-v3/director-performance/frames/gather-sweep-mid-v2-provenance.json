@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "frames/gather-out-v2.png",
+  "sourceSHA256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+  "raw": "raw/gather-sweep-mid-v2.png",
+  "rawSHA256": "e59184e0be0b8f3ca5d3fb7d3ef92dab73b0996f3bf1c6d0c83365bf2dcdd980",
+  "prompt": "prompts/gather-sweep-mid-v2.txt",
+  "output": "frames/gather-sweep-mid-v2.png",
+  "sha256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+  "mask": "masks/gather-sweep-mid-v2.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

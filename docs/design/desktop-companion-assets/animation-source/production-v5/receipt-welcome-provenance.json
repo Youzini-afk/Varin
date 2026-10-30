@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "status": "selected-source-checkpoint-not-runtime-admission",
+  "inputs": [
+    {
+      "reference": "local-review:studies/receipt-v5-sequence/timing-and-provenance.json",
+      "sha256": "df139825b82fe0dd3d2860a04353c6c382284f2cd49ad054d050f0c2268c6ec6"
+    },
+    {
+      "reference": "local-review:studies/welcome-v5-sequence/frozen-timing-and-exits.json",
+      "sha256": "a4f67e02029e91804de8676b2a38886fbbf37ca84d862ee6aa044f21cc6e368c"
+    }
+  ],
+  "sourceAliases": {
+    "receipt": {
+      "open-neutral": "neutral",
+      "contact": "receipt-contact",
+      "descent": "receipt-descent",
+      "entry": "receipt-entry",
+      "recover-mid": "receipt-recover-mid",
+      "recovery": "receipt-recovery"
+    },
+    "welcome": {
+      "open-neutral": "neutral",
+      "attend-release": "welcome-attend-release",
+      "greeting-rise": "welcome-greeting-rise",
+      "greeting-near-cheek": "welcome-greeting-near-cheek",
+      "wrist-arc-end-r2": "welcome-wrist-arc-end-r2",
+      "lowering-mid": "welcome-lowering-mid",
+      "lowering-ready": "welcome-lowering-ready"
+    }
+  },
+  "selectedSources": [
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+      "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+      "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/receipt/contact.png",
+      "sha256": "b967d9fbd17de50d53346adb9251b51bc4e51ae032c98eb62bee2fa31bc51bd9",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/contact.png",
+      "sha256": "3ac9d1574566c3934f676178d5c4adb6bbc988f21ee84c6edc79f043dde1a8fb",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/receipt/descent.png",
+      "sha256": "3b41971392850371118319b98d6e74cd23fb2f857661660957dd7750b633d87a",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/descent.png",
+      "sha256": "e1ca249cc5ddabda521e7496fe475f57afb56d7a35b8e1818d00dd4a7c98ce20",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/receipt/entry.png",
+      "sha256": "49564af7379806bb0fab9859b3d190037ad63074ab2daa616b282fd4effa852b",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/entry.png",
+      "sha256": "9e0358d8da4c651a23cee73d0ca120bf13a0bf2fe6136ecbf39a1398bfb312c9",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/receipt/recover-mid.png",
+      "sha256": "dc6ca1f75b9b38ffaa8e63293951ec71a19eb7b4cfd06a98305b450de3a872c3",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/recover-mid.png",
+      "sha256": "321f4edb0a584fe654d5a592e7f3b5de0db417fa39f3594f3cc5458c88129789",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/receipt/recovery.png",
+      "sha256": "2803bef4fe8e732fc92dc4770bfb70a6bb8cae55b7d8b5b2eda0a0e006542bb5",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/recovery.png",
+      "sha256": "44315537301b630bbe4d7df1448cf153acc6d1cf4d69a2a482e552be06f31f7b",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/attend-release.png",
+      "sha256": "e278a1adb282dd8008ddf1e68ca795e8ba893c189aef57612449e739194f71af",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/attend-release.png",
+      "sha256": "6314b333edaa9522619b94891f161f907ae1fcb8e9924ea304a593621a3de033",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/greeting-rise.png",
+      "sha256": "45e9a4726a518402a96bf9c6b08a3f38fb1239bb5f68e4d3cee1e6bede34dec0",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/greeting-rise.png",
+      "sha256": "fa9a26b183a7185275200449d4d32c84bdc61dd1ad6c5a22db6cd7bd8275fbd5",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/greeting-near-cheek.png",
+      "sha256": "d284ecee91a9b14e651666fd02f46109e748698b6163bd8f29739c6cd5b82b9c",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/greeting-near-cheek.png",
+      "sha256": "e6239304c3edb6ff89519a7ecffb8176b66bbceea779bbfe0fe01ee5adabd8b4",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/wrist-arc-end-r2.png",
+      "sha256": "7884ff1725acef6f3b9dcea97685a82854f6ca731bd60a5f9f14d3029bc733ed",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/wrist-arc-end-r2.png",
+      "sha256": "2d97138ff6ccff430594be45007e6db795718b350a17b3f6eb31ee6363cafa46",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-mid.png",
+      "sha256": "68e86b85afae50ce7ea5eac4abf69e1ba79018ff6b6c33078cad1603446d831d",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-mid.png",
+      "sha256": "71f88003cc90f309771a90c456850031fafe648ed0d95426f9f9cb6aad06eb7e",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-ready.png",
+      "sha256": "92d09e7bd00620f5011af6b4e45687c548b58507a7d71d3eed2ae6ef1ebc71e2",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-ready.png",
+      "sha256": "08d97384eb453233d160b734fffaf1e010b86538bc9909b72cb71112ca0bb258",
+      "operation": "copy-selected"
+    }
+  ],
+  "ownerMappingEvidence": [
+    {
+      "path": "packages/ui/src/apps/renderCompanionApp.tsx",
+      "sha256": "01662fe1c6b15478f40267dd049fe2a5b5c47fefb7e4652dad003e6bb5477b4c"
+    },
+    {
+      "path": "packages/ui/src/components/companion/presentation.ts",
+      "sha256": "7760560be73253ccafe76052be9786667390fe59ce8b78574fe26bb59fc007f5"
+    }
+  ],
+  "selectedWelcomeArc": "wrist-arc-end-r2 only; older arc excluded",
+  "review": "Parent reviewed all selected FG/D pairs at360; candidate review, not native/temporal acceptance.",
+  "limitations": [
+    "Source-only checkpoint; no event wiring, runtime installation or normal admission.",
+    "Receipt uses existing understood/permission-allowed factual gates; no generic receipt alias or synthetic acknowledgement.",
+    "Native root/world-stool and temporal continuity remain separate gates."
+  ]
+}

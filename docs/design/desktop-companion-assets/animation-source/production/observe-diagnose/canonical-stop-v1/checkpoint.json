@@ -1,0 +1,111 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "observe-diagnose/canonical-stop-v1/face-mask.png",
+      "sha256": "23a2f6163a4375f54c71668b7673549af7943c15800cd8922b9355f0455c6444",
+      "bytes": 1991
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/surprise-source.png",
+      "sha256": "03c94da6e88a52a54b45868a7e9bfaf778aec155c1f476477f2edc22544b671a",
+      "bytes": 1605646
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/middle-surprise.png",
+      "sha256": "41004ce0b9730cd5d53d3ad5170edabc99e6278f3c159a989965b02c013433f9",
+      "bytes": 310824
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/rest-serious.png",
+      "sha256": "ff60042d4080de8c2c20da611baa8bd013642d83898ff6ad3b98dcc4172f21ab",
+      "bytes": 309453
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/rest.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/raised-serious.png",
+      "sha256": "12e9d291a7fb5c479d76f3b445c93b3b80a4312f86840153d4b8622ee5fe93b3",
+      "bytes": 310151
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/rest-surprise.png",
+      "sha256": "3860c489695938bbf3df5dfbd54700c60cc9128a582c30e16f8fc563166fce7d",
+      "bytes": 309672
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/build.py",
+      "sha256": "87d9d86046df777376bbea2e25aea03430f31459a931949b00737df33396d4f0",
+      "bytes": 2646
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/hand-mask.png",
+      "sha256": "10d4342d54fd46e28fb1ad6c86dbfdf4fd0cadb8e8815629db2dd3c0e701e851",
+      "bytes": 2172
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/strip.jpg",
+      "sha256": "e8e586862087a4145975534943dcbd6273aa8046e667c65ae91a68ec3c38a980",
+      "bytes": 159972
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/cancel-entry.source.json",
+      "sha256": "16f497e0ebeb003b52d6ce35ab132aeb2da3d48df0c76784d96b45c0865c69ee",
+      "bytes": 1180
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/failure-entry.source.json",
+      "sha256": "4bf0691b4a49b94b350e55b0799065902fe224d0a32939cde0494fc8082bc923",
+      "bytes": 1394
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/raised-ref.png",
+      "sha256": "ea89ac5290932f387ffd4bd80d6bf2ffd3ba64ee71de85c546169579c43cf231",
+      "bytes": 333450
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/middle-source.png",
+      "sha256": "4e1f2ee3bbd82c73b0fc4b78f0095943fb3a507a6ee7a1bc79c2e63f2073849d",
+      "bytes": 1640491
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/raised-surprise.png",
+      "sha256": "85668658799a6c27e9f810f83b65f1031c9f320c897bcabd0d64e056ce5d8622",
+      "bytes": 310378
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/prompts.json",
+      "sha256": "1691d694481a368397070baa4e4a4bef6fe5b974a78ffbd17e3af3c9a9d2b429",
+      "bytes": 2354
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/serious-source.png",
+      "sha256": "f24d4b9f087a6a5104a1f1e13516061d44057a65954ef83e93bd492e281ae1cc",
+      "bytes": 1596490
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/middle-serious.png",
+      "sha256": "79e50736cfa772683e9c8eb4846dfc27d739585e45c5a15e7de45be4b850fb5d",
+      "bytes": 310600
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/middle.png",
+      "sha256": "ae50186697cf2ca202ae83a458fe3c8a340454a389bad1b9b978e2a78341073b",
+      "bytes": 310171
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/raised-source.png",
+      "sha256": "de29d444f76245a0ae68e30fe0520308d63a5294747e75d6350138f11ec37770",
+      "bytes": 1582722
+    },
+    {
+      "path": "observe-diagnose/canonical-stop-v1/raised.png",
+      "sha256": "72e7f2f854be4b79e2daf9c49a66d62cd49bb743be1c09466b397ab794985c2b",
+      "bytes": 309735
+    }
+  ],
+  "pathBase": "production-root"
+}

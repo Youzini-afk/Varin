@@ -1,0 +1,4 @@
+{
+  "originalComposerSha256": "47ed1e077a6da55dad5eeb1e1cca4851bc1201770e79be988314b6d923be2b8a",
+  "change": "Output inventory uses paths relative to its own root; input inventory includes only the five required, byte-identical accepted source packages. No artwork or timing change."
+}

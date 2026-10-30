@@ -1,0 +1,239 @@
+{
+  "status": "DRAFT_FACE_LOCAL_PATCHES",
+  "source": "../canonical-seated-clean-v3.png",
+  "canvas": [
+    1382,
+    1382
+  ],
+  "origin": [
+    0,
+    0
+  ],
+  "method": "source pixel feature patches; local skin plane / harmonic brow fill; no generated replacement facial design",
+  "reconstructionMaxChannelError": 0,
+  "blankChangedPixels": 7478,
+  "files": {
+    "eyeL": "eyeL.png",
+    "eyeR": "eyeR.png",
+    "mouth": "mouth.png",
+    "browL": "browL.png",
+    "browR": "browR.png",
+    "upperLidL": "upperLidL.png",
+    "upperLidR": "upperLidR.png",
+    "faceBasePatch": "faceBasePatch.png"
+  },
+  "eyeL": {
+    "center": [
+      600,
+      440
+    ],
+    "baseline": [
+      [
+        568,
+        449
+      ],
+      [
+        631,
+        440
+      ]
+    ],
+    "upperLidTravel": [
+      0,
+      18
+    ],
+    "rotationRadians": -0.14189705460416394,
+    "rotationDegrees": -8.13010235415598,
+    "upperLidPolyline": [
+      [
+        562,
+        440
+      ],
+      [
+        576,
+        429
+      ],
+      [
+        590,
+        423
+      ],
+      [
+        605,
+        423
+      ],
+      [
+        620,
+        427
+      ],
+      [
+        633,
+        431
+      ]
+    ],
+    "lowerLidPolyline": [
+      [
+        569,
+        449
+      ],
+      [
+        585,
+        459
+      ],
+      [
+        604,
+        461
+      ],
+      [
+        623,
+        454
+      ],
+      [
+        635,
+        445
+      ]
+    ]
+  },
+  "eyeR": {
+    "center": [
+      725,
+      382
+    ],
+    "baseline": [
+      [
+        688,
+        393
+      ],
+      [
+        758,
+        377
+      ]
+    ],
+    "upperLidTravel": [
+      0,
+      22
+    ],
+    "rotationRadians": -0.2247111684146427,
+    "rotationDegrees": -12.875001559612476,
+    "upperLidPolyline": [
+      [
+        684,
+        386
+      ],
+      [
+        698,
+        372
+      ],
+      [
+        717,
+        365
+      ],
+      [
+        738,
+        361
+      ],
+      [
+        761,
+        360
+      ]
+    ],
+    "lowerLidPolyline": [
+      [
+        692,
+        396
+      ],
+      [
+        710,
+        404
+      ],
+      [
+        731,
+        403
+      ],
+      [
+        747,
+        394
+      ],
+      [
+        758,
+        380
+      ]
+    ]
+  },
+  "warnings": [
+    "Blank fill is draft and requires close-up artistic QA; brow partly crosses hair",
+    "eye patches include immediate source skin; clipping must follow slanted eyelid axis",
+    "upperLid strokes extracted from original, not a finished closed-eye expression",
+    "Do not scale entire head for blink; draw base patch then local eye iris clipping then lid stroke",
+    "Blank fill currently NOT approved: visible polygon seams and some overlap onto fringe; use original open face until corrected",
+    "Closed-eye silhouette not finished; independent lower-lid contours recommended rather than flat scaled eye"
+  ],
+  "sourcePixelBounds": {
+    "eyeL": [
+      551,
+      411,
+      638,
+      464
+    ],
+    "eyeR": [
+      678,
+      352,
+      774,
+      406
+    ],
+    "mouth": [
+      664,
+      459,
+      700,
+      481
+    ],
+    "browL": [
+      548,
+      376,
+      586,
+      401
+    ],
+    "browR": [
+      651,
+      330,
+      704,
+      359
+    ],
+    "upperLidL": [
+      558,
+      419,
+      632,
+      450
+    ],
+    "upperLidR": [
+      682,
+      352,
+      768,
+      391
+    ],
+    "faceBasePatch": [
+      548,
+      330,
+      774,
+      481
+    ]
+  },
+  "reconstructionMethod": "Exact array replacement with mutually exclusive masks. Standard source-over alpha not yet zero-error because original pixels contain alpha 253/254.",
+  "trueSourceOverQA": {
+    "maxChannelError": 0,
+    "changedPixels": 0,
+    "base": "canonical-face-cutout.png",
+    "layers": [
+      "eyeL",
+      "eyeR",
+      "browL",
+      "browR",
+      "mouth"
+    ],
+    "note": "Base holes + original features; blank skin patch omitted at open=1; opaque blank skin shown progressively during closure"
+  },
+  "blankV2": {
+    "file": "faceBasePatch-generated-v2.png",
+    "registration": "registration.json",
+    "status": "improved draft; close-up QA before blink acceptance",
+    "note": "Generated skin copied ONLY inside original feature masks, original full face/hair/body outside unchanged. Mouth uses programmatic local fill."
+  }
+}

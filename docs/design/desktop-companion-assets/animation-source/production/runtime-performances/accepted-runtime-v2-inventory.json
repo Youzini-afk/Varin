@@ -1,0 +1,22 @@
+[
+  {
+    "action": "editing",
+    "package": "accepted-runtime/v1/typing/sequence.json"
+  },
+  {
+    "action": "browsing",
+    "package": "accepted-runtime/v1/scroll/sequence.json"
+  },
+  {
+    "action": "idle-closed",
+    "package": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json"
+  },
+  {
+    "action": "eye-rub",
+    "package": "accepted-runtime/v2/rest-closed-eye-rub-v1/sequence.json"
+  },
+  {
+    "action": "stretch",
+    "package": "accepted-runtime/v2/rest-closed-stretch-v1/sequence.json"
+  }
+]

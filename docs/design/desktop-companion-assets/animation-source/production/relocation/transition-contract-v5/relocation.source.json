@@ -1,0 +1,2360 @@
+{
+  "schemaVersion": 1,
+  "stage": "motion-candidate",
+  "coordinateRoot": "varin-animation-production",
+  "frames": {
+    "open": {
+      "source": "relocation/rapid-pickup-v1/open.png",
+      "sha256": "3af122cea75c3533699dd7fa6c26441005fc43db937baa0018a41b19225957fb",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "lid65",
+        "half",
+        "closed",
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "lid65",
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "half": {
+      "source": "relocation/rapid-pickup-v1/half.png",
+      "sha256": "50ff730ed917d9326049257a61532b29ec7de9310bce9c7374151fc51b2fcdca",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "closed",
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "closed": {
+      "source": "relocation/rapid-pickup-v1/closed.png",
+      "sha256": "ca135e539b6621f8f4245a5359cc3e3ed98cbae07aafb64e28eac45edac7a55e",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "turn": {
+      "source": "relocation/rapid-pickup-v1/turn.png",
+      "sha256": "77ca66133cb5be06fa457d6819c786aeec1e6c2a887e6015df48840e0f59cf79",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "turn70",
+        "hug",
+        "hugPrecontact",
+        "hugContact",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn70",
+        "hug"
+      ]
+    },
+    "hug": {
+      "source": "relocation/rapid-pickup-v1/hug.png",
+      "sha256": "c2cb7b48ddb11d1b7a9a877f1847675e891b9f2fcf9121b6db3859012af50469",
+      "durationMs": 110,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "hugPrecontact",
+        "hugContact",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": []
+    },
+    "lid65": {
+      "source": "relocation/rapid-pickup-v5/lid65.png",
+      "sha256": "fa43c3df8176f3f95e6814d2e86261236bf53423e3e9a263065d467ce0d15aaf",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "half",
+        "closed",
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "turn70": {
+      "source": "relocation/rapid-pickup-v4/turn70.png",
+      "sha256": "726298cd1039ce8ac40015fbdf447966848da4b5639df274ec45b398affbc8ad",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "hug",
+        "hugPrecontact",
+        "hugContact",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hug"
+      ]
+    },
+    "turn20": {
+      "source": "relocation/rapid-pickup-v3/turn20.png",
+      "sha256": "bc8d298b56d85dd4610baa38685b7313e919f938bc4ea68cafbc376a02fe40e8",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "closed",
+        "precontact",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "precontact": {
+      "source": "relocation/rapid-pickup-v2/precontact.png",
+      "sha256": "5907bdd35b5c0a19cb053d5e7a1de6f2bbe60ffdb9d202dd6549e13c76810e8a",
+      "durationMs": 90,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "both hands + thigh",
+      "releaseNext": [
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "contact": {
+      "source": "relocation/canonical-static-v1/closed.png",
+      "sha256": "43c4150df0ea0dbbd8efbe97d9c8cb33393ebff29c1b09cfa4a991e087d5749f",
+      "durationMs": 80,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "precontact",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "release": {
+      "source": "relocation/canonical-static-v2/lap-release.png",
+      "sha256": "88bce77bad478a010102cf7ab270fc73d2fe8ec1e15b894a2ad376d886fbb495",
+      "durationMs": 80,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "precontact",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "settle": {
+      "source": "relocation/closed-handoff-v1/near-settled.png",
+      "sha256": "d31a3c129539f503b716459a8347f372bee77f656a3c2ba71d20613b03747aaa",
+      "durationMs": 70,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [
+        "seated"
+      ],
+      "grabNext": [
+        "precontact",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "seated": {
+      "source": "seated-work/canonical-lid-v1/closed-canonical-candidate.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "durationMs": 300,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [],
+      "grabNext": [
+        "precontact",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "seatedOpen": {
+      "source": "shared/seated-open-canonical-alpha-v1.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "lap + hands",
+      "releaseNext": [],
+      "grabNext": [
+        "entryCurrent",
+        "entrySupported",
+        "detachHalf",
+        "detachMid",
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "hugPrecontact": {
+      "source": "relocation/hug-landing-v2/mid.png",
+      "sha256": "d846382b9fefd95911d594a4821f110cb5f806e9f3faedb47e624d469a29ffad",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "lap + hands; actual authored contact",
+      "releaseNext": [
+        "hugContact",
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hug"
+      ]
+    },
+    "hugContact": {
+      "source": "relocation/hug-landing-v3/contact-no-stool.png",
+      "sha256": "e745d29f3c7c43a96ce263e900139b9f02caffffefe901be63907da40f415b7a",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": true,
+      "laptopSupport": "lap + hands; actual authored contact",
+      "releaseNext": [
+        "seatedHug",
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hugPrecontact",
+        "hug"
+      ]
+    },
+    "seatedHug": {
+      "source": "relocation/canonical-static-v1/hug.png",
+      "sha256": "c6899d1960bb41138879c08f5ae173b7a7b9f7d2bf691b247d3f557269746598",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "seatedTurn",
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "hugContact",
+        "hugPrecontact",
+        "hug"
+      ]
+    },
+    "seatedTurn": {
+      "source": "relocation/canonical-static-v1/turn.png",
+      "sha256": "f442fb7b7e7a438d2f22eeae204c6e4333708cdad544736b4e6f4a80ffdd8fae",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "seatedGrip",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn",
+        "hug"
+      ]
+    },
+    "seatedGrip": {
+      "source": "relocation/canonical-static-v1/grip-lift-white.png",
+      "sha256": "f57d5e3ff63474aa2319b093cfd3e96eb8fb7f25d6e36f7d3c3260b4c9cd9cc9",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": true,
+      "seatContact": true,
+      "laptopSupport": "both hands",
+      "releaseNext": [
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "entryCurrent": {
+      "source": "relocation/shared-entry-v1/open-current.png",
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "lap + hands; actual authored contact",
+      "releaseNext": [
+        "entrySupported",
+        "detachHalf",
+        "detachClosed",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "entrySupported",
+        "detachHalf",
+        "detachMid",
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "entrySupported": {
+      "source": "relocation/shared-entry-v1/open-supported.png",
+      "sha256": "4f4488cf08f92b09ec123a3771bdc89c606d2f40fa83093922f254efa3b0d065",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "lap + hands; actual authored contact",
+      "releaseNext": [
+        "entrySupported",
+        "detachHalf",
+        "detachClosed",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "detachHalf",
+        "detachMid",
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "detachHalf": {
+      "source": "relocation/departure-bridge-v1/detach-protected-v2.png",
+      "sha256": "9bc600c76d6cab4ee16e5fd20a2c19741dd1e002b1e6b022fbc2ae37c1523d16",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "lap + hands; actual authored contact",
+      "releaseNext": [
+        "detachClosed",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "detachMid",
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "detachMid": {
+      "source": "relocation/departure-bridge-v3/mid-protected.png",
+      "sha256": "47716ba3c66ba5caa66c4d55cd3acc8356fe48584c56971cea49aa52bc095e4d",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "lap + hands; actual authored contact",
+      "releaseNext": [
+        "detachClosed",
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "half",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    },
+    "detachClosed": {
+      "source": "relocation/shared-entry-v1/closed-detached.png",
+      "sha256": "3bb724ce23581ac2c1656706205a3eeab8909a33a886ad2f1298bda297f9e59b",
+      "durationMs": 65,
+      "canvas": [
+        512,
+        512
+      ],
+      "embeddedStool": false,
+      "seatContact": false,
+      "laptopSupport": "lap + hands; actual authored contact",
+      "releaseNext": [
+        "contact",
+        "release",
+        "settle",
+        "seated"
+      ],
+      "grabNext": [
+        "precontact",
+        "closed",
+        "turn20",
+        "turn",
+        "turn70",
+        "hug"
+      ]
+    }
+  },
+  "worldStool": {
+    "source": "relocation/canonical-registered-v1/stool-world-candidate-v2.png",
+    "viewport": [
+      512,
+      512
+    ],
+    "seatSupportEstimate": [
+      300,
+      347
+    ],
+    "visibleRim": [
+      434,
+      365
+    ],
+    "fadeOutMs": 150,
+    "fadeInMs": 100,
+    "interactive": false,
+    "movesWithCharacter": false,
+    "hideIndependentPlateWhenEmbeddedStool": true
+  },
+  "semantics": {
+    "pointerDown": "capture pointer; follow immediately; route grabNext from actually displayed frame, no seated closing prerequisite",
+    "pointerUp": "freeze destination world anchor; replace unplayed queue with releaseNext from displayed frame",
+    "repeatedRelease": "no-op if already landing; do not restart",
+    "regrab": "cancel pending release queue; world plate fades in place; route grabNext from displayed contact/grip",
+    "poseBlend": "none",
+    "windowTranslation": "pointer root only, never interpreted as body-pose synthesis"
+  },
+  "acceptance": {
+    "contactStatic": "independent review observed supported laptop across pickup and early landing",
+    "playback": "Seated peer inspected interactive v4 current-pose early release without forced curl, plus hug -> newmid/contact -> shared seatedHug/Turn/Grip; supported nodes accepted as integration candidate. New boot-only mid correction pending peer; laptop angle already corrected.",
+    "knownGaps": [
+      "core entry/early-release and corrected hug-tail have limited v4 peer acceptance; not final smoothness acceptance",
+      "native pointer/window/world stool integration QA pending",
+      "USER low-hand/direct and nod entries need representative sampling",
+      "OBSERVE/REST source map pending merge; do not pretend all families covered",
+      "direction response optional study not included"
+    ]
+  },
+  "currentPoseEntries": [
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-000.png",
+      "sourceSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-000.png",
+      "detachedSha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-000.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-001.png",
+      "sourceSha256": "7a7e59882efd7a259186da25c88cfd3f9350a29dac9aa4dd89cb1f6168a4bb7e",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-001.png",
+      "detachedSha256": "c925a3bb1a9ff59a7d44276b39785a079669a7f97e09bd1c0f8d15aafa08b87f",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-001.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-002.png",
+      "sourceSha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-002.png",
+      "detachedSha256": "de11a5f5e01af2853b16b0bc11f6cc788dcc1dacd9c49f1e8e42c27b1584011f",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-002.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-003.png",
+      "sourceSha256": "c224944557fed9f2da49a7b1073c645deb2f5e44ae3119bc4ea1b3d9f8995c15",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-003.png",
+      "detachedSha256": "a2becf71720fcf4667bc998221dc16898d1f0de50eae6c00bb48d6c2f3403831",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-003.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-004.png",
+      "sourceSha256": "a1d49752eca51651f08cab3f76676e49257cb91fbacce6841c83f210736458f4",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-004.png",
+      "detachedSha256": "3394698a08d9736b5804e7a613a2317ab10ccb73367966a98536f8d1a5ad47ba",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45,
+          "sha256": "d18c316f7adb9c754d9d6ad934426fa7dcf76f67a29cd2d537af54aec5a25a4c"
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-004.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-005.png",
+      "sourceSha256": "9d548c5769377748e3ac47908dacf753f6a3a30c2fba44482223aa9809f4fa56",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-005.png",
+      "detachedSha256": "ae28f9344df812702de9b99a10aeac65d728b52167fed59935e2aa5431a5ae03",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45,
+          "sha256": "d18c316f7adb9c754d9d6ad934426fa7dcf76f67a29cd2d537af54aec5a25a4c"
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-005.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-006.png",
+      "sourceSha256": "f567b6b4da1b088df7ea92b8190ac5784ccc9de6b38d28b6122a29d045420f18",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-006.png",
+      "detachedSha256": "e3077cdd773d79bdf7fa8d028b7a737ecc49e57c5c6f17f8a1b6825b69383186",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45,
+          "sha256": "d18c316f7adb9c754d9d6ad934426fa7dcf76f67a29cd2d537af54aec5a25a4c"
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-006.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-007.png",
+      "sourceSha256": "fa90c96d80c7e95094b0ed3ee1872d467b0b0f5fefef14b4338a041266f54c32",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-007.png",
+      "detachedSha256": "50fefa1901587c9bb0a2458dbbf2482285048b186b7e0592d1f88871909b281f",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45,
+          "sha256": "d18c316f7adb9c754d9d6ad934426fa7dcf76f67a29cd2d537af54aec5a25a4c"
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-007.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-008.png",
+      "sourceSha256": "409aa7714ab85498aa01dd353de3c12ae7eb2b77b0970eee2fa316a40b4ba91e",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-008.png",
+      "detachedSha256": "9cef65c75171f182a9940b572838a73d0ac98205efe7aec4402f505d38eb160a",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45,
+          "sha256": "d18c316f7adb9c754d9d6ad934426fa7dcf76f67a29cd2d537af54aec5a25a4c"
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-008.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-009.png",
+      "sourceSha256": "5843feb9a48fe08371ce5667a1718ab49e0c656708996d3335cd51e6580c6ca9",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-009.png",
+      "detachedSha256": "747d3ff6761930b17f50e98fa083fa9b8dc9dda182a67d4f47ed579886490b09",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45,
+          "sha256": "d18c316f7adb9c754d9d6ad934426fa7dcf76f67a29cd2d537af54aec5a25a4c"
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-009.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-010.png",
+      "sourceSha256": "64adb42cea608c7590473bf74844d49aa87b640483361d26e7d3b037061c35d0",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+      "detachedSha256": "d18c316f7adb9c754d9d6ad934426fa7dcf76f67a29cd2d537af54aec5a25a4c",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-010.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-011.png",
+      "sourceSha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-011.png",
+      "detachedSha256": "de11a5f5e01af2853b16b0bc11f6cc788dcc1dacd9c49f1e8e42c27b1584011f",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-011.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/permission-cycle-v2/pose-012.png",
+      "sourceSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "detachedSource": "relocation/user-current-detach-v1/permission-cycle-v2/pose-012.png",
+      "detachedSha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70,
+          "sha256": "f1bcb00663e3d0485e2711e7382c3a8fbfd80ce365688a74f85c7ce6b3a6ca8e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/permission-cycle-v2/pose-012.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-000.png",
+      "sourceSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-000.png",
+      "detachedSha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-000.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-001.png",
+      "sourceSha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-001.png",
+      "detachedSha256": "266df2615f67a7b87482f377c0ac8e213b4f856153fa278c95cffaceb00b2310",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-001.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-002.png",
+      "sourceSha256": "026ccb6ed968c03e11ae922c4dc94f88492193ea66920582df6b9ef37cf694b3",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-002.png",
+      "detachedSha256": "1f967909e938dc6c19892a576b0ea5d37f2b5ec43e7a9758da49e8d29fb5630c",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-002.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-003.png",
+      "sourceSha256": "071577bc01dcbae22f0d12b0204153cd79e1fc43fc79e17785b45abc14eefa33",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-003.png",
+      "detachedSha256": "2b915a7594ecb8060288dca9cbcf3a79e80d9e7a1a9005b76a903597ca947b47",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+          "durationMs": 40,
+          "sha256": "75a354996d4c973b95228c79586ea1d98d75d36ff9c981fe3497dc91c5336ded"
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-003.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-004.png",
+      "sourceSha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-004.png",
+      "detachedSha256": "7ebc6b07328d4a4227be5119f5771f0a2f4dc443ba40c7082df5777dbee0b297",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+          "durationMs": 40,
+          "sha256": "75a354996d4c973b95228c79586ea1d98d75d36ff9c981fe3497dc91c5336ded"
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-004.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-005.png",
+      "sourceSha256": "594ebbb8f66a066882a82e1ead4b1d5508d82c6aceef08aa7b39c9e8cd27d49e",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-005.png",
+      "detachedSha256": "5c86eb71263acd398b0430bcbba5ff5c719b4caac34a317d19e23ad0601ff75f",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-006.png",
+          "durationMs": 35,
+          "sha256": "7ebc6b07328d4a4227be5119f5771f0a2f4dc443ba40c7082df5777dbee0b297"
+        },
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+          "durationMs": 40,
+          "sha256": "75a354996d4c973b95228c79586ea1d98d75d36ff9c981fe3497dc91c5336ded"
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-005.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-006.png",
+      "sourceSha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-006.png",
+      "detachedSha256": "7ebc6b07328d4a4227be5119f5771f0a2f4dc443ba40c7082df5777dbee0b297",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+          "durationMs": 40,
+          "sha256": "75a354996d4c973b95228c79586ea1d98d75d36ff9c981fe3497dc91c5336ded"
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-006.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-007.png",
+      "sourceSha256": "9388abed6cd5ef04e649837b6faf1e191f2c1a89850d3ad5c3945c7bebf324ff",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+      "detachedSha256": "75a354996d4c973b95228c79586ea1d98d75d36ff9c981fe3497dc91c5336ded",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-007.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-008.png",
+      "sourceSha256": "034855f9a5c3a419f92338610892b2d9e7621b4b1bc70f7c296e23c21f8f36fb",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-008.png",
+      "detachedSha256": "61cdcbabddf8cdeb42d0a98f10d5f53f20f092a6ebf974e71428d106b32563d5",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-008.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-009.png",
+      "sourceSha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-009.png",
+      "detachedSha256": "266df2615f67a7b87482f377c0ac8e213b4f856153fa278c95cffaceb00b2310",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-009.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-010.png",
+      "sourceSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-010.png",
+      "detachedSha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-010.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-011.png",
+      "sourceSha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-011.png",
+      "detachedSha256": "2ae6044de40cf3f1e983e3e5559cd9c1d1312e2c21f1614d7fa43150ab2f9474",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-014.png",
+          "durationMs": 40,
+          "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-011.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-012.png",
+      "sourceSha256": "a82f21fc77c882592e89f6f318abd1888db691569db353f40e23961e519f7788",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-012.png",
+      "detachedSha256": "5c674f396892ee59d04561dc8c07b01303b36fb06e22efdf1fc4a17cd9c795f5",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-013.png",
+          "durationMs": 40,
+          "sha256": "2ae6044de40cf3f1e983e3e5559cd9c1d1312e2c21f1614d7fa43150ab2f9474"
+        },
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-014.png",
+          "durationMs": 40,
+          "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-012.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-013.png",
+      "sourceSha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-013.png",
+      "detachedSha256": "2ae6044de40cf3f1e983e3e5559cd9c1d1312e2c21f1614d7fa43150ab2f9474",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-014.png",
+          "durationMs": 40,
+          "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-013.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/query-understand-v1/pose-014.png",
+      "sourceSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "detachedSource": "relocation/user-current-detach-v1/query-understand-v1/pose-014.png",
+      "detachedSha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70,
+          "sha256": "dc1be4f99d453b5b5b2ffa1770222bb867de93d990058c533a58b3259a93c954"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/query-understand-v1/pose-014.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/wait-relaxed-v1/pose-000.png",
+      "sourceSha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0",
+      "detachedSource": "relocation/user-current-detach-v1/wait-relaxed-v1/pose-000.png",
+      "detachedSha256": "602839d83cacd4308682317f19bce15894a3ec6bdd1bf85fb286fefb4910b9b2",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/wait-000-detach.png",
+          "durationMs": 70,
+          "sha256": "90f7842ee613457dd9801bf98ceae2f67e587eaa802a428deaef3638c9f0f3b1"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/wait-relaxed-v1/pose-000.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/wait-relaxed-v1/pose-001.png",
+      "sourceSha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2",
+      "detachedSource": "relocation/user-current-detach-v1/wait-relaxed-v1/pose-001.png",
+      "detachedSha256": "3fce2a20dc6e4d16bfe10cb06cd4fdd29ff25980e8c257706a4ea665458eab33",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/wait-001-detach.png",
+          "durationMs": 70,
+          "sha256": "88b2093a99905aa34a12e26016f2d3f62e322e38541914f57ba8d8db6b623038"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/wait-relaxed-v1/pose-001.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/wait-relaxed-v1/pose-002.png",
+      "sourceSha256": "84fd24637cc576f83afd8b1cf29cf08ff4e2f3d130d70c6f61fb3e0a7bc60a7f",
+      "detachedSource": "relocation/user-current-detach-v1/wait-relaxed-v1/pose-002.png",
+      "detachedSha256": "76d87fef2244594bbaeefd3f4fcae4ea7fa2620de5e5f479efd9a6fa02c464ee",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/wait-002-detach.png",
+          "durationMs": 70,
+          "sha256": "0efc75c8198a7a922b4db89b468d7a0e6232de89647af6ca370da79abd42ee0e"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/wait-relaxed-v1/pose-002.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/wait-relaxed-v1/pose-003.png",
+      "sourceSha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2",
+      "detachedSource": "relocation/user-current-detach-v1/wait-relaxed-v1/pose-003.png",
+      "detachedSha256": "3fce2a20dc6e4d16bfe10cb06cd4fdd29ff25980e8c257706a4ea665458eab33",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/wait-001-detach.png",
+          "durationMs": 70,
+          "sha256": "88b2093a99905aa34a12e26016f2d3f62e322e38541914f57ba8d8db6b623038"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/wait-relaxed-v1/pose-003.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/wait-relaxed-v1/pose-004.png",
+      "sourceSha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0",
+      "detachedSource": "relocation/user-current-detach-v1/wait-relaxed-v1/pose-004.png",
+      "detachedSha256": "602839d83cacd4308682317f19bce15894a3ec6bdd1bf85fb286fefb4910b9b2",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/wait-000-detach.png",
+          "durationMs": 70,
+          "sha256": "90f7842ee613457dd9801bf98ceae2f67e587eaa802a428deaef3638c9f0f3b1"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/wait-relaxed-v1/pose-004.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/wait-relaxed-v1/pose-005.png",
+      "sourceSha256": "07db95e7a079b4b84bf7ef6e7dd9794fae6f9ed9c5815d93d02c20c1c0863ccf",
+      "detachedSource": "relocation/user-current-detach-v1/wait-relaxed-v1/pose-005.png",
+      "detachedSha256": "fda14556907cde6a1f73b1742e0c828bc83111ddb19747dff8f0b864e5e5dfe7",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/wait-005-detach.png",
+          "durationMs": 70,
+          "sha256": "d65fbbb445e857437c96e1611ad3ebcffe3f5d8b4f11e84f2e24b344241afb7c"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/wait-relaxed-v1/pose-005.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    },
+    {
+      "source": "user-attention/registered/wait-relaxed-v1/pose-006.png",
+      "sourceSha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0",
+      "detachedSource": "relocation/user-current-detach-v1/wait-relaxed-v1/pose-006.png",
+      "detachedSha256": "602839d83cacd4308682317f19bce15894a3ec6bdd1bf85fb286fefb4910b9b2",
+      "currentFrameMs": 35,
+      "acceptance": "representative permission reviewed; per-node sampling pending",
+      "grabNext": [
+        {
+          "source": "relocation/family-detach-v1/wait-000-detach.png",
+          "durationMs": 70,
+          "sha256": "90f7842ee613457dd9801bf98ceae2f67e587eaa802a428deaef3638c9f0f3b1"
+        },
+        {
+          "frame": "detachHalf"
+        },
+        {
+          "frame": "detachMid"
+        },
+        {
+          "frame": "half"
+        },
+        {
+          "frame": "closed"
+        },
+        {
+          "frame": "turn20"
+        },
+        {
+          "frame": "turn"
+        },
+        {
+          "frame": "turn70"
+        },
+        {
+          "frame": "hug"
+        }
+      ],
+      "releaseBeforeSupport": {
+        "restoreSeatedSameExposure": "user-attention/registered/wait-relaxed-v1/pose-006.png",
+        "worldSeatAtReleasePosition": true,
+        "stoolFadeInMs": 100,
+        "doNotForceCurlOrHug": true
+      },
+      "releaseDuringRecovery": "Finish only remaining current hand recovery to supported contact, then detachHalf -> detachClosed -> contact -> release -> settle -> seated; never enter curled carry first."
+    }
+  ],
+  "entryRouting": "Match actually displayed original source SHA; swap to corresponding no-stool exposure immediately and follow pointer. Never infer from family name alone."
+}

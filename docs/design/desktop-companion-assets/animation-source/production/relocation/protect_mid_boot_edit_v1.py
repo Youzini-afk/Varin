@@ -1,0 +1,3 @@
+from pathlib import Path
+from PIL import Image,ImageDraw,ImageFilter
+r=Path(__file__).parent;base=Image.open(r/'departure-bridge-v2/mid.png').convert('RGBA');new=Image.open(r/'departure-bridge-v3/mid.png').convert('RGBA');m=Image.new('L',(512,512));ImageDraw.Draw(m).rectangle((145,379,310,505),fill=255);m=m.filter(ImageFilter.GaussianBlur(.6));im=Image.composite(new,base,m);im.save(r/'departure-bridge-v3/mid-protected.png');m.save(r/'departure-bridge-v3/boot-edit-mask.png');b=Image.new('RGBA',(512,512),(26,37,50,255));b.alpha_composite(im);b.convert('RGB').save(r/'departure-bridge-v3/mid-protected-dark.jpg')

@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "status": "source-checkpoint-not-runtime-admission",
+  "recipe": "../seated-preparation.json",
+  "sharedRoutes": "lid-supported-routes.json",
+  "entryPairs": [
+    {
+      "seatedNode": "l09-01-release-fg",
+      "entrySourceSha256": "f95303427b7962ec8b448dbd4dcd7bf0af471af1b3c12837281ab060c0db6dae",
+      "detachedNode": "l09-01-release-d"
+    },
+    {
+      "seatedNode": "l09-02-rise-fg",
+      "entrySourceSha256": "34be7235c303502a5abb9c85aff43fddaf2ef3d3b88ebf3d41481486e8051f62",
+      "detachedNode": "l09-02-rise-d"
+    },
+    {
+      "seatedNode": "l09-03-peak-r2-fg",
+      "entrySourceSha256": "948836a738ff934c383e30cb2bcf9af7f6492b3a69d187c7dc6c801fd12eab60",
+      "detachedNode": "l09-03-peak-r2-d"
+    },
+    {
+      "seatedNode": "l09-04-return-r3-fg",
+      "entrySourceSha256": "fb6ea468745597665d76c359df7a8c5fb0c2f4ce72fbf28e32e64a612bd750f9",
+      "detachedNode": "l09-04-return-r3-d"
+    },
+    {
+      "seatedNode": "l09-05-contact-fg",
+      "entrySourceSha256": "891d7c098da30d5b13385f42bacd1cc9a7fea7c496b64fb2175269269c9313fb",
+      "detachedNode": "l09-05-contact-d"
+    }
+  ],
+  "nodes": {
+    "l09-01-release-fg": {
+      "sha256": "f95303427b7962ec8b448dbd4dcd7bf0af471af1b3c12837281ab060c0db6dae",
+      "durationMs": 100,
+      "embeddedStool": true,
+      "grabNext": [
+        "l09-05-contact-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "grabImmediate": "l09-01-release-d",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-01-release-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-01-release",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-01-release.png",
+      "originalSHA256": "f1b8258b166aec71707eb99cace5b978a47455b4b52955dbde15eef51fc0ad41"
+    },
+    "l09-01-release-d": {
+      "sha256": "ca9e49a547e4a5515ba784b71fe925beb1d09d46ab9f845ab377d1a8e1ccbb6b",
+      "durationMs": 100,
+      "embeddedStool": false,
+      "grabNext": [
+        "l09-05-contact-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-01-release-fg",
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-01-release-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-01-release",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-01-release-d-r1.png",
+      "originalSHA256": "aa133e31c4f0ad02bbf3044faf32221ec2bda49db4d027409fa3dc1826acd49a"
+    },
+    "l09-02-rise-fg": {
+      "sha256": "34be7235c303502a5abb9c85aff43fddaf2ef3d3b88ebf3d41481486e8051f62",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "l09-04-return-r3-d",
+        "l09-05-contact-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-04-return-r3-fg",
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "grabImmediate": "l09-02-rise-d",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-02-rise-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-02-rise",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-02-rise.png",
+      "originalSHA256": "a78f591240de5130eaf8238fbb609356483dc69c6ec5f1c271aa5d08884c223a"
+    },
+    "l09-02-rise-d": {
+      "sha256": "40c6950cb8b1bf43fb7cc6b566b5df3d77c89298e7349c8dcae6e871ef44f535",
+      "durationMs": 120,
+      "embeddedStool": false,
+      "grabNext": [
+        "l09-04-return-r3-d",
+        "l09-05-contact-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-02-rise-fg",
+        "l09-04-return-r3-fg",
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-02-rise-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-02-rise",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-02-rise-d-r1.png",
+      "originalSHA256": "7960c65df7996b3cc0208d3d93d96d1cd01c999197db5eba2cd6e04fec233a07"
+    },
+    "l09-03-peak-r2-fg": {
+      "sha256": "948836a738ff934c383e30cb2bcf9af7f6492b3a69d187c7dc6c801fd12eab60",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "l09-04-return-r3-d",
+        "l09-05-contact-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-04-return-r3-fg",
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "grabImmediate": "l09-03-peak-r2-d",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-03-peak-r2-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-03-peak-r2",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-03-peak-r2.png",
+      "originalSHA256": "adc99031fdbf807bd3478312e506c6a939ed34f6cfae080d2c552054050b8b2e"
+    },
+    "l09-03-peak-r2-d": {
+      "sha256": "56892c4753417ee400eeda6dfc579543e406bf60038a6c4bb6231498af85bff1",
+      "durationMs": 120,
+      "embeddedStool": false,
+      "grabNext": [
+        "l09-04-return-r3-d",
+        "l09-05-contact-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-03-peak-r2-fg",
+        "l09-04-return-r3-fg",
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-03-peak-r2-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-03-peak-r2",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-03-peak-r2-d-r1.png",
+      "originalSHA256": "33c9a46b13087a5a34efd0a60866849b673eee2825fd3d384ce8f53f3e8b1543"
+    },
+    "l09-04-return-r3-fg": {
+      "sha256": "fb6ea468745597665d76c359df7a8c5fb0c2f4ce72fbf28e32e64a612bd750f9",
+      "durationMs": 140,
+      "embeddedStool": true,
+      "grabNext": [
+        "l09-05-contact-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "grabImmediate": "l09-04-return-r3-d",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-04-return-r3-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-04-return-r3",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-04-return-r3.png",
+      "originalSHA256": "5972dcc675862100d16394e9a9637d84b816809cdea120f037cbe9fe8c05f4a9"
+    },
+    "l09-04-return-r3-d": {
+      "sha256": "ae68db88051b2bda35e3c153a2f92af5685b476162eb23129a5dbb9e99e24768",
+      "durationMs": 140,
+      "embeddedStool": false,
+      "grabNext": [
+        "l09-05-contact-d",
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-04-return-r3-fg",
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-04-return-r3-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-04-return-r3",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-04-return-r3-d-r1.png",
+      "originalSHA256": "2592fe5d174285f8a0163e982b1629a77cd451c35a7499683203f8dbe1dab6de"
+    },
+    "l09-05-contact-fg": {
+      "sha256": "891d7c098da30d5b13385f42bacd1cc9a7fea7c496b64fb2175269269c9313fb",
+      "durationMs": 120,
+      "embeddedStool": true,
+      "grabNext": [
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "grabImmediate": "l09-05-contact-d",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-05-contact-ordinary.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-05-contact",
+      "sourceVariant": "foreground",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-05-contact.png",
+      "originalSHA256": "6e38529adbf34260c318913dd23e13a86c063f6e5d4ec4fa0c824450967aec72"
+    },
+    "l09-05-contact-d": {
+      "sha256": "ff9c715198c676d5a9a2092bea066301ff34819cf7efafc9fb90b0440c6d6741",
+      "durationMs": 120,
+      "embeddedStool": false,
+      "grabNext": [
+        "closed-neutral-d",
+        "lid-closed-side-d",
+        "lid-closed-secure-d",
+        "lid-closed-relax-d"
+      ],
+      "releaseNext": [
+        "l09-05-contact-fg",
+        "closed-neutral-fg"
+      ],
+      "releaseViaFrames": true,
+      "restoreTarget": "closed-neutral-fg",
+      "localReviewPreparedSource": "local-review:studies/idle-body-v5/prepared-l09-r2/l09-05-contact-detached.png",
+      "sourceKind": "prepared-display-png",
+      "sourceId": "l09-05-contact",
+      "sourceVariant": "detached",
+      "originalSource": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-05-contact-d-r1.png",
+      "originalSHA256": "6c80b64be43e9a691218cc989fc70f913886265ece02e545e4bcfedeb837a3f1"
+    }
+  },
+  "policy": {
+    "nativeFollow": "immediate, never wait for hand recovery",
+    "samePoseFirst": true,
+    "closedOnly": true,
+    "holdNode": "lid-closed-relax-d",
+    "newHoldArt": false,
+    "earlyDrop": "same-pose seated source then actual recovery suffix; no forced stretch completion",
+    "regrab": "immediate exact D at current recovery/landing phase; continue that suffix",
+    "canonicalEndpoint": "existing exact canonical, never newly generated"
+  }
+}

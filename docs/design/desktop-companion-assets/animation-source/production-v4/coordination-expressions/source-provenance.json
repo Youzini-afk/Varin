@@ -1,0 +1,113 @@
+{
+  "geometryReference": "varin-upright-v2",
+  "sources": [
+    {
+      "source": "frames/question.png",
+      "sha256": "4a43f748b214312327638d2292848f37d604619b16fae14ca4a32d3fd352205c",
+      "originalSHA256": "121f6b5fb239214001f8be40650f935bd38b5bda16e7d40c8ca8ea4619f75262",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "uniform full-canvas LANCZOS resize; alpha preserved",
+      "inspection": "Full source and actual360 pair review complete: face semantics, instantaneous arm/head/torso/laptop contact preserved; stool removed. New formerly occluded hair contours permitted. No pose replacement or semantic nod."
+    },
+    {
+      "source": "detached/question.png",
+      "sha256": "fc40c238817dfc4d6c44b300163f13790fd327efc5e0bfb6d20f0a16872bc434",
+      "originalSHA256": "727a1f0c1d7f7244456f9f6b98d0b0a52687b6f0a40924fb81add74377d6e605",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "uniform full-canvas LANCZOS resize; alpha preserved; built-in imagegen exact seated-pose stool removal",
+      "inspection": "Full source and actual360 pair review complete: face semantics, instantaneous arm/head/torso/laptop contact preserved; stool removed. New formerly occluded hair contours permitted. No pose replacement or semantic nod."
+    },
+    {
+      "source": "frames/result-eye-smile.png",
+      "sha256": "917acee0a33ee42b3f2814e60968cbe46a76760d57ad4b84089befcabeaf8ade",
+      "originalSHA256": "17f7c9a00ed9dc07f2b53bd05d0579a78e4329994a44127e265e019fb531035e",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "uniform full-canvas LANCZOS resize; alpha preserved",
+      "inspection": "Full source and actual360 pair review complete: face semantics, instantaneous arm/head/torso/laptop contact preserved; stool removed. New formerly occluded hair contours permitted. No pose replacement or semantic nod."
+    },
+    {
+      "source": "detached/result-eye-smile.png",
+      "sha256": "da349cf2b01f153e9a1ccd561ac3decb8b0279f012c2535eb6a99c1c4ea0d1d3",
+      "originalSHA256": "14bec1ec03739f320a97e2cf3e84321b50540fb976aeac27dbd6ab5574e4e340",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "uniform full-canvas LANCZOS resize; alpha preserved; built-in imagegen exact seated-pose stool removal",
+      "inspection": "Full source and actual360 pair review complete: face semantics, instantaneous arm/head/torso/laptop contact preserved; stool removed. New formerly occluded hair contours permitted. No pose replacement or semantic nod."
+    },
+    {
+      "source": "frames/serious-rest.png",
+      "sha256": "78245105c97395375c9b554ebd1a4fb710db2578f506a01fe806b28f05050e95",
+      "originalSHA256": "ac4bdda600c6d2a347688b6613a7ba08905f18058d7492a8d77a2793763dd5b6",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "uniform full-canvas LANCZOS resize; alpha preserved",
+      "inspection": "Full source and actual360 pair review complete: face semantics, instantaneous arm/head/torso/laptop contact preserved; stool removed. New formerly occluded hair contours permitted. No pose replacement or semantic nod."
+    },
+    {
+      "source": "detached/serious-rest.png",
+      "sha256": "1c48d2e88e6cfd5973801cc0dcc7126ead79cbc9f969d4bd885cdb69af188567",
+      "originalSHA256": "1a1e5e69869b702943c2b1d73f36a3d8a0833ed940be2021850bd4e1dfea453c",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "uniform full-canvas LANCZOS resize; alpha preserved; built-in imagegen exact seated-pose stool removal",
+      "inspection": "Full source and actual360 pair review complete: face semantics, instantaneous arm/head/torso/laptop contact preserved; stool removed. New formerly occluded hair contours permitted. No pose replacement or semantic nod."
+    }
+  ]
+}

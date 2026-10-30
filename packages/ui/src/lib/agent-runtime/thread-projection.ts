@@ -45,7 +45,7 @@ export class ThreadProjection {
   constructor(private readonly api: ThreadsAPI, private readonly identity: ThreadIdentity,
     private readonly publish: (snapshot: ThreadSnapshot) => void,
     private readonly report: (error: unknown) => void,
-    private readonly publishProgress: (parts: StreamingTextPart[]) => void = () => {},
+    private readonly publishProgress: (parts: StreamingTextPart[], context?: { runId: string; requestId?: string; activity?: 'text' | 'thinking' | 'retry' | 'provider' }) => void = () => {},
     private readonly publishTools: (calls: StreamingToolCall[]) => void = () => {},
     private readonly publishToolProgress: (progress: ToolExecutionProgress[]) => void = () => {},
     private readonly options: { contextInspection?: boolean } = {}) {}
@@ -128,9 +128,9 @@ export class ThreadProjection {
   }
   close(): void { this.removeEndpoint?.(); this.abort.abort(); this.progress.clear(); this.toolProgress.clear(); }
 
-  private publishCurrentProgress(): void {
+  private publishCurrentProgress(activity?: 'text' | 'thinking' | 'retry' | 'provider'): void {
     const current = this.activeRunId ? this.progress.get(this.activeRunId) : undefined;
-    this.publishProgress(current ? [...current.items.values(), ...(current.retry ? [current.retry] : [])] : []);
+    this.publishProgress(current ? [...current.items.values(), ...(current.retry ? [current.retry] : [])] : [], this.activeRunId ? { runId: this.activeRunId, ...(current ? { requestId: current.requestId } : {}), ...(activity ? { activity } : {}) } : undefined);
     this.publishTools(current ? [...current.calls.values()] : this.interruptedTools);
   }
 
@@ -181,10 +181,13 @@ export class ThreadProjection {
             progress.sequence = event.sequence;
             const batch = event.event as { kind: 'batch'; events: ProviderProgress[] };
             if (batch.kind !== 'batch' || !Array.isArray(batch.events)) return;
+            let activity: 'text' | 'thinking' | 'retry' | 'provider' | undefined;
             for (const payload of batch.events) {
               const data = payload?.data;
+              if (payload.kind === 'provider') activity = 'provider';
               if (payload.kind === 'retry_scheduled' && typeof data?.attempt === 'number' && typeof data.delay_ms === 'number') {
                 progress.retry = { type: 'retry', attempt: data.attempt, retryAt: Date.now() + data.delay_ms };
+                activity = 'retry';
               }
               if (payload?.kind === 'provider' && typeof data?.call_id === 'string') {
                 const old = progress.calls.get(data.call_id);
@@ -218,6 +221,7 @@ export class ThreadProjection {
               }
               if (payload.kind === 'provider' && (data?.kind === 'text_delta' || data?.kind === 'reasoning_delta')
                 && typeof data.item_id === 'string' && typeof data.text === 'string') {
+                if (data.text.length) activity = data.kind === 'text_delta' ? 'text' : 'thinking';
                 const key = `${data.kind}:${data.item_id}`;
                 const old = progress.items.get(key);
                 const identity = { id: `model-item:${new TextEncoder().encode(event.requestId).length}:${event.requestId}:${data.item_id}`,
@@ -228,7 +232,7 @@ export class ThreadProjection {
               }
             }
             if (event.runId !== this.activeRunId) { this.activeRunId = event.runId; void this.refresh(); }
-            this.publishCurrentProgress();
+            this.publishCurrentProgress(activity);
           }
         }, { signal: this.abort.signal });
       } catch (error) { if (!this.abort.signal.aborted) this.report(error); }

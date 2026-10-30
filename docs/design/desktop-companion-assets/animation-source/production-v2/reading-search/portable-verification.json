@@ -1,0 +1,130 @@
+{
+  "status": "passed",
+  "method": "independent temporary directory rebuild; no generation",
+  "originalAndRebuiltCandidates": [
+    {
+      "path": "read-prepare-v2-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "read-middle-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "read-settle-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "read-hand-prepare-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "read-turn-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "search-left-middle-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "search-left-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "search-right-middle-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "search-right-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    },
+    {
+      "path": "search-focus-v1-candidate.png",
+      "matchesOriginalPNGHash": true,
+      "rebuiltBytesEqual": true,
+      "rebuiltRGBAEqual": true
+    }
+  ],
+  "rebuiltMasksAndTiming": [
+    {
+      "path": "read-hand-prepare-v1-edit-mask.png",
+      "sha256": "7a6981f6bff223937b5606ebb3304546095241c2df2e2548917a89ebb462c17b",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "read-middle-v1-edit-mask.png",
+      "sha256": "7583ede4ac8e4fff414afbdbeb4e3eb419d0853c9d8cf814d76a2b36cb37194a",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "read-prepare-v2-edit-mask.png",
+      "sha256": "7583ede4ac8e4fff414afbdbeb4e3eb419d0853c9d8cf814d76a2b36cb37194a",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "read-settle-v1-edit-mask.png",
+      "sha256": "7583ede4ac8e4fff414afbdbeb4e3eb419d0853c9d8cf814d76a2b36cb37194a",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "read-turn-v1-edit-mask.png",
+      "sha256": "7a6981f6bff223937b5606ebb3304546095241c2df2e2548917a89ebb462c17b",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "search-focus-v1-edit-mask.png",
+      "sha256": "7a6981f6bff223937b5606ebb3304546095241c2df2e2548917a89ebb462c17b",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "search-left-middle-v1-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "search-left-v1-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "search-right-middle-v1-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "search-right-v1-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "reading-timing-v2.json",
+      "sha256": "8145b0eb7f190a1f86b9e6c939f192f92163b68706e38a84e6aa2296c4637b88",
+      "rebuiltHashEqual": true
+    },
+    {
+      "path": "search-timing-v2.json",
+      "sha256": "739e659d159a9219e755960722d0b0da385f2a76d012144f3bf5b45b16ae0240",
+      "rebuiltHashEqual": true
+    }
+  ],
+  "privateAbsolutePathFiles": [],
+  "acceptance": "source reproducibility only, not animation acceptance"
+}

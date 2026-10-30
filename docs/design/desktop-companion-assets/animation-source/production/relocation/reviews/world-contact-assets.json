@@ -1,0 +1,25 @@
+{
+  "stage": "keyposes",
+  "warning": "internal scene integration candidate only; no smoothness/contact acceptance",
+  "assets": {
+    "close-start": "canonical-static-v1/close-start.png",
+    "close70-white": "canonical-static-v1/close70-white.png",
+    "close-half": "canonical-static-v1/close-half.png",
+    "closed": "canonical-static-v1/closed.png",
+    "grip-lift-white": "canonical-static-v1/grip-lift-white.png",
+    "turn": "canonical-static-v1/turn.png",
+    "hug": "canonical-static-v1/hug.png",
+    "airborne": "canonical-registered-v1/airborne-clean-v2.png",
+    "preland": "canonical-registered-v1/preland-no-stool-white-alpha.png",
+    "contact": "canonical-registered-v1/contact-skirt-restored-v3.png",
+    "stool": "canonical-registered-v1/stool-world-candidate-v2.png"
+  },
+  "worldAnchorOld": [
+    40,
+    32
+  ],
+  "worldAnchorNew": [
+    230,
+    32
+  ]
+}

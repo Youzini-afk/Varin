@@ -1,0 +1,346 @@
+{
+  "status": "authored-source-candidate / integration review pending",
+  "geometryReference": "varin-upright-v2",
+  "canvas": [
+    512,
+    512
+  ],
+  "cueContract": "emit only on actual rendered exposure; no business effects",
+  "sequences": {
+    "reading": {
+      "entryPose": "upright-v2:open-user",
+      "exitPose": "upright-v2:open-user",
+      "entryRange": [
+        0,
+        3
+      ],
+      "holdExposureIndices": [
+        3,
+        7
+      ],
+      "exitRange": [
+        8,
+        11
+      ],
+      "loop": null,
+      "loopNote": "No implicit repeat across entry/exit; reading optional authored subcycle [3,8) only while true reading intent persists. Search exits open-screen, must not silently loop to open-user.",
+      "frames": [
+        {
+          "source": "shared/upright-open-neutral-v2.png",
+          "durationMs": 550,
+          "cue": "prepare",
+          "index": 0,
+          "phase": "enter",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        },
+        {
+          "source": "read-prepare-v2-candidate.png",
+          "durationMs": 100,
+          "cue": "PAGE_PRESENT",
+          "index": 1,
+          "phase": "enter",
+          "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482"
+        },
+        {
+          "source": "read-middle-v1-candidate.png",
+          "durationMs": 110,
+          "cue": "READ_ENTER",
+          "index": 2,
+          "phase": "enter",
+          "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa"
+        },
+        {
+          "source": "read-settle-v1-candidate.png",
+          "durationMs": 800,
+          "cue": "READ_SETTLE",
+          "index": 3,
+          "phase": "hold",
+          "sha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3"
+        },
+        {
+          "source": "read-hand-prepare-v1-candidate.png",
+          "durationMs": 100,
+          "cue": "PAGE_TURN_PREPARE",
+          "index": 4,
+          "phase": "act",
+          "sha256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825"
+        },
+        {
+          "source": "read-turn-v1-candidate.png",
+          "durationMs": 180,
+          "cue": "PAGE_TURN",
+          "index": 5,
+          "phase": "act",
+          "sha256": "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742"
+        },
+        {
+          "source": "read-hand-prepare-v1-candidate.png",
+          "durationMs": 90,
+          "cue": "PAGE_TURN_RELEASE",
+          "index": 6,
+          "phase": "act",
+          "sha256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825"
+        },
+        {
+          "source": "read-settle-v1-candidate.png",
+          "durationMs": 450,
+          "cue": "READ_SETTLE",
+          "index": 7,
+          "phase": "hold",
+          "sha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3"
+        },
+        {
+          "source": "read-middle-v1-candidate.png",
+          "durationMs": 120,
+          "cue": "release",
+          "index": 8,
+          "phase": "exit",
+          "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa"
+        },
+        {
+          "source": "read-prepare-v2-candidate.png",
+          "durationMs": 110,
+          "cue": "release",
+          "index": 9,
+          "phase": "exit",
+          "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482"
+        },
+        {
+          "source": "shared/upright-open-neutral-v2.png",
+          "durationMs": 700,
+          "cue": "exit",
+          "index": 10,
+          "phase": "exit",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ],
+      "safeRecoveryFromActualFrame": {
+        "0": [
+          0
+        ],
+        "1": [
+          1,
+          0
+        ],
+        "2": [
+          2,
+          1,
+          0
+        ],
+        "3": [
+          3,
+          2,
+          1,
+          0
+        ],
+        "4": [
+          4,
+          3,
+          2,
+          1,
+          0
+        ],
+        "5": [
+          5,
+          4,
+          3,
+          2,
+          1,
+          0
+        ],
+        "6": [
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        "7": [
+          7,
+          8,
+          9,
+          10
+        ],
+        "8": [
+          8,
+          9,
+          10
+        ],
+        "9": [
+          9,
+          10
+        ],
+        "10": [
+          10
+        ]
+      },
+      "recoveryEndpointNote": "Reading ends open-user; search recoveries 0..8 end open-user, 9..11 end open-screen. New intent routes from that actual endpoint."
+    },
+    "search": {
+      "entryPose": "upright-v2:open-user",
+      "exitPose": "upright-v2:open-screen",
+      "entryRange": [
+        0,
+        2
+      ],
+      "holdExposureIndices": [
+        2,
+        4,
+        6,
+        11
+      ],
+      "exitRange": [
+        7,
+        12
+      ],
+      "loop": null,
+      "loopNote": "No implicit repeat across entry/exit; reading optional authored subcycle [3,8) only while true reading intent persists. Search exits open-screen, must not silently loop to open-user.",
+      "frames": [
+        {
+          "source": "shared/upright-open-neutral-v2.png",
+          "durationMs": 500,
+          "cue": "FAN_OUT",
+          "index": 0,
+          "phase": "enter",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        },
+        {
+          "source": "search-left-middle-v1-candidate.png",
+          "durationMs": 100,
+          "cue": "SCAN_SIDE_A_ENTER",
+          "index": 1,
+          "phase": "enter",
+          "sha256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce"
+        },
+        {
+          "source": "search-left-v1-candidate.png",
+          "durationMs": 650,
+          "cue": "SCAN_SIDE_A",
+          "index": 2,
+          "phase": "hold",
+          "sha256": "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263"
+        },
+        {
+          "source": "search-left-middle-v1-candidate.png",
+          "durationMs": 90,
+          "cue": "release",
+          "index": 3,
+          "phase": "act",
+          "sha256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce"
+        },
+        {
+          "source": "shared/upright-open-neutral-v2.png",
+          "durationMs": 230,
+          "cue": "attend",
+          "index": 4,
+          "phase": "hold",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        },
+        {
+          "source": "search-right-middle-v1-candidate.png",
+          "durationMs": 100,
+          "cue": "SCAN_SIDE_B_ENTER",
+          "index": 5,
+          "phase": "act",
+          "sha256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5"
+        },
+        {
+          "source": "search-right-v1-candidate.png",
+          "durationMs": 950,
+          "cue": "SCAN_SIDE_B",
+          "index": 6,
+          "phase": "hold",
+          "sha256": "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852"
+        },
+        {
+          "source": "search-right-middle-v1-candidate.png",
+          "durationMs": 110,
+          "cue": "release",
+          "index": 7,
+          "phase": "exit",
+          "sha256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5"
+        },
+        {
+          "source": "shared/upright-open-neutral-v2.png",
+          "durationMs": 140,
+          "cue": "return",
+          "index": 8,
+          "phase": "exit",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        },
+        {
+          "source": "shared/open-screen-read-v2.png",
+          "durationMs": 180,
+          "cue": "SELECT_PREPARE",
+          "index": 9,
+          "phase": "exit",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        },
+        {
+          "source": "search-focus-v1-candidate.png",
+          "durationMs": 180,
+          "cue": "SELECT",
+          "index": 10,
+          "phase": "act",
+          "sha256": "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b"
+        },
+        {
+          "source": "shared/open-screen-read-v2.png",
+          "durationMs": 600,
+          "cue": "exit",
+          "index": 11,
+          "phase": "hold",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb"
+        }
+      ],
+      "safeRecoveryFromActualFrame": {
+        "0": [
+          0
+        ],
+        "1": [
+          1,
+          0
+        ],
+        "2": [
+          2,
+          3,
+          4
+        ],
+        "3": [
+          3,
+          4
+        ],
+        "4": [
+          4
+        ],
+        "5": [
+          5,
+          4
+        ],
+        "6": [
+          6,
+          7,
+          8
+        ],
+        "7": [
+          7,
+          8
+        ],
+        "8": [
+          8
+        ],
+        "9": [
+          9
+        ],
+        "10": [
+          10,
+          11
+        ],
+        "11": [
+          11
+        ]
+      },
+      "recoveryEndpointNote": "Reading ends open-user; search recoveries 0..8 end open-user, 9..11 end open-screen. New intent routes from that actual endpoint."
+    }
+  }
+}

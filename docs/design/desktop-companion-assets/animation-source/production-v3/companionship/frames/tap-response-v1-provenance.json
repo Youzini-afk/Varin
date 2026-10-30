@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "frames/hover-attend-v1.png",
+  "sourceSHA256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+  "raw": "raw/tap-response-v1.png",
+  "rawSHA256": "d24999b2742fe16f4472072a7b47a12cea3bfc8f4d1b604fca7e424889fc241a",
+  "prompt": "prompts/tap-response-v1.txt",
+  "output": "frames/tap-response-v1.png",
+  "sha256": "9764d64c77d61326c5519ebe3cd2671e53d0f731e4bee86c4785f8154866b148",
+  "mask": "masks/tap-response-v1.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

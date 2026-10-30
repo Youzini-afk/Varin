@@ -3583,6 +3583,18 @@ fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
             &error, &snapshot, &frozen, None).unwrap();
         assert_eq!(error_opened[0].delivery_released, !managed);
         assert_eq!(error_opened[0].delivery, None);
+        let cursor = db.event_cursor().unwrap();
+        let attention = db.capture_attention_read().load(&|| false).unwrap();
+        assert_eq!(db.event_cursor().unwrap(), cursor);
+        assert_eq!(attention.counts.action_required, 2);
+        assert!(attention.items.iter().any(|item| item.kind == "mcp_elicitation"
+            && item.request_id.as_deref() == Some("original-question")));
+        assert!(attention.items.iter().any(|item| item.kind == "mcp_error"
+            && item.request_id.as_deref() == Some("original-url")));
+        let wire = serde_json::to_string(&attention).unwrap();
+        for content in ["Original question", "URL requirement", "https://fixture.invalid/review"] {
+            assert!(!wire.contains(content));
+        }
         let interactions = [("original-question", interaction_binding), ("original-url", error_binding)];
         let begun = db.begin_mcp_resource(binding.clone(), &snapshot, &frozen).unwrap();
         assert_eq!(begun.mcp_resource_subscription.as_ref().unwrap().mcp_holder_released, !managed);
@@ -3610,6 +3622,11 @@ fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
         let history = db.history("main").unwrap();
         db.release_mcp_resource_source(&run.run_id).unwrap();
         db.release_mcp_interaction_source(&run.run_id).unwrap();
+        let attention = db.capture_attention_read().load(&|| false).unwrap();
+        assert!(!attention.items.iter().any(|item| item.kind == "mcp_elicitation"));
+        assert!(attention.items.iter().any(|item| item.kind == "mcp_error"
+            && item.request_id.as_deref() == Some("original-url")),
+            "local RPC error review remains available after source closes");
         // A Source request can already exist before A sees its body, while the
         // original invocation/source closes. Keep only the managed historical
         // fact so its ACK debt can drain; never restore review or model admission.

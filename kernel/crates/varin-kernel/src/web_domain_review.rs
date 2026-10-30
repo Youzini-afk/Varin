@@ -154,13 +154,14 @@ impl Fixture {
             ),
             "runtime.operation.inspect"
             | "runtime.thread.operations.active"
+            | "runtime.thread.attention.read"
             | "runtime.permission.open"
             | "runtime.permission.consume"
             | "runtime.permission.decide" => operation_commands::execute(
                 self.runtime.clone(),
                 method,
                 params,
-                &AtomicBool::new(false),
+                &Arc::new(AtomicBool::new(false)),
             ),
             _ => storage_rpc(
                 &self.storage,

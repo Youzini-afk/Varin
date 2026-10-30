@@ -1,0 +1,6 @@
+{
+  "raw": "read-prepare-v1-raw.png",
+  "sha256": "098e683ad9e72151b1789becd864bf92415d4d430315aae4cae0b84501032f0a",
+  "status": "rejected as intermediate",
+  "reason": "Generated deeper pitch than endpoint instead of half motion; not included in sequence."
+}

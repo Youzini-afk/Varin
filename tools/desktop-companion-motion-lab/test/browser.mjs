@@ -1,0 +1,8 @@
+import {chromium} from 'playwright';import assert from 'node:assert/strict';import {mkdir} from 'node:fs/promises';
+await mkdir('evidence',{recursive:true});const browser=await chromium.launch({executablePath:process.env.BROWSER_PATH??'/usr/bin/chromium',headless:true,args:['--no-sandbox']});const page=await browser.newPage({viewport:{width:1350,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('http://127.0.0.1:8765');await page.click('#play');await page.evaluate(()=>window.lab.seek(4));await page.screenshot({path:'evidence/workbench.png'});
+await page.click('#track');await page.selectOption('#track','14');await page.evaluate(()=>window.lab.seek(8));await page.screenshot({path:'evidence/question.png'});
+const canvas=page.locator('#scene'),r=await canvas.boundingBox();await page.mouse.move(r.x+r.width*.5,r.y+r.height*.4);await page.mouse.down();await page.mouse.move(r.x+r.width*.64,r.y+r.height*.32,{steps:8});await page.evaluate(()=>{window.lab.getMotion().advance(.4);window.lab.render();});const drag=await page.evaluate(()=>({root:window.lab.getMotion().root,chair:window.lab.getMotion().chair}));assert.notEqual(drag.root.x,drag.chair.x);await page.mouse.up();
+await page.selectOption('#track','8');
+// Record canvas as reproducible frame sequence, independent of screenshot/UI timing.
+for(let i=0;i<48;i++){await page.evaluate(t=>window.lab.seek(t),i/6);await canvas.screenshot({path:`evidence/frame-${String(i).padStart(3,'0')}.png`});}
+await page.evaluate(()=>window.lab.dispose());assert.deepEqual(errors,[]);console.log(JSON.stringify({pageErrors:errors,drag,frames:48,dispose:'completed'}));await browser.close();

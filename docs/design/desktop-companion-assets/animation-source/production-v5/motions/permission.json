@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "id": "v5-permission-working-phrase",
+  "action": "permission",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "entry": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 650
+    },
+    {
+      "sourceId": "permission-release",
+      "durationMs": 130
+    },
+    {
+      "sourceId": "permission-upper",
+      "durationMs": 100
+    },
+    {
+      "sourceId": "permission-mid",
+      "durationMs": 60
+    },
+    {
+      "sourceId": "permission-low",
+      "durationMs": 110
+    }
+  ],
+  "hold": {
+    "sourceId": "permission-hold",
+    "behavior": "Hold while the actual request remains pending; preview exposure is not an automatic release."
+  },
+  "return": [
+    {
+      "sourceId": "permission-low",
+      "durationMs": 110
+    },
+    {
+      "sourceId": "permission-mid",
+      "durationMs": 100
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 650
+    }
+  ],
+  "scope": [
+    "Present a real pending permission request without executing or acknowledging it."
+  ],
+  "notFor": [
+    "permission-allowed",
+    "permission-denied",
+    "typing",
+    "question",
+    "completion"
+  ],
+  "integration": "Selected authoring source with five same-pose detached counterparts. Host request state controls hold/return; local touch never grants permission. Live interruption closure and temporal visual acceptance remain to be verified."
+}

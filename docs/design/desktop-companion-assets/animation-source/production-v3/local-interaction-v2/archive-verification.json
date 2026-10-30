@@ -1,0 +1,104 @@
+{
+  "candidateOnly": true,
+  "copiedFrozenSourcesChecks": [
+    {
+      "path": "manifest.json",
+      "sha256": "0d88d9fe23ed34b51ca7ffc6b460cce7585eb53742035cd9defac2062afe9c13",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "masks/open-hover-middle-v2.png",
+      "sha256": "c1620f88e88285e10d345e2a7029ddd814419f2d8d94fe5c735064a207d9a769",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "masks/open-hover-attend-v1.png",
+      "sha256": "c1620f88e88285e10d345e2a7029ddd814419f2d8d94fe5c735064a207d9a769",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "masks/open-tap-playful-v1.png",
+      "sha256": "84c56884a96427613216d23725146c47d77d9474d9c69aac7422f60926ba06d4",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "raw/open-hover-middle-v2.png",
+      "sha256": "cc3b9bbd5f2745435608ebfa3ef33d54ddbb444ddd2c75ea11de5e2b0e4f0ab2",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "raw/open-hover-attend-v1.png",
+      "sha256": "670492c7196d4a62844e78419a4b3405ff9bf3e3cf8d17c950bbeb2e308470c6",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "raw/open-tap-playful-v1.png",
+      "sha256": "646b3e28e73bbfc98f8d13cdf2345d6df35fc07e7e312e03706fd29852d8c27e",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "prompts/open-hover-attend-v1.txt",
+      "sha256": "3ad069cc62209a3093bd45b6e956452091b94043d471ddf6a4a06058864153d0",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "prompts/open-hover-middle-v2.txt",
+      "sha256": "d666914789f40660c7da9b93ec9039c7d514527c566c81d2dfb731fae3af03b8",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "prompts/open-tap-playful-v1.txt",
+      "sha256": "2f335840b18862052cade50a227437f5b27da15399695bb4398b41cea3329b9e",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "frames/open-hover-middle-v2.png",
+      "sha256": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "frames/open-hover-attend-v1-provenance.json",
+      "sha256": "a106841cf7fa51e0bd3fcd41bb94ef7683b8931f699f8f64a1ec99432e4d1ae6",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "frames/open-hover-attend-v1.png",
+      "sha256": "f319e0c0d34b012a2e9c4151f7358c593250da2b703c60e2b1501ce395ba095a",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "frames/open-tap-playful-v1.png",
+      "sha256": "f195320d4ee0e041df695a9b739ba48da7804cca900b8ccd8a4ea97f595e6b59",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "frames/open-tap-playful-v1-provenance.json",
+      "sha256": "8cc9a363db1090bae8cbc211b17537b40ea158fc720725498563aa03729ad6ef",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "frames/open-hover-middle-v2-provenance.json",
+      "sha256": "582dc255ddd25bd3f63ceeccdc9ebc3240d315b9100227029fd0df6735f71830",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "references/hover-attend-v1.png",
+      "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "references/open-smile.png",
+      "sha256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+      "matchesFrozenWorkspace": true
+    },
+    {
+      "path": "references/upright-open-neutral-v2.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "matchesFrozenWorkspace": true
+    }
+  ],
+  "checkedCount": 19,
+  "allEqual": true,
+  "independentRebuild": "rebuild-verification.json",
+  "excluded": "Rejected middle-v1 raw/prompt, raw-resized discarded input, generated normalized-reference cache, HTML/GIF movies and extra contact sheets."
+}

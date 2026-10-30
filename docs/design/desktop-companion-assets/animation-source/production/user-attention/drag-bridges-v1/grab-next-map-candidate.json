@@ -1,0 +1,415 @@
+{
+  "stage": "explicit candidate routing, not blanket acceptance of every unviewed intermediate",
+  "currentFrameMs": 35,
+  "nativeWindow": "follow pointer immediately; do not wait for exposure completion",
+  "rows": {
+    "permission-cycle-v2/pose-000.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-001.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-002.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-003.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-004.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-005.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-006.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-007.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-008.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-009.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/permission-cycle-v2/pose-010.png",
+          "durationMs": 45
+        },
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-010.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-011.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "permission-cycle-v2/pose-012.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/permission-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "High palm folds through genuinely authored returning hover; low hand contacts directly, no replay of raised palm."
+    },
+    "query-understand-v1/pose-000.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-001.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-002.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-003.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+          "durationMs": 40
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-004.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+          "durationMs": 40
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-005.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-006.png",
+          "durationMs": 35
+        },
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+          "durationMs": 40
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-006.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-007.png",
+          "durationMs": 40
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-007.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-008.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-009.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-010.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "representative chin path pending peer"
+    },
+    "query-understand-v1/pose-011.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-014.png",
+          "durationMs": 40
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Existing authored nod return only (middle\u2192neutral or bottom\u2192middle\u2192neutral), no complete nod replay; hand then secures laptop.",
+      "reviewStatus": "nod-first-frame-not-reviewed"
+    },
+    "query-understand-v1/pose-012.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-013.png",
+          "durationMs": 40
+        },
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-014.png",
+          "durationMs": 40
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Existing authored nod return only (middle\u2192neutral or bottom\u2192middle\u2192neutral), no complete nod replay; hand then secures laptop.",
+      "reviewStatus": "nod-first-frame-not-reviewed"
+    },
+    "query-understand-v1/pose-013.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/user-current-detach-v1/query-understand-v1/pose-014.png",
+          "durationMs": 40
+        },
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Existing authored nod return only (middle\u2192neutral or bottom\u2192middle\u2192neutral), no complete nod replay; hand then secures laptop.",
+      "reviewStatus": "nod-first-frame-not-reviewed"
+    },
+    "query-understand-v1/pose-014.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/query-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Chin contact first releases then chest-height arm goes to screen edge; lower/neutral hand reaches directly. Nod can return via existing neutral pose if needed.",
+      "reviewStatus": "nod-first-frame-not-reviewed"
+    },
+    "wait-relaxed-v1/pose-000.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/wait-000-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Preserve exact current relaxed/halfblink/closedblink/settled head; shared newly drawn supporting arms."
+    },
+    "wait-relaxed-v1/pose-001.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/wait-001-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Preserve exact current relaxed/halfblink/closedblink/settled head; shared newly drawn supporting arms."
+    },
+    "wait-relaxed-v1/pose-002.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/wait-002-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Preserve exact current relaxed/halfblink/closedblink/settled head; shared newly drawn supporting arms."
+    },
+    "wait-relaxed-v1/pose-003.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/wait-001-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Preserve exact current relaxed/halfblink/closedblink/settled head; shared newly drawn supporting arms."
+    },
+    "wait-relaxed-v1/pose-004.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/wait-000-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Preserve exact current relaxed/halfblink/closedblink/settled head; shared newly drawn supporting arms."
+    },
+    "wait-relaxed-v1/pose-005.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/wait-005-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Preserve exact current relaxed/halfblink/closedblink/settled head; shared newly drawn supporting arms."
+    },
+    "wait-relaxed-v1/pose-006.png": {
+      "afterCurrentExposure": [
+        {
+          "source": "relocation/family-detach-v1/wait-000-detach.png",
+          "durationMs": 70
+        }
+      ],
+      "rationale": "Preserve exact current relaxed/halfblink/closedblink/settled head; shared newly drawn supporting arms."
+    }
+  },
+  "then": [
+    {
+      "source": "relocation/departure-bridge-v1/detach-protected-v2.png",
+      "durationMs": 80
+    },
+    {
+      "source": "relocation/departure-bridge-v1/mid.png",
+      "durationMs": 100
+    },
+    {
+      "source": "relocation/rapid-pickup-v1/half.png",
+      "durationMs": 350
+    }
+  ],
+  "missing": [],
+  "unreviewedBranches": [
+    "Representative gesture branches peer pending; derived low-hand direct and nod-return branches need integration exposure review, not new drawings unless visible jump."
+  ]
+}

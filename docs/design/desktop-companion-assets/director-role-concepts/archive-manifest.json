@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "classification": "design-exploration-candidate",
+  "userApproval": "generated figure-1 design direction endorsed; earlier figure-2 vector fit rejected; corrected shape-fit review pending",
+  "runtimeEligible": false,
+  "userDelivery": {
+    "reportedBy": "parent assistant",
+    "utc": "2026-10-29T11:35:00Z",
+    "timestampPrecision": "approximately one minute",
+    "messageId": "Sentinel_2e3872ebe3888191a4b2d6bf053362e7"
+  },
+  "generation": {
+    "provider": "OpenAI built-in image generation",
+    "tool": "image_gen.imagegen",
+    "modelVersion": null,
+    "generationId": null,
+    "originalOutputBasename": "exec-215fa580-6bc2-4f2f-bbb7-b94f8145f936.png",
+    "output": "generated-captain-concept.png",
+    "outputSha256": "5afd2396a97a5f24858e2fd4fc2ea4a88c6e2db45bfc724a75c141da21ef5e77",
+    "exactPrompt": "generated-captain-prompt.txt",
+    "promptSha256": "602d921f782cd299358d8e6d0061bbb2543138e77e4621958166ba608c8cdcc3",
+    "inputReference": "lead-variants.png",
+    "inputReferenceSha256": "c5ee528e7a0c7399c5d10527474bec155e3a0f689ade9c6b8491cb3952581eba",
+    "inputIdentityVerification": "Archived reference is byte-identical to the original reference board path supplied by the parent.",
+    "limits": "No model version or provider generation ID was exposed in the supplied evidence. Filename is not treated as a model/job ID. Imagegen concept visibly changes some eyes; never use generated face pixels as saved-avatar replacements."
+  },
+  "verification": {
+    "generatedImageByteIdentical": true,
+    "exactPromptByteIdentical": true,
+    "inputBoardByteIdentical": true,
+    "portableBoardRebuild": "passed",
+    "embeddedMotionScript": "12 deterministic frames executed and rasterized",
+    "runtimeApplicationVerification": "not applicable; prototype only",
+    "cacheExcluded": true
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 7018,
+      "sha256": "bc20ec141fd9b7f9b2c54767c26bba5323fd37d876b6e0e390ad63d840435330"
+    },
+    {
+      "path": "concept-stages.json",
+      "bytes": 694,
+      "sha256": "d5391baad7a43a98e268c6d4a96a6733433f7d88c8fdbb21108a47a1b77fa839"
+    },
+    {
+      "path": "design.mjs",
+      "bytes": 13303,
+      "sha256": "9e8ce32e1b80872eec639586c6a03e0361f41061ef689008fd06a9ccad510ab0"
+    },
+    {
+      "path": "director-five-scenes.mjs",
+      "bytes": 3492,
+      "sha256": "269366ee0bdedc026e8fa8d384e3b568c56987761f2eaf73c1477374ca8002d8"
+    },
+    {
+      "path": "director-five-scenes.png",
+      "bytes": 267319,
+      "sha256": "af3b3e19e05d9a0551393057832abe5ff694788c3dad9bb3fae1f741a6dad6aa"
+    },
+    {
+      "path": "director-storyboards.png",
+      "bytes": 232102,
+      "sha256": "9941a7aa1dbbcc3933fc565140fafad515bf8041fe13842bd6e3139b6da9f78a"
+    },
+    {
+      "path": "fit-repair/COVERAGE.md",
+      "bytes": 3939,
+      "sha256": "7d5763fb07312825038bbe59b01657de4e97605e1d3f678cd639768228756224"
+    },
+    {
+      "path": "fit-repair/README.md",
+      "bytes": 2562,
+      "sha256": "10171467e651e58336f238acd888625e23f690024bbff36322dc2853a29cab7d"
+    },
+    {
+      "path": "fit-repair/audit-coverage.mjs",
+      "bytes": 4735,
+      "sha256": "5a355731e07dd9b72c1ebcd86440ad2ab9606cf06dc98018846b44f836b45919"
+    },
+    {
+      "path": "fit-repair/clean-family-board.mjs",
+      "bytes": 1924,
+      "sha256": "a75f1a18e69c83b4e8da0605bfd4697b949647ff8ea89f94a58d2c93de05d40a"
+    },
+    {
+      "path": "fit-repair/coverage-audit.json",
+      "bytes": 25691,
+      "sha256": "0fb19dcd79ca8de4ea86518842e76ad851f50b74cfdecdc8495c3a9557380456"
+    },
+    {
+      "path": "fit-repair/fit-layer-audit.png",
+      "bytes": 101476,
+      "sha256": "aab04fc0a685098009249b98ccb7509d93f6afa408c204f7140a423c7dec6445"
+    },
+    {
+      "path": "fit-repair/fit-validation.json",
+      "bytes": 1228,
+      "sha256": "c2962f8cedb6a489f76211b7e32864bc5d035145053d779f5f13bfee092cc1b1"
+    },
+    {
+      "path": "fit-repair/fitted-captain-family.png",
+      "bytes": 176783,
+      "sha256": "ded5ad723cce3d6d8d4f775202ebec70150e759de2e2c1dd4cacba07f1e8394d"
+    },
+    {
+      "path": "fit-repair/fitted-captains.mjs",
+      "bytes": 8404,
+      "sha256": "3bb6e24acd851634963eb8aec6d71dae9697d16ba39bd6db03462b7988ee439d"
+    },
+    {
+      "path": "fit-repair/main-agent-captain-family-clean.png",
+      "bytes": 96499,
+      "sha256": "856870f600854957f74aa9e05a37667fffad4c6e4076ea04590af19b61aeb764"
+    },
+    {
+      "path": "generated-captain-concept.png",
+      "bytes": 1302266,
+      "sha256": "5afd2396a97a5f24858e2fd4fc2ea4a88c6e2db45bfc724a75c141da21ef5e77"
+    },
+    {
+      "path": "generated-captain-prompt.txt",
+      "bytes": 2448,
+      "sha256": "602d921f782cd299358d8e6d0061bbb2543138e77e4621958166ba608c8cdcc3"
+    },
+    {
+      "path": "lead-variants.png",
+      "bytes": 169737,
+      "sha256": "c5ee528e7a0c7399c5d10527474bec155e3a0f689ade9c6b8491cb3952581eba"
+    },
+    {
+      "path": "motion-concepts.html",
+      "bytes": 811898,
+      "sha256": "ef00f7c6464f776801de5bee0a84f66bf7ae43754f85cd7af25d8c6efb484649"
+    },
+    {
+      "path": "motion-sequence-proof.png",
+      "bytes": 616980,
+      "sha256": "42aa7c0fc3cd281efec56ab7a3f24fe9dfbebf2d8e8eb77f449e9aac69c4baf8"
+    },
+    {
+      "path": "motion-validation.json",
+      "bytes": 318,
+      "sha256": "2a0678343fed9d1b5873cb2f05d610c369a44799df3a23afd69d96df08dbba20"
+    },
+    {
+      "path": "plates/dispatch.png",
+      "bytes": 389354,
+      "sha256": "6d79e49f916dd9d6b5c997f0eec2207ffc7c59cc1423f3fd8f136287aff80329"
+    },
+    {
+      "path": "plates/permission.png",
+      "bytes": 391218,
+      "sha256": "9726bbb167e2441b47c812f2fdf7891187fd6b03e5d4f43f85ff87252571d8bc"
+    },
+    {
+      "path": "plates/understood.png",
+      "bytes": 389387,
+      "sha256": "6a54bdfea01bac2f479cf41464498a026f01862f3cd94b94d1146de8e63e49e4"
+    },
+    {
+      "path": "provenance.json",
+      "bytes": 1964,
+      "sha256": "03ea44eefc0a58f3d25dee02bef49cfd2adffb14d226eb2a27525094780bb19a"
+    },
+    {
+      "path": "recommended-family.png",
+      "bytes": 84348,
+      "sha256": "185cf0ea4e70cb0e49f8f85dc7a93012469c96dd009d12e985b2a576425554f1"
+    },
+    {
+      "path": "verify-motion.mjs",
+      "bytes": 2054,
+      "sha256": "931abe8ff5e513f28f022cb3ac99d008a9279a78c57f8aaf1b098c2e9f6c253d"
+    }
+  ],
+  "feedback": {
+    "utc": "2026-10-29T11:42:38Z",
+    "messageId": "Sentinel_7bba8eec8afc8191ab32fdf574768dd7",
+    "quote": "嗯图1不错，图2的你放在一起反而穿模了",
+    "historicalInputPreserved": "lead-variants.png",
+    "currentShapeFitCandidate": "fit-repair/fitted-captain-family.png",
+    "parentStaticFitReview": "accepted; user-facing corrected fit not yet approved",
+    "cleanComparison": "fit-repair/main-agent-captain-family-clean.png"
+  },
+  "coverage": {
+    "avatarIds": 64,
+    "distinctCompositeGeometries": 64,
+    "explicitProfiles": 4,
+    "unreviewedShapes": 60,
+    "geometryIdenticalReuseGroups": 0,
+    "genericFallback": false
+  }
+}

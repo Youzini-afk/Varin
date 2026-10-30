@@ -1,0 +1,6 @@
+{
+  "stage": "motion-candidate",
+  "method": "whole viewport 512 normalization; border matte and boundary unmatting; exact static canonical head restoration",
+  "interiorHairHoles": "pending manual QA",
+  "noBodyWarp": true
+}

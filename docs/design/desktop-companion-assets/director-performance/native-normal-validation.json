@@ -1,0 +1,26 @@
+{
+  "at": "2026-10-29T15:10:49.665Z",
+  "candidate": "40c6f4f9f0c46c2b4c248fcf798fe3c726b77bb6dac7a59accbd485db2eeb4d2",
+  "defaultBundleSHA256": "ed6830296471e492521e7f0b9adc026f057a0e744726faa86462c5cee90ad2aa",
+  "filesVerified": 15,
+  "mainSHA256": "953f3ca2d529ee2b4297ac77be551a8c2a4d622d33e38113d7905bc1cb04151c",
+  "preloadSHA256": "9f539b0ccdd646c3c679cb38be253d14a12a773b4ce72330dcf42cffd5d97dd4",
+  "nativeGUI": "passed finite normal-entry smoke",
+  "defaultSelectionChanged": true,
+  "validatedAtUTC": "2026-10-29T15:15:11Z",
+  "observed": [
+    "Normal entry enables supervisor overview directly with accepted ed683 assets; no review flag or fixture",
+    "Actual empty Host stays empty; native task coverage is explicitly labelled",
+    "Project panel expands and closes; Escape followed by Return reopens via restored focus",
+    "Normal menu exposes project inspection, privacy label switch, pin/passthrough and close controls without developer diagnostics",
+    "Physical drag moves normal companion; detached landing drawing is followed by stool-restored sitting",
+    "Close companion through normal menu removes companion and auxiliary windows; main application gracefully exits"
+  ],
+  "notClaimed": [
+    "Live model-driven concurrent runs in this isolated empty Host",
+    "All original and new frames individually inspected on every OS",
+    "Release distribution, main merge or full CI pass"
+  ],
+  "settingsRestoredSHA256": "87ee5fe4ec53a5fd4226d8ca790df57bd94e82c597dc8b72e94a6353a39bdcab",
+  "logSHA256": "c8988c468ab3634512e703c4dfb13e1c47022dfc0bc0bea736055ff7e9815666"
+}

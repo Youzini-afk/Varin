@@ -1,0 +1,21 @@
+{
+  "name": "varin-animation-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "serve": "python3 -m http.server 8765 --bind 127.0.0.1",
+    "render:evidence": "node test/offscreen.mjs",
+    "check:seams": "node test/seams.mjs",
+    "test:art-static": "node test/art-static.mjs",
+    "test:art-integrity": "node test/art-integrity.mjs",
+    "render:art": "node test/art-record.mjs",
+    "prepare:art": "node prepare-art.mjs",
+    "render:art-v3": "node test/art-v3-record.mjs",
+    "check:art-v3-neutral": "node test/art-v3-neutral.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.13",
+    "playwright": "^1.64.1"
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "stage": "motion-candidate",
+  "depends": [
+    "CURRENT_EXPORT_SELECTION.json",
+    "CURRENT_EXPORT_INCREMENT_V2.json",
+    "CURRENT_EXPORT_INCREMENT_V3.json"
+  ],
+  "files": [
+    {
+      "path": "source/canonical-rapid-pickup-precontact-v2.png",
+      "bytes": 1754877,
+      "sha256": "7ddeb2a49a6b131b9186654919fdc68e3c41ba95ac29bfc88717e5283a1efd35"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-precontact-v2.prompt.txt",
+      "bytes": 650,
+      "sha256": "c2dbcc19bea7f5e7384182f3a21dde2f6126d99ffc4bc2dac96d5bc9639419c7"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-turn20-v1.png",
+      "bytes": 1993400,
+      "sha256": "f7f9b6237db04ad3b465b0bb908c5f049b048f9e8a0184804700bbfbf9ef8fd0"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-turn20-v1.prompt.txt",
+      "bytes": 673,
+      "sha256": "b25340e6ef03ba51bb8c43d703bb51b422772e5cc4db5626d8cba5a9bdc028bd"
+    },
+    {
+      "path": "source/canonical-closed-handoff-mid-v1.png",
+      "bytes": 1704430,
+      "sha256": "0ef2aa1c24e472ce60272e014b99172b5fe3db7d5a5fa529d676b49dfe1ffd9f"
+    },
+    {
+      "path": "source/canonical-closed-handoff-mid-v1.prompt.txt",
+      "bytes": 1055,
+      "sha256": "1f57bed17b85ac392e7bf1542fc55d932b0318037156c8df7dc68c83178eb72f"
+    },
+    {
+      "path": "derive_rapid_pickup_v2.py",
+      "bytes": 1851,
+      "sha256": "981676a6b57786e96620b9c52658eabfe763ab5e4f87f5aa2dfc2064df149b05"
+    },
+    {
+      "path": "derive_rapid_pickup_v3.py",
+      "bytes": 1847,
+      "sha256": "7d2f2814d7fb65d46c6a11734a8bd089c03094b50c8d6e580fac08f678d77dfb"
+    },
+    {
+      "path": "derive_closed_handoff_v1.py",
+      "bytes": 906,
+      "sha256": "b54774ef72b77e6e1b4161bcbfe026f18d6781e173cf2bfabf83a40b84de5fc7"
+    },
+    {
+      "path": "rapid-pickup-v2/precontact.png",
+      "bytes": 310810,
+      "sha256": "5907bdd35b5c0a19cb053d5e7a1de6f2bbe60ffdb9d202dd6549e13c76810e8a"
+    },
+    {
+      "path": "rapid-pickup-v3/turn20.png",
+      "bytes": 314131,
+      "sha256": "bc8d298b56d85dd4610baa38685b7313e919f938bc4ea68cafbc376a02fe40e8"
+    },
+    {
+      "path": "closed-handoff-v1/near-settled.png",
+      "bytes": 316345,
+      "sha256": "d31a3c129539f503b716459a8347f372bee77f656a3c2ba71d20613b03747aaa"
+    },
+    {
+      "path": "closed-handoff-v1/shared-closed.png",
+      "bytes": 317282,
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "build_scene_review_v6.py",
+      "bytes": 5345,
+      "sha256": "9d871629b6bc964a412da6026aec0a52dd9fa75c2d6143d6a2111899e1881970"
+    },
+    {
+      "path": "build_interactive_relocation_v1.py",
+      "bytes": 5491,
+      "sha256": "3c4de6199b71dd05cd0f30e0f8cc7310e4c91ef7db6194d1dbc79b7337fa850f"
+    },
+    {
+      "path": "build_transition_contract_v1.py",
+      "bytes": 4288,
+      "sha256": "a5ac752394283dac488b2790a1318a0653e078299034b92ccd48654c8a67e7fe"
+    },
+    {
+      "path": "transition-contract-v1/relocation.source.json",
+      "bytes": 11616,
+      "sha256": "086adc41481d3ee755e227d641703e40be9975b02cfd77243171e5d57d07914f"
+    }
+  ],
+  "bytes": 6744997
+}

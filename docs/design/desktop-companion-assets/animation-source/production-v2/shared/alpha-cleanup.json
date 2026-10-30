@@ -1,0 +1,8 @@
+{
+  "sourceSHA": "5155f30fc8a3806ddbd8d74d56ba89c67b2daab14b9d6fb3e2add49854e6135d",
+  "canvasNormalization": "1254 entire viewport to 512; no bbox scaling",
+  "removedIslandPixels": 221,
+  "edgeChromaPixels": 132,
+  "whiteContaminationPixels": 490,
+  "outsideEdgeRGBUnchanged": true
+}

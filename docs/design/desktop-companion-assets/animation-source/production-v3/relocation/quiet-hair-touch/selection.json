@@ -1,0 +1,76 @@
+{
+  "pathBase": "this directory",
+  "files": [
+    {
+      "path": "build.py",
+      "sha256": "7f43f5085d6e743f679c727d76fdc36652534798b88527c20afc3d052617a9c6",
+      "bytes": 3192
+    },
+    {
+      "path": "frames/hair-contact-v1-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/hair-contact-v1.png",
+      "sha256": "37ad0dc377a222580f7b49559cf1a930fb0207a3213afa5100e91895751a3fba",
+      "bytes": 337016
+    },
+    {
+      "path": "frames/hair-detach-v1-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/hair-detach-v1.png",
+      "sha256": "288e004bf90d772a043946b4721d0dc2a478332ab6c9b13e1e51a4fa2d6ff7c2",
+      "bytes": 337196
+    },
+    {
+      "path": "frames/hair-near-v2-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/hair-near-v2.png",
+      "sha256": "cd45941243652c203774a5f4fcd2f49af9e36e32aee4e5bf2cae9accaa0e0a87",
+      "bytes": 337664
+    },
+    {
+      "path": "frames/hair-raise-v1-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/hair-raise-v1.png",
+      "sha256": "bcc07058eaafc2b96a1b2dabbde1d49252c4233cd4a7ebf23ff2e97f78f2e5d9",
+      "bytes": 337614
+    },
+    {
+      "path": "frames/hair-smooth-v1-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/hair-smooth-v1.png",
+      "sha256": "5d9dc85ebe6746b008909a1c58608b3eddf28e69defc80a39063505813756258",
+      "bytes": 337254
+    },
+    {
+      "path": "index.json",
+      "sha256": "5229c29acdbdf1084e7ce77675ed4a229d6a4abd1f541610b191b06dc433fb3e",
+      "bytes": 8767
+    },
+    {
+      "path": "review.jpg",
+      "sha256": "224f6defcf1cab7774017d04fc1b1cba0e576ad16b4948ed35b05d6b49846e8b",
+      "bytes": 984339
+    },
+    {
+      "path": "verification.json",
+      "sha256": "6654517db928e6ca254f47320527c497999eb339233c29a48ad8b7239680d0de",
+      "bytes": 571
+    }
+  ],
+  "dependencies": "production-v3/quiet-hair-touch frozen source package; production-v3 relocation prior21 source index for existing hand-release; production-v2 relocation exact closed detached/mask and index-v4"
+}

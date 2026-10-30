@@ -1,0 +1,582 @@
+{
+  "version": 1,
+  "id": "continuous.editing-v1",
+  "family": "SEATED_WORK",
+  "stage": "motion-candidate",
+  "warning": "Continuous authored performance from reviewed drawings. Nonessential recurrence stops under reduced motion; actual Host changes and pointer movement take priority. Timing visual follow-up recorded separately.",
+  "reviewStatus": "accepted",
+  "kind": "action",
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "action": "editing",
+  "canvas": [
+    512,
+    512
+  ],
+  "durationMs": 9870,
+  "loop": [
+    0,
+    18
+  ],
+  "uniqueImages": 5,
+  "entryPose": "seated-open-screen-keyboard",
+  "exitPose": "seated-open-screen-keyboard",
+  "pages": [
+    {
+      "file": "atlas-000.png"
+    }
+  ],
+  "frames": [
+    {
+      "source": "frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 0,
+      "durationMs": 240,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "startMs": 240,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "index-lift",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "startMs": 340,
+      "durationMs": 130,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "index-press",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-004.png",
+      "sha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+      "startMs": 470,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "middle-lift",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-005.png",
+      "sha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+      "startMs": 570,
+      "durationMs": 140,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "middle-press",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 710,
+      "durationMs": 1880,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 2590,
+      "durationMs": 240,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "startMs": 2830,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "index-lift",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "startMs": 2930,
+      "durationMs": 130,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "index-press",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-004.png",
+      "sha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+      "startMs": 3060,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "middle-lift",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-005.png",
+      "sha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+      "startMs": 3160,
+      "durationMs": 140,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "middle-press",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 3300,
+      "durationMs": 3380,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 6680,
+      "durationMs": 240,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "startMs": 6920,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "index-lift",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "startMs": 7020,
+      "durationMs": 130,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "index-press",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-004.png",
+      "sha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+      "startMs": 7150,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "middle-lift",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-005.png",
+      "sha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+      "startMs": 7250,
+      "durationMs": 140,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "middle-press",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 7390,
+      "durationMs": 2480,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "stable",
+      "pose": "seated-open-screen-keyboard",
+      "exitTo": [
+        "seated-open-screen-keyboard"
+      ],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    }
+  ]
+}

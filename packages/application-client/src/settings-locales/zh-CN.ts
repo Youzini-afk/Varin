@@ -1621,6 +1621,8 @@ export const settingsDict = {
   'settings.varin.desktopNetwork.field.macMenuBarDescription': '需要重启应用。关闭后，Varin 不会创建菜单栏项目，也不会运行相关的会话、审批和用量更新。',
   'settings.varin.desktopNetwork.field.minimizeToTrayAria': '将 Varin 最小化和关闭到系统托盘',
   'settings.varin.desktopNetwork.field.minimizeToTray': '最小化和关闭到系统托盘',
+  'settings.varin.desktopNetwork.field.companion': '桌面陪伴',
+  'settings.varin.desktopNetwork.field.companionDescription': '显示 Varin 桌面形象。只观察现有工作，不改变执行或代为授权。',
   'settings.varin.desktopNetwork.field.minimizeToTrayDescription': '主窗口最小化或关闭时，让 Varin 继续在系统托盘中运行。',
   'settings.varin.desktopNetwork.field.keepAwakeAria': 'Varin 运行时保持电脑唤醒',
   'settings.varin.desktopNetwork.field.keepAwake': 'Varin 运行时保持电脑唤醒',

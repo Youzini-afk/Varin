@@ -1,0 +1,55 @@
+{
+  "sharedArmInputs": [
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-001.png",
+      "sha256": "838da04ae1177dcf46274ad7825670b0e6bb993d8c2862a279aad375a4ef8ab2"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-002.png",
+      "sha256": "24ad1115db6f725dc8cc9354ae185b42cc678d64deb61be850b98b3278916bb9"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-003.png",
+      "sha256": "bcebbd7589649310c4f6b2fd8a851d62746210eddbf17ca5e66ac1944815222e"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-004.png",
+      "sha256": "709c0e4fb0ad29c4ccbf0223f86849d5629fab24cf46c2d7db345354bb4ad1c2"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-005.png",
+      "sha256": "d6057ed870889fb10d6a6af24264ff5753aa083e6de8cbb87ac9bc5f2d951f45"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-004.png",
+      "sha256": "709c0e4fb0ad29c4ccbf0223f86849d5629fab24cf46c2d7db345354bb4ad1c2"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-003.png",
+      "sha256": "bcebbd7589649310c4f6b2fd8a851d62746210eddbf17ca5e66ac1944815222e"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-002.png",
+      "sha256": "24ad1115db6f725dc8cc9354ae185b42cc678d64deb61be850b98b3278916bb9"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-001.png",
+      "sha256": "838da04ae1177dcf46274ad7825670b0e6bb993d8c2862a279aad375a4ef8ab2"
+    },
+    {
+      "source": "observe-diagnose/canonical-chin-v1/pose-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    }
+  ],
+  "owner": "produce_observation_rest_animation",
+  "frozenUpstreamDirectory": "observe-diagnose/canonical-chin-v1",
+  "newAuthoredFace": "sources/query-attentive-face-single-v1.png",
+  "newAuthoredNods": [
+    "sources/understand-nod-middle-single-v1.png",
+    "sources/understand-nod-bottom-single-v1.png"
+  ]
+}

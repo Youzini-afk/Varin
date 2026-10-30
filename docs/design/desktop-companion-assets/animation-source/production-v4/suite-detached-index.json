@@ -1,0 +1,687 @@
+{
+  "pathBase": "production-v4",
+  "entries": [
+    {
+      "source": "coordination/frames/release.png",
+      "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+      "detachedSource": "coordination/detached/release.png",
+      "detachedSHA256": "8ee6b39ad8a117f5db99b42bd09235e90a954007fb8c55c5f96b767d3837625a",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/half-lift.png",
+      "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+      "detachedSource": "coordination/detached/half-lift.png",
+      "detachedSHA256": "dea284ce267ce275a730caf356c44de266281a2bd2c05429756fcdabce71728f",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/gather.png",
+      "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+      "detachedSource": "coordination/detached/gather.png",
+      "detachedSHA256": "22f1717263b4dba7677eb71f0b72d3bc4caee8404cec41b7b06f08b43b4e022f",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/unfold-early.png",
+      "sourceSHA256": "265f5b99b142a8026eef41eda9d85e95570ee73ea191df681144345a72772289",
+      "detachedSource": "coordination/detached/unfold-early.png",
+      "detachedSHA256": "7ee8e7feed423eb2db070835a8db0b136ddfa6b5632c3ac50e37c413b7302363",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/unfold-mid.png",
+      "sourceSHA256": "287d899efd253686aaff1b498e3dd1285df73fcd6fc513a0ae069e0129d4cf05",
+      "detachedSource": "coordination/detached/unfold-mid.png",
+      "detachedSHA256": "11768a288bbd06550169f97706f398dd893a4d47def8057e341c08da9137b159",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/unfold-open.png",
+      "sourceSHA256": "b1b5fa9919ffe4d7753fee4aa22957b69c5a1d94c43b74f9f055a12816d12880",
+      "detachedSource": "coordination/detached/unfold-open.png",
+      "detachedSHA256": "d1dca9e967f981e1bbca69bf4a56e11764d648d362a9a7f44bfc720562255fa7",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/present.png",
+      "sourceSHA256": "d49bff65da96300ab68d5402470de7d4239918328a9d1616ccc316e21cf94776",
+      "detachedSource": "coordination/detached/present.png",
+      "detachedSHA256": "f76d8c3b125bc9e2865d7b5c2f91d0c3e3c673a917bc3d2fe89d4427d1fd901b",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/wrist-return.png",
+      "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+      "detachedSource": "coordination/detached/wrist-return.png",
+      "detachedSHA256": "d798c7cae04cae5f6a948a3203e839f38137a77499ad596021150b78f9331ce5",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/keyboard-hover.png",
+      "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+      "detachedSource": "coordination/detached/keyboard-hover.png",
+      "detachedSHA256": "2508af946aabe2c559d2d656c968a8aea9c32c7a8a78730c2db185036ba5f47c",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination/frames/keyboard-contact.png",
+      "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+      "detachedSource": "coordination/detached/keyboard-contact.png",
+      "detachedSHA256": "31c4a4f8d1294242eb49be7dd5ce49e68d3d78a423899236c814befb1d4ba9e8",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; source selection separate from runtime graph acceptance"
+    },
+    {
+      "source": "coordination-expressions/frames/question.png",
+      "sourceSHA256": "4a43f748b214312327638d2292848f37d604619b16fae14ca4a32d3fd352205c",
+      "detachedSource": "coordination-expressions/detached/question.png",
+      "detachedSHA256": "fc40c238817dfc4d6c44b300163f13790fd327efc5e0bfb6d20f0a16872bc434",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose and expression reviewed at360; runtime graph acceptance separate"
+    },
+    {
+      "source": "coordination-expressions/frames/result-eye-smile.png",
+      "sourceSHA256": "917acee0a33ee42b3f2814e60968cbe46a76760d57ad4b84089befcabeaf8ade",
+      "detachedSource": "coordination-expressions/detached/result-eye-smile.png",
+      "detachedSHA256": "da349cf2b01f153e9a1ccd561ac3decb8b0279f012c2535eb6a99c1c4ea0d1d3",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose and expression reviewed at360; runtime graph acceptance separate"
+    },
+    {
+      "source": "coordination-expressions/frames/serious-rest.png",
+      "sourceSHA256": "78245105c97395375c9b554ebd1a4fb710db2578f506a01fe806b28f05050e95",
+      "detachedSource": "coordination-expressions/detached/serious-rest.png",
+      "detachedSHA256": "1c48d2e88e6cfd5973801cc0dcc7126ead79cbc9f969d4bd885cdb69af188567",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose and expression reviewed at360; runtime graph acceptance separate"
+    },
+    {
+      "source": "response/frames/attention.png",
+      "sourceSHA256": "03f8833bd9620eb483354064340dc76ee8741f61ba33cee22427670fdc3b3f64",
+      "detachedSource": "response/detached/attention.png",
+      "detachedSHA256": "86acc94ae93cdd7d1eb0a88c561fcff226b6a581eb5bcce8793ee1bb8b1892e9",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/lift.png",
+      "sourceSHA256": "7d056fb851da57f45f55590e82aa658d12164a9b6e0be98c21496d5179ff458f",
+      "detachedSource": "response/detached/lift.png",
+      "detachedSHA256": "8ca7619c4d776d1b5125f1906c6b1720ed66a304d7d16ef38a66e083bc84c2a6",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/palm-opening.png",
+      "sourceSHA256": "6c611cd761887c68f67b052cb2885ab91fcf3e0885a7e98bd9754a415351627d",
+      "detachedSource": "response/detached/palm-opening.png",
+      "detachedSHA256": "6da02ee6399c1da98c7fa947ae3e3d2b6d68840c41cbd96dfc3108db23c9b784",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/palm.png",
+      "sourceSHA256": "9dfa8549de49261a6decc9eb466ca9f9d9ee75ea4035d408e67283d8aa98986b",
+      "detachedSource": "response/detached/palm.png",
+      "detachedSHA256": "da52dc9f7a619247ce64702a7b0e03dbe07a6174d1351867d54076e3e77b8625",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/lower.png",
+      "sourceSHA256": "d018349372c6b85b6d307c88da1406bd4857ba7b1c7614b59bd1376d4f363fba",
+      "detachedSource": "response/detached/lower.png",
+      "detachedSHA256": "e30cb2c25e60895dda7afd3ee9994f30cd4f64654af43945c1c836031a96abbf",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/keyboard-hover.png",
+      "sourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+      "detachedSource": "response/detached/keyboard-hover.png",
+      "detachedSHA256": "e5b059183df98633f8b28558e9b7e3989b46e46f61e8c0e43bef12a8bca5737c",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/keyboard-contact.png",
+      "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+      "detachedSource": "response/detached/keyboard-contact.png",
+      "detachedSHA256": "ac4845ca2e98f8fdde9fb25f80dd64f9b4ec9e3eed00f5e65e73495ac6eea691",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/busy-ack.png",
+      "sourceSHA256": "a3a700d58a93cf18e442b7410153bbfc3da9d5ada7d547cfe9fbd9f335338e4b",
+      "detachedSource": "response/detached/busy-ack.png",
+      "detachedSHA256": "5386071033ca3aa9a6197924202ecc60e04bb7cb439ccf0100bfe7caa7192693",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/busy-release.png",
+      "sourceSHA256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+      "detachedSource": "response/detached/busy-release.png",
+      "detachedSHA256": "07c0eff197eb4e345c28c6f1dbe1912bd178f96269e9241bb8b31f57499c8ac5",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/playful-entry.png",
+      "sourceSHA256": "8fe783f2d8f73b2d88f72d873a6306c66a4f094ca9b503d9d425d3e3bf2a0f7c",
+      "detachedSource": "response/detached/playful-entry.png",
+      "detachedSHA256": "ba2e1c8b1f09453716f2013bd1124c3249611829248480c22207b2c4d89a9bb7",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/playful-gather.png",
+      "sourceSHA256": "89b68835cb583f9931ce823253c5f8a3103d8ed6d2b65878c4f096ae2ea49ae3",
+      "detachedSource": "response/detached/playful-gather.png",
+      "detachedSHA256": "9f86ef39f2718b39aaa88fd3f46d4b4da68944839f6091310024a33d5d323ed4",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "quiet-open-blink/frames/half.png",
+      "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+      "detachedSource": "quiet-open-blink/detached/half.png",
+      "detachedSHA256": "74e6f961ff0bb6eee5474d9c37901bbc75c443cb9034129820a3367ae5e33be9",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false
+    },
+    {
+      "source": "quiet-open-blink/frames/closed.png",
+      "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+      "detachedSource": "quiet-open-blink/detached/closed.png",
+      "detachedSHA256": "8583319f6974880c065dc4000867e8beab37dd4f85af01a0b1d9d2e78bddf1b8",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false
+    },
+    {
+      "source": "companionship/frames/yawn-enter-1.png",
+      "sourceSHA256": "39f32613fc5f81600acfd82b2ae9a545f5dfdb8170b1cbbd514f07e72de4a756",
+      "detachedSource": "companionship/detached/yawn-enter-1.png",
+      "detachedSHA256": "716b64c3d64b4f31495626634098c4cf4f96a627c5857a62f4320950eeb0a1e6",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-enter-2.png",
+      "sourceSHA256": "12f83f5bae667150750a446c2e52528758409ae6ca65eaacc1c2436024dcbf08",
+      "detachedSource": "companionship/detached/yawn-enter-2.png",
+      "detachedSHA256": "1aa16339a8e23ed8059e70a86b6d4ac75cba9a14d5b5255ce12cc7844697327a",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-enter-3.png",
+      "sourceSHA256": "a1798d9b14e5d9daa9c835f9ab2c22088337f7dcdbfb54072dc3de2c11666078",
+      "detachedSource": "companionship/detached/yawn-enter-3.png",
+      "detachedSHA256": "fd6a5cadef2c241f30e77e78923f5c8e0122f1c8b8b6581bf337c53a1755c1d2",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-crest.png",
+      "sourceSHA256": "2f7de840280ac3feee5ab4bf5784d8db8eefd69cea859126e06d9ee6b715d11b",
+      "detachedSource": "companionship/detached/yawn-crest.png",
+      "detachedSHA256": "8f9801af9884e1cd6fcfba3596fc9443afc6ffc8012b1b937c0a72eb0770d879",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "7d4630a583ef104f383b659670c5dd4bd1d30580c39ac5459c47fb0ba8245784",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-return-1.png",
+      "sourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+      "detachedSource": "companionship/detached/yawn-return-1.png",
+      "detachedSHA256": "6826330ae9ba060eb215f774668e160f4a83e6ff39e28d63a6d041bc795fcc02",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-return-2.png",
+      "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+      "detachedSource": "companionship/detached/yawn-return-2.png",
+      "detachedSHA256": "d332f6e3608bf6b7e13da9664bd2c7c4754b38ab11bd86a604de1a40a54ada85",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-return-3.png",
+      "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+      "detachedSource": "companionship/detached/yawn-return-3.png",
+      "detachedSHA256": "191d5fc6afb65041398faa3e777913f96cf6d5df914aafd142a6f86c2e402a73",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/doze-relax.png",
+      "sourceSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+      "detachedSource": "companionship/detached/doze-relax.png",
+      "detachedSHA256": "28268ac09132c37d1b0a0cb7eb6550dc3602c9b1ed0cbb36b19632155247bc00",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/doze.png",
+      "sourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+      "detachedSource": "companionship/detached/doze.png",
+      "detachedSHA256": "3dbb685bed128323064fbdddf5183f21141918becf04bfc6353a665a5b3b96ad",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "77bda9c9033a662f0396c86d25aa9c8db6cdebc5c3b9d5c23b729d56c949156a",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/wake-aware.png",
+      "sourceSHA256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+      "detachedSource": "companionship/detached/wake-aware.png",
+      "detachedSHA256": "c0575a525f9712da812ec8b35c2f585c109f947fab25cdece50cac0f2a0c3ee1",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "69af45f01d39d5e94950a5daf2cb9f78a54cea5a592973bdfe7a009d563aeefc",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/wake-load-half.png",
+      "sourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+      "detachedSource": "companionship/detached/wake-load-half.png",
+      "detachedSHA256": "aecb95722d09a251c7ddd91eb498963884415ebba9663a141a628154e5e8006e",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/wake-support.png",
+      "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+      "detachedSource": "companionship/detached/wake-support.png",
+      "detachedSHA256": "1ee4bcf2ef34f32165ff42691413bf457c5918ef11e2b275bd4f40c294d51634",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "718cc809d77e4f2dec8ebae0a13d05483556d5c96c1d23b58aed95eef806788e",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/wake-unload.png",
+      "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+      "detachedSource": "companionship/detached/wake-unload.png",
+      "detachedSHA256": "9f95e70ba0f2724e18666ca1c7dd4adb5f1c4ae892cd126a65a942b584eb98e7",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "745b496b67b739ed02941d27df625d117aa2c4459be3fad9f3626b288fe62063",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/rest-settle.png",
+      "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+      "detachedSource": "companionship/detached/rest-settle.png",
+      "detachedSHA256": "41b6a5fa3ec378dda5d92aedb37493d53888b1bc5da1b9dcf19a4eb58cf9667b",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "c8b1f8b1be9a11c9f1fc742d792ed2e359d5016ac94c721a0e2cd5144c43fbff",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-enter-1.png",
+      "sourceSHA256": "1491bba9579f80b3c6b3cb6545e36263b0722adb907168b3e56af956e0efdafc",
+      "detachedSource": "companionship/detached/stretch-enter-1.png",
+      "detachedSHA256": "dafc18e472898fbb9c06019422fa41bf144d6fed9582f037a8e3f25a7b1bf6f0",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-enter-2.png",
+      "sourceSHA256": "15c3e91d1a404c64ed1605816421185cbcb14ea1b0fe8780dda66858905d305d",
+      "detachedSource": "companionship/detached/stretch-enter-2.png",
+      "detachedSHA256": "75b1a05ceb76a0a2d87514ac5761f5338f9634b4c540fd93345e00f28223f5de",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-enter-3.png",
+      "sourceSHA256": "96b736eef127aa332b93be47f9e8b1e590d3dfbc6289cba9182caea67899ec7b",
+      "detachedSource": "companionship/detached/stretch-enter-3.png",
+      "detachedSHA256": "c4bea9955576e9fbcd491afa01fd6b946fe9c6a822594f556a093c0c626cd59b",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-crest.png",
+      "sourceSHA256": "768a3e206ced3ded9a723b7ce0d86d57684cff9a3c0ff9a6b0d5a6e11dcbab16",
+      "detachedSource": "companionship/detached/stretch-crest.png",
+      "detachedSHA256": "c7bae32554a19175b1a577b71d05a28873139b908e64e1f0fff1353acdb159bc",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "58ee29bc58d9c788fecfdb3e66148d7adf8a4f30d500c9391b9207c06cdae667",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-return-1.png",
+      "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+      "detachedSource": "companionship/detached/stretch-return-1.png",
+      "detachedSHA256": "f9c21fb5a50b43d71bfea5fe4e0b93f05d01b3ca0fd85da4883887ead66d27a1",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-return-2.png",
+      "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+      "detachedSource": "companionship/detached/stretch-return-2.png",
+      "detachedSHA256": "4609ef24f8d58caa6a9e8fb617d1a32688b291f79f743b9671f4e8d0bdb50d76",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-return-3.png",
+      "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+      "detachedSource": "companionship/detached/stretch-return-3.png",
+      "detachedSHA256": "783f815ca1e0d7937073c10931f85c650de2848277b9816f7018fe8a74239d37",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-unload.png",
+      "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+      "detachedSource": "companionship/detached/stretch-unload.png",
+      "detachedSHA256": "17c39000dc1bb1d113baa00205554a2bbd0540a7d8a1aaef13be4486dccc51a1",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "38a094f6c88a0bee7be29349233c53e3f314f5d5ac0aba7695c79e99fa631c44",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-enter-1.png",
+      "sourceSHA256": "763073ab2c571513ff1c78d97ff024889bbababf2c4a9edfa99f3934314e75a7",
+      "detachedSource": "companionship/detached/hair-enter-1.png",
+      "detachedSHA256": "07d4b6a1528fe13479c3df49779bda0ded9530dec1312a72199bf3bfdac35a11",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-enter-2.png",
+      "sourceSHA256": "1d6b1c5c712ee1016de9c2db9d6626fab39a74c435d9b5f6ad8280ca910857c4",
+      "detachedSource": "companionship/detached/hair-enter-2.png",
+      "detachedSHA256": "062731851f38bfbefc7de7575708bb13439dfed6c1b61139e36dcf584e7eafd1",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-enter-3.png",
+      "sourceSHA256": "343550a2ebfbd3dbace43f991987d840cc86129db4a64edd247340b69aae51ab",
+      "detachedSource": "companionship/detached/hair-enter-3.png",
+      "detachedSHA256": "8a57afc588577edc45cfce1d00489f766ea67af90521ecd27d1630d0785edfd2",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-contact-1.png",
+      "sourceSHA256": "cd27319fe19e9905a9f315f5e903eeac0882e369a7ed9a246cf9901b20ceaf6b",
+      "detachedSource": "companionship/detached/hair-contact-1.png",
+      "detachedSHA256": "1b22a1fe1721916ad8b22c9fc156e5f6d17e3ebfd81b54818eff0ad5735587a5",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-contact-2.png",
+      "sourceSHA256": "6fc5d6559b29421f174bfc3960ce93e11a9ebac0caea81050e7480efd89547f7",
+      "detachedSource": "companionship/detached/hair-contact-2.png",
+      "detachedSHA256": "d48dec14a276faa6cbcd562333d4254452b476229fb8b1e20679d987657d4025",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-contact-3.png",
+      "sourceSHA256": "4ed27dd08efdcfea379670b2ddcb244aa866b336108b0c6c3ef0910ac47d3f9f",
+      "detachedSource": "companionship/detached/hair-contact-3.png",
+      "detachedSHA256": "6b0924c12a4ceadc90d0335dc7e429058941497611d14d1b6797d53ba47a6446",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-return-1.png",
+      "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+      "detachedSource": "companionship/detached/hair-return-1.png",
+      "detachedSHA256": "a890230998da4f69a70f8d9f76ac630831818c8fc7469e42a0113109a6d0bb8d",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-return-2.png",
+      "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+      "detachedSource": "companionship/detached/hair-return-2.png",
+      "detachedSHA256": "1184ba6a8224c5545614c81bb5229a0a61fb060e5931fb7ec709ac06d77608aa",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-return-3.png",
+      "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+      "detachedSource": "companionship/detached/hair-return-3.png",
+      "detachedSHA256": "05e79a6c157fd4ca58e6194be79455d1645c482ab723b84aae3987c07f64cbff",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-release.png",
+      "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+      "detachedSource": "companionship/detached/sleeve-release.png",
+      "detachedSHA256": "c7db2f05188b714a0e97755a559730c634d33bda358956adb971908230e63ec2",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-cross.png",
+      "sourceSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+      "detachedSource": "companionship/detached/sleeve-cross.png",
+      "detachedSHA256": "463ecc66776ca3a0d01663bdf19a8b47b6a483154f385f6157332f3745925a08",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-1.png",
+      "sourceSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+      "detachedSource": "companionship/detached/sleeve-brush-1.png",
+      "detachedSHA256": "66970420dab46f6b4acfd8737b579ae87a095ec33c3b812b4d04ff2a1f268453",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-2.png",
+      "sourceSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+      "detachedSource": "companionship/detached/sleeve-brush-2.png",
+      "detachedSHA256": "0c74305be651e986d2ecfa49388c9933db82801ea35a1d172b83cc5a44428877",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-3.png",
+      "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+      "detachedSource": "companionship/detached/sleeve-brush-3.png",
+      "detachedSHA256": "919ce309b29d3afaeda5e2b7461df47cffcf11924134d1065666d0461ffbd69d",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/comfort-1.png",
+      "sourceSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+      "detachedSource": "companionship/detached/comfort-1.png",
+      "detachedSHA256": "2dc099e5c410852110bce8ff65f507181d85849a74972d0623cfc80e02d3f39c",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/comfort-2.png",
+      "sourceSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+      "detachedSource": "companionship/detached/comfort-2.png",
+      "detachedSHA256": "d6407e684510ff055e9baafdfa7da89f4b46c590704f9e26d3270fe0576c4145",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/comfort-3.png",
+      "sourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+      "detachedSource": "companionship/detached/comfort-3.png",
+      "detachedSHA256": "114ac51e23c679e77941d2d7280c9e26efe6891a195b463b2ca484abe6cdc8c7",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/social-release.png",
+      "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+      "detachedSource": "companionship/detached/social-release.png",
+      "detachedSHA256": "21d472fb4f4b230c572acaab62957d41fb588f2f9f66e11431a14c8730be052d",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/social-wrist.png",
+      "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+      "detachedSource": "companionship/detached/social-wrist.png",
+      "detachedSHA256": "b40f4c9864c32a8bd7db916c475ce4c91fdf39b4504c2b8fcc6ca58030558209",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/social-lower.png",
+      "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+      "detachedSource": "companionship/detached/social-lower.png",
+      "detachedSHA256": "ac23a1936874625682a1155a4373cde417a8f05389402cb27bc64fba6fe7aaa5",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/blink-half.png",
+      "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+      "detachedSource": "companionship/detached/blink-half.png",
+      "detachedSHA256": "51c1930eb166e4bd585d092ae81a8a888109653f6e5f1b3e41dda7dd0cc2effe",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/blink-closed.png",
+      "sourceSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+      "detachedSource": "companionship/detached/blink-closed.png",
+      "detachedSHA256": "e90f40c6fd5738d3f5b9109d3ce455c6f0de11fb55e24277a581f093ac8018ae",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/social-palm.png",
+      "sourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+      "detachedSource": "companionship/detached/social-palm.png",
+      "detachedSHA256": "ae97382d7191b7cebee4baa4ff9edb0a0a4ff168d5526e424fa6075048f63f5d",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "bd67382e4f21eb1e2ae94e5cf15612de3ebe1a9c8853488c9078b6322542f5c7",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "candidateOnly": true,
+  "checks": [
+    {
+      "path": "rebuild-verification.json",
+      "sha256": "214b9b6b6958192e026df3d158f556849cf2e687485e0408c82b6f8bc768dece",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "register_pose.py",
+      "sha256": "951470307a42722d5d166372bf6e7380646d3feb04bfe23aba05d2002daedba1",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "rejected.json",
+      "sha256": "a410a5f87a42d007a98a316a5f9ce7cca1d2c6b5496c1a6a97fd38276a8e2625",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "manifest.json",
+      "sha256": "b43f7b679f485f7ea16f0e60147754f9a378a28454f6042e0bb938c192a7cd61",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "verify_portable.py",
+      "sha256": "5b52b4f8e9cf04a98848a3820ccf56ae54063b5c74a789ce189915b38db08292",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "generation-inputs.json",
+      "sha256": "8f7c8319b29bbb3a9eb901a79e4f081a60deda9b7000f6ffe358005620753614",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "masks/hair-near-v2.png",
+      "sha256": "1f4ed2a6372f142e6882d97e9476895ef84c66f9cf874016b0d2440e22c83ae6",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "masks/hair-smooth-v1.png",
+      "sha256": "1f4ed2a6372f142e6882d97e9476895ef84c66f9cf874016b0d2440e22c83ae6",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "masks/hair-raise-v1.png",
+      "sha256": "1f4ed2a6372f142e6882d97e9476895ef84c66f9cf874016b0d2440e22c83ae6",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "masks/hair-contact-v1.png",
+      "sha256": "1f4ed2a6372f142e6882d97e9476895ef84c66f9cf874016b0d2440e22c83ae6",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "masks/hair-detach-v1.png",
+      "sha256": "1f4ed2a6372f142e6882d97e9476895ef84c66f9cf874016b0d2440e22c83ae6",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "raw/hair-near-v2.png",
+      "sha256": "5742b1323f2d5d3972b550fb38554ece6ab364286669481cebeff790d0b2dcd5",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "raw/hair-smooth-v1.png",
+      "sha256": "85971bb6eb1a05322c973b3fdebd1a52f627e6f67d55bba8974ef63458bf787f",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "raw/hair-raise-v1.png",
+      "sha256": "1e42252d8dd8704052c2d72e3763898133f1c5dc88a42fdb9e2e682d144901b7",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "raw/hair-contact-v1.png",
+      "sha256": "1b7d16c080bc6e154683b4f8c2db0a99822a33b25531c9c9cdbc72ee587ebd2a",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "raw/hair-detach-v1.png",
+      "sha256": "07f856dd52a795e0d7b482723de75b0233db4f9c947ca1f9eac2c64a74cb1de2",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "qa/hair-contact-chain-v1.jpg",
+      "sha256": "02ba336402b3b7dc62e9d8d561b3193070c034de15530dc2912963db210442a9",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "prompts/hair-contact-v1.txt",
+      "sha256": "c7144afc8059e3fb0456d03d791c8ac474e9030af7ec7a501f383d9bebb62a7f",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "prompts/hair-raise-v1.txt",
+      "sha256": "6785aaf47a9a6fa9674276a3761a460c588dc87c4fe7760824888b6e01bfcc9a",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "prompts/hair-smooth-v1.txt",
+      "sha256": "f31641b0d6416054a15ad04cb345daacfa0568c57eba4cad95ffa0749fc740a7",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "prompts/hair-detach-v1.txt",
+      "sha256": "608562821c9862644fa061fe9b88de44504638aa17248440d6a700b263d276a5",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "prompts/hair-near-v2.txt",
+      "sha256": "2da1e6c3017e2a6d6f862d96b17ff59c66de86f6427c1ef8ca3bcdb58a78505f",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-detach-v1-provenance.json",
+      "sha256": "01a59f288a5cc4647905ef45a8d67faa20743483b9275792c1cd98bd89ffa4a8",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-contact-v1-provenance.json",
+      "sha256": "7b72290b5625120e1cccc4e260959429f8be6e6e59c76d4eec42a4d82af84ff9",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-near-v2.png",
+      "sha256": "395cc118049efd493c760091e3c84261e929c3b3d90da12afc6239fef16a388b",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-near-v2-provenance.json",
+      "sha256": "1a41fa9253a65defc4dfe0ee13def5323cb53394aaa49d566d213c15a9967f67",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-smooth-v1.png",
+      "sha256": "8c42ce18965166dcc3c660a40eac77ae4223b7d2a646eec0c1606af0369b2b27",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-smooth-v1-provenance.json",
+      "sha256": "dcb18654def465f6e4ed3cf573b54f858900d8987caea5e18beb676b332cb6f9",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-raise-v1.png",
+      "sha256": "9778d643d1e9197bdabc385838a0da036208a605710882284bb8371fb5ff5448",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-contact-v1.png",
+      "sha256": "2ee95097391a9ca7064fe2edd614d15c756680b734a60284005727d68f161086",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-raise-v1-provenance.json",
+      "sha256": "260b0c2399c55526f322e518fd37330041c06cdfe00bbfe8f2a04b68fd0b6268",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "frames/hair-detach-v1.png",
+      "sha256": "87d1b075ceef4ee2e7f7c47285fcf72275163d237998cd01232ee9f5ca69d703",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "references/yawn-hand-release-v1.png",
+      "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+      "frozenSourceEqual": true
+    },
+    {
+      "path": "references/closed-rest-rigid-v2.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "frozenSourceEqual": true
+    }
+  ],
+  "allFrozenCopiesEqual": true,
+  "excluded": "Rejected approach raw/prompt; unused reference; generated normalized references; HTML/GIF movies. All 5 actual drawings, 7 reachable sources and real recovery retained."
+}

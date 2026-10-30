@@ -14,6 +14,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Single durable owner, short metadata transactions, format preflight | [catalog.rs](src/catalog.rs) |
 | One-time supported-generation conversion before recovery | [catalog_upgrade.rs](src/catalog_upgrade.rs) |
 | Thread titles, archive/pin, read positions and visibility tombstones | [catalog_threads.rs](src/catalog_threads.rs) |
+| Transaction-consistent, metadata-only Host attention (including hidden unsettled work) | [catalog_attention.rs](src/catalog_attention.rs) |
 | Deleted conversation metadata retirement and surviving reference protection | [catalog_retention.rs](src/catalog_retention.rs) |
 | Worker lifecycle, cancellation, policy actions, model/tool settlement | [execution.rs](src/execution.rs), [supervisor.rs](src/supervisor.rs) |
 | History/request commit, safe restoration, explicit navigation | [catalog_execution.rs](src/catalog_execution.rs), [catalog_recovery.rs](src/catalog_recovery.rs), [catalog_navigation.rs](src/catalog_navigation.rs) |

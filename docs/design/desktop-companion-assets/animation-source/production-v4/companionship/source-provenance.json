@@ -1,0 +1,1677 @@
+{
+  "canvas": [
+    512,
+    512
+  ],
+  "sources": [
+    {
+      "source": "frames/yawn-enter-1.png",
+      "sha256": "39f32613fc5f81600acfd82b2ae9a545f5dfdb8170b1cbbd514f07e72de4a756",
+      "originalSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/yawn-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/yawn-enter-2.png",
+      "sha256": "12f83f5bae667150750a446c2e52528758409ae6ca65eaacc1c2436024dcbf08",
+      "originalSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/yawn-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/yawn-enter-3.png",
+      "sha256": "a1798d9b14e5d9daa9c835f9ab2c22088337f7dcdbfb54072dc3de2c11666078",
+      "originalSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/yawn-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/yawn-crest.png",
+      "sha256": "2f7de840280ac3feee5ab4bf5784d8db8eefd69cea859126e06d9ee6b715d11b",
+      "originalSHA256": "7d4630a583ef104f383b659670c5dd4bd1d30580c39ac5459c47fb0ba8245784",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/yawn-r-anchored-crest-v3.png"
+    },
+    {
+      "source": "frames/yawn-return-1.png",
+      "sha256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+      "originalSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/yawn-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/yawn-return-2.png",
+      "sha256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+      "originalSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/yawn-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/yawn-return-3.png",
+      "sha256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+      "originalSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/yawn-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/doze-relax.png",
+      "sha256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+      "originalSHA256": "f3408ce3f8234080b8e87d7d318a55653c20a8ef050adfbd4cc5eb08b56bd8f2",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/doze-r-relax-half-v2.png"
+    },
+    {
+      "source": "frames/doze.png",
+      "sha256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+      "originalSHA256": "77bda9c9033a662f0396c86d25aa9c8db6cdebc5c3b9d5c23b729d56c949156a",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/doze-r-anchored-single-v5.png"
+    },
+    {
+      "source": "frames/wake-aware.png",
+      "sha256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+      "originalSHA256": "69af45f01d39d5e94950a5daf2cb9f78a54cea5a592973bdfe7a009d563aeefc",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/wake-r-awareness-single-v1.png"
+    },
+    {
+      "source": "frames/wake-load-half.png",
+      "sha256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+      "originalSHA256": "2ee5a9e66d0ccd75b3a5496490542866105358448f55fedaee79345deab6dba3",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/wake-r-initial-load-half-v1.png"
+    },
+    {
+      "source": "frames/wake-support.png",
+      "sha256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+      "originalSHA256": "718cc809d77e4f2dec8ebae0a13d05483556d5c96c1d23b58aed95eef806788e",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/wake-r-anchored-support-single-v7.png"
+    },
+    {
+      "source": "frames/wake-unload.png",
+      "sha256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+      "originalSHA256": "745b496b67b739ed02941d27df625d117aa2c4459be3fad9f3626b288fe62063",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/wake-r-support-unload-half-v1.png"
+    },
+    {
+      "source": "frames/rest-settle.png",
+      "sha256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+      "originalSHA256": "c8b1f8b1be9a11c9f1fc742d792ed2e359d5016ac94c721a0e2cd5144c43fbff",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/common-rest-exact-approach-single-v2.png"
+    },
+    {
+      "source": "frames/stretch-enter-1.png",
+      "sha256": "1491bba9579f80b3c6b3cb6545e36263b0722adb907168b3e56af956e0efdafc",
+      "originalSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/stretch-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/stretch-enter-2.png",
+      "sha256": "15c3e91d1a404c64ed1605816421185cbcb14ea1b0fe8780dda66858905d305d",
+      "originalSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/stretch-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/stretch-enter-3.png",
+      "sha256": "96b736eef127aa332b93be47f9e8b1e590d3dfbc6289cba9182caea67899ec7b",
+      "originalSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/stretch-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/stretch-crest.png",
+      "sha256": "768a3e206ced3ded9a723b7ce0d86d57684cff9a3c0ff9a6b0d5a6e11dcbab16",
+      "originalSHA256": "58ee29bc58d9c788fecfdb3e66148d7adf8a4f30d500c9391b9207c06cdae667",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/stretch-r-crest-v2.png"
+    },
+    {
+      "source": "frames/stretch-return-1.png",
+      "sha256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+      "originalSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/stretch-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/stretch-return-2.png",
+      "sha256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+      "originalSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/stretch-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/stretch-return-3.png",
+      "sha256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+      "originalSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/stretch-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/stretch-unload.png",
+      "sha256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+      "originalSHA256": "38a094f6c88a0bee7be29349233c53e3f314f5d5ac0aba7695c79e99fa631c44",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/stretch-r-unload-half-v2.png"
+    },
+    {
+      "source": "frames/hair-enter-1.png",
+      "sha256": "763073ab2c571513ff1c78d97ff024889bbababf2c4a9edfa99f3934314e75a7",
+      "originalSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/hair-enter-2.png",
+      "sha256": "1d6b1c5c712ee1016de9c2db9d6626fab39a74c435d9b5f6ad8280ca910857c4",
+      "originalSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/hair-enter-3.png",
+      "sha256": "343550a2ebfbd3dbace43f991987d840cc86129db4a64edd247340b69aae51ab",
+      "originalSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-entry-three-v2.png"
+    },
+    {
+      "source": "frames/hair-contact-1.png",
+      "sha256": "cd27319fe19e9905a9f315f5e903eeac0882e369a7ed9a246cf9901b20ceaf6b",
+      "originalSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-contact-three-v2.png"
+    },
+    {
+      "source": "frames/hair-contact-2.png",
+      "sha256": "6fc5d6559b29421f174bfc3960ce93e11a9ebac0caea81050e7480efd89547f7",
+      "originalSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-contact-three-v2.png"
+    },
+    {
+      "source": "frames/hair-contact-3.png",
+      "sha256": "4ed27dd08efdcfea379670b2ddcb244aa866b336108b0c6c3ef0910ac47d3f9f",
+      "originalSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-contact-three-v2.png"
+    },
+    {
+      "source": "frames/hair-return-1.png",
+      "sha256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+      "originalSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/hair-return-2.png",
+      "sha256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+      "originalSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/hair-return-3.png",
+      "sha256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+      "originalSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/hair-r-return-three-v2.png"
+    },
+    {
+      "source": "frames/sleeve-release.png",
+      "sha256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+      "originalSHA256": "5d8fcfef1fddd16a5bf9d2f5fce030d5cd64d9190333fe5e34f99d6b41cb1ecf",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/sleeve-r-left-release-single-v2.png"
+    },
+    {
+      "source": "frames/sleeve-cross.png",
+      "sha256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+      "originalSHA256": "0eefb676281ac71b15beb4ded3d696277991da8077c7c98c4db4a0562bd39476",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/sleeve-r-entry-exit-three-v1.png"
+    },
+    {
+      "source": "frames/sleeve-brush-1.png",
+      "sha256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+      "originalSHA256": "2033ba619f979663bf300c0ec26b0b983033c77a1617a15ee5aaaec17ce658f8",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/sleeve-r-contact-three-v1.png"
+    },
+    {
+      "source": "frames/sleeve-brush-2.png",
+      "sha256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+      "originalSHA256": "2033ba619f979663bf300c0ec26b0b983033c77a1617a15ee5aaaec17ce658f8",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/sleeve-r-contact-three-v1.png"
+    },
+    {
+      "source": "frames/sleeve-brush-3.png",
+      "sha256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+      "originalSHA256": "2033ba619f979663bf300c0ec26b0b983033c77a1617a15ee5aaaec17ce658f8",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/sleeve-r-contact-three-v1.png"
+    },
+    {
+      "source": "frames/comfort-1.png",
+      "sha256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+      "originalSHA256": "1214f8191077fbc03c2382ade5d9da2987f09eaad0804cd292b2ee4bd5ebf252",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/comfort-r-adjust-three-v1.png"
+    },
+    {
+      "source": "frames/comfort-2.png",
+      "sha256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+      "originalSHA256": "1214f8191077fbc03c2382ade5d9da2987f09eaad0804cd292b2ee4bd5ebf252",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/comfort-r-adjust-three-v1.png"
+    },
+    {
+      "source": "frames/comfort-3.png",
+      "sha256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+      "originalSHA256": "1214f8191077fbc03c2382ade5d9da2987f09eaad0804cd292b2ee4bd5ebf252",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/comfort-r-adjust-three-v1.png"
+    },
+    {
+      "source": "frames/social-release.png",
+      "sha256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+      "originalSHA256": "a299d514e43c1902e283e2d614bb8cd6558040d729bb54fd6dcd37c2553825fa",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/closed-social-r-early-release-single-v3.png"
+    },
+    {
+      "source": "frames/social-wrist.png",
+      "sha256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+      "originalSHA256": "b8a123393f8182691f5a31772073d7a4caa430e27199491c551324c6ad0c73ab",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/closed-social-r-wrist-half-single-v1.png"
+    },
+    {
+      "source": "frames/social-lower.png",
+      "sha256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+      "originalSHA256": "d9ecb5394f24c4a0551b9991063a83e6846b208dc2f500be5e468f9429f0e992",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/closed-social-r-lowering-single-v3.png"
+    },
+    {
+      "source": "frames/blink-half.png",
+      "sha256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+      "originalSHA256": "7e5804f46b3828946f3a42befcc7652a9e210c36eba6d740dd884fab8433701b",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/quiet-r-blink-half-v1.png"
+    },
+    {
+      "source": "frames/blink-closed.png",
+      "sha256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+      "originalSHA256": "c89a6c1e8cde21d33b74ca00b50400d6dda30ff5664693b193a5f89c3c7efc09",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/quiet-r-blink-closed-v1.png"
+    },
+    {
+      "source": "frames/social-palm.png",
+      "sha256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+      "originalSHA256": "98d97bdb962c79f220d11f8f2564900f01d66bfa4d95ed10429dc5d8b14245d2",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained",
+      "originalSource": "raw/closed-social-r-palm-clean-single-v1.png",
+      "generatedFromInputSHA256": "bd67382e4f21eb1e2ae94e5cf15612de3ebe1a9c8853488c9078b6322542f5c7",
+      "editIntent": "Remove isolated neighboring-cell purple arc at extreme left border only; preserve full seated pose and registration",
+      "editTool": "builtin imagegen",
+      "pairedDetachedReusedAfterReview": true
+    },
+    {
+      "source": "detached/yawn-enter-1.png",
+      "sha256": "716b64c3d64b4f31495626634098c4cf4f96a627c5857a62f4320950eeb0a1e6",
+      "originalSHA256": "83f773bbb647e62b4819935dd4bdd8fe592236199d60a6b244495c2b3e65bb9c",
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "originalSource": "detached/yawn-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/yawn-enter-2.png",
+      "sha256": "1aa16339a8e23ed8059e70a86b6d4ac75cba9a14d5b5255ce12cc7844697327a",
+      "originalSHA256": "83f773bbb647e62b4819935dd4bdd8fe592236199d60a6b244495c2b3e65bb9c",
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "originalSource": "detached/yawn-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/yawn-enter-3.png",
+      "sha256": "fd6a5cadef2c241f30e77e78923f5c8e0122f1c8b8b6581bf337c53a1755c1d2",
+      "originalSHA256": "83f773bbb647e62b4819935dd4bdd8fe592236199d60a6b244495c2b3e65bb9c",
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "originalSource": "detached/yawn-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/yawn-crest.png",
+      "sha256": "8f9801af9884e1cd6fcfba3596fc9443afc6ffc8012b1b937c0a72eb0770d879",
+      "originalSHA256": "6f1adc754d96e72c4773c6a6d83518c4d8dc70d1a8732ecb121c2afa59781c61",
+      "generatedFromInputSHA256": "7d4630a583ef104f383b659670c5dd4bd1d30580c39ac5459c47fb0ba8245784",
+      "originalSource": "detached/yawn-r-anchored-crest-v3-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/yawn-return-1.png",
+      "sha256": "6826330ae9ba060eb215f774668e160f4a83e6ff39e28d63a6d041bc795fcc02",
+      "originalSHA256": "4ebb594599dadab8ed4165c0db572d156384de7eac3f5d4240393db7dc018f35",
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "originalSource": "detached/yawn-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/yawn-return-2.png",
+      "sha256": "d332f6e3608bf6b7e13da9664bd2c7c4754b38ab11bd86a604de1a40a54ada85",
+      "originalSHA256": "4ebb594599dadab8ed4165c0db572d156384de7eac3f5d4240393db7dc018f35",
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "originalSource": "detached/yawn-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/yawn-return-3.png",
+      "sha256": "191d5fc6afb65041398faa3e777913f96cf6d5df914aafd142a6f86c2e402a73",
+      "originalSHA256": "4ebb594599dadab8ed4165c0db572d156384de7eac3f5d4240393db7dc018f35",
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "originalSource": "detached/yawn-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/doze-relax.png",
+      "sha256": "28268ac09132c37d1b0a0cb7eb6550dc3602c9b1ed0cbb36b19632155247bc00",
+      "originalSHA256": "70f37035a21e6419a2fbdd05d97bf88c17aca58a32aaf9f9b6831c0a6b580054",
+      "generatedFromInputSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+      "originalSource": "detached/doze-relax-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/doze.png",
+      "sha256": "3dbb685bed128323064fbdddf5183f21141918becf04bfc6353a665a5b3b96ad",
+      "originalSHA256": "11f1d5f25b3cee4b4f155ffa1fcbd34c4ad86d134cb2e4226bcc7f05a0777193",
+      "generatedFromInputSHA256": "77bda9c9033a662f0396c86d25aa9c8db6cdebc5c3b9d5c23b729d56c949156a",
+      "originalSource": "detached/doze-r-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/wake-aware.png",
+      "sha256": "c0575a525f9712da812ec8b35c2f585c109f947fab25cdece50cac0f2a0c3ee1",
+      "originalSHA256": "c9fd6becfd5e5d8ad8953ee22db81d523a50a2047201ec63a09311f517d4f936",
+      "generatedFromInputSHA256": "69af45f01d39d5e94950a5daf2cb9f78a54cea5a592973bdfe7a009d563aeefc",
+      "originalSource": "detached/wake-awareness-r-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/wake-load-half.png",
+      "sha256": "aecb95722d09a251c7ddd91eb498963884415ebba9663a141a628154e5e8006e",
+      "originalSHA256": "d18cf0d26df6e83888e404dd4cc65e161d98d5c9e487d27232a9d4cb2973dfb3",
+      "generatedFromInputSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+      "originalSource": "detached/wake-load-half-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/wake-support.png",
+      "sha256": "1ee4bcf2ef34f32165ff42691413bf457c5918ef11e2b275bd4f40c294d51634",
+      "originalSHA256": "79fef15d5bce2bf87329b8e63c465a65d29dff3e7bb8c582c1ae16b273bfdca0",
+      "generatedFromInputSHA256": "718cc809d77e4f2dec8ebae0a13d05483556d5c96c1d23b58aed95eef806788e",
+      "originalSource": "detached/wake-support-r-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/wake-unload.png",
+      "sha256": "9f95e70ba0f2724e18666ca1c7dd4adb5f1c4ae892cd126a65a942b584eb98e7",
+      "originalSHA256": "47db3fb0798045258a42962e9bbcb866c0dac535afac0f1d390fc9ae04a8cd6e",
+      "generatedFromInputSHA256": "745b496b67b739ed02941d27df625d117aa2c4459be3fad9f3626b288fe62063",
+      "originalSource": "detached/wake-unload-r-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/rest-settle.png",
+      "sha256": "41b6a5fa3ec378dda5d92aedb37493d53888b1bc5da1b9dcf19a4eb58cf9667b",
+      "originalSHA256": "3de241465a4d252c6238f67385850357d6c5697373ba2c1e1b248e6426e50357",
+      "generatedFromInputSHA256": "c8b1f8b1be9a11c9f1fc742d792ed2e359d5016ac94c721a0e2cd5144c43fbff",
+      "originalSource": "detached/wake-settle-r-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/stretch-enter-1.png",
+      "sha256": "dafc18e472898fbb9c06019422fa41bf144d6fed9582f037a8e3f25a7b1bf6f0",
+      "originalSHA256": "0422ff1f2fa8ed28ae3fdc73114c2f3b3b7cf3c6049b4cbc11ac58be8a60cf51",
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "originalSource": "detached/stretch-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/stretch-enter-2.png",
+      "sha256": "75b1a05ceb76a0a2d87514ac5761f5338f9634b4c540fd93345e00f28223f5de",
+      "originalSHA256": "0422ff1f2fa8ed28ae3fdc73114c2f3b3b7cf3c6049b4cbc11ac58be8a60cf51",
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "originalSource": "detached/stretch-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/stretch-enter-3.png",
+      "sha256": "c4bea9955576e9fbcd491afa01fd6b946fe9c6a822594f556a093c0c626cd59b",
+      "originalSHA256": "0422ff1f2fa8ed28ae3fdc73114c2f3b3b7cf3c6049b4cbc11ac58be8a60cf51",
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "originalSource": "detached/stretch-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/stretch-crest.png",
+      "sha256": "c7bae32554a19175b1a577b71d05a28873139b908e64e1f0fff1353acdb159bc",
+      "originalSHA256": "b164a1c62ba3c559497c36e8b4cf45e82a47228b2e3595dda4441a98f0a2dbf0",
+      "generatedFromInputSHA256": "58ee29bc58d9c788fecfdb3e66148d7adf8a4f30d500c9391b9207c06cdae667",
+      "originalSource": "detached/stretch-r-crest-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/stretch-return-1.png",
+      "sha256": "f9c21fb5a50b43d71bfea5fe4e0b93f05d01b3ca0fd85da4883887ead66d27a1",
+      "originalSHA256": "dca6eb6f900272f2f59af38536a76003ca6abf9c979bc6ed14656b4b471c6705",
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "originalSource": "detached/stretch-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/stretch-return-2.png",
+      "sha256": "4609ef24f8d58caa6a9e8fb617d1a32688b291f79f743b9671f4e8d0bdb50d76",
+      "originalSHA256": "dca6eb6f900272f2f59af38536a76003ca6abf9c979bc6ed14656b4b471c6705",
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "originalSource": "detached/stretch-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/stretch-return-3.png",
+      "sha256": "783f815ca1e0d7937073c10931f85c650de2848277b9816f7018fe8a74239d37",
+      "originalSHA256": "dca6eb6f900272f2f59af38536a76003ca6abf9c979bc6ed14656b4b471c6705",
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "originalSource": "detached/stretch-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/stretch-unload.png",
+      "sha256": "17c39000dc1bb1d113baa00205554a2bbd0540a7d8a1aaef13be4486dccc51a1",
+      "originalSHA256": "345c94b73b5aa05ac949e37afcc8b97cac4ce070b4a3f2c0b125a91647c5e039",
+      "generatedFromInputSHA256": "38a094f6c88a0bee7be29349233c53e3f314f5d5ac0aba7695c79e99fa631c44",
+      "originalSource": "detached/stretch-r-unload-half-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-enter-1.png",
+      "sha256": "07d4b6a1528fe13479c3df49779bda0ded9530dec1312a72199bf3bfdac35a11",
+      "originalSHA256": "f718abccf3391146126ea43738cd71e0b84cad18b3f2035c67e20f9d80758dcd",
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "originalSource": "detached/hair-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-enter-2.png",
+      "sha256": "062731851f38bfbefc7de7575708bb13439dfed6c1b61139e36dcf584e7eafd1",
+      "originalSHA256": "f718abccf3391146126ea43738cd71e0b84cad18b3f2035c67e20f9d80758dcd",
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "originalSource": "detached/hair-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-enter-3.png",
+      "sha256": "8a57afc588577edc45cfce1d00489f766ea67af90521ecd27d1630d0785edfd2",
+      "originalSHA256": "f718abccf3391146126ea43738cd71e0b84cad18b3f2035c67e20f9d80758dcd",
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "originalSource": "detached/hair-r-entry-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-contact-1.png",
+      "sha256": "1b22a1fe1721916ad8b22c9fc156e5f6d17e3ebfd81b54818eff0ad5735587a5",
+      "originalSHA256": "754ea619ac66cf9513c26ad51da0ae136cd7f7b70153d8503577076bf051e8bc",
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "originalSource": "detached/hair-r-contact-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-contact-2.png",
+      "sha256": "d48dec14a276faa6cbcd562333d4254452b476229fb8b1e20679d987657d4025",
+      "originalSHA256": "754ea619ac66cf9513c26ad51da0ae136cd7f7b70153d8503577076bf051e8bc",
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "originalSource": "detached/hair-r-contact-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-contact-3.png",
+      "sha256": "6b0924c12a4ceadc90d0335dc7e429058941497611d14d1b6797d53ba47a6446",
+      "originalSHA256": "754ea619ac66cf9513c26ad51da0ae136cd7f7b70153d8503577076bf051e8bc",
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "originalSource": "detached/hair-r-contact-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-return-1.png",
+      "sha256": "a890230998da4f69a70f8d9f76ac630831818c8fc7469e42a0113109a6d0bb8d",
+      "originalSHA256": "4c5966f82d237e442946131baa34a92b0c56b33b03c3e46e321bec8579150fec",
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "originalSource": "detached/hair-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-return-2.png",
+      "sha256": "1184ba6a8224c5545614c81bb5229a0a61fb060e5931fb7ec709ac06d77608aa",
+      "originalSHA256": "4c5966f82d237e442946131baa34a92b0c56b33b03c3e46e321bec8579150fec",
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "originalSource": "detached/hair-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        724,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/hair-return-3.png",
+      "sha256": "05e79a6c157fd4ca58e6194be79455d1645c482ab723b84aae3987c07f64cbff",
+      "originalSHA256": "4c5966f82d237e442946131baa34a92b0c56b33b03c3e46e321bec8579150fec",
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "originalSource": "detached/hair-r-return-three-v2-no-stool-v1.png",
+      "sourceRect": [
+        1448,
+        0,
+        724,
+        724
+      ],
+      "uniformScale": 0.7071823204419889,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/sleeve-release.png",
+      "sha256": "c7db2f05188b714a0e97755a559730c634d33bda358956adb971908230e63ec2",
+      "originalSHA256": "3ccd7833dc887588f61fc67164d5379080897ead0624bbdcaae11cfcbf1337ce",
+      "generatedFromInputSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+      "originalSource": "detached-extra-first/sleeve-release-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/sleeve-cross.png",
+      "sha256": "463ecc66776ca3a0d01663bdf19a8b47b6a483154f385f6157332f3745925a08",
+      "originalSHA256": "1d941184f13d8b0ed8d052ab8007c6304f7d773304c73bb01343e265ba5c30d0",
+      "generatedFromInputSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+      "originalSource": "detached-extra-first/sleeve-cross-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/sleeve-brush-1.png",
+      "sha256": "66970420dab46f6b4acfd8737b579ae87a095ec33c3b812b4d04ff2a1f268453",
+      "originalSHA256": "c52ad3e91920310c4a5e3edd86417a34c0bba3d03ffb7a5a798749ca5fe589cb",
+      "generatedFromInputSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+      "originalSource": "detached-extra-first/sleeve-brush-1-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/sleeve-brush-2.png",
+      "sha256": "0c74305be651e986d2ecfa49388c9933db82801ea35a1d172b83cc5a44428877",
+      "originalSHA256": "51d916cc654ab87209ee8a4995cefb72b220c773ae500e646840d7a0b1ae7a3a",
+      "generatedFromInputSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+      "originalSource": "detached-extra-first/sleeve-brush-2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/sleeve-brush-3.png",
+      "sha256": "919ce309b29d3afaeda5e2b7461df47cffcf11924134d1065666d0461ffbd69d",
+      "originalSHA256": "11581313a3abffbcb672a73434d45e1fda567e70a185acc4e25ea3ba48cbd726",
+      "generatedFromInputSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+      "originalSource": "detached-extra-first/sleeve-brush-3-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/comfort-1.png",
+      "sha256": "2dc099e5c410852110bce8ff65f507181d85849a74972d0623cfc80e02d3f39c",
+      "originalSHA256": "77480a324c13d30c9c1b5ff7020b7147580bc593ea8b311f9e997421d4ada641",
+      "generatedFromInputSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+      "originalSource": "detached-extra-first/comfort-1-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/comfort-2.png",
+      "sha256": "d6407e684510ff055e9baafdfa7da89f4b46c590704f9e26d3270fe0576c4145",
+      "originalSHA256": "2d06e2cdcdea82933376d06c9d0303e53002c7646751691a69713bfb1df618d8",
+      "generatedFromInputSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+      "originalSource": "detached-extra-first/comfort-2-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/comfort-3.png",
+      "sha256": "114ac51e23c679e77941d2d7280c9e26efe6891a195b463b2ca484abe6cdc8c7",
+      "originalSHA256": "db8675ad6a631003f2f8bd38c3898c53286a0cf608d0147f8fdff3b20b53a951",
+      "generatedFromInputSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+      "originalSource": "detached-extra-first/comfort-3-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/social-release.png",
+      "sha256": "21d472fb4f4b230c572acaab62957d41fb588f2f9f66e11431a14c8730be052d",
+      "originalSHA256": "fcc9674d78ba6e134608c5c64865fdc847daa9766bf82b65d9ae6057f6371072",
+      "generatedFromInputSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+      "originalSource": "detached-extra-first/social-release-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/social-wrist.png",
+      "sha256": "b40f4c9864c32a8bd7db916c475ce4c91fdf39b4504c2b8fcc6ca58030558209",
+      "originalSHA256": "1b927704965fe6ec6af6881833579007e4be2350dc74966764077692dcd3f2e7",
+      "generatedFromInputSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+      "originalSource": "detached-extra-first/social-wrist-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/social-lower.png",
+      "sha256": "ac23a1936874625682a1155a4373cde417a8f05389402cb27bc64fba6fe7aaa5",
+      "originalSHA256": "145dc77a77715756686a3ea2303b4897b7dc72d3e62c53508add02e53296c573",
+      "generatedFromInputSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+      "originalSource": "detached-extra-first/social-lower-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/blink-half.png",
+      "sha256": "51c1930eb166e4bd585d092ae81a8a888109653f6e5f1b3e41dda7dd0cc2effe",
+      "originalSHA256": "91dfefc4c28c6aad3baaf2fc79a7524a6b0763d0fe8168824facf0752d28ea47",
+      "generatedFromInputSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+      "originalSource": "detached/blink-half-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/blink-closed.png",
+      "sha256": "e90f40c6fd5738d3f5b9109d3ce455c6f0de11fb55e24277a581f093ac8018ae",
+      "originalSHA256": "cc709ddbd30f105ad2e1cea54e98faa51e5af5a7d39e4706ae1c1b59e034223b",
+      "generatedFromInputSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+      "originalSource": "detached/blink-closed-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    },
+    {
+      "source": "detached/social-palm.png",
+      "sha256": "ae97382d7191b7cebee4baa4ff9edb0a0a4ff168d5526e424fa6075048f63f5d",
+      "originalSHA256": "4f1c5150e9c485ebcbaf2eaffc1d9bc91a3b1bb5277c00d4c48d66fe6200f22b",
+      "generatedFromInputSHA256": "bd67382e4f21eb1e2ae94e5cf15612de3ebe1a9c8853488c9078b6322542f5c7",
+      "originalSource": "detached-extra-first/social-palm-no-stool-v1.png",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen edit; exact declared cell and uniform whole-canvas resize; no masking or alpha repaint"
+    }
+  ]
+}

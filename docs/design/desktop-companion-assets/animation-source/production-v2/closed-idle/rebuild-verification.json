@@ -1,0 +1,53 @@
+{
+  "status": "passed",
+  "method": "independent directory rebuild; no generation",
+  "frameAndMaskChecks": [
+    {
+      "path": "frames/blink-closed-mask.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    },
+    {
+      "path": "frames/blink-closed.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    },
+    {
+      "path": "frames/blink-half-mask.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    },
+    {
+      "path": "frames/blink-half.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    },
+    {
+      "path": "frames/closed-rest.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    },
+    {
+      "path": "frames/look-left-middle-mask.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    },
+    {
+      "path": "frames/look-left-middle.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    },
+    {
+      "path": "frames/look-left-peak-mask.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    },
+    {
+      "path": "frames/look-left-peak.png",
+      "byteEqual": true,
+      "pixelEqual": true
+    }
+  ],
+  "manifestHashEqual": true,
+  "acceptance": "reproducibility only"
+}

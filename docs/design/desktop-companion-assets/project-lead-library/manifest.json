@@ -1,0 +1,447 @@
+{
+  "status": "User-endorsed role library; parent static review passed; animation/native integration not accepted by this archive",
+  "fileCount": 88,
+  "bytes": 1900966,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 5377,
+      "sha256": "d9239601faa6535b837c06defcc846f43c7d17cd84145117e19a6690d7f43d2b"
+    },
+    {
+      "path": "all64-contact-sheet.png",
+      "bytes": 383338,
+      "sha256": "f9f51ac396930444e4b5176bf53848e7c0039535faf7fbaecedbd28f2cdd6610"
+    },
+    {
+      "path": "authored-overrides.json",
+      "bytes": 1192,
+      "sha256": "c228eafbac3eba01cb223ae557c95e1bb301b8f0179d71e2e8d60d9f6a2e6620"
+    },
+    {
+      "path": "avatar-art.mjs",
+      "bytes": 15641,
+      "sha256": "7728dbfa6f2b383cab47cce2a0aff29bd93fc5218da390d4eb9b240c63781fd6"
+    },
+    {
+      "path": "build-library.mjs",
+      "bytes": 2014,
+      "sha256": "2cdb06d86e7aeb3f8064ec1da9670ed604693009734d36aee2c912073f558253"
+    },
+    {
+      "path": "derivation-audit.json",
+      "bytes": 29322,
+      "sha256": "095547e9195061d460ef1f16cf3a19ca32ff8a143de861695e9f558e502ec261"
+    },
+    {
+      "path": "derive-profiles.mjs",
+      "bytes": 6555,
+      "sha256": "8a1c941c438571c7d967c2c11815c99a905ff005b1901c3ee116c3b277dbadd4"
+    },
+    {
+      "path": "exception-closeups.png",
+      "bytes": 154762,
+      "sha256": "6135c96371e565665629b64b517f4be0c62f7d1b39c8a653594aab484913a787"
+    },
+    {
+      "path": "geometry-validation.json",
+      "bytes": 7703,
+      "sha256": "fb8eec286ba219121a2baea2154cc74a9a12404f40b354fd1b717b959b0c757c"
+    },
+    {
+      "path": "identity-map.json",
+      "bytes": 19369,
+      "sha256": "bb0d6a0bddfff21e760ea437ccacceb6a223c9a228a6f5d8a4b3ac1d6aebb733"
+    },
+    {
+      "path": "library-validation.json",
+      "bytes": 352,
+      "sha256": "3b193b8695e58fd8e49d4127887866fa22187ed177717d70bd1f1b0bd8523cab"
+    },
+    {
+      "path": "lining-color-four-comparison.png",
+      "bytes": 95249,
+      "sha256": "7a6f701765a3054eb040ba481df3a242163d910f6752fba0d73913a8256f99cb"
+    },
+    {
+      "path": "native-sizes-1.png",
+      "bytes": 113712,
+      "sha256": "84e785dd8ecf4ec7fdacb21d8b62479a757a728fb35a27ba13c0a16f81c2b6da"
+    },
+    {
+      "path": "native-sizes-2.png",
+      "bytes": 111711,
+      "sha256": "ecdbe7a4204f0d4409fe0e0dc60a2e2b381a49999136196751ff2e22ce05a049"
+    },
+    {
+      "path": "native-sizes-3.png",
+      "bytes": 110136,
+      "sha256": "b381547becc2a7697c47b161732e7a4dc180822c299725e29b6cdd44463924e1"
+    },
+    {
+      "path": "native-sizes-4.png",
+      "bytes": 112959,
+      "sha256": "844efb431d20aa13ccf86696452ac4c06dd3b7071c2f56e294b935111e449738"
+    },
+    {
+      "path": "palette-comparison.mjs",
+      "bytes": 1868,
+      "sha256": "dde293917cbf29a0d4a15fc03703b4ce878c1341aa182b79b311864fc684dc44"
+    },
+    {
+      "path": "palette-validation.json",
+      "bytes": 10408,
+      "sha256": "eace685bb551afd051a1a988fe131c1e57ddc2257a692cd777d25e157cebe467"
+    },
+    {
+      "path": "profiles.json",
+      "bytes": 126453,
+      "sha256": "a528467372dba450aee2fe959f6043ce884595b50645573b944526c795a56d02"
+    },
+    {
+      "path": "project-lead-library-overview.png",
+      "bytes": 378653,
+      "sha256": "63ec8c1c27405a42cbfe6ce2a482318e5a090d517dfa3039542f8e46362afecf"
+    },
+    {
+      "path": "render-audit.mjs",
+      "bytes": 4162,
+      "sha256": "29e8e892b8357b91339fb5390c1f7e509f91657d08dbc492bf8ad8037f6ee2bb"
+    },
+    {
+      "path": "render-overview.mjs",
+      "bytes": 1361,
+      "sha256": "37e4f33ed053224d47634ab8575d2e89392fd19685e2e5ceaa1d8d837db7b9f5"
+    },
+    {
+      "path": "render-role.mjs",
+      "bytes": 3819,
+      "sha256": "a257e624c137ddd43a636a728c4dc12c43c63204b4312a338c8e0391f81db31e"
+    },
+    {
+      "path": "svg/arc-apricot.svg",
+      "bytes": 3171,
+      "sha256": "27093cdc3abf62430ef089f1a9678996833c1b07976409c9b506a9b7a389de79"
+    },
+    {
+      "path": "svg/arch-butter.svg",
+      "bytes": 3178,
+      "sha256": "9fb914ceda464caf931257b22f9ef5224344334d8783d686e968bc9718693022"
+    },
+    {
+      "path": "svg/beam-coral.svg",
+      "bytes": 3244,
+      "sha256": "78ac8ac7e6ac5716feb8c4ed8fb0fffdbf6a91403daedec9728773ffd090f83b"
+    },
+    {
+      "path": "svg/bend-ochre.svg",
+      "bytes": 3262,
+      "sha256": "700fead6c9cd56d88b3cca332be8f2ccbb668163544d86153f1710a0b2c0442f"
+    },
+    {
+      "path": "svg/bevel-rose.svg",
+      "bytes": 3225,
+      "sha256": "3905eca96c72352e44ecb2641be4c11df3bd6f390ddc479c0a70bf4e9ca9b4eb"
+    },
+    {
+      "path": "svg/bridge-aqua.svg",
+      "bytes": 3256,
+      "sha256": "c9779459901e1ddd5c821369147d345a2f4181f793563bcb08c8781a4b479344"
+    },
+    {
+      "path": "svg/cap-coral.svg",
+      "bytes": 3266,
+      "sha256": "0922942f1083196bb121877e6602fe0afc00c688428032db5324e3ff6cfe2885"
+    },
+    {
+      "path": "svg/capsule-sky.svg",
+      "bytes": 3164,
+      "sha256": "e82e757d076ed741475a51515312b1586c1ab80a0b4ca5cf08f963797244e177"
+    },
+    {
+      "path": "svg/chamfer-jade.svg",
+      "bytes": 3283,
+      "sha256": "e8d369a4ac538d24eafe9ade5225dc111ddf3614002c8802eba1b0e17732f0b2"
+    },
+    {
+      "path": "svg/comma-lilac.svg",
+      "bytes": 3187,
+      "sha256": "42b113b7d856f9f090459b40cf7bf43bc647ef5eb854f2dd160e3e7bb0b4b559"
+    },
+    {
+      "path": "svg/cove-sage.svg",
+      "bytes": 3225,
+      "sha256": "c23af82a5ecce6fa1f795f624a7f8c5fa82a059263e3726f4f883d38d07ac1cd"
+    },
+    {
+      "path": "svg/crest-lilac.svg",
+      "bytes": 3261,
+      "sha256": "eec12cdd24455dead38b20e07725562f58082e71dfecdce8a41cf130af916b37"
+    },
+    {
+      "path": "svg/curve-mint.svg",
+      "bytes": 2862,
+      "sha256": "c1a29ef9a119e5ad66bf9d4fe8952197ec3834649f389e51be97624b56c4137b"
+    },
+    {
+      "path": "svg/cushion-ochre.svg",
+      "bytes": 3255,
+      "sha256": "7535dec7132c89e04e092a7f981d2e8e7dd744fa1b10c5b2a875b173ccff4af8"
+    },
+    {
+      "path": "svg/dome-ivory.svg",
+      "bytes": 3167,
+      "sha256": "df4fc667807afdd63bfea356324fba12d727df05e3e30df4b57a5b2391434623"
+    },
+    {
+      "path": "svg/drift-blue.svg",
+      "bytes": 3200,
+      "sha256": "800185eaf98b7deeb66f83e66b7a36ddc7c9bff0ef18268c618e6436134d66f5"
+    },
+    {
+      "path": "svg/drop-melon.svg",
+      "bytes": 3087,
+      "sha256": "13362fbabb64a4baff46c9ba89488e1e614d5e54442dc03795e3123bb1db6963"
+    },
+    {
+      "path": "svg/echo-ochre.svg",
+      "bytes": 3262,
+      "sha256": "f8d60fe34838edda2a09d8943328c56cade50ae5bef514486ff1581c16bdb5c1"
+    },
+    {
+      "path": "svg/facet-blue.svg",
+      "bytes": 3187,
+      "sha256": "4900b54c719024947e6323d098a4c56cff3812614eeece34ddf66768cb9094f2"
+    },
+    {
+      "path": "svg/fan-coral.svg",
+      "bytes": 3184,
+      "sha256": "1c6a720b63367b7ed8a4949d9b8bfc41883d861e71ff355c0ddb227c00c444cc"
+    },
+    {
+      "path": "svg/float-butter.svg",
+      "bytes": 3270,
+      "sha256": "47be21a4bd81cde347cdc96dab7789b5772d100a5c44dab3ac0fb1f30c6c0440"
+    },
+    {
+      "path": "svg/fold-sage.svg",
+      "bytes": 2905,
+      "sha256": "b58a8e10ccd9c7f089db7a5ce5bceabec31eb62ff2f4ac1ea2d5b548003a57ca"
+    },
+    {
+      "path": "svg/inset-sage.svg",
+      "bytes": 3182,
+      "sha256": "87bf212e51045624e338bef447d4dcd48aaed44e30fe04591667a8136e62fb1c"
+    },
+    {
+      "path": "svg/lean-coral.svg",
+      "bytes": 3210,
+      "sha256": "f558b302893e42084c8672fcd46020e424eda8fbb8e810ab0026543aebbc27ca"
+    },
+    {
+      "path": "svg/ledge-aqua.svg",
+      "bytes": 3134,
+      "sha256": "94c72ac55f93dcb1c899227c85943810314077067a40d520feeb9fa55347c701"
+    },
+    {
+      "path": "svg/lens-lilac.svg",
+      "bytes": 2753,
+      "sha256": "41730adea6481a5ce997ad32c44e842b43ec9bb32c03d2c3ae671af784f6dfe2"
+    },
+    {
+      "path": "svg/lozenge-mint.svg",
+      "bytes": 3088,
+      "sha256": "74e46542a7df4612572398b025b79f671073814ac32ab66ab79591c6a3894054"
+    },
+    {
+      "path": "svg/mound-lavender.svg",
+      "bytes": 3276,
+      "sha256": "be6b0ba838a263d187275cab06ef119d4abc1e7a3d883cad758068bd8570083c"
+    },
+    {
+      "path": "svg/notch-ochre.svg",
+      "bytes": 3198,
+      "sha256": "39c9d3f8392dd2311a6a7cbf9de516eb6d4f9f2c2c665a7ba250d3b869d9f1da"
+    },
+    {
+      "path": "svg/offset-peach.svg",
+      "bytes": 3222,
+      "sha256": "dff83aa83e67e37cfd9b001c8fd5d0d5f7ff6550f2613fedb8b9873f4a935df7"
+    },
+    {
+      "path": "svg/orbit-sage.svg",
+      "bytes": 3217,
+      "sha256": "2b0a001e39a516c21bc9af423a21a5428e4ab7b9170def0476a886463f2e68da"
+    },
+    {
+      "path": "svg/oval-rose.svg",
+      "bytes": 3157,
+      "sha256": "069db3a4d0e12a435a06d49853851733618fa8afe6b7c4b6ea3bdb67b1734c01"
+    },
+    {
+      "path": "svg/overlap-coral.svg",
+      "bytes": 2827,
+      "sha256": "552ea44a66bf5027045d35986c01ef3896b8433fcf07d5f7acc7fa4d85c0c80e"
+    },
+    {
+      "path": "svg/parcel-periwinkle.svg",
+      "bytes": 3370,
+      "sha256": "f26573cbf9062cc7e99ffe446040dbbd6ad0b900320fdf99fb50b7b06d58e818"
+    },
+    {
+      "path": "svg/pebble-blue.svg",
+      "bytes": 3188,
+      "sha256": "a6fa38736dab6bd96662b8e790218e80e6c6f8899da2a20b5529c53801ccee0e"
+    },
+    {
+      "path": "svg/pillar-lilac.svg",
+      "bytes": 3162,
+      "sha256": "1a6c74f6636b0f016b724dbc450a483b05983f931a35867da2d3b83f566c621b"
+    },
+    {
+      "path": "svg/plate-lavender.svg",
+      "bytes": 3190,
+      "sha256": "1f0c5642832d57b65bbc44ecf0d3cfd26f9834cbbf64f59316732845dcb0baba"
+    },
+    {
+      "path": "svg/pocket-rose.svg",
+      "bytes": 3204,
+      "sha256": "c202ac4af1189491314aeacbe62e115848dde3241479205c09062219a361f79e"
+    },
+    {
+      "path": "svg/ramp-mint.svg",
+      "bytes": 3281,
+      "sha256": "a93bc5f2f6ab1be394729a634559941a0056a9ac48478b401bcb6698f12587fa"
+    },
+    {
+      "path": "svg/ribbon-blue.svg",
+      "bytes": 2800,
+      "sha256": "033bdf9b9e055e883a26136dacd00568f2e9a951784cffa10a591ad398dee18f"
+    },
+    {
+      "path": "svg/ripple-peach.svg",
+      "bytes": 3103,
+      "sha256": "6546db8214b5ef221c29331d3b09dd808e52c321e1675e831f21b12d9b982c27"
+    },
+    {
+      "path": "svg/rise-ivory.svg",
+      "bytes": 3216,
+      "sha256": "126ce65a34069975d26cf8a5851dc932485315a225cd31cd17ca6369cae4ea02"
+    },
+    {
+      "path": "svg/round-lilac.svg",
+      "bytes": 3193,
+      "sha256": "b5fde0e25b624e7341d19b209fb50840a6e3f40f9e39a9ad555f308ff8172f88"
+    },
+    {
+      "path": "svg/sail-ivory.svg",
+      "bytes": 3171,
+      "sha256": "7012046db4fe6068b3f11748be3252fa83b1820251305733cbcca9c7947c2490"
+    },
+    {
+      "path": "svg/scoop-pistachio.svg",
+      "bytes": 2725,
+      "sha256": "4a3a30656a9c2ea63ee0daefcf4a83140aa6e50c462567887c25beac1b422282"
+    },
+    {
+      "path": "svg/shield-sage.svg",
+      "bytes": 3280,
+      "sha256": "de42ed36d1827d56af5ba08afd4f70c68ba73a03ea1a28de6bc69cc090d21f50"
+    },
+    {
+      "path": "svg/slant-mint.svg",
+      "bytes": 3118,
+      "sha256": "8dc35d436641020e04763a742339548e291ef2852804094cddadc8ab9a71ea00"
+    },
+    {
+      "path": "svg/slide-rose.svg",
+      "bytes": 3169,
+      "sha256": "81de450bcfa2be300f6fd80cb0eb8045bae3046292707df0482412239083ec80"
+    },
+    {
+      "path": "svg/slope-lilac.svg",
+      "bytes": 3177,
+      "sha256": "e2c2e7c86436b006e0c8d9db1fa7e4500b909a484e354c4d5b2d85c3c44115cb"
+    },
+    {
+      "path": "svg/span-jade.svg",
+      "bytes": 3259,
+      "sha256": "c754d2f7e83c988c2679193cce4cf2cd8a2404febbafb43ca9f4dc9c5f5ee578"
+    },
+    {
+      "path": "svg/squircle-periwinkle.svg",
+      "bytes": 3219,
+      "sha256": "449f71ff46c5850ea680896a41fd580ccb2f6e164b586d86e89746a47381271e"
+    },
+    {
+      "path": "svg/stack-ivory.svg",
+      "bytes": 3197,
+      "sha256": "490502cc9c9588791a7850173518aa83e3225d8cd58b5a8ad1da9c1201edde0a"
+    },
+    {
+      "path": "svg/step-blue.svg",
+      "bytes": 3158,
+      "sha256": "c6b74000b6613167629a35e4704bcc434060c6d503e411dd8cec04b36d30a55e"
+    },
+    {
+      "path": "svg/sweep-aqua.svg",
+      "bytes": 3226,
+      "sha256": "2d8adb82a0d4465d471838d414fbadb0e074164215a0dcb410cac49ce84299f2"
+    },
+    {
+      "path": "svg/swell-apricot.svg",
+      "bytes": 3212,
+      "sha256": "1d9958a554ea55577440d957466acadd58e04dd2eeb7c1c57717acb00fda9a80"
+    },
+    {
+      "path": "svg/tab-butter.svg",
+      "bytes": 3177,
+      "sha256": "cadbb29c9ecf1fb1b01a7d4647236061aa9e0cedd60094fab951625f15d52e46"
+    },
+    {
+      "path": "svg/taper-sage.svg",
+      "bytes": 3240,
+      "sha256": "760abc7831b7b674870ebc48973b14640cd419cc546db314dfb689b431935c50"
+    },
+    {
+      "path": "svg/terrace-ivory.svg",
+      "bytes": 3215,
+      "sha256": "60dc01bd19dd58b18901276dd95eadbb7948de2279ebc24383ddc8834a35a435"
+    },
+    {
+      "path": "svg/tile-blue.svg",
+      "bytes": 3192,
+      "sha256": "4e539beb935958157217f76a64e8bb3f9fd373cb587df9c936b11825d57c2038"
+    },
+    {
+      "path": "svg/tilt-pistachio.svg",
+      "bytes": 3205,
+      "sha256": "10b8bf35cb711530a154a256849e239b57e0b889a67b6621a8469c313018ae23"
+    },
+    {
+      "path": "svg/tuck-jade.svg",
+      "bytes": 3242,
+      "sha256": "d3af9d4fe6e2122eb4ed7727651c281c2ac02cbab78da1f6a028f30fcc03c4bc"
+    },
+    {
+      "path": "svg/twin-periwinkle.svg",
+      "bytes": 3243,
+      "sha256": "b9c6aa8b7e44aa00e4acaa94a577bb059a029f1e07355711da41cc960cced93e"
+    },
+    {
+      "path": "svg/wave-ivory.svg",
+      "bytes": 3250,
+      "sha256": "0e388b811f68dc152e2f206c823be7bbaacc841a51bf78caa2c540c20d27a50c"
+    },
+    {
+      "path": "svg/wedge-apricot.svg",
+      "bytes": 3164,
+      "sha256": "eb0eea58414e63acaa62c61c28404193242f40759d840686b3b9d6d5c98c7918"
+    },
+    {
+      "path": "verify-palette.mjs",
+      "bytes": 1939,
+      "sha256": "66c67c8735742c2eb1f59cfb516b050ed6bc9e6071176d5a4b8fb396ba11a583"
+    }
+  ]
+}

@@ -1,0 +1,290 @@
+{
+  "status": "phase4-closed-welcome-and-click-art-candidates-not-motion-approved",
+  "files": [
+    {
+      "path": "clean_click_closed_alpha_v3.py",
+      "bytes": 2135,
+      "sha256": "0ec32e4a72aa5b33cb58cfcfaccd612976b90a05b5a641cc500991861eba73d6"
+    },
+    {
+      "path": "clean_welcome_local_alpha_v2.py",
+      "bytes": 1887,
+      "sha256": "a9b8029068ecae02350fa2f2da83efb580820c993f7db85e9238c2ff105a0e04"
+    },
+    {
+      "path": "metadata/prompt-click-closed-fullblink.txt",
+      "bytes": 466,
+      "sha256": "e15b80a9f8cbbda906dfb070c9da7d16e4d3a9b3201fa60caabe6a7abc95a40d"
+    },
+    {
+      "path": "metadata/prompt-click-closed-halfblink.txt",
+      "bytes": 524,
+      "sha256": "93d1f2a84114e4a5e633b787aa671cb34e033e5e49ca5b3f16e768cf4b7bbecd"
+    },
+    {
+      "path": "metadata/prompt-click-closed-notice.txt",
+      "bytes": 769,
+      "sha256": "e4d80dda94a2ab1e4654e471882871d3e8a3e3d681560ae75136bd55373d53f3"
+    },
+    {
+      "path": "metadata/prompt-welcome-closed-endpoint.txt",
+      "bytes": 1005,
+      "sha256": "12e88b73a09193cfa1e490a9ad00925063e30d6fe20a9962d9d060236493df3f"
+    },
+    {
+      "path": "metadata/prompt-welcome-closed-middle.txt",
+      "bytes": 670,
+      "sha256": "5dfb6d7a038a8b8cf2c9d1b2c4931642cbfde55d92a9dc547a767dff4ce2f675"
+    },
+    {
+      "path": "metadata/prompt-welcome-closed-peel.txt",
+      "bytes": 779,
+      "sha256": "39e24887dbb41c49f11ab0937acea91850624db5012da92ee85b2afeae510609"
+    },
+    {
+      "path": "metadata/prompt-welcome-closed-return.txt",
+      "bytes": 735,
+      "sha256": "abcbc2cd7ef455b0e3c8b3ddf06e8c08b42a4b4014d79b769272aa86642fd4d6"
+    },
+    {
+      "path": "metadata/prompt-welcome-closed-rise10.txt",
+      "bytes": 1049,
+      "sha256": "6e8d5c6b1ad6ac148585c149cc64a818f14614f0f22cfa3b2b3abe7a0b805a45"
+    },
+    {
+      "path": "metadata/prompt-welcome-closed-sweep.txt",
+      "bytes": 699,
+      "sha256": "82bbf236592dcf5e49e29cab80519b0782cddaccd4aea353f288885beb50c132"
+    },
+    {
+      "path": "register_click_closed_v2.py",
+      "bytes": 4784,
+      "sha256": "3ac1c1ee593b205f98fefe853c423109ec771186f35eee95325ce9a8958fd948"
+    },
+    {
+      "path": "register_welcome_closed_v1.py",
+      "bytes": 4871,
+      "sha256": "b13d71ef19887ae3580f06a9efc9f38b671eda530153c521400826df5cf6dd83"
+    },
+    {
+      "path": "registered/click-closed-v3/alpha-cleanup.json",
+      "bytes": 1011,
+      "sha256": "bf4289ee3f0763185a5efce57740fbea0795e0480c862f0a73387a9662510ea7"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-000.png",
+      "bytes": 317282,
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-001.png",
+      "bytes": 317331,
+      "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-002.png",
+      "bytes": 334385,
+      "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-003.png",
+      "bytes": 333931,
+      "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-004.png",
+      "bytes": 333628,
+      "sha256": "d3a75fbc6057bbe1b9e88eb341911074d99d5fd2b1fbed2c4bb17c11fe87228e"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-005.png",
+      "bytes": 333931,
+      "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-006.png",
+      "bytes": 334385,
+      "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-007.png",
+      "bytes": 317331,
+      "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c"
+    },
+    {
+      "path": "registered/click-closed-v3/pose-008.png",
+      "bytes": 317282,
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "registered/click-closed-v3/provenance.json",
+      "bytes": 1393,
+      "sha256": "ba5ea5b493ac713034988033773bc213c36b8d613af75e7fd0c566766cd6ad28"
+    },
+    {
+      "path": "registered/click-closed-v3/reviewed-hair-background-region.png",
+      "bytes": 696,
+      "sha256": "b0993ab200e132ad636a736792d3d4dca36a3ea5322f39c5f6c63c03848f0e2d"
+    },
+    {
+      "path": "registered/click-closed-v3/sequence.json",
+      "bytes": 1625,
+      "sha256": "7084b12de0c7c9ed90eb1c54a62eb6353e8b676534762ce1124c51466e1775bc"
+    },
+    {
+      "path": "registered/welcome-closed-v2/alpha-cleanup.json",
+      "bytes": 1120,
+      "sha256": "8b25bd84aac66455975d47254aaf48c6d865999d51f1c8c13683c6d7036f07a3"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-000.png",
+      "bytes": 317282,
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-001.png",
+      "bytes": 335280,
+      "sha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-002.png",
+      "bytes": 332618,
+      "sha256": "68709b429a10eb1a5abfda2dfe9009738dd10c6debf899b7dd33def9d2de5dcf"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-003.png",
+      "bytes": 338332,
+      "sha256": "ac8f871a2058c73fbe4db1fbb3e3544efefdc058144b5bb5b96ed0e4cf14137a"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-004.png",
+      "bytes": 331261,
+      "sha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-005.png",
+      "bytes": 336303,
+      "sha256": "64b656a090ce6d1d04c60eec2fe6d9658a48709693ed49c7223723b0a4c0d9ae"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-006.png",
+      "bytes": 331261,
+      "sha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-007.png",
+      "bytes": 336899,
+      "sha256": "96d72d685bdf9ca74a88bce9684b88468167904e4cbe40a844e46562d7b83b78"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-008.png",
+      "bytes": 335280,
+      "sha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4"
+    },
+    {
+      "path": "registered/welcome-closed-v2/pose-009.png",
+      "bytes": 317282,
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "registered/welcome-closed-v2/provenance.json",
+      "bytes": 1541,
+      "sha256": "60dd05233f2bce4e45230b7113d16d8c8b8dbe584714550b693daf7bd00398cc"
+    },
+    {
+      "path": "registered/welcome-closed-v2/reviewed-hair-background-region.png",
+      "bytes": 567,
+      "sha256": "8456be3e6a4f8b117987284c6c4f7a7f02b7323c9e4db1690b68a48ce69b0123"
+    },
+    {
+      "path": "registered/welcome-closed-v2/sequence.json",
+      "bytes": 1718,
+      "sha256": "ba2ae78d045981fe11aeea97d2951402234db5b309b034f1787ffefe512ff008"
+    },
+    {
+      "path": "sources/click-closed-fullblink-single-v1.png",
+      "bytes": 1919419,
+      "sha256": "e451adbf39f8a564584282f699404d978f507e289d3f3621c5448928ac49fbe7"
+    },
+    {
+      "path": "sources/click-closed-halfblink-single-v1.png",
+      "bytes": 1914257,
+      "sha256": "b2edefd6233c822a94b617cf1b3405c38a3fd5b888434dc65fc18843e12fa7e9"
+    },
+    {
+      "path": "sources/click-closed-notice-single-v1.png",
+      "bytes": 1707207,
+      "sha256": "854cea60e00681a6c28a5205bcc90b7b3b593dc77be2a145f7f8bc9ad1ab68f9"
+    },
+    {
+      "path": "sources/closed-shared-reference-v1.png",
+      "bytes": 277594,
+      "sha256": "4e78cadde3546d9b13bf7e345616d77e221b2369ab3f6f9e4bc13153f4caadff"
+    },
+    {
+      "path": "sources/welcome-closed-endpoint-single-v1.png",
+      "bytes": 1699529,
+      "sha256": "cb90230aa9c9cecaed962e9b81c1f245ce2d50a34c4b98c8d0689475b48f8c4e"
+    },
+    {
+      "path": "sources/welcome-closed-middle-single-v1.png",
+      "bytes": 1949264,
+      "sha256": "ffc33209845c407254a43962fe068d19b8fc2c2f9e69d2992018ef15df178980"
+    },
+    {
+      "path": "sources/welcome-closed-peel-single-v1.png",
+      "bytes": 1724596,
+      "sha256": "41d2855eb92d30507890def3ef302bbb7c81c50eba3512ef5b17045dcb25f02f"
+    },
+    {
+      "path": "sources/welcome-closed-return-single-v1.png",
+      "bytes": 1898697,
+      "sha256": "4f8017f6715d7b9bd7c891dc169671e06e9bfb3e838020b86ab54a1d7da50941"
+    },
+    {
+      "path": "sources/welcome-closed-rise10-single-v1.png",
+      "bytes": 1697890,
+      "sha256": "5c39997ed8a5ec9e39ef66ff79c7ecc9df6769a0cbbf4df6791305ff03dc66d5"
+    },
+    {
+      "path": "sources/welcome-closed-sweep-single-v1.png",
+      "bytes": 1908171,
+      "sha256": "2e13dca4105ee808e95b0a6c0c39c2cd1c471e6e3cb72c3d13f2785bb42b834a"
+    }
+  ],
+  "existingCheckpointDependencies": [
+    {
+      "path": "../seated-work/canonical-lid-v1/closed-canonical-candidate.png",
+      "bytes": 317282,
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "registered/attention-lift-v1/edit-region-mask.png",
+      "bytes": 2923,
+      "sha256": "a702229ebcc09467172c5ad9683d41af4e6607cdb3cd2ec615cfbd30f96f13cb"
+    },
+    {
+      "path": "registered/attention-sequence-v2/blink-redraw-region.png",
+      "bytes": 1665,
+      "sha256": "8334f060d7ea92843de39ec04441e33bb57e880d9ef8ebbf5d5fa9b50133a5ff"
+    },
+    {
+      "path": "sources/attention-eye-lead-single-v1.png",
+      "bytes": 1670724,
+      "sha256": "123973b3bfab96eb704eaf4f9e04a1106907fc47640ba35f99b6edb37939e38f"
+    }
+  ],
+  "rebuild": [
+    "python register_welcome_closed_v1.py",
+    "python clean_welcome_local_alpha_v2.py",
+    "python register_click_closed_v2.py",
+    "python clean_click_closed_alpha_v3.py"
+  ],
+  "notes": [
+    "All source refs generated/edited with built-in imagegen, prompts retained.",
+    "Closed reference exact white composite of shared closed c8d2a1.",
+    "Welcome raw return eyes drift rejected; restricted face cel held from blue-eye endpoint, no duplicate hand.",
+    "PNG candidates preserve source drawing timing and held static parts; not motion-final or automatically accepted."
+  ],
+  "totalBytes": 22977952
+}

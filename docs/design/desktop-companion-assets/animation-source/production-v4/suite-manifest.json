@@ -1,0 +1,5064 @@
+{
+  "status": "assembled full-suite candidate; no public installation",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "varin-upright-v2",
+  "replaceActions": [
+    "accept",
+    "browsing",
+    "cancel-settling",
+    "checking",
+    "completion",
+    "director-gather-present",
+    "director-intake",
+    "director-listen-left",
+    "director-listen-right",
+    "director-notify-attention",
+    "director-open-attention",
+    "director-supervise",
+    "disconnected",
+    "dispatch",
+    "editing",
+    "execution-observe",
+    "external-wait",
+    "failure",
+    "hover-response",
+    "idle-closed",
+    "open-hover-response",
+    "organizing",
+    "output",
+    "output-emphasis",
+    "permission",
+    "permission-allowed",
+    "prepare",
+    "query",
+    "queued",
+    "quiet-hair-smooth",
+    "quiet-seat-adjust",
+    "quiet-sleeve-smooth",
+    "quiet-stretch",
+    "reading",
+    "reconnecting",
+    "relax-idle",
+    "rest-sleep",
+    "retry-wait",
+    "tap-repeat-response",
+    "tap-response",
+    "think",
+    "understood",
+    "unknown-effect-check",
+    "welcome"
+  ],
+  "sequences": [
+    {
+      "id": "v4-director-gather-present",
+      "kind": "action",
+      "action": "director-gather-present",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 220,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/unfold-early.png",
+          "sourceSHA256": "265f5b99b142a8026eef41eda9d85e95570ee73ea191df681144345a72772289",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/unfold-mid.png",
+          "sourceSHA256": "287d899efd253686aaff1b498e3dd1285df73fcd6fc513a0ae069e0129d4cf05",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/unfold-open.png",
+          "sourceSHA256": "b1b5fa9919ffe4d7753fee4aa22957b69c5a1d94c43b74f9f055a12816d12880",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/present.png",
+          "sourceSHA256": "d49bff65da96300ab68d5402470de7d4239918328a9d1616ccc316e21cf94776",
+          "durationMs": 350,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-director-intake",
+      "kind": "action",
+      "action": "director-intake",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 220,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/unfold-early.png",
+          "sourceSHA256": "265f5b99b142a8026eef41eda9d85e95570ee73ea191df681144345a72772289",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/unfold-mid.png",
+          "sourceSHA256": "287d899efd253686aaff1b498e3dd1285df73fcd6fc513a0ae069e0129d4cf05",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/unfold-open.png",
+          "sourceSHA256": "b1b5fa9919ffe4d7753fee4aa22957b69c5a1d94c43b74f9f055a12816d12880",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/present.png",
+          "sourceSHA256": "d49bff65da96300ab68d5402470de7d4239918328a9d1616ccc316e21cf94776",
+          "durationMs": 350,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-director-listen-left",
+      "kind": "action",
+      "action": "director-listen-left",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 220,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-director-listen-right",
+      "kind": "action",
+      "action": "director-listen-right",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 220,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-accept",
+      "kind": "action",
+      "action": "accept",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 220,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-organizing",
+      "kind": "action",
+      "action": "organizing",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 220,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-prepare",
+      "kind": "action",
+      "action": "prepare",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 220,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-director-notify-attention",
+      "kind": "action",
+      "action": "director-notify-attention",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/present.png",
+          "sourceSHA256": "d49bff65da96300ab68d5402470de7d4239918328a9d1616ccc316e21cf94776",
+          "durationMs": 400,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-permission",
+      "kind": "action",
+      "action": "permission",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/present.png",
+          "sourceSHA256": "d49bff65da96300ab68d5402470de7d4239918328a9d1616ccc316e21cf94776",
+          "durationMs": 400,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-c-short-return",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 220,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-d-early-return",
+      "kind": "bridge",
+      "frames": [
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-expression-question",
+      "kind": "action",
+      "action": "query",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination-expressions/frames/question.png",
+          "sourceSHA256": "4a43f748b214312327638d2292848f37d604619b16fae14ca4a32d3fd352205c",
+          "durationMs": 360,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "semanticSuggestion": "Actual pending question; expression does not answer or approve."
+    },
+    {
+      "id": "v4-expression-result-eye-smile",
+      "kind": "action",
+      "action": "completion",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination-expressions/frames/result-eye-smile.png",
+          "sourceSHA256": "917acee0a33ee42b3f2814e60968cbe46a76760d57ad4b84089befcabeaf8ade",
+          "durationMs": 360,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "semanticSuggestion": "Actual completion of indicated task, not all projects."
+    },
+    {
+      "id": "v4-expression-serious-rest",
+      "kind": "action",
+      "action": "failure",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination-expressions/frames/serious-rest.png",
+          "sourceSHA256": "78245105c97395375c9b554ebd1a4fb710db2578f506a01fe806b28f05050e95",
+          "durationMs": 500,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "semanticSuggestion": "Actual failure or unknown-effect check; quiet serious face, no new hand gesture."
+    },
+    {
+      "id": "v4-director-open-attention",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "response/frames/attention.png",
+          "sourceSHA256": "03f8833bd9620eb483354064340dc76ee8741f61ba33cee22427670fdc3b3f64",
+          "durationMs": 160,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/lift.png",
+          "sourceSHA256": "7d056fb851da57f45f55590e82aa658d12164a9b6e0be98c21496d5179ff458f",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/palm-opening.png",
+          "sourceSHA256": "6c611cd761887c68f67b052cb2885ab91fcf3e0885a7e98bd9754a415351627d",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/palm.png",
+          "sourceSHA256": "9dfa8549de49261a6decc9eb466ca9f9d9ee75ea4035d408e67283d8aa98986b",
+          "durationMs": 300,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/lower.png",
+          "sourceSHA256": "d018349372c6b85b6d307c88da1406bd4857ba7b1c7614b59bd1376d4f363fba",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-hover.png",
+          "sourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "kind": "action",
+      "action": "director-open-attention"
+    },
+    {
+      "id": "v4-open-hover-response",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "response/frames/busy-ack.png",
+          "sourceSHA256": "a3a700d58a93cf18e442b7410153bbfc3da9d5ada7d547cfe9fbd9f335338e4b",
+          "durationMs": 240,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/busy-release.png",
+          "sourceSHA256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "kind": "action",
+      "action": "open-hover-response"
+    },
+    {
+      "id": "v4-output-emphasis",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "response/frames/busy-ack.png",
+          "sourceSHA256": "a3a700d58a93cf18e442b7410153bbfc3da9d5ada7d547cfe9fbd9f335338e4b",
+          "durationMs": 240,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/busy-release.png",
+          "sourceSHA256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "kind": "action",
+      "action": "output-emphasis"
+    },
+    {
+      "id": "v4-permission-allowed",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "response/frames/busy-ack.png",
+          "sourceSHA256": "a3a700d58a93cf18e442b7410153bbfc3da9d5ada7d547cfe9fbd9f335338e4b",
+          "durationMs": 240,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/busy-release.png",
+          "sourceSHA256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "kind": "action",
+      "action": "permission-allowed"
+    },
+    {
+      "id": "v4-understood",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "response/frames/busy-ack.png",
+          "sourceSHA256": "a3a700d58a93cf18e442b7410153bbfc3da9d5ada7d547cfe9fbd9f335338e4b",
+          "durationMs": 240,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/busy-release.png",
+          "sourceSHA256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "kind": "action",
+      "action": "understood"
+    },
+    {
+      "id": "v4-tap-repeat-response",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "response/frames/playful-entry.png",
+          "sourceSHA256": "8fe783f2d8f73b2d88f72d873a6306c66a4f094ca9b503d9d425d3e3bf2a0f7c",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/playful-gather.png",
+          "sourceSHA256": "89b68835cb583f9931ce823253c5f8a3103d8ed6d2b65878c4f096ae2ea49ae3",
+          "durationMs": 300,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/playful-entry.png",
+          "sourceSHA256": "8fe783f2d8f73b2d88f72d873a6306c66a4f094ca9b503d9d425d3e3bf2a0f7c",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "kind": "action",
+      "action": "tap-repeat-response"
+    },
+    {
+      "id": "v4-browsing",
+      "kind": "action",
+      "action": "browsing",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-cancel-settling",
+      "kind": "action",
+      "action": "cancel-settling",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-checking",
+      "kind": "action",
+      "action": "checking",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-director-supervise",
+      "kind": "action",
+      "action": "director-supervise",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-disconnected",
+      "kind": "action",
+      "action": "disconnected",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-dispatch",
+      "kind": "action",
+      "action": "dispatch",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-editing",
+      "kind": "action",
+      "action": "editing",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-execution-observe",
+      "kind": "action",
+      "action": "execution-observe",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-external-wait",
+      "kind": "action",
+      "action": "external-wait",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-output",
+      "kind": "action",
+      "action": "output",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-queued",
+      "kind": "action",
+      "action": "queued",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-reading",
+      "kind": "action",
+      "action": "reading",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-reconnecting",
+      "kind": "action",
+      "action": "reconnecting",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-retry-wait",
+      "kind": "action",
+      "action": "retry-wait",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-think",
+      "kind": "action",
+      "action": "think",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 4500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/closed.png",
+          "sourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+          "durationMs": 75,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 2500,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-unknown-effect-check",
+      "kind": "action",
+      "action": "unknown-effect-check",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "coordination-expressions/frames/serious-rest.png",
+          "sourceSHA256": "78245105c97395375c9b554ebd1a4fb710db2578f506a01fe806b28f05050e95",
+          "durationMs": 500,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "semanticSuggestion": "Actual failure or unknown-effect check; quiet serious face, no new hand gesture."
+    },
+    {
+      "id": "v4-closed-tap-response",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/social-release.png",
+          "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-palm.png",
+          "sourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+          "durationMs": 240,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 70,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "tap-response"
+    },
+    {
+      "id": "v4-closed-tap-repeat-response",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/social-release.png",
+          "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-palm.png",
+          "sourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+          "durationMs": 240,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 70,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "tap-repeat-response"
+    },
+    {
+      "id": "v4-closed-welcome",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/social-release.png",
+          "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-palm.png",
+          "sourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+          "durationMs": 240,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 70,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "welcome"
+    },
+    {
+      "id": "v4-closed-hover-response",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/social-release.png",
+          "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+          "durationMs": 100,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "hover-response"
+    },
+    {
+      "id": "v4-closed-idle-closed",
+      "kind": "action",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 4500,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/blink-closed.png",
+          "sourceSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+          "durationMs": 75,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 2500,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "idle-closed"
+    },
+    {
+      "id": "v4-closed-relax-idle",
+      "kind": "action",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 4500,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/blink-closed.png",
+          "sourceSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+          "durationMs": 75,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 2500,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "relax-idle"
+    },
+    {
+      "id": "v4-closed-quiet-hair-smooth",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/hair-enter-1.png",
+          "sourceSHA256": "763073ab2c571513ff1c78d97ff024889bbababf2c4a9edfa99f3934314e75a7",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-enter-2.png",
+          "sourceSHA256": "1d6b1c5c712ee1016de9c2db9d6626fab39a74c435d9b5f6ad8280ca910857c4",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-enter-3.png",
+          "sourceSHA256": "343550a2ebfbd3dbace43f991987d840cc86129db4a64edd247340b69aae51ab",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-contact-1.png",
+          "sourceSHA256": "cd27319fe19e9905a9f315f5e903eeac0882e369a7ed9a246cf9901b20ceaf6b",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-contact-2.png",
+          "sourceSHA256": "6fc5d6559b29421f174bfc3960ce93e11a9ebac0caea81050e7480efd89547f7",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-contact-3.png",
+          "sourceSHA256": "4ed27dd08efdcfea379670b2ddcb244aa866b336108b0c6c3ef0910ac47d3f9f",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "quiet-hair-smooth"
+    },
+    {
+      "id": "v4-closed-quiet-sleeve-smooth",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/sleeve-cross.png",
+          "sourceSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/sleeve-brush-1.png",
+          "sourceSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/sleeve-brush-2.png",
+          "sourceSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/sleeve-brush-3.png",
+          "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "quiet-sleeve-smooth"
+    },
+    {
+      "id": "v4-closed-quiet-seat-adjust",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/comfort-1.png",
+          "sourceSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/comfort-2.png",
+          "sourceSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+          "durationMs": 200,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/comfort-3.png",
+          "sourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+          "durationMs": 180,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "quiet-seat-adjust"
+    },
+    {
+      "id": "v4-closed-quiet-stretch",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/stretch-enter-1.png",
+          "sourceSHA256": "1491bba9579f80b3c6b3cb6545e36263b0722adb907168b3e56af956e0efdafc",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-enter-2.png",
+          "sourceSHA256": "15c3e91d1a404c64ed1605816421185cbcb14ea1b0fe8780dda66858905d305d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-enter-3.png",
+          "sourceSHA256": "96b736eef127aa332b93be47f9e8b1e590d3dfbc6289cba9182caea67899ec7b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-crest.png",
+          "sourceSHA256": "768a3e206ced3ded9a723b7ce0d86d57684cff9a3c0ff9a6b0d5a6e11dcbab16",
+          "durationMs": 350,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-1.png",
+          "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "quiet-stretch"
+    },
+    {
+      "id": "v4-closed-doze-enter",
+      "kind": "bridge",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/yawn-enter-1.png",
+          "sourceSHA256": "39f32613fc5f81600acfd82b2ae9a545f5dfdb8170b1cbbd514f07e72de4a756",
+          "durationMs": 100,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-enter-2.png",
+          "sourceSHA256": "12f83f5bae667150750a446c2e52528758409ae6ca65eaacc1c2436024dcbf08",
+          "durationMs": 100,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-enter-3.png",
+          "sourceSHA256": "a1798d9b14e5d9daa9c835f9ab2c22088337f7dcdbfb54072dc3de2c11666078",
+          "durationMs": 100,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-crest.png",
+          "sourceSHA256": "2f7de840280ac3feee5ab4bf5784d8db8eefd69cea859126e06d9ee6b715d11b",
+          "durationMs": 400,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-1.png",
+          "sourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/doze-relax.png",
+          "sourceSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/doze.png",
+          "sourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+          "durationMs": 300,
+          "phase": "hold",
+          "cue": "REST_DOZE",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-closed-doze-hold",
+      "kind": "action",
+      "loop": [
+        0,
+        1
+      ],
+      "frames": [
+        {
+          "source": "companionship/frames/doze.png",
+          "sourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+          "durationMs": 1800,
+          "phase": "hold",
+          "cue": "REST_DOZE",
+          "pauseSafe": true
+        }
+      ],
+      "action": "rest-sleep"
+    },
+    {
+      "id": "v4-closed-wake-exit",
+      "kind": "bridge",
+      "loop": null,
+      "frames": [
+        {
+          "source": "companionship/frames/doze.png",
+          "sourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST_DOZE",
+          "pauseSafe": true
+        },
+        {
+          "source": "companionship/frames/wake-aware.png",
+          "sourceSHA256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+          "durationMs": 300,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-load-half.png",
+          "sourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-support.png",
+          "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+          "durationMs": 180,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 180,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    }
+  ],
+  "ordinaryRecoveryByActualSource": [
+    {
+      "source": "coordination/frames/release.png",
+      "actualSourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+      "frames": [
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/half-lift.png",
+      "actualSourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+      "frames": [
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/gather.png",
+      "actualSourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+      "frames": [
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/unfold-early.png",
+      "actualSourceSHA256": "265f5b99b142a8026eef41eda9d85e95570ee73ea191df681144345a72772289",
+      "frames": [
+        {
+          "source": "coordination/frames/gather.png",
+          "sourceSHA256": "a05a7cf020e289aac4190a25cbb1b152500d872844da6ddf0ba0c2522b7126df",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/unfold-mid.png",
+      "actualSourceSHA256": "287d899efd253686aaff1b498e3dd1285df73fcd6fc513a0ae069e0129d4cf05",
+      "frames": [
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/unfold-open.png",
+      "actualSourceSHA256": "b1b5fa9919ffe4d7753fee4aa22957b69c5a1d94c43b74f9f055a12816d12880",
+      "frames": [
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/present.png",
+      "actualSourceSHA256": "d49bff65da96300ab68d5402470de7d4239918328a9d1616ccc316e21cf94776",
+      "frames": [
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/wrist-return.png",
+      "actualSourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+      "frames": [
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/keyboard-hover.png",
+      "actualSourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+      "frames": [
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination/frames/keyboard-contact.png",
+      "actualSourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination-expressions/frames/question.png",
+      "actualSourceSHA256": "4a43f748b214312327638d2292848f37d604619b16fae14ca4a32d3fd352205c",
+      "frames": [
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination-expressions/frames/result-eye-smile.png",
+      "actualSourceSHA256": "917acee0a33ee42b3f2814e60968cbe46a76760d57ad4b84089befcabeaf8ade",
+      "frames": [
+        {
+          "source": "coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "coordination-expressions/frames/serious-rest.png",
+      "actualSourceSHA256": "78245105c97395375c9b554ebd1a4fb710db2578f506a01fe806b28f05050e95",
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/attention.png",
+      "actualSourceSHA256": "03f8833bd9620eb483354064340dc76ee8741f61ba33cee22427670fdc3b3f64",
+      "frames": [
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/lift.png",
+      "actualSourceSHA256": "7d056fb851da57f45f55590e82aa658d12164a9b6e0be98c21496d5179ff458f",
+      "frames": [
+        {
+          "source": "response/frames/keyboard-hover.png",
+          "sourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/palm-opening.png",
+      "actualSourceSHA256": "6c611cd761887c68f67b052cb2885ab91fcf3e0885a7e98bd9754a415351627d",
+      "frames": [
+        {
+          "source": "response/frames/lower.png",
+          "sourceSHA256": "d018349372c6b85b6d307c88da1406bd4857ba7b1c7614b59bd1376d4f363fba",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-hover.png",
+          "sourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/palm.png",
+      "actualSourceSHA256": "9dfa8549de49261a6decc9eb466ca9f9d9ee75ea4035d408e67283d8aa98986b",
+      "frames": [
+        {
+          "source": "response/frames/lower.png",
+          "sourceSHA256": "d018349372c6b85b6d307c88da1406bd4857ba7b1c7614b59bd1376d4f363fba",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-hover.png",
+          "sourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/lower.png",
+      "actualSourceSHA256": "d018349372c6b85b6d307c88da1406bd4857ba7b1c7614b59bd1376d4f363fba",
+      "frames": [
+        {
+          "source": "response/frames/keyboard-hover.png",
+          "sourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/keyboard-hover.png",
+      "actualSourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+      "frames": [
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/keyboard-contact.png",
+      "actualSourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/busy-ack.png",
+      "actualSourceSHA256": "a3a700d58a93cf18e442b7410153bbfc3da9d5ada7d547cfe9fbd9f335338e4b",
+      "frames": [
+        {
+          "source": "response/frames/busy-release.png",
+          "sourceSHA256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/busy-release.png",
+      "actualSourceSHA256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/playful-entry.png",
+      "actualSourceSHA256": "8fe783f2d8f73b2d88f72d873a6306c66a4f094ca9b503d9d425d3e3bf2a0f7c",
+      "frames": [
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "response/frames/playful-gather.png",
+      "actualSourceSHA256": "89b68835cb583f9931ce823253c5f8a3103d8ed6d2b65878c4f096ae2ea49ae3",
+      "frames": [
+        {
+          "source": "response/frames/playful-entry.png",
+          "sourceSHA256": "8fe783f2d8f73b2d88f72d873a6306c66a4f094ca9b503d9d425d3e3bf2a0f7c",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "response/frames/keyboard-contact.png",
+          "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "quiet-open-blink/frames/half.png",
+      "actualSourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+      "frames": [
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 90,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "quiet-open-blink/frames/closed.png",
+      "actualSourceSHA256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+      "frames": [
+        {
+          "source": "quiet-open-blink/frames/half.png",
+          "sourceSHA256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+          "durationMs": 45,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 90,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/yawn-enter-1.png",
+      "actualSourceSHA256": "39f32613fc5f81600acfd82b2ae9a545f5dfdb8170b1cbbd514f07e72de4a756",
+      "frames": [
+        {
+          "source": "companionship/frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/yawn-enter-2.png",
+      "actualSourceSHA256": "12f83f5bae667150750a446c2e52528758409ae6ca65eaacc1c2436024dcbf08",
+      "frames": [
+        {
+          "source": "companionship/frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/yawn-enter-3.png",
+      "actualSourceSHA256": "a1798d9b14e5d9daa9c835f9ab2c22088337f7dcdbfb54072dc3de2c11666078",
+      "frames": [
+        {
+          "source": "companionship/frames/yawn-return-1.png",
+          "sourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/yawn-crest.png",
+      "actualSourceSHA256": "2f7de840280ac3feee5ab4bf5784d8db8eefd69cea859126e06d9ee6b715d11b",
+      "frames": [
+        {
+          "source": "companionship/frames/yawn-return-1.png",
+          "sourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/yawn-return-1.png",
+      "actualSourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+      "frames": [
+        {
+          "source": "companionship/frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/yawn-return-2.png",
+      "actualSourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+      "frames": [
+        {
+          "source": "companionship/frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/yawn-return-3.png",
+      "actualSourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+      "frames": [
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/doze-relax.png",
+      "actualSourceSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+      "frames": [
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/doze.png",
+      "actualSourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+      "frames": [
+        {
+          "source": "companionship/frames/wake-aware.png",
+          "sourceSHA256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+          "durationMs": 240,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-load-half.png",
+          "sourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-support.png",
+          "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/wake-aware.png",
+      "actualSourceSHA256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+      "frames": [
+        {
+          "source": "companionship/frames/wake-load-half.png",
+          "sourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-support.png",
+          "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/wake-load-half.png",
+      "actualSourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+      "frames": [
+        {
+          "source": "companionship/frames/wake-support.png",
+          "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/wake-support.png",
+      "actualSourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+      "frames": [
+        {
+          "source": "companionship/frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/wake-unload.png",
+      "actualSourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+      "frames": [
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/rest-settle.png",
+      "actualSourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/stretch-enter-1.png",
+      "actualSourceSHA256": "1491bba9579f80b3c6b3cb6545e36263b0722adb907168b3e56af956e0efdafc",
+      "frames": [
+        {
+          "source": "companionship/frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/stretch-enter-2.png",
+      "actualSourceSHA256": "15c3e91d1a404c64ed1605816421185cbcb14ea1b0fe8780dda66858905d305d",
+      "frames": [
+        {
+          "source": "companionship/frames/stretch-return-1.png",
+          "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/stretch-enter-3.png",
+      "actualSourceSHA256": "96b736eef127aa332b93be47f9e8b1e590d3dfbc6289cba9182caea67899ec7b",
+      "frames": [
+        {
+          "source": "companionship/frames/stretch-return-1.png",
+          "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/stretch-crest.png",
+      "actualSourceSHA256": "768a3e206ced3ded9a723b7ce0d86d57684cff9a3c0ff9a6b0d5a6e11dcbab16",
+      "frames": [
+        {
+          "source": "companionship/frames/stretch-return-1.png",
+          "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/stretch-return-1.png",
+      "actualSourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+      "frames": [
+        {
+          "source": "companionship/frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/stretch-return-2.png",
+      "actualSourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+      "frames": [
+        {
+          "source": "companionship/frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/stretch-return-3.png",
+      "actualSourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/stretch-unload.png",
+      "actualSourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+      "frames": [
+        {
+          "source": "companionship/frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-enter-1.png",
+      "actualSourceSHA256": "763073ab2c571513ff1c78d97ff024889bbababf2c4a9edfa99f3934314e75a7",
+      "frames": [
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-enter-2.png",
+      "actualSourceSHA256": "1d6b1c5c712ee1016de9c2db9d6626fab39a74c435d9b5f6ad8280ca910857c4",
+      "frames": [
+        {
+          "source": "companionship/frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-enter-3.png",
+      "actualSourceSHA256": "343550a2ebfbd3dbace43f991987d840cc86129db4a64edd247340b69aae51ab",
+      "frames": [
+        {
+          "source": "companionship/frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-contact-1.png",
+      "actualSourceSHA256": "cd27319fe19e9905a9f315f5e903eeac0882e369a7ed9a246cf9901b20ceaf6b",
+      "frames": [
+        {
+          "source": "companionship/frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-contact-2.png",
+      "actualSourceSHA256": "6fc5d6559b29421f174bfc3960ce93e11a9ebac0caea81050e7480efd89547f7",
+      "frames": [
+        {
+          "source": "companionship/frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-contact-3.png",
+      "actualSourceSHA256": "4ed27dd08efdcfea379670b2ddcb244aa866b336108b0c6c3ef0910ac47d3f9f",
+      "frames": [
+        {
+          "source": "companionship/frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-return-1.png",
+      "actualSourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+      "frames": [
+        {
+          "source": "companionship/frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-return-2.png",
+      "actualSourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+      "frames": [
+        {
+          "source": "companionship/frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/hair-return-3.png",
+      "actualSourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/sleeve-release.png",
+      "actualSourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/sleeve-cross.png",
+      "actualSourceSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+      "frames": [
+        {
+          "source": "companionship/frames/sleeve-brush-3.png",
+          "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-1.png",
+      "actualSourceSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+      "frames": [
+        {
+          "source": "companionship/frames/sleeve-brush-3.png",
+          "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-2.png",
+      "actualSourceSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+      "frames": [
+        {
+          "source": "companionship/frames/sleeve-brush-3.png",
+          "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-3.png",
+      "actualSourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+      "frames": [
+        {
+          "source": "companionship/frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/comfort-1.png",
+      "actualSourceSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+      "frames": [
+        {
+          "source": "companionship/frames/comfort-3.png",
+          "sourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/comfort-2.png",
+      "actualSourceSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+      "frames": [
+        {
+          "source": "companionship/frames/comfort-3.png",
+          "sourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/comfort-3.png",
+      "actualSourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/social-release.png",
+      "actualSourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+      "frames": [
+        {
+          "source": "companionship/frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/social-wrist.png",
+      "actualSourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+      "frames": [
+        {
+          "source": "companionship/frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/social-lower.png",
+      "actualSourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+      "frames": [
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/blink-half.png",
+      "actualSourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+      "frames": [
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/blink-closed.png",
+      "actualSourceSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+      "frames": [
+        {
+          "source": "companionship/frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "companionship/frames/social-palm.png",
+      "actualSourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+      "frames": [
+        {
+          "source": "companionship/frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 70,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "companionship/frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    }
+  ]
+}

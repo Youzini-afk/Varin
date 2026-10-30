@@ -1,0 +1,25 @@
+{
+  "status": "internal candidate; not runtime accepted",
+  "cue": "PAGE_TURN",
+  "source": "read-settle-v1-candidate.png",
+  "sourceSha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+  "raw": "read-turn-v1-raw.png",
+  "rawSha256": "b36c9fd9748190f2c0e146f3e831aa46275491abb3c15fa59425027ffb6febd7",
+  "prompt": "read-turn-v1-exactprompt.txt",
+  "candidate": "read-turn-v1-candidate.png",
+  "candidateSha256": "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742",
+  "canvas": [
+    512,
+    512
+  ],
+  "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+  "mask": "read-turn-v1-edit-mask.png",
+  "outsideMaskExact": true,
+  "alphaCleanup": {
+    "islandPixels": 49,
+    "chromaEdgePixels": 118,
+    "whiteEdgePixels": 10,
+    "opaqueInteriorRGBUnchanged": true
+  },
+  "actualGestureSide": "image-left visible hand (character right); generated opposite prompt side; selected coherent authored gesture, other hand locked"
+}

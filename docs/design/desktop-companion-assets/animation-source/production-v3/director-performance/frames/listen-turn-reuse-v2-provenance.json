@@ -1,0 +1,11 @@
+{
+  "source": "references/search-right-middle.png",
+  "sourceSHA256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5",
+  "base": "references/listen-rest.png",
+  "baseSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+  "output": "frames/listen-turn-reuse-v2.png",
+  "sha256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442",
+  "mask": "masks/listen-turn-reuse-v2.png",
+  "method": "same 512 canvas actual authored intermediate head/neck registered; no scaling or rotation; not new generated head",
+  "outsideMaskExact": true
+}

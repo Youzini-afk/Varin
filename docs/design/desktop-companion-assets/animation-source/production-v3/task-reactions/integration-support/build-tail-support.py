@@ -1,0 +1,14 @@
+from pathlib import Path
+from PIL import Image,ImageDraw
+import numpy as np,json,hashlib
+D=Path(__file__).parent;P=D.parent;(P/'qa').mkdir(exist_ok=True);donor=Image.open(P/'references/secure-no-stool-clean-donor-v1.png').convert('RGBA');hair=np.asarray(donor);common=np.asarray(Image.open(P/'references/canonical-stool-removal-mask-v5.png').convert('L'));records={};sheet=Image.new('RGB',(1500,360),'white');drs=ImageDraw.Draw(sheet)
+for i,n in enumerate(['arrival-chest','explain-rise','explain-content','error-observe','error-locate']):
+ # Individually checked at 10x: explain lower coat is narrower, its edge starts left.
+ edge=([(369,332),(374,338),(378,344),(382,350),(386,356),(389,362),(389,365)] if n.startswith('explain') else [(374,332),(377,337),(380,343),(383,349),(386,355),(389,361),(389,365)])
+ upper=( [(356,320),(362,327)] if n.startswith('explain') else [(361,323),(365,329)] )
+ fg=Image.new('L',(512,512));ImageDraw.Draw(fg).polygon([(290,170),(385,170),(385,305)]+upper+edge[:-1]+[(386,363),(360,363),(350,356),(332,340),(290,330)],fill=255);protect=np.minimum(np.asarray(fg),common);Image.fromarray(protect).save(D/f'{n}-foreground-exclusion.png')
+ orig=Image.open(P/'poses'/f'{n}.png').convert('RGBA');a=np.asarray(orig).copy();rm=Image.new('L',(512,512));ImageDraw.Draw(rm).polygon(edge+[(394,365),(394,332)],fill=255);r=np.asarray(rm).copy();r[:,:365]=0;r[:,390:]=0;yy,xx=np.where(r>0);a[yy,xx]=hair[yy,np.minimum(xx+5,511)];patch=Image.fromarray(a);patch.save(D/f'{n}-clean-tail-patch.png');Image.fromarray(r).save(D/f'{n}-extra-removal.png')
+ final=Image.new('L',(512,512));ImageDraw.Draw(final).rectangle((365,325,389,365),fill=255);final.save(D/f'{n}-patch-mask.png')
+ im=Image.composite(donor,orig,Image.fromarray((common.astype(float)*(1-protect/255)).astype('uint8')));im=Image.composite(patch,im,final);view=im.crop((330,310,405,390)).resize((300,320));sheet.paste(view,(i*300,30),view);drs.text((i*300+5,5),n,fill='black')
+ records[n]={'source':f'../poses/{n}.png','sourceSHA256':hashlib.sha256((P/'poses'/f'{n}.png').read_bytes()).hexdigest(),'foregroundExclusion':f'{n}-foreground-exclusion.png','cleanPatch':f'{n}-clean-tail-patch.png','finalPatchMask':f'{n}-patch-mask.png','extraRemoval':f'{n}-extra-removal.png','tracedEdge':edge,'order':'common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask','localDonorOffset':[5,0]}
+(D/'tail-support-manifest.json').write_text(json.dumps({'pathBase':'manifest directory','status':'author checked narrow new-source foreground and seat-wedge cleanup, no frozen source modification','donor':'../references/secure-no-stool-clean-donor-v1.png','commonMask':'../references/canonical-stool-removal-mask-v5.png','records':records},indent=2,sort_keys=True)+'\n');sheet.save(P/'qa/new-tail-cleanup-review.png')

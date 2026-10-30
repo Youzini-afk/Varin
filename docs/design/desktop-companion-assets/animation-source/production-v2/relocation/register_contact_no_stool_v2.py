@@ -1,0 +1,28 @@
+from pathlib import Path
+from PIL import Image
+from scipy import ndimage as nd
+import numpy as np,json,hashlib
+R=Path(__file__).parent;p=R/'sources/contact-no-stool-v1-raw.png';a=np.array(Image.open(p).convert('RGBA'));rgb=a[:,:,:3].astype(float);alpha=a[:,:,3].astype(float)/255
+labels,n=nd.label(alpha>0.02,np.ones((3,3)));sizes=np.bincount(labels.ravel());remove=(sizes[labels]<28)&(labels>0);alpha[remove]=0
+# Only the 3px generated edge band; preserve all opaque interior drawing.
+fg=alpha>0.02;dist=nd.distance_transform_edt(fg);core=(dist>3)&(alpha>.85);_,near=nd.distance_transform_edt(~core,return_indices=True);ref=rgb[near[0],near[1]]
+band=fg&(dist<=3);chroma=rgb.max(2)-rgb.min(2);bad=band&(chroma>95);rgb[bad]=ref[bad];alpha[bad]*=.65
+# White matte contamination, not the pearl hair interior.
+white=band&(rgb.min(2)>225)&((rgb-ref).mean(2)>24);den=((255-ref)**2).sum(2);est=np.divide(((255-rgb)*(255-ref)).sum(2),den,out=np.ones_like(den),where=den>50);alpha[white]*=np.clip(est[white],0,1);rgb[white]=ref[white]
+out=np.dstack([rgb.clip(0,255).astype('uint8'),(alpha*255).round().astype('uint8')]);out[out[:,:,3]==0]=0
+
+
+im=Image.fromarray(out).resize((512,512),Image.Resampling.LANCZOS)
+master=Image.open(R/'frames/land-contact-v1.png').convert('RGBA')
+from PIL import ImageDraw,ImageFilter
+mask=Image.new('L',(512,512));d=ImageDraw.Draw(mask)
+d.polygon([(348,349),(382,343),(443,345),(445,482),(402,492),(379,477),(362,429),(344,387)],fill=255)
+d.polygon([(289,423),(351,425),(369,468),(298,468)],fill=255)
+g=Image.new('L',(512,512));d=ImageDraw.Draw(g)
+d.polygon([(199,407),(232,409),(238,431),(225,453),(197,454)],fill=255)
+d.polygon([(267,425),(295,429),(295,465),(277,465),(280,452),(276,439)],fill=255)
+mask=Image.fromarray(np.maximum(np.array(mask),np.array(g.filter(ImageFilter.MaxFilter(13)))));mask=mask.filter(ImageFilter.GaussianBlur(.6));final=Image.composite(im,master,mask);final.save(R/'frames/contact-no-stool-v2.png');mask.save(R/'frames/contact-stool-removal-mask-v2.png')
+qa=Image.new('RGB',(1024,512),'#263846')
+for i,x in enumerate([master,final]):
+ b=Image.new('RGBA',(512,512),'#263846');b.alpha_composite(x);qa.paste(b.convert('RGB'),(i*512,0))
+qa.save(R/'contact-no-stool-review-v2.jpg',quality=96)

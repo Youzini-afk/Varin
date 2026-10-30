@@ -1,0 +1,25 @@
+{
+  "source": "source/canonical-stool-plate-v2.png",
+  "fullViewport": 512,
+  "worldFit": {
+    "scale": 0.8,
+    "translate": [
+      54,
+      85
+    ]
+  },
+  "observedCanonicalVisibleCushionRight": [
+    434,
+    365
+  ],
+  "observedCanonicalLegBottom": [
+    424,
+    473
+  ],
+  "estimatedOccludedSeatSupport": [
+    300,
+    347
+  ],
+  "status": "candidate only: hidden surface interpretation; top perspective not exact source match; do not mark contact verified",
+  "constraint": "Stool remains fixed world transform during lift/land, opacity only animates. No body motion is produced by this transform."
+}

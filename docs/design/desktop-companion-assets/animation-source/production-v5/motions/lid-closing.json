@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "id": "v5-lid-closing-working-phrase",
+  "action": "lid-closing",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "durationMs": 2135,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 500
+    },
+    {
+      "sourceId": "lid-closing-lift",
+      "durationMs": 110
+    },
+    {
+      "sourceId": "lid-closing-approach",
+      "durationMs": 100
+    },
+    {
+      "sourceId": "lid-contact-100",
+      "durationMs": 100
+    },
+    {
+      "sourceId": "lid-contact-085",
+      "durationMs": 70
+    },
+    {
+      "sourceId": "lid-contact-070",
+      "durationMs": 65
+    },
+    {
+      "sourceId": "lid-contact-055",
+      "durationMs": 65
+    },
+    {
+      "sourceId": "lid-contact-045",
+      "durationMs": 70
+    },
+    {
+      "sourceId": "lid-contact-030",
+      "durationMs": 75
+    },
+    {
+      "sourceId": "lid-contact-015",
+      "durationMs": 90
+    },
+    {
+      "sourceId": "lid-contact-000",
+      "durationMs": 110
+    },
+    {
+      "sourceId": "lid-closing-settle",
+      "durationMs": 130
+    },
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 650
+    }
+  ],
+  "integration": "Authoring exposure sequence only; no asserted interrupt routes or pickup counterparts. Not installed. Opening/closing share mechanical contacts only; closing has separately authored entry and settling.",
+  "closedAuthority": "closed-neutral",
+  "openAuthority": "neutral"
+}

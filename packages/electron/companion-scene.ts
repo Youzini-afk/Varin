@@ -1,0 +1,267 @@
+import { isAgentAvatarId } from '@varin/protocol';
+import { COMPANION_SPATIAL_B, resolveCompanionSpatialLayout, type CompanionSpatialLayout, COMPANION_TEAM_VISIBLE_LIMIT, type DesktopCompanionTeam } from '@varin/application-client/desktop';
+import { readCompanionPortfolio } from './companion-portfolio.js';
+import { companionWorldRect } from './companion-window.js';
+type Bounds = ReturnType<typeof companionWorldRect>;
+
+import type { DesktopCompanionScene } from '@varin/application-client/desktop';
+
+export type CompanionSceneDescriptor = DesktopCompanionScene;
+export type CompanionSceneKind = Exclude<DesktopCompanionScene['kind'], null>;
+export interface CompanionSceneViewport { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number; decorationBottom?: number }
+export interface CompanionSceneOwner {
+  id: number; isDestroyed(): boolean; isVisible(): boolean; isMinimized(): boolean;
+  isAlwaysOnTop(): boolean; getContentBounds(): Bounds;
+}
+export interface CompanionSceneWindow {
+  isDestroyed(): boolean; close(): void; hide(): void; showInactive(): void;
+  setBounds(bounds: Bounds): void; setAlwaysOnTop(value: boolean): void;
+  publish(value: CompanionScenePayload): Promise<void>; onReady(callback: () => void): void;
+  onRendererGone(callback: () => void): void;
+}
+export interface CompanionScenePayload {
+  descriptor: CompanionSceneDescriptor;
+  layout: { character: Bounds; visible: Bounds; inspectionSide: 'left' | 'right' | null; spatial?: CompanionSpatialLayout };
+}
+export function readCompanionTeam(input: unknown): DesktopCompanionTeam {
+    const value = input as Record<string, unknown>;
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.members) || value.members.length > COMPANION_TEAM_VISIBLE_LIMIT
+      || !(value.overflowCount === null || Number.isSafeInteger(value.overflowCount) && (value.overflowCount as number) >= 0)) throw new Error('Invalid companion team');
+    const keys = new Set<string>();
+    const members: DesktopCompanionTeam['members'] = value.members.map(raw => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid companion team member');
+      const member = raw as Record<string, unknown>;
+      if (typeof member.key !== 'string' || !member.key || member.key.length > 200 || keys.has(member.key) || !isAgentAvatarId(member.avatar)
+        || !['preparing','running','waiting','settling','failed','leaving'].includes(String(member.state))) throw new Error('Invalid companion team member');
+      keys.add(member.key);
+      return { key: member.key, avatar: member.avatar, state: member.state as DesktopCompanionTeam['members'][number]['state'] };
+    });
+    return { members, overflowCount: value.overflowCount as number | null };
+}
+
+const kinds = new Set(['reading','editing','searching','dispatch','question','permission','organize','verify','status','portfolio']);
+/** Narrow presentation data only: no renderer-provided markup, URL, task content or command. */
+export function readCompanionSceneDescriptor(value: unknown): CompanionSceneDescriptor {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Missing scene descriptor');
+  const d = value as Record<string, unknown>;
+  if (!Number.isSafeInteger(d.revision) || (d.revision as number) < 0
+    || typeof d.scope !== 'string' || d.scope.length > 200
+    || (d.kind !== null && !kinds.has(String(d.kind)))
+    || !['active','resolve','withdraw'].includes(String(d.phase))
+    || ![null,'allowed','denied','answered'].includes(d.outcome as null | string)
+    || !(d.count === null || Number.isSafeInteger(d.count) && (d.count as number) >= 0 && (d.count as number) <= 99)
+    || !['transition','engaged','present','read','page-turn','type','review','revise','scan-left','scan-right','select','split','dispatch-left','dispatch-right','watch','ask','offer','attend','acknowledge','organize-align','organize-select','verify-scan','verify-compare','listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate'].includes(String(d.cue))
+    || !(d.cueInstance === undefined || Number.isSafeInteger(d.cueInstance) && (d.cueInstance as number) >= 0)
+    || typeof d.suppressed !== 'boolean' || typeof d.reducedMotion !== 'boolean' || typeof d.menuOpen !== 'boolean') throw new Error('Invalid scene descriptor');
+  let drawing: DesktopCompanionScene['drawing'];
+  if (d.drawing !== undefined) {
+    const f = d.drawing as Record<string, unknown>;
+    if (!f || typeof f !== 'object' || Array.isArray(f) || !['selected','review'].includes(String(f.bundle))
+      || typeof f.epoch !== 'string' || !/^[a-f0-9]{64}$/.test(f.epoch)
+      || typeof f.packageId !== 'string' || !f.packageId || f.packageId.length > 200
+      || !Number.isSafeInteger(f.frameIndex) || (f.frameIndex as number) < 0 || (f.frameIndex as number) > 10000) throw new Error('Invalid companion drawing identity');
+    drawing = { bundle: f.bundle as 'selected' | 'review', epoch: f.epoch, packageId: f.packageId, frameIndex: f.frameIndex as number };
+  }
+  if (d.layout !== undefined && d.layout !== 'spatial-b-v1') throw new Error('Invalid companion scene layout');
+  const team = d.team === undefined ? undefined : readCompanionTeam(d.team);
+  if (d.kind === 'status' ? !['queued','external','retry','failure','cancelling','disconnected','synchronizing','uncertain'].includes(String(d.status)) : d.status !== undefined) throw new Error('Invalid scene status');
+  const portfolio = d.kind === 'portfolio' ? readCompanionPortfolio(d.portfolio, readCompanionTeam) : undefined;
+  if (d.kind !== 'portfolio' && d.portfolio !== undefined) throw new Error('Unexpected portfolio');
+  if (portfolio && d.team !== undefined) throw new Error('Portfolio owns its scoped team');
+  if (portfolio && !['transition','listen-left','listen-right','gather-out','gather-in','address-user','management-present','management-release','management-receive','management-delegate'].includes(String(d.cue))) throw new Error('Portfolio body cue must describe a management gesture');
+  if (d.outcome !== null && (d.phase !== 'resolve' || (d.outcome === 'answered' ? d.kind !== 'question' : d.kind !== 'permission'))) throw new Error('Scene outcome does not match its presentation');
+  return { ...(drawing ? { drawing } : {}), ...(d.layout === 'spatial-b-v1' ? { layout: 'spatial-b-v1' as const } : {}), revision: d.revision as number, scope: d.scope, kind: d.kind as CompanionSceneKind | null,
+    phase: d.phase as CompanionSceneDescriptor['phase'], outcome: d.outcome as CompanionSceneDescriptor['outcome'],
+    ...(portfolio ? { portfolio } : {}), ...(team ? { team } : {}), ...(d.status === undefined ? {} : { status: d.status as NonNullable<CompanionSceneDescriptor['status']> }), count: d.count as number | null, ...(d.cueInstance === undefined ? {} : { cueInstance: d.cueInstance as number }), cue: d.cue as CompanionSceneDescriptor['cue'], suppressed: d.suppressed, reducedMotion: d.reducedMotion, menuOpen: d.menuOpen };
+}
+
+export function companionSceneLayout(content: Bounds, viewport: unknown, workArea: Bounds, spatial = false, preferredSide: 'left' | 'right' = 'right') {
+  const character = companionWorldRect(content, viewport);
+  // Preserve the character's native anchor. Additional space is decorative only;
+  // the bottom ends at the character canvas, above the existing status caption.
+  const width = Math.round(character.width * 1.45), height = Math.round(character.height * (spatial ? 1.5 : 1.2));
+  const bounds = { x: character.x - Math.round((width-character.width)/2), y: character.y-Math.round(character.height*.2), width, height };
+  let floor = workArea.y + workArea.height;
+  const v = viewport as CompanionSceneViewport;
+  if (spatial && v.decorationBottom !== undefined) {
+    if (!Number.isFinite(v.decorationBottom) || v.decorationBottom < v.y || v.decorationBottom > v.viewportHeight) throw new Error('Invalid decoration floor');
+    floor = Math.min(floor, content.y + v.decorationBottom * content.height / v.viewportHeight);
+  }
+  const left = Math.max(bounds.x,workArea.x), top = Math.max(bounds.y,workArea.y);
+  const right = Math.min(bounds.x+width,workArea.x+workArea.width), bottom = Math.min(bounds.y+height,floor);
+  // Admit the whole decorative side lane, not merely the old 56px brief card.
+  // Teams can occupy any point within this already allocated inert surface.
+  const sideMargin = (width - character.width) / 2;
+  const rightSpace = workArea.x + workArea.width - (character.x + character.width);
+  const leftSpace = character.x - workArea.x;
+  const rightFits = rightSpace >= sideMargin, leftFits = leftSpace >= sideMargin;
+  const inspectionSide: 'left' | 'right' | null = spatial && !(preferredSide === 'left' ? leftFits : rightFits) ? null : preferredSide === 'left' && leftFits ? 'left' : preferredSide === 'right' && rightFits ? 'right' : rightFits ? 'right' : leftFits ? 'left' : rightSpace >= leftSpace ? 'right' : 'left';
+  const scale = character.width / COMPANION_SPATIAL_B.character.width;
+  const space = spatial ? resolveCompanionSpatialLayout({ available: { left: (left-character.x)/scale+50, right: (right-character.x)/scale+50, top: (top-character.y)/scale+25, bottom: (bottom-character.y)/scale+25 } }) : undefined;
+  return { bounds, layout: { inspectionSide, ...(space ? { spatial: space } : {}),
+    character: { x: (character.x-bounds.x)/width, y: (character.y-bounds.y)/height, width: character.width/width, height: character.height/height },
+    visible: { x: (left-bounds.x)/width, y: (top-bounds.y)/height, width: Math.max(0,right-left)/width, height: Math.max(0,bottom-top)/height },
+  } };
+}
+
+function preferredSceneSide(descriptor: CompanionSceneDescriptor): 'left' | 'right' {
+  const p = descriptor.portfolio;
+  const key = p?.mode === 'inspection' ? p.inspectedKey : p?.subjectKey;
+  return descriptor.layout === 'spatial-b-v1' && p?.projects.find(project => project.key === key)?.label === 'B' ? 'left' : 'right';
+}
+
+type SceneEntry = {
+  owner: CompanionSceneOwner; window: CompanionSceneWindow; descriptor: CompanionSceneDescriptor;
+  viewport: CompanionSceneViewport; receivedAt: number; recoveryUsed: boolean; failed: boolean; recovering: boolean; ready: boolean; blocked: boolean; publishing: boolean; dirty: boolean; lastPayload?: string | undefined; teamRetiresAt?: number; retirementTimer?: ReturnType<typeof setTimeout> | undefined;
+};
+/** One inert surface per companion. Its owner is the only presentation source. */
+export class CompanionSceneWindows {
+  private readonly entries = new Map<number, SceneEntry>();
+  constructor(private readonly create: (bounds: Bounds, owner: CompanionSceneOwner) => CompanionSceneWindow,
+    private readonly workArea: (bounds: Bounds) => Bounds) {}
+
+  update(owner: CompanionSceneOwner, raw: unknown, viewport: CompanionSceneViewport): void {
+    const descriptor = readCompanionSceneDescriptor(raw);
+    if (owner.isDestroyed()) { this.clear(owner.id); return; }
+    const geometry = companionSceneLayout(owner.getContentBounds(), viewport, this.workArea(owner.getContentBounds()), descriptor.layout === 'spatial-b-v1', preferredSceneSide(descriptor));
+    let entry = this.entries.get(owner.id);
+    if (entry?.window.isDestroyed() && !entry.failed) { this.unavailable(entry); entry = this.entries.get(owner.id); }
+    if (entry && descriptor.revision <= entry.descriptor.revision) return;
+    if (!entry) {
+      if (descriptor.kind === null && !descriptor.team?.members.length) return;
+      entry = { owner, window: this.create(geometry.bounds, owner), descriptor, viewport: { ...viewport }, receivedAt: Date.now(), recoveryUsed: false, failed: false, recovering: false, ready: false, blocked: false, publishing: false, dirty: false };
+      this.entries.set(owner.id, entry);
+      this.listen(entry);
+    } else {
+      const newScope = entry.descriptor.scope !== descriptor.scope;
+      if (newScope) entry.recoveryUsed = false;
+      // Drawing/geometry revisions are not a new event. Only a new semantic
+      // primary or cue instance can rearm a performance after renderer recovery.
+      if (newScope || entry.descriptor.kind !== descriptor.kind || entry.descriptor.phase !== descriptor.phase
+        || entry.descriptor.outcome !== descriptor.outcome || entry.descriptor.cue !== descriptor.cue
+        || entry.descriptor.cueInstance !== descriptor.cueInstance) entry.recovering = false;
+      const retiring = entry.descriptor.scope === descriptor.scope && !descriptor.suppressed && !descriptor.menuOpen
+        && !!entry.descriptor.team?.members.length && !descriptor.team?.members.length;
+      if (retiring) {
+        clearTimeout(entry.retirementTimer);
+        entry.teamRetiresAt = Date.now() + 600;
+        const retiringEntry = entry;
+        entry.retirementTimer = setTimeout(() => { if (this.entries.get(owner.id) === retiringEntry) this.refresh(owner.id); }, 600);
+      } else if (descriptor.scope !== entry.descriptor.scope || descriptor.suppressed || descriptor.menuOpen || descriptor.team?.members.length) {
+        clearTimeout(entry.retirementTimer); delete entry.retirementTimer; delete entry.teamRetiresAt;
+      }
+      if (entry.descriptor.scope !== descriptor.scope || entry.descriptor.kind !== descriptor.kind || entry.descriptor.phase !== descriptor.phase || entry.descriptor.outcome !== descriptor.outcome) entry.receivedAt = Date.now();
+      entry.descriptor = descriptor; entry.viewport = { ...viewport };
+      if (newScope && entry.failed) this.replace(entry);
+    }
+    this.refresh(owner.id);
+  }
+
+  private listen(entry: SceneEntry): void {
+    entry.window.onRendererGone(() => this.unavailable(entry));
+    entry.window.onReady(() => {
+      if (this.entries.get(entry.owner.id) !== entry || entry.failed) return;
+      entry.ready = true; this.refresh(entry.owner.id);
+    });
+  }
+
+  private replace(entry: SceneEntry): void {
+    const owner = entry.owner;
+    if (owner.isDestroyed()) { this.clear(owner.id); return; }
+    const { bounds } = companionSceneLayout(owner.getContentBounds(), entry.viewport, this.workArea(owner.getContentBounds()), entry.descriptor.layout === 'spatial-b-v1', preferredSceneSide(entry.descriptor));
+    try {
+      const replacement: SceneEntry = { ...entry, window: this.create(bounds, owner), ready: false, failed: false, recovering: true,
+        publishing: false, dirty: false, lastPayload: undefined, retirementTimer: undefined };
+      this.entries.set(owner.id, replacement);
+      const terminalAt = replacement.descriptor.phase === 'active' ? undefined : replacement.receivedAt + (replacement.descriptor.phase === 'resolve' ? 900 : 600);
+      const deadline = [replacement.teamRetiresAt, terminalAt].filter((at): at is number => at !== undefined && at > Date.now()).sort((a, b) => a - b)[0];
+      if (deadline !== undefined)
+        replacement.retirementTimer = setTimeout(() => { if (this.entries.get(owner.id) === replacement) this.refresh(owner.id); }, deadline - Date.now());
+      this.listen(replacement);
+    } catch { /* Keep the failed entry and current facts; no autonomous retry loop. */ }
+  }
+
+  private unavailable(entry: SceneEntry): void {
+    if (this.entries.get(entry.owner.id) !== entry || entry.failed) return;
+    entry.failed = true; entry.ready = false; entry.dirty = false;
+    clearTimeout(entry.retirementTimer); delete entry.retirementTimer;
+    if (!entry.window.isDestroyed()) { entry.window.hide(); entry.window.close(); }
+    // A persistent renderer fault must not create a crash/restart loop. A new
+    // owner scope or explicit clear can rearm; ordinary drawing revisions cannot.
+    if (!entry.recoveryUsed) { entry.recoveryUsed = true; this.replace(entry); }
+  }
+
+  inspectionReceipt(ownerId: number) {
+    const entry = this.entries.get(ownerId);
+    if (!entry || entry.descriptor.kind !== 'portfolio') return null;
+    const { descriptor } = entry;
+    const inspectionSide = entry.failed || entry.blocked || descriptor.suppressed || descriptor.menuOpen || !entry.owner.isVisible()
+      ? null : companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()), descriptor.layout === 'spatial-b-v1', preferredSceneSide(descriptor)).layout.inspectionSide;
+    return { scope: descriptor.scope, revision: descriptor.revision, inspectionSide };
+  }
+
+  block(ownerId: number, blocked: boolean): void {
+    const entry = this.entries.get(ownerId); if (!entry) return;
+    entry.blocked = blocked;
+    if (blocked) { clearTimeout(entry.retirementTimer); delete entry.retirementTimer; delete entry.teamRetiresAt; }
+    this.refresh(ownerId);
+  }
+
+  refresh(ownerId: number): void {
+    const entry = this.entries.get(ownerId); if (!entry) return;
+    if (entry.owner.isDestroyed()) { this.clear(ownerId); return; }
+    if (entry.failed) return;
+    if (entry.window.isDestroyed()) { this.unavailable(entry); return; }
+    if (!entry.owner.isVisible() || entry.owner.isMinimized()) { clearTimeout(entry.retirementTimer); delete entry.retirementTimer; delete entry.teamRetiresAt; }
+    // Native input suppression happens synchronously, before queued renderer work.
+    if (!this.visible(entry)) entry.window.hide();
+    if (!entry.ready) return;
+    // Keep only the latest receipt while a renderer publish is pending. Pointer
+    // moves must not allocate a promise chain behind a slow decorative window.
+    entry.dirty = true;
+    if (entry.publishing) return;
+    entry.publishing = true;
+    void Promise.resolve().then(async () => {
+      while (entry.dirty) {
+        entry.dirty = false;
+        if (this.entries.get(ownerId) !== entry || entry.window.isDestroyed() || entry.owner.isDestroyed()) return;
+        // Suppression is also published: hidden renderers must stop their RAF.
+        if (!this.visible(entry)) entry.window.hide();
+        const { bounds, layout } = companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()), entry.descriptor.layout === 'spatial-b-v1', preferredSceneSide(entry.descriptor));
+        entry.window.setBounds(bounds); entry.window.setAlwaysOnTop(entry.owner.isAlwaysOnTop());
+        // A recovered document has no history. Keep current roster/status, not
+        // a restarted acknowledgement or withdrawn primary. Owner facts/age stay intact.
+        const discardTail = entry.recovering && entry.descriptor.phase !== 'active'
+          && entry.descriptor.kind !== 'portfolio' && entry.descriptor.kind !== 'status';
+        const descriptor = { ...entry.descriptor, ...(entry.recovering ? { cue: 'transition' as const } : {}),
+          ...(discardTail ? { kind: null, phase: 'active' as const, outcome: null, count: null } : {}), suppressed: !this.visible(entry) };
+        const payload = { descriptor, layout }, key = JSON.stringify(payload);
+        if (entry.lastPayload !== key) {
+          await entry.window.publish(payload);
+          entry.lastPayload = key;
+        }
+        if (this.entries.get(ownerId) !== entry || entry.window.isDestroyed()) return;
+        // A changed viewport or unblock with the same revision still needs its
+        // latest payload before showing; never flash the stale in-flight scene.
+        if (!entry.dirty && this.visible(entry) && entry.descriptor.revision === descriptor.revision) entry.window.showInactive();
+        else entry.window.hide();
+      }
+    }).catch(() => this.unavailable(entry))
+      .finally(() => { entry.publishing = false; if (entry.dirty && this.entries.get(ownerId) === entry) this.refresh(ownerId); });
+  }
+
+  private visible(entry: SceneEntry): boolean {
+    if (entry.recovering && entry.descriptor.phase !== 'active' && entry.descriptor.kind !== 'portfolio'
+      && entry.descriptor.kind !== 'status' && !entry.descriptor.team?.members.length) return false;
+    const age = Date.now() - entry.receivedAt;
+    const expired = entry.descriptor.phase === 'withdraw' ? age >= 600 : entry.descriptor.phase === 'resolve' && age >= 900;
+    const hasTeam = !!entry.descriptor.team?.members.length || Date.now() < (entry.teamRetiresAt ?? 0);
+    return (hasTeam || !expired) && !entry.blocked && !entry.descriptor.suppressed && (entry.descriptor.kind !== null || hasTeam)
+      && !entry.owner.isDestroyed() && entry.owner.isVisible() && !entry.owner.isMinimized();
+  }
+  clear(ownerId: number): void {
+    const entry = this.entries.get(ownerId); if (!entry) return;
+    this.entries.delete(ownerId); clearTimeout(entry.retirementTimer); if (!entry.window.isDestroyed()) entry.window.close();
+  }
+  clearAll(): void { for (const id of this.entries.keys()) this.clear(id); }
+}

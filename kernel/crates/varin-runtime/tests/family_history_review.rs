@@ -131,6 +131,15 @@ fn nested_fixture() -> (Fixture, ChildTask, ChildTask, ChildTask) {
 #[test]
 fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control() {
     let (mut f, first, sibling, nested) = nested_fixture();
+    let attention=f.db.capture_attention_read().load(&||false).unwrap();
+    assert_eq!(attention.team_executions.len(),3);
+    let relation=attention.team_executions.iter().find(|r|r.child_thread_id==nested.child_thread_id).unwrap();
+    assert_eq!(relation.parent_thread_id,nested.parent_thread_id);
+    assert_eq!(relation.parent_branch_id,nested.parent_branch_id);
+    assert_eq!(relation.parent_run_id,nested.parent_run_id);
+    assert_eq!(relation.child_operation_id,nested.operation_id);
+    assert_eq!(relation.avatar,nested.avatar);
+    assert!(!serde_json::to_string(&attention.team_executions).unwrap().contains("input_ref"));
     f.db.create_thread("unrelated", "unrelated-branch").unwrap();
     for caller in [
         "thread:parent",
@@ -202,6 +211,13 @@ fn cancelled_report_leaves_current_directory_only_after_the_parent_receives_the_
     let mut f=Fixture::new();
     assert!(f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().is_none());
     let child=f.accept();f.settle_exchange();f.db.cancel_child(&child.operation_id).unwrap();
+    let revision=f.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
+    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"archive-settling-child".into(),expected_revision:revision,title:None,pinned:None,archived:Some(true)}).unwrap();
+    let attention=f.db.capture_attention_read().load(&||false).unwrap();
+    assert!(attention.branches.iter().any(|b|b.thread_id==child.child_thread_id&&b.archived&&b.has_unsettled_work));
+    let relation=attention.team_executions.iter().find(|r|r.child_thread_id==child.child_thread_id).unwrap();
+    assert_eq!(relation.state,"cancelled");assert_eq!(relation.parent_run_id,child.parent_run_id);
+    assert!(relation.activity.is_none());assert!(relation.child_run_id.is_none());
     let tail=f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().unwrap();
     let Content::Text{text}=&tail.content else {panic!("status text")};
     assert!(text.contains(&child.agent_id));assert!(text.contains("reportCursor"));
@@ -222,6 +238,16 @@ fn cancelled_report_leaves_current_directory_only_after_the_parent_receives_the_
         f.db.commit_execution(&f.context.run_id,epoch,&record).unwrap();
     }
     assert!(f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().is_none());
+    let hidden = f.db.capture_attention_read().load(&||false).unwrap();
+    assert!(!hidden.team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
+    assert!(!hidden.delegations.iter().any(|r|r.child_thread_id==child.child_thread_id));
+    let revision=f.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
+    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"show-completed-child".into(),expected_revision:revision,title:None,pinned:None,archived:Some(false)}).unwrap();
+    let visible = f.db.capture_attention_read().load(&||false).unwrap();
+    assert!(!visible.team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
+    let relation=visible.delegations.iter().find(|r|r.child_thread_id==child.child_thread_id).unwrap();
+    assert_eq!(relation.accepted_cursor,Some(child.cursor));
+    assert_eq!(relation.parent_branch_id,child.parent_branch_id);
     let history=f.db.history("branch:parent").unwrap();assert_eq!(history.len(),before+1);
     assert!(history.iter().all(|item|!item.content.to_string().contains("当前协作任务")));
     let page=f.db.capture_family_read("thread:parent",None,None).unwrap().list_page(false,FamilyListQuery{scope:Some("history".into()),query:Some(child.agent_id.to_lowercase()),limit:Some(1),..Default::default()},&||false).unwrap();

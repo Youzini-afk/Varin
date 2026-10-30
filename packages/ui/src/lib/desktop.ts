@@ -68,6 +68,7 @@ export type DesktopSettings = {
   homeDirectory?: string;
   desktopLanAccessEnabled?: boolean;
   desktopKeepAwakeEnabled?: boolean;
+  desktopCompanionEnabled?: boolean;
   desktopMinimizeToTrayEnabled?: boolean;
   desktopMacMenuBarEnabled?: boolean;
   desktopUiPassword?: string;

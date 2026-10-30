@@ -1,0 +1,303 @@
+{
+  "id": "question-answered-path",
+  "family": "USER_ATTENTION",
+  "kind": "action",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "stage": "motion-candidate",
+  "reviewStatus": "candidate",
+  "entryPose": "seated-open-neutral-keyboard",
+  "exitPose": "seated-open-neutral-keyboard",
+  "loop": null,
+  "frames": [
+    {
+      "source": "frame-000.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "question-ask-enter-v1"
+    },
+    {
+      "source": "frame-001.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-enter-moving",
+      "phase": "question-ask-enter-v1"
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-enter-moving",
+      "phase": "question-ask-enter-v1"
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-enter-moving",
+      "phase": "question-ask-enter-v1"
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-enter-moving",
+      "phase": "question-ask-enter-v1"
+    },
+    {
+      "source": "frame-005.png",
+      "durationMs": 320,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-query-chin-attentive",
+      "phase": "question-ask-enter-v1"
+    },
+    {
+      "source": "frame-006.png",
+      "durationMs": 220,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-query-chin-attentive",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-007.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-release-moving",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-008.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-release-moving",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-009.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-release-moving",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-010.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-release-moving",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-011.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-012.png",
+      "durationMs": 1800,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-013.png",
+      "durationMs": 50,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-halfblink",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-014.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-closedblink",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-015.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-halfblink",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-016.png",
+      "durationMs": 1500,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-017.png",
+      "durationMs": 1600,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed-settled",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-018.png",
+      "durationMs": 1000,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed",
+      "phase": "question-unanswered-hold-v1"
+    },
+    {
+      "source": "frame-019.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-relaxed",
+      "phase": "relaxed-to-neutral-v1"
+    },
+    {
+      "source": "frame-020.png",
+      "durationMs": 50,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-halfblink",
+      "phase": "relaxed-to-neutral-v1"
+    },
+    {
+      "source": "frame-021.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-watch-user-closedblink",
+      "phase": "relaxed-to-neutral-v1"
+    },
+    {
+      "source": "frame-022.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "relaxed-to-neutral-v1"
+    },
+    {
+      "source": "frame-023.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "answer-understood-v1"
+    },
+    {
+      "source": "frame-024.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "understanding-nod-moving",
+      "phase": "answer-understood-v1"
+    },
+    {
+      "source": "frame-025.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "understanding-nod-moving",
+      "phase": "answer-understood-v1"
+    },
+    {
+      "source": "frame-026.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "understanding-nod-moving",
+      "phase": "answer-understood-v1"
+    },
+    {
+      "source": "frame-027.png",
+      "durationMs": 200,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "answer-understood-v1"
+    }
+  ],
+  "warning": "Finite handoff choreography review only. This scripted demo injects an explicit simulated decision AFTER one hold cycle; production MUST NOT resolve permission/question on elapsed time.",
+  "trigger": "actual user answer received and understood; never timeout or denial",
+  "safeExitFrames": [
+    0,
+    4
+  ]
+}

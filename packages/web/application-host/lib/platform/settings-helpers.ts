@@ -214,6 +214,9 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.outboundNetwork !== undefined) {
       result.outboundNetwork = normalizeOutboundNetwork(candidate.outboundNetwork);
     }
+    if (typeof candidate.desktopCompanionEnabled === 'boolean') {
+      result.desktopCompanionEnabled = candidate.desktopCompanionEnabled;
+    }
     if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
       result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
     }

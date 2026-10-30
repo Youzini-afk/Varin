@@ -1,0 +1,9 @@
+{
+  "reviewer": "produce_observation_rest_animation",
+  "method": "Independent browser tab14,320px,1x native held-cel playback, sampled at0 and250ms and static source strip.",
+  "id": "observe.raised-focus-to-unknown-boundary-v1",
+  "decision": "accept-for-integration",
+  "finding": "Only eyelid/gaze changes over the existing raised hand pose; no new body or laptop shift. Gaze addresses user after blink. No stopped/failure/success claim.",
+  "manifestSha256": "ca1dea3166c1957a0b11648fb4cc7d938528a79a6488a8d25b38da4403457c10",
+  "scope": "330ms eye/face transition only; other recovery actions retain their respective review status."
+}

@@ -1,0 +1,201 @@
+{
+  "id": "observe.chin-enter-hold-release-v1",
+  "family": "OBSERVE_DIAGNOSE",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "seated-open-gaze-screen",
+  "exitPose": "seated-open-gaze-screen",
+  "loop": null,
+  "warning": "First continuous chin/eyelid candidate; timing, shoulder response and face-contact still need normal-speed visual review. Not full waiting/error coverage.",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 650,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "enter",
+      "pose": "seated-open-gaze-screen",
+      "contacts": {},
+      "exitTo": [
+        "seated-open-gaze-screen"
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "enter",
+      "pose": "observe-arm-transition",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "enter",
+      "pose": "observe-arm-transition",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "enter",
+      "pose": "observe-arm-transition",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "enter",
+      "pose": "observe-arm-transition",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 1550,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "pose": "observe-chin-contact",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "hold-half.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "pose": "observe-chin-contact",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "hold-closed.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "pose": "observe-chin-contact",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "hold-half.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "pose": "observe-chin-contact",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 2600,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "pose": "observe-chin-contact",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "exit",
+      "pose": "observe-arm-transition",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "exit",
+      "pose": "observe-arm-transition",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "exit",
+      "pose": "observe-arm-transition",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "exit",
+      "pose": "observe-arm-transition",
+      "contacts": {},
+      "exitTo": []
+    },
+    {
+      "source": "pose-000.png",
+      "durationMs": 1000,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "exit",
+      "pose": "seated-open-gaze-screen",
+      "contacts": {},
+      "exitTo": [
+        "seated-open-gaze-screen"
+      ]
+    }
+  ]
+}

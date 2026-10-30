@@ -11,7 +11,8 @@ import { registerThreadRoutes } from './thread-routes.js';
  * Catalog behavior and persistence are exercised in the Rust owner's real-database tests. */
 function fixture() {
   const requests = vi.fn(async (_method: string, _params: unknown, _signal?: AbortSignal): Promise<unknown> => []);
-  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
+  const exits = new Set<(error: Error) => void>();
+  const runtime = new AgentRuntimeClient({ subscribeExit(listener: (error: Error) => void) { exits.add(listener); return () => exits.delete(listener); }, onToolReleased() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
   const adapter = new ThreadAdapter(runtime, { resolveModel: vi.fn(), rebindModel: vi.fn() }, vi.fn(), vi.fn());
   const routes = new Map<string, RequestHandler[]>();
   const app = { post: (path: string, ...chain: RequestHandler[]) => routes.set(path, chain), get() {} } as unknown as Express;
@@ -40,7 +41,7 @@ function fixture() {
     return Response.json(output ?? {}, { status });
   };
   vi.stubGlobal('fetch', (url: string, init: RequestInit) => request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body))));
-  return { api: createThreadsHttpAPI(), requests, request, adapter };
+  return { api: createThreadsHttpAPI(), requests, request, adapter, failKernel: (error: Error) => { for (const listener of exits) listener(error); } };
 }
 afterEach(() => vi.unstubAllGlobals());
 const target = { runtime: 'agent' as const, threadId: 'original-thread' };
@@ -143,4 +144,45 @@ it('projects only the displayed failed Run\'s original failure and preserves an 
   run.state = 'failed'; unreadable = true;
   await expect(f.api.snapshot(identity)).rejects.toMatchObject({ code: 'thread-request-failed' });
   expect(f.requests.mock.calls.some(([method]) => /cancel|resume|retry/.test(method))).toBe(false);
+});
+
+it('reads complete attention through authenticated Host without per-thread hydration or scope injection', async () => {
+  const f = fixture();
+  const view = { epoch: 7, eventCursor: 42,
+    coverage: { native: 'complete', external: 'unsupported', scope: 'host' }, teamExecutions: [],
+    branches: [], items: [], counts: { actionRequired: 0, affectedBranches: 0, unknownEffects: 0 } };
+  f.requests.mockResolvedValue(view);
+  await expect(f.api.attention()).resolves.toEqual(view);
+  expect(f.requests.mock.calls.map(([method, params]) => [method, params])).toEqual([
+    ['runtime.thread.attention.read', {}],
+  ]);
+  expect((await f.request('/api/threads/attention', {}, false)).status).toBe(401);
+  expect((await f.request('/api/threads/attention', { threadId: 'invented-scope' })).status).toBe(400);
+  expect(f.requests).toHaveBeenCalledOnce();
+});
+
+it('cancels only the original attention read and does not turn unavailable data into empty success', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  f.requests.mockImplementation(async (_method, _params, signal) => new Promise((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  const pending = f.adapter.attention(controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  expect(f.requests.mock.calls[0]?.[2]).toBe(controller.signal);
+  controller.abort();
+  await rejected;
+  expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.thread.attention.read']);
+});
+
+
+it('rejects an attention snapshot whose kernel was replaced during the read', async () => {
+  const f = fixture();
+  f.requests.mockImplementation(async () => {
+    f.failKernel(new Error('original kernel replaced'));
+    return { epoch: 7, eventCursor: 42, coverage: { native: 'complete', external: 'unsupported', scope: 'host' },
+      branches: [], items: [], teamExecutions: [], delegations: [], follows: [],
+      counts: { actionRequired: 0, affectedBranches: 0, unknownEffects: 0 } };
+  });
+  await expect(f.adapter.attention()).rejects.toThrow('original kernel replaced');
 });

@@ -1,0 +1,36 @@
+{
+  "pathBase": "this directory",
+  "files": [
+    {
+      "path": "build.py",
+      "sha256": "4f1507e0bf9e713f0b792ad277b71cb498eebb3131bf752be6dfd079ef1e62f8",
+      "bytes": 3076
+    },
+    {
+      "path": "frames/closed-tap-playful-v1-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/closed-tap-playful-v1.png",
+      "sha256": "99a59fedaedf1dd40bb414ee4dc425fa3bca811bc3684fd60ca289754ba4b9f3",
+      "bytes": 337828
+    },
+    {
+      "path": "index.json",
+      "sha256": "3a94c9cc13f1eeeb1832ebfce134787b100291933f8dc819abe81872657fdec8",
+      "bytes": 1777
+    },
+    {
+      "path": "review.jpg",
+      "sha256": "cb6f81c0d9429f29f5a71eacb62362295564f1e5736d46187721574448b9d06f",
+      "bytes": 197160
+    },
+    {
+      "path": "verification.json",
+      "sha256": "6bc398e900bf1e2925700f2782bc449423bc23b3aaba95150db13d521a58dac3",
+      "bytes": 594
+    }
+  ],
+  "dependencies": "production-v3/closed-tap-playful frozen source package; production-v2 relocation exact closed endpoint detached/mask via current-source-detached-index-v4"
+}

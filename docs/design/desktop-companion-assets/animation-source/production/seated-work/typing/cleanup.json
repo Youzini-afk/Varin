@@ -1,0 +1,26 @@
+[
+  {
+    "frame": 1,
+    "removedSpuriousWhiteHemPixels": 95
+  },
+  {
+    "frame": 2,
+    "removedSpuriousWhiteHemPixels": 105
+  },
+  {
+    "frame": 3,
+    "removedSpuriousWhiteHemPixels": 103
+  },
+  {
+    "frame": 4,
+    "removedSpuriousWhiteHemPixels": 103
+  },
+  {
+    "frame": 5,
+    "removedSpuriousWhiteHemPixels": 94
+  },
+  {
+    "frame": 6,
+    "removedSpuriousWhiteHemPixels": 107
+  }
+]

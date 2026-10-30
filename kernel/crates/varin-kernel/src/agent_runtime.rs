@@ -1106,6 +1106,7 @@ pub(crate) fn spawn(
                                 | "runtime.operation.inspect"
                                 | "runtime.operation.calls"
                                 | "runtime.thread.operations.active"
+                                | "runtime.thread.attention.read"
                                 | "runtime.permission.open"
                                 | "runtime.permission.consume"
                                 | "runtime.permission.decide"

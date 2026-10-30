@@ -1,0 +1,135 @@
+{
+  "id": "query-understand-v1",
+  "family": "USER_ATTENTION",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "keyposes",
+  "loop": false,
+  "entryPose": "seated-open-neutral-keyboard",
+  "exitPose": "seated-open-neutral-keyboard",
+  "warning": "Art candidate. Review displays answer arriving after question; runtime must wait for actual user answer. Reuses authored arm drawings with different entry/exit exposures, not claims of unique independent arms. Head nod only after arm leaves chin, no approval semantics.",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 300,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 700,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-007.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-008.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-009.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-010.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-011.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-012.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-013.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-014.png",
+      "durationMs": 400,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  ]
+}

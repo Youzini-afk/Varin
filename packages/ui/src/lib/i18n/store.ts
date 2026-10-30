@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 import { dict as enDict, type I18nKey } from './messages/en';
-import { DEFAULT_LOCALE, detectInitialLocale, type Locale, writeStoredLocale } from './runtime';
+import { DEFAULT_LOCALE, detectInitialLocale, LOCALE_STORAGE_KEY, readStoredLocale, type Locale, writeStoredLocale } from './runtime';
 
 export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 export type I18nDictionary = Record<I18nKey, string>;
@@ -99,7 +99,20 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
   },
 }));
 
+let localeStorageWindow: Window | undefined;
+const syncStoredLocale = (event: StorageEvent): void => {
+  if (event.key !== LOCALE_STORAGE_KEY) return;
+  // Read the latest saved value, not an older queued event's payload.
+  const locale = readStoredLocale();
+  if (locale) void useI18nStore.getState().setLocale(locale);
+};
+
 export function initializeLocale(): void {
+  if (typeof window !== 'undefined' && localeStorageWindow !== window) {
+    localeStorageWindow?.removeEventListener('storage', syncStoredLocale);
+    localeStorageWindow = window;
+    localeStorageWindow.addEventListener('storage', syncStoredLocale);
+  }
   void useI18nStore.getState().setLocale(detectInitialLocale());
 }
 

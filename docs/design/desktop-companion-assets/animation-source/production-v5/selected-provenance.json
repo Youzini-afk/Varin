@@ -1,0 +1,286 @@
+{
+  "version": 1,
+  "status": "selected-source-checkpoint-not-runtime-admission",
+  "runtimeApproval": false,
+  "sourceInputs": [
+    {
+      "studyRelative": "result-v5-sequence/refinement-current/r3/import-map-r3.json",
+      "sha256": "adf522b27bd520c8326883412489ff83f9baa7192b151db5550b9af5c3324895"
+    },
+    {
+      "studyRelative": "result-v5-sequence/refinement-current/r3/seated-preparation-r3.json",
+      "sha256": "1a66e44092caccde4f4feff77681f34ed9e05e9090193dae315f24d90caff697"
+    },
+    {
+      "studyRelative": "result-v5-sequence/refinement-current/r3/provenance-r3.json",
+      "sha256": "2dbea24c1a7a51d799bd61a0f0fbff14649c9a16384d4357c53d1a505542601b"
+    },
+    {
+      "studyRelative": "result-v5-sequence/refinement-current/r3/sequence-ordinary-r3.json",
+      "sha256": "46b719df1cdab52fae441e26d7c79d154f7456461674824606ecf9a5f21064be"
+    },
+    {
+      "studyRelative": "result-v5-sequence/refinement-current/r3/sequence-detached-r3.json",
+      "sha256": "10e72973c93f14ea8f56e14193f8c0be241e4843b5a68a89cd4642b537e17d1f"
+    },
+    {
+      "studyRelative": "result-v5-sequence/refinement-current/r3/return-route-r3.json",
+      "sha256": "2c37ab86ab5a8f5a74530153328c537c56d77f4bde0fd3adb8316f2d0d3d20e1"
+    },
+    {
+      "studyRelative": "forward-attention-v5/timing-and-provenance.json",
+      "sha256": "c1cfd9cb6d0840c8bfb1e57eab43bd431190d3bc2d29103a5af92d0929443fbb"
+    },
+    {
+      "studyRelative": "director-handoff-v5-sequence/compiler-handoff-v3.json",
+      "sha256": "fbab79e500c94f270fbc4503f05432359f1ca646c52b253ee239b3caa2860e33"
+    },
+    {
+      "studyRelative": "director-handoff-v5-sequence/source-with-detached-v3.json",
+      "sha256": "18e1607636455f0dcf8614af9aacfcda898b136c0cdead84e04288ce3c1f1594"
+    },
+    {
+      "studyRelative": "director-handoff-v5-sequence/exit-support-routes-v3.json",
+      "sha256": "9088461482be145975ee9e8ee198b960488ef7912836669b4d76cff06971f528"
+    },
+    {
+      "studyRelative": "director-handoff-v5-sequence/timing-v2.json",
+      "sha256": "7b184104812a5b95cce866d676b13327fad36b257d44f654d50b5baa1596ac71"
+    }
+  ],
+  "aliases": {
+    "canonical": "neutral",
+    "neutral-exact": "neutral",
+    "open-neutral": "neutral",
+    "listen-crest": "listen",
+    "e-side": "lift-side",
+    "e-support": "lift-support"
+  },
+  "selected": [
+    {
+      "family": "result-relief",
+      "originalId": "canonical",
+      "recipeId": "neutral",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+      "foregroundSHA256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+      "detachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+    },
+    {
+      "family": "result-relief",
+      "originalId": "t0-attention",
+      "recipeId": "t0-attention",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/result-relief/t0-attention-r3.png",
+      "foregroundSHA256": "6d414d5e9d8f6924ecd716a6c6403cb293ee4c1680ffbd74f139cd07bccdf4ba",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/result-relief/t0-attention-r3.png",
+      "detachedSHA256": "51e119daa2a87eb36cc9ea2c56efbebd175e2084f41c54ac32da15c0532f984f"
+    },
+    {
+      "family": "result-relief",
+      "originalId": "t1-held-inhale",
+      "recipeId": "t1-held-inhale",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/result-relief/t1-held-inhale-r3.png",
+      "foregroundSHA256": "6e6340718ff8b9a9c61eea05c1d3eaeb0d139dd74a2a4ba788e2a8ba73898e89",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/result-relief/t1-held-inhale-r3.png",
+      "detachedSHA256": "7bdfc9f6a377123fb17fc1ef1d80fbc3e4ade17ce61db42d27f77ade532727fd"
+    },
+    {
+      "family": "result-relief",
+      "originalId": "t2-exhale-mid",
+      "recipeId": "t2-exhale-mid",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/result-relief/t2-exhale-mid-r3.png",
+      "foregroundSHA256": "d5f594553235fb0c3ede7cd0c882e9e651c9dcf110f21590a08dab6ecd6bfb40",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/result-relief/t2-exhale-mid-r3.png",
+      "detachedSHA256": "0a482f027b08452150d968c459ed59c2cedb21d679f6f1d439816aa9603fcddf"
+    },
+    {
+      "family": "result-relief",
+      "originalId": "t3-engaged-relief",
+      "recipeId": "t3-engaged-relief",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/result-relief/t3-engaged-relief-r3.png",
+      "foregroundSHA256": "2ac4b4cc94d3fa5e625ef201876c269a5cda8c54f5233d814b9a525ab8954e21",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/result-relief/t3-engaged-relief-r3.png",
+      "detachedSHA256": "00e308a8446f5178f4ab9835968f997a0d6941805e2e5d2d93500b3006d8b4be"
+    },
+    {
+      "family": "forward-attention",
+      "originalId": "open-neutral",
+      "recipeId": "neutral",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+      "foregroundSHA256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+      "detachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+    },
+    {
+      "family": "forward-attention",
+      "originalId": "entry-early",
+      "recipeId": "entry-early",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/forward-attention/entry-early.png",
+      "foregroundSHA256": "278c198850cdf9e3ee56f0aa8ed21c45ad22e3d330545958e111722456ecc6bb",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/forward-attention/entry-early.png",
+      "detachedSHA256": "4e138953a4f7e069a482eb3b9974888fb55f8bbcddc689044463e6a6e960da51"
+    },
+    {
+      "family": "forward-attention",
+      "originalId": "entry-late",
+      "recipeId": "entry-late",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/forward-attention/entry-late.png",
+      "foregroundSHA256": "dea7c7cb16ad81478d0b61d8f713f0c521b496cc15d2782a327b93a99d83641c",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/forward-attention/entry-late.png",
+      "detachedSHA256": "23623b2d41537b8152335316fdb91c205c85185e35b208e79deb0ba11c618c18"
+    },
+    {
+      "family": "forward-attention",
+      "originalId": "listen-crest",
+      "recipeId": "listen",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/listen-crest.png",
+      "foregroundSHA256": "1c7d50642f5c3f44477954b18ba36786c6e4cdf0b6c66055c26a80f85cb20f65",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/forward-attention/listen-crest.png",
+      "detachedSHA256": "fd31ea1c2d583e6827c5d67c96b78df0831d0069c52bb517c0b976938ed74b4b"
+    },
+    {
+      "family": "forward-attention",
+      "originalId": "recovery-mid",
+      "recipeId": "recovery-mid",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/forward-attention/recovery-mid.png",
+      "foregroundSHA256": "5acae11d41b73d8518286b6fe6b6a6ffcb74f486e8a173cbbdc65dfcca3f2c3f",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/forward-attention/recovery-mid.png",
+      "detachedSHA256": "68c0d9660d911b3e573ad34259bfbf775e380ef1115db9c1ac6f0a9350c8490e"
+    },
+    {
+      "family": "forward-attention",
+      "originalId": "recovery-late",
+      "recipeId": "recovery-late",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/forward-attention/recovery-late.png",
+      "foregroundSHA256": "e44a3dfb074604199fa11c10969969ab11bd195233e1d279a2c81d8dedfb8e2d",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/forward-attention/recovery-late.png",
+      "detachedSHA256": "282f9317d36947dc965e9cf0ed5760e1fe87893514567460f1f67062c4c51bc1"
+    },
+    {
+      "family": "director",
+      "originalId": "neutral-exact",
+      "recipeId": "neutral",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+      "foregroundSHA256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+      "detachedSHA256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+    },
+    {
+      "family": "director",
+      "originalId": "w01-b",
+      "recipeId": "w01-b",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w01-b.png",
+      "foregroundSHA256": "7e4f57408ef17b0097224b3df9491a3a49d4a6f57e4bdf23dc194832825c84b6",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-b.png",
+      "detachedSHA256": "6264e57fedda783a7d675a3a6ecca8809ee34878749f3c8be9b62584d4ccc592"
+    },
+    {
+      "family": "director",
+      "originalId": "w01-c",
+      "recipeId": "w01-c",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w01-c.png",
+      "foregroundSHA256": "7d47cc0197c30be7ccbce7e9d6ed83e1ffa4e7a6aae8bd6f3e19905b0445d4be",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-c.png",
+      "detachedSHA256": "e4c98b4f0f855f6f0fb42f97eda1141b5151eaab2de2b967a2846e00d0e3b6d0"
+    },
+    {
+      "family": "director",
+      "originalId": "w01-h",
+      "recipeId": "w01-h",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w01-h.png",
+      "foregroundSHA256": "c626cfa45e76b361ff498469df08db582f759c897a034ca231873b4254217fa2",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-h.png",
+      "detachedSHA256": "e945c823e385f05d5d2180b923d692dc58ab9b6de8cf61f4deb218f732d2acae"
+    },
+    {
+      "family": "director",
+      "originalId": "w01-r",
+      "recipeId": "w01-r",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w01-r.png",
+      "foregroundSHA256": "a9a2ae3f777da34c9a71d292a2d05800d9ccd18fd3b2360b99ed0f5e1e10952e",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-r.png",
+      "detachedSHA256": "2de94bae0a322bd885c7875c267ef60661a286bf146dffab83e100173f7f9c33"
+    },
+    {
+      "family": "director",
+      "originalId": "w01-s",
+      "recipeId": "w01-s",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w01-s.png",
+      "foregroundSHA256": "e94975b3cea03e463b302c578f6a4048362da229a9bac6bf45f644940db14066",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w01-s.png",
+      "detachedSHA256": "c66755956f5670d510ff39af82410ebc47236d393660e025c27096bd56bae2af"
+    },
+    {
+      "family": "director",
+      "originalId": "w07-g",
+      "recipeId": "w07-g",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w07-g.png",
+      "foregroundSHA256": "0855442b4276685c6dec646278ab51dad6929757ffa983f2b6d691238d7569dc",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-g.png",
+      "detachedSHA256": "834623aa622e0bf067fd470a49a7b7490b7ded18283a4a8ab20fc1e4ff72458b"
+    },
+    {
+      "family": "director",
+      "originalId": "w07-h",
+      "recipeId": "w07-h",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w07-h.png",
+      "foregroundSHA256": "823f17a2dedabdf29459bdd48a4eb8a4e0886345ecc88d7c9ad6a80e135698be",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-h.png",
+      "detachedSHA256": "543e918bd25f49b5c8abbd34a3e8672f4c685bf2ae9c8a3f722e4bbf6845e9aa"
+    },
+    {
+      "family": "director",
+      "originalId": "w07-i",
+      "recipeId": "w07-i",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w07-i.png",
+      "foregroundSHA256": "a33fbdbba8f4eb730d170a99d141dc6bc8dc79a47b2da4d939447fa6621a45d3",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-i.png",
+      "detachedSHA256": "c7495480e92e80fc6945535218d43c0e4edd5245e9049db44537e0fc68b012df"
+    },
+    {
+      "family": "director",
+      "originalId": "w07-l",
+      "recipeId": "w07-l",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w07-l.png",
+      "foregroundSHA256": "964e83fe179a18a35a83d360d374b7e7d45bad4e96a9853ba323170aa61c8d3c",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-l.png",
+      "detachedSHA256": "d8f62961651b34737390602ea2f0f8a7b876497605b0dbd0dd321b357d57ac01"
+    },
+    {
+      "family": "director",
+      "originalId": "w07-p",
+      "recipeId": "w07-p",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w07-p.png",
+      "foregroundSHA256": "8dda7f267ad93d8115459058968e9182a3e0a55f87b5291f5341decb305c377d",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-p.png",
+      "detachedSHA256": "bd7c1bae5b5f51b2b4f6f5aaec88e9775218b2cd4b9404abdec3394683dce39e"
+    },
+    {
+      "family": "director",
+      "originalId": "w07-s",
+      "recipeId": "w07-s",
+      "foreground": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/director/w07-s.png",
+      "foregroundSHA256": "f1fe56578896a1defb62a98c497e86ea61afc99d6f68160b15cb9fc7c7b32092",
+      "detached": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/director/w07-s.png",
+      "detachedSHA256": "74b0cb79fad93da5c8c9e0b9b862ddde6e9c6a3eb36efaa1b4c10d85ad6341fe"
+    }
+  ],
+  "overrides": [
+    {
+      "input": "result-v5-sequence/refinement-current/r3/return-route-r3.json",
+      "field": "interruption",
+      "replacement": "Interrupted T1 must T2 then canonical; never force T3.",
+      "authority": "Parent task explicit reviewed contract"
+    }
+  ],
+  "runtimeEvidence": {
+    "path": "local-review:v5-runtime-director-integrated.md",
+    "sha256": "6c29c60fb14b0c1fe5849b8870a36dc9b5c855fc7e3ecb05d0ebb95b640ee15b"
+  },
+  "limitations": [
+    "No public runtime installation or normal production admission.",
+    "W07 H 160ms vs virtual gather-in 340ms remains visual watch item.",
+    "Native root/world-stool coordinates, full Host scheduling and normal-speed physical continuity remain open.",
+    "Prepared sourceSHA256 must be verified after recipe preparation, not substituted with original PNG hashes."
+  ]
+}

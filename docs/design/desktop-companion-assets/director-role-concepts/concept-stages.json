@@ -1,0 +1,37 @@
+{
+  "plates": [
+    "overview",
+    "delegate",
+    "report",
+    "decision"
+  ],
+  "notes": "design-only scenarios, no runtime events or new avatar identities",
+  "variants": [
+    [
+      "child",
+      "原有子精灵",
+      "原身份 · 无角色配件"
+    ],
+    [
+      "collar",
+      "A 领航短披肩 · 推荐",
+      "双层肩线 / 空心菱形扣 / 小文书签"
+    ],
+    [
+      "sash",
+      "B 侧系派遣带",
+      "横向腰带 / 侧文件夹 / 非对称短尾"
+    ],
+    [
+      "jacket",
+      "C 项目工装襟",
+      "双翻领 / 肩章 / 文书口袋"
+    ]
+  ],
+  "ids": [
+    "ribbon-blue",
+    "scoop-pistachio",
+    "lens-lilac",
+    "overlap-coral"
+  ]
+}

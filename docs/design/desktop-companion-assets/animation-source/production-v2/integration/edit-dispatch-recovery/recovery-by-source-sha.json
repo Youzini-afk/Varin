@@ -1,0 +1,563 @@
+{
+  "schemaVersion": 1,
+  "geometryReference": "varin-upright-v2",
+  "status": "existing-art recovery support candidate; runtime continuity still needs rendered QA",
+  "targetPublicPose": "open-screen",
+  "sourceSequences": "editing-dispatch/sequence-manifest.json",
+  "actualSequenceSHAcoverage": {
+    "used": 16,
+    "covered": 16,
+    "complete": true
+  },
+  "rules": [
+    "Every recovery step uses existing authored drawing only.",
+    "Never replay original DISPATCH, SELECT, REVISE, or other one-shot scene cue during recovery.",
+    "Typing exits forward posture once; no alternating body bob.",
+    "REVIEW lowers its raised image-left hand through review-rise and select hand-contact drawing; select is recovery-only, not a new selection event.",
+    "For carried mode resolve each original SHA to its no-stool derived SHA and preserve carrier geometry; do not restore seated pixels."
+  ],
+  "routes": [
+    {
+      "fromSourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "fromPose": "screen-read",
+      "fromFrame": "editing-dispatch/frames/screen-read.png",
+      "recovery": [],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": true
+    },
+    {
+      "fromSourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "fromPose": "neutral",
+      "fromFrame": "editing-dispatch/frames/neutral.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 140,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04",
+      "fromPose": "gaze-right",
+      "fromFrame": "editing-dispatch/frames/gaze-right.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/neutral.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "holdMs": 130,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 140,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "6adbd265d91917ffedabfcc7fa1fdbe6400ec8aaeb6188903a64ee6f28149d25",
+      "fromPose": "split-gaze",
+      "fromFrame": "editing-dispatch/frames/split-gaze.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 120,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+      "fromPose": "review-v2",
+      "fromFrame": "editing-dispatch/frames/review-v2.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+      "fromPose": "type-burst",
+      "fromFrame": "editing-dispatch/frames/type-burst.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+      "fromPose": "type-prepare",
+      "fromFrame": "editing-dispatch/frames/type-prepare.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/type-burst.png",
+          "sourceSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "holdMs": 150,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+      "fromPose": "type-forward",
+      "fromFrame": "editing-dispatch/frames/type-forward.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/type-prepare.png",
+          "sourceSHA256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/type-burst.png",
+          "sourceSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "holdMs": 150,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d",
+      "fromPose": "type-forward-hands-b",
+      "fromFrame": "editing-dispatch/frames/type-forward-hands-b.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/type-forward.png",
+          "sourceSHA256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+          "holdMs": 110,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/type-prepare.png",
+          "sourceSHA256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/type-burst.png",
+          "sourceSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "holdMs": 150,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "2ff88020f1da38714ac9484698cc921b3db0cd3d93dccf72833b0b052ba571f2",
+      "fromPose": "review",
+      "fromFrame": "editing-dispatch/frames/review.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/review-rise.png",
+          "sourceSHA256": "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/select.png",
+          "sourceSHA256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/type-burst.png",
+          "sourceSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "holdMs": 150,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6",
+      "fromPose": "review-rise",
+      "fromFrame": "editing-dispatch/frames/review-rise.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/select.png",
+          "sourceSHA256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/type-burst.png",
+          "sourceSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "holdMs": 150,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+      "fromPose": "select",
+      "fromFrame": "editing-dispatch/frames/select.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/type-burst.png",
+          "sourceSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "holdMs": 150,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb",
+      "fromPose": "dispatch-a-gaze",
+      "fromFrame": "editing-dispatch/frames/dispatch-a-gaze.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/dispatch-rise-gaze.png",
+          "sourceSHA256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+          "sourceSHA256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+      "fromPose": "dispatch-rise-gaze",
+      "fromFrame": "editing-dispatch/frames/dispatch-rise-gaze.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+          "sourceSHA256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+      "fromPose": "dispatch-transit-gazeB",
+      "fromFrame": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1",
+      "fromPose": "dispatch-b-v2-gazeB",
+      "fromFrame": "editing-dispatch/frames/dispatch-b-v2-gazeB.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+          "sourceSHA256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "38ecf44c540b2f1b195e37649e1b8a5159152e72a528c9f2ac6a11d64f1d642b",
+      "fromPose": "dispatch-a",
+      "fromFrame": "editing-dispatch/frames/dispatch-a.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/dispatch-rise.png",
+          "sourceSHA256": "e21d295b3b080eb60d4c4074f6880bdb0ae8124d806b8873ea3b0933951b9ade",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/dispatch-transit.png",
+          "sourceSHA256": "11d4d3e685e1217237c6d8bb501500e287adce0c32a7f0b08389c351fd4e203d",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "e21d295b3b080eb60d4c4074f6880bdb0ae8124d806b8873ea3b0933951b9ade",
+      "fromPose": "dispatch-rise",
+      "fromFrame": "editing-dispatch/frames/dispatch-rise.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/dispatch-transit.png",
+          "sourceSHA256": "11d4d3e685e1217237c6d8bb501500e287adce0c32a7f0b08389c351fd4e203d",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "11d4d3e685e1217237c6d8bb501500e287adce0c32a7f0b08389c351fd4e203d",
+      "fromPose": "dispatch-transit",
+      "fromFrame": "editing-dispatch/frames/dispatch-transit.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    },
+    {
+      "fromSourceSHA256": "cf6fa19cd93aa28daa4681f79e69bd4b86e937f889cc06a04795d36e24ea6c34",
+      "fromPose": "dispatch-b-v2",
+      "fromFrame": "editing-dispatch/frames/dispatch-b-v2.png",
+      "recovery": [
+        {
+          "frame": "editing-dispatch/frames/dispatch-transit.png",
+          "sourceSHA256": "11d4d3e685e1217237c6d8bb501500e287adce0c32a7f0b08389c351fd4e203d",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/review-v2.png",
+          "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "holdMs": 180,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        },
+        {
+          "frame": "editing-dispatch/frames/screen-read.png",
+          "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "holdMs": 170,
+          "cue": "recovery-only",
+          "suppressAllSceneActionCues": true
+        }
+      ],
+      "toPose": "open-screen",
+      "toAnchorSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "alreadyAtTarget": false
+    }
+  ]
+}

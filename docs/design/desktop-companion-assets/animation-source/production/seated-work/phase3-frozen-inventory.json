@@ -1,0 +1,263 @@
+{
+  "checkpoint": "seated-work-phase3-screen-gaze-20261028T2141Z",
+  "status": "frozen-motion-candidates-not-global-production-acceptance",
+  "files": [
+    {
+      "path": "seated-work/PHASE2-ALPHA-CORRECTION.md",
+      "sha256": "c8173f88b403aaaec91aa7543bc05a91d04c2620f04eb63252263a04a48cba27",
+      "bytes": 1408
+    },
+    {
+      "path": "seated-work/PHASE3-QA.md",
+      "sha256": "b8268c9007a7e103471f71505a7906a342296ecc1240225b10d07d328e027853",
+      "bytes": 1420
+    },
+    {
+      "path": "seated-work/build_read_screen_variants.py",
+      "sha256": "b4c7c604e2fc15b44e60ee010b7d8b6fcbf5eaf63389bf6e9b29bb336506aa7a",
+      "bytes": 2176
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "bytes": 309629
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "bytes": 309436
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/frame-004.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/qa.json",
+      "sha256": "8b2d4fd84dd640eb27125002a951e2467855773e315a604c0ab829401b7cdf95",
+      "bytes": 685,
+      "sourceSha256": "c5dbbb412f69f0a2c39f370b9b05899516a40d595275a1f3444a4e343c0446d1",
+      "sourceBytes": 743,
+      "publicationNormalization": "handMaskSource expressed relative to production root; numerical and pixel data unchanged"
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/sequence.source.json",
+      "sha256": "322feb53b769efba6e210b2f3dd105a237132ef7d586e3fd4a52f607821ae1cc",
+      "bytes": 1948
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-002.png",
+      "sha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343",
+      "bytes": 309618
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-003.png",
+      "sha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c",
+      "bytes": 309726
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-004.png",
+      "sha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316",
+      "bytes": 309531
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-005.png",
+      "sha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef",
+      "bytes": 309569
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/qa.json",
+      "sha256": "dcac71b94b2f02a5f9a634af254be9fdacb0e4673987bcc2bd7c37db052904a8",
+      "bytes": 879,
+      "sourceSha256": "abaea7c8780652bd98ff48315c1c40f6f3b8a45c27e8d57fde8eb9f4d65a67b7",
+      "sourceBytes": 937,
+      "publicationNormalization": "handMaskSource expressed relative to production root; numerical and pixel data unchanged"
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/sequence.source.json",
+      "sha256": "1a498926d2a89309ab929310e6e59eed249563f8e9f12085a031d2e0fe70c6ee",
+      "bytes": 2855
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "bytes": 309629
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "bytes": 309436
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-004.png",
+      "sha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+      "bytes": 309593
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-005.png",
+      "sha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+      "bytes": 309582
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/qa.json",
+      "sha256": "f28053765f1d9a9e81d35025e499fdc2f8eeb9da58f1f78aa1609329438dcb69",
+      "bytes": 879,
+      "sourceSha256": "868510e6cca67355ee0b430539d7cd0314540cf28140e772f234e40cef754098",
+      "sourceBytes": 937,
+      "publicationNormalization": "handMaskSource expressed relative to production root; numerical and pixel data unchanged"
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/sequence.source.json",
+      "sha256": "685f4dbe09d3ec13716699aae4d9cd975a3088547e29f85745c2dfedb582ca5c",
+      "bytes": 2854
+    }
+  ],
+  "externalDependencies": [
+    {
+      "path": "varin-animation-production/observe-diagnose/canonical-gaze-v1/read-screen.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-key-tap-v1/frame-001.png",
+      "sha256": "fde8b3f8710b8deed3d8b197eb92a3b8d296c522acf78c51ecc9159a7232a44b",
+      "bytes": 307996
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-key-tap-v1/frame-002.png",
+      "sha256": "ea70188ec129f99093db2a2bb06eb79955b0f759e5859844541e536f30b8315a",
+      "bytes": 308428
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-key-tap-v1/frame-003.png",
+      "sha256": "3296a817cf829a30d6535205f63cdc5e18e9fe591c4a2ee16f04aee6de13c238",
+      "bytes": 308245
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-key-tap-v1/frame-004.png",
+      "sha256": "fde8b3f8710b8deed3d8b197eb92a3b8d296c522acf78c51ecc9159a7232a44b",
+      "bytes": 307996
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-key-tap-v1/sequence.source.json",
+      "sha256": "d7a98754ee68a7ced1094892d47f4420bea566b31b5bc30eaa6cc6517361d2b3",
+      "bytes": 1833
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-scroll-v1/frame-001.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-scroll-v1/frame-002.png",
+      "sha256": "c45c56ca6d6aa12a9f08633819a4b07d94276a3fa67adb6849645983a36a7d5c",
+      "bytes": 309429
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-scroll-v1/frame-003.png",
+      "sha256": "1faea0ab353c5b241146eee398be4c4ea055b8bd6da237c2c346ff6d41417df2",
+      "bytes": 309533
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-scroll-v1/frame-004.png",
+      "sha256": "eda366aa35ea26e97ab7f9391140d8537cc64bd75f871cfbbd872785dc695439",
+      "bytes": 309343
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-scroll-v1/frame-005.png",
+      "sha256": "9a592d4842e692e2e08c56c0754a85cf9c91de8299ee8393da19f71cf97a7db1",
+      "bytes": 309380
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-scroll-v1/frame-006.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-scroll-v1/hand-context-mask.png",
+      "sha256": "5d3cef50355ec7aa11fb823ad74537a858aca54e199ef843211d99633ea22201",
+      "bytes": 941
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-scroll-v1/sequence.source.json",
+      "sha256": "50487f91faa739353dcb13c5da33180a9bb5731164efb44d02926023a937198d",
+      "bytes": 2502
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-typing-v1/frame-001.png",
+      "sha256": "fde8b3f8710b8deed3d8b197eb92a3b8d296c522acf78c51ecc9159a7232a44b",
+      "bytes": 307996
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-typing-v1/frame-002.png",
+      "sha256": "ea70188ec129f99093db2a2bb06eb79955b0f759e5859844541e536f30b8315a",
+      "bytes": 308428
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-typing-v1/frame-003.png",
+      "sha256": "3296a817cf829a30d6535205f63cdc5e18e9fe591c4a2ee16f04aee6de13c238",
+      "bytes": 308245
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-typing-v1/frame-004.png",
+      "sha256": "2a1f06e1f3c32490e78e566be34f1693c8f3fc929b1fd79cababd5cf02ea448f",
+      "bytes": 308395
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-typing-v1/frame-005.png",
+      "sha256": "8915b2b2309ebcb02f43ef6f662ea9c954bdb39b5eebddd3b8caddbf6c9b5763",
+      "bytes": 308386
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-typing-v1/frame-006.png",
+      "sha256": "fde8b3f8710b8deed3d8b197eb92a3b8d296c522acf78c51ecc9159a7232a44b",
+      "bytes": 307996
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-typing-v1/hand-context-mask.png",
+      "sha256": "93b0792de1f7340347e4ad7f727631e1dc2c8e4d58100ef2328009f3e34a3796",
+      "bytes": 946
+    },
+    {
+      "path": "varin-animation-production/seated-work/canonical-typing-v1/sequence.source.json",
+      "sha256": "20b8b9f2f1a308f2bb147958f4aabd8421a57d9f4a589aa9b3c499e335203997",
+      "bytes": 2501
+    },
+    {
+      "path": "varin-animation-production/shared/seated-open-canonical-alpha-draft-v0.png",
+      "sha256": "fde8b3f8710b8deed3d8b197eb92a3b8d296c522acf78c51ecc9159a7232a44b",
+      "bytes": 307996
+    },
+    {
+      "path": "varin-animation-production/shared/seated-open-canonical-alpha-v1.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    }
+  ],
+  "pathBase": "production-root"
+}

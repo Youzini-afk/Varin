@@ -1,0 +1,61 @@
+{
+  "id": "observe.unknown-entry-v1",
+  "family": "OBSERVE_DIAGNOSE",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "seated-open-read-screen",
+  "exitPose": "observe-unknown",
+  "loop": null,
+  "warning": "Art-only candidate. Semantic transitions require real Host facts; stopped-release never plays from cancel intent alone; sync does not imply completion. Normal-speed review pending.",
+  "frames": [
+    {
+      "source": "read.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "seated-open-read-screen"
+    },
+    {
+      "source": "middle-surprise.png",
+      "durationMs": 60,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "observe-recovery-transition"
+    },
+    {
+      "source": "raised-surprise.png",
+      "durationMs": 300,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "observe-recovery-transition"
+    },
+    {
+      "source": "raised-serious.png",
+      "durationMs": 1600,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "observe-unknown"
+    }
+  ]
+}

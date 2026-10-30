@@ -1,0 +1,61 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "observe-diagnose/canonical-chin-v2/hold-closed.png",
+      "sha256": "cb3bbea7be2e9282e380587c36ad6d08ca43a4682647407f5af64a2482c90bd9",
+      "bytes": 308514
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/pose-003.png",
+      "sha256": "ae13c9f58666b277628768a528885b88e05c984490f13aa454c8a6cc8831d191",
+      "bytes": 309370
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/build.py",
+      "sha256": "33e9a95585358e6619d65a3e9bc71b7aead6c03c88be728689b6f8e14c0a2be9",
+      "bytes": 1190
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/pose-002.png",
+      "sha256": "3d432405b24022b9f068293624f0cf63940f5a0a1f3550cc58551f6467024e43",
+      "bytes": 309487
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/pose-004.png",
+      "sha256": "878b9db63ea007ef20b94d3b244ebd2d1272b7d9a64c6a16f1da9b02e7ce346d",
+      "bytes": 309424
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/sequence.source.json",
+      "sha256": "21bcba40c8f594f3d8161442add1ae4967e8c46a57e467f2defe404fea8923a4",
+      "bytes": 3925
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/pose-000.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/hold-half.png",
+      "sha256": "fa76ec4c24fdcee17b55ce1701ff9dc55283a4752443a1244ba69325c3d3a956",
+      "bytes": 308968
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/pose-001.png",
+      "sha256": "e0757a3837d659b3f6015eb168932667fdaeaca537abcd43c4b6dff04eea3404",
+      "bytes": 309389
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/pose-005.png",
+      "sha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87",
+      "bytes": 309097
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v2/provenance.json",
+      "sha256": "6f0a812969a7b1e9510ca1c15f59d603e54b2508ee686512abee3a48e0d81a57",
+      "bytes": 184
+    }
+  ],
+  "pathBase": "production-root"
+}

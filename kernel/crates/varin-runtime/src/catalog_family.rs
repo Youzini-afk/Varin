@@ -177,7 +177,7 @@ pub struct FamilyListQuery {
 #[derive(Serialize, Deserialize)]
 struct MemberCursor { caller:String, root:String, before:i64, maximum:i64, scope:String, query:Option<String>,filters:String }
 // Current work is projected from the owners that already track execution and delivery.
-const CURRENT: &str = "(EXISTS(SELECT 1 FROM branches b WHERE b.thread_id=t.id AND b.active_run IS NOT NULL)
+pub(super) const CURRENT: &str = "(EXISTS(SELECT 1 FROM branches b WHERE b.thread_id=t.id AND b.active_run IS NOT NULL)
  OR EXISTS(SELECT 1 FROM code_exchange_peers p JOIN operations o ON o.id=p.operation_id WHERE p.peer_thread_id=t.id AND (json_extract(o.body,'$.phase')!='terminal' OR json_extract(o.body,'$.effect')='unknown'))
  OR EXISTS(SELECT 1 FROM input_queue q WHERE q.branch_id IN (SELECT id FROM branches WHERE thread_id=t.id) AND q.state='queued' AND q.activation='activating')
  OR EXISTS(SELECT 1 FROM child_tasks c JOIN delegated_executions d ON d.child_operation_id=c.id WHERE c.child_thread_id=t.id AND d.rowid=(SELECT max(x.rowid) FROM delegated_executions x WHERE x.child_operation_id=c.id) AND (json_extract(d.body,'$.report') IS NULL OR json_extract(d.body,'$.code_result.kind') IN ('pending','settling','candidate') OR NOT EXISTS(SELECT 1 FROM deliveries x WHERE x.state='\"committed\"' AND (x.observer='agent-status:'||d.id OR x.observer='child-report-history:'||d.id OR (x.observer='bot-report-delivery' AND x.request=d.id))))))";

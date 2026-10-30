@@ -1,0 +1,364 @@
+[
+  {
+    "sha": "41004ce0b9730cd5d53d3ad5170edabc99e6278f3c159a989965b02c013433f9",
+    "path": "observe-diagnose/canonical-stop-v1/middle-surprise.png",
+    "uses": [
+      {
+        "package": "observe.failure-entry-boundary-v1",
+        "exposure": 1,
+        "source": "middle-surprise.png"
+      },
+      {
+        "package": "observe.unknown-entry-boundary-v1",
+        "exposure": 1,
+        "source": "middle-surprise.png"
+      }
+    ]
+  },
+  {
+    "sha": "85668658799a6c27e9f810f83b65f1031c9f320c897bcabd0d64e056ce5d8622",
+    "path": "observe-diagnose/canonical-stop-v1/raised-surprise.png",
+    "uses": [
+      {
+        "package": "observe.failure-entry-boundary-v1",
+        "exposure": 2,
+        "source": "raised-surprise.png"
+      },
+      {
+        "package": "observe.unknown-entry-boundary-v1",
+        "exposure": 2,
+        "source": "raised-surprise.png"
+      }
+    ]
+  },
+  {
+    "sha": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824",
+    "path": "observe-diagnose/canonical-gaze-v1/half.png",
+    "uses": [
+      {
+        "package": "observe.gaze-to-screen-v1-pose-v1",
+        "exposure": 1,
+        "source": "half.png"
+      },
+      {
+        "package": "observe.gaze-to-user-v1-pose-v1",
+        "exposure": 1,
+        "source": "half.png"
+      }
+    ]
+  },
+  {
+    "sha": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f",
+    "path": "observe-diagnose/canonical-gaze-v1/closed.png",
+    "uses": [
+      {
+        "package": "observe.gaze-to-screen-v1-pose-v1",
+        "exposure": 2,
+        "source": "closed.png"
+      },
+      {
+        "package": "observe.gaze-to-user-v1-pose-v1",
+        "exposure": 2,
+        "source": "closed.png"
+      }
+    ]
+  },
+  {
+    "sha": "8ce2c012514281146a422c9369df895242f6642f03c07535568dafd6861bd780",
+    "path": "observe-diagnose/canonical-wait-cycle-v1/chin-glance-user.png",
+    "uses": [
+      {
+        "package": "observe.wait-hold-v1-boundary-v1",
+        "exposure": 13,
+        "source": "chin-glance-user.png"
+      }
+    ]
+  },
+  {
+    "sha": "09da09c185209721f9890563d264267c8a99a660bafcebd5242b515aa6c7bbdb",
+    "path": "observe-diagnose/canonical-wait-cycle-v1/rim-approach.png",
+    "uses": [
+      {
+        "package": "observe.wait-hold-v1-boundary-v1",
+        "exposure": 7,
+        "source": "rim-approach.png"
+      },
+      {
+        "package": "observe.wait-hold-v1-boundary-v1",
+        "exposure": 9,
+        "source": "rim-approach.png"
+      }
+    ]
+  },
+  {
+    "sha": "6adf830b01666d5c23b4e45e97ce5b08057e94f129312efc63722a6a931b7e18",
+    "path": "observe-diagnose/canonical-recovery-v1/check-005.png",
+    "uses": [
+      {
+        "package": "observe.uncertain-check-boundary-v1",
+        "exposure": 6,
+        "source": "check-005.png"
+      },
+      {
+        "package": "observe.uncertain-release-boundary-v1",
+        "exposure": 0,
+        "source": "check-005.png"
+      }
+    ]
+  },
+  {
+    "sha": "a1c931bef3b940bf8e50af0a506b6695a0d9dce602309e0e150adfe01f3d9e25",
+    "path": "observe-diagnose/canonical-recovery-v1/check-003.png",
+    "uses": [
+      {
+        "package": "observe.uncertain-check-boundary-v1",
+        "exposure": 4,
+        "source": "check-003.png"
+      },
+      {
+        "package": "observe.uncertain-release-boundary-v1",
+        "exposure": 2,
+        "source": "check-003.png"
+      }
+    ]
+  },
+  {
+    "sha": "f26683c6d0f669c5a1bf2e431dcc287218b1b89883f051fe94759a055c62bf41",
+    "path": "observe-diagnose/canonical-recovery-v1/rest-half.png",
+    "uses": [
+      {
+        "package": "observe.neutral-recovery-boundary-v1",
+        "exposure": 3,
+        "source": "rest-half.png"
+      },
+      {
+        "package": "observe.neutral-recovery-boundary-v1",
+        "exposure": 5,
+        "source": "rest-half.png"
+      }
+    ]
+  },
+  {
+    "sha": "b87df537bb124afa25bd9be7ec9cc775decf2f10c417efbf692850a9336d0823",
+    "path": "observe-diagnose/canonical-recovery-v1/raised-closed.png",
+    "uses": [
+      {
+        "package": "observe.cancel-hold-boundary-v1",
+        "exposure": 2,
+        "source": "raised-closed.png"
+      },
+      {
+        "package": "observe.unknown-hold-boundary-v1",
+        "exposure": 2,
+        "source": "raised-closed.png"
+      },
+      {
+        "package": "observe.raised-focus-to-unknown-boundary-v1",
+        "exposure": 2,
+        "source": "raised-closed.png"
+      }
+    ]
+  },
+  {
+    "sha": "5eedd7d91a13f90106550b7329816bf826b7a3dfd4012c04e5f453b347ee3fb9",
+    "path": "observe-diagnose/canonical-recovery-v1/rest-focused.png",
+    "uses": [
+      {
+        "package": "observe.sync-attention-boundary-v1",
+        "exposure": 3,
+        "source": "rest-focused.png"
+      },
+      {
+        "package": "observe.neutral-recovery-boundary-v1",
+        "exposure": 2,
+        "source": "rest-focused.png"
+      },
+      {
+        "package": "observe.neutral-recovery-boundary-v1",
+        "exposure": 6,
+        "source": "rest-focused.png"
+      }
+    ]
+  },
+  {
+    "sha": "cfe5597e8d81ab00bcd7362883e1c29692d79478ce5d275ccc78d9027a65e33f",
+    "path": "observe-diagnose/canonical-recovery-v1/middle-focused.png",
+    "uses": [
+      {
+        "package": "observe.cancel-entry-boundary-v1",
+        "exposure": 1,
+        "source": "middle-focused.png"
+      },
+      {
+        "package": "observe.sync-attention-boundary-v1",
+        "exposure": 2,
+        "source": "middle-focused.png"
+      },
+      {
+        "package": "observe.neutral-recovery-boundary-v1",
+        "exposure": 1,
+        "source": "middle-focused.png"
+      }
+    ]
+  },
+  {
+    "sha": "84ee8a6abd9d9a0c7b4aa4bff3ad5e77f162c75024114cca542f041e9e928270",
+    "path": "observe-diagnose/canonical-recovery-v1/check-000.png",
+    "uses": [
+      {
+        "package": "observe.uncertain-check-boundary-v1",
+        "exposure": 1,
+        "source": "check-000.png"
+      },
+      {
+        "package": "observe.uncertain-release-boundary-v1",
+        "exposure": 5,
+        "source": "check-000.png"
+      }
+    ]
+  },
+  {
+    "sha": "326d4fcce29ffa40fadb3d8d14186ac23d91d92e1e5c03c989e618aae377e81f",
+    "path": "observe-diagnose/canonical-recovery-v1/check-001.png",
+    "uses": [
+      {
+        "package": "observe.uncertain-check-boundary-v1",
+        "exposure": 2,
+        "source": "check-001.png"
+      },
+      {
+        "package": "observe.uncertain-release-boundary-v1",
+        "exposure": 4,
+        "source": "check-001.png"
+      }
+    ]
+  },
+  {
+    "sha": "c8c4ec19eb6fcf1f68cc8cd68fc2f2f2d07682a6675e8c6c42819d663de4f621",
+    "path": "observe-diagnose/canonical-recovery-v1/check-004.png",
+    "uses": [
+      {
+        "package": "observe.uncertain-check-boundary-v1",
+        "exposure": 5,
+        "source": "check-004.png"
+      },
+      {
+        "package": "observe.uncertain-release-boundary-v1",
+        "exposure": 1,
+        "source": "check-004.png"
+      }
+    ]
+  },
+  {
+    "sha": "5b1454b39deb72781973b9f6f0bd2fba1ae702eec87ac12804e0f76e421743c6",
+    "path": "observe-diagnose/canonical-recovery-v1/rest-closed.png",
+    "uses": [
+      {
+        "package": "observe.neutral-recovery-boundary-v1",
+        "exposure": 4,
+        "source": "rest-closed.png"
+      }
+    ]
+  },
+  {
+    "sha": "f2ec68ed05f9553053d4c8c55ab5b53e1efce256a1ac5d495c801169644fa41f",
+    "path": "observe-diagnose/canonical-recovery-v1/raised-half.png",
+    "uses": [
+      {
+        "package": "observe.cancel-hold-boundary-v1",
+        "exposure": 1,
+        "source": "raised-half.png"
+      },
+      {
+        "package": "observe.cancel-hold-boundary-v1",
+        "exposure": 3,
+        "source": "raised-half.png"
+      },
+      {
+        "package": "observe.unknown-hold-boundary-v1",
+        "exposure": 1,
+        "source": "raised-half.png"
+      },
+      {
+        "package": "observe.unknown-hold-boundary-v1",
+        "exposure": 3,
+        "source": "raised-half.png"
+      },
+      {
+        "package": "observe.raised-focus-to-unknown-boundary-v1",
+        "exposure": 1,
+        "source": "raised-half.png"
+      }
+    ]
+  },
+  {
+    "sha": "639ea19851dedc963e9dd5d88cdea9b3ee83079746da4654203e9cddf6911b00",
+    "path": "observe-diagnose/canonical-recovery-v1/check-002.png",
+    "uses": [
+      {
+        "package": "observe.uncertain-check-boundary-v1",
+        "exposure": 3,
+        "source": "check-002.png"
+      },
+      {
+        "package": "observe.uncertain-release-boundary-v1",
+        "exposure": 3,
+        "source": "check-002.png"
+      }
+    ]
+  },
+  {
+    "sha": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+    "path": "rest/canonical-quiet-v1/half.png",
+    "uses": [
+      {
+        "package": "rest.quiet-settle-v1-boundary-v1",
+        "exposure": 1,
+        "source": "half.png"
+      },
+      {
+        "package": "rest.quiet-settle-v1-boundary-v1",
+        "exposure": 3,
+        "source": "half.png"
+      }
+    ]
+  },
+  {
+    "sha": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+    "path": "rest/canonical-quiet-v1/between.png",
+    "uses": [
+      {
+        "package": "rest.quiet-settle-v1-boundary-v1",
+        "exposure": 5,
+        "source": "between.png"
+      },
+      {
+        "package": "rest.quiet-settle-v1-boundary-v1",
+        "exposure": 7,
+        "source": "between.png"
+      }
+    ]
+  },
+  {
+    "sha": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+    "path": "rest/canonical-quiet-v1/closed.png",
+    "uses": [
+      {
+        "package": "rest.quiet-settle-v1-boundary-v1",
+        "exposure": 2,
+        "source": "closed.png"
+      }
+    ]
+  },
+  {
+    "sha": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+    "path": "rest/canonical-quiet-v1/settle.png",
+    "uses": [
+      {
+        "package": "rest.quiet-settle-v1-boundary-v1",
+        "exposure": 6,
+        "source": "settle.png"
+      }
+    ]
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "references/closed-rest-rigid-v2.png",
+  "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+  "raw": "raw/rest-settled-v2.png",
+  "rawSHA256": "5b8891a223e0b917887ffa8c0d7b47ecfc8643224a6d6f41554c881d6888a831",
+  "prompt": "prompts/rest-settled-v2.txt",
+  "output": "frames/rest-settled-v2.png",
+  "sha256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+  "mask": "masks/rest-settled-v2.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

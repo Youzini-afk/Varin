@@ -4347,6 +4347,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.thread.attention.read" => {
+            serde_json::from_value::<KernelEmptyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.thread.update" => {
             serde_json::from_value::<ThreadMetadataUpdateParams>(params.clone())
                 .map(|_| ())

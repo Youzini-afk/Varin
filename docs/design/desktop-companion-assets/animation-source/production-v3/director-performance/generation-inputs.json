@@ -1,0 +1,217 @@
+{
+  "scope": "selected draws and their necessary ancestor references; paths remapped to byte-identical portable copies",
+  "records": [
+    {
+      "id": "listen-lean-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/listen-lean-v1.png",
+      "rawSHA256": "48cec8b28422eacae157766ccbc9f6c5403ec3b43c24026180597d226f2e386c",
+      "exactPrompt": "prompts/listen-lean-v1.txt",
+      "promptSHA256": "d9659be91c9295a85e27d5555645ba919991e2b7f3f349b8431acbacdda0291d",
+      "inputImagesInOrder": [
+        {
+          "path": "references/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "role": "edit target"
+        }
+      ],
+      "runtimeSelection": "ancestor raw only, rejected as runtime pose"
+    },
+    {
+      "id": "gather-out-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-out-v1.png",
+      "rawSHA256": "c15af23c3d90292b686d1525b71e4b3baedf4a9cafe00eea472afd72caf4453a",
+      "exactPrompt": "prompts/gather-out-v1.txt",
+      "promptSHA256": "7e7948e04a6ab27625ac558b5f7728024177ff9ea796a2a5cf5df16bbabe8ee2",
+      "inputImagesInOrder": [
+        {
+          "path": "references/offer-mid.png",
+          "sha256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+          "role": "edit target"
+        }
+      ],
+      "runtimeSelection": "ancestor raw only, rejected as runtime pose"
+    },
+    {
+      "id": "listen-lean-v2",
+      "generator": "built-in image_gen",
+      "raw": "raw/listen-lean-v2.png",
+      "rawSHA256": "ba0ed595d9f9523a8042d3d34392e727a011cc041b4080c5d2d1d3afbcc99bf4",
+      "exactPrompt": "prompts/listen-lean-v2.txt",
+      "promptSHA256": "5c7809becaa1f2c81be8b79007a55cee991931a506a12ea5c8453e0206cca5d5",
+      "inputImagesInOrder": [
+        {
+          "path": "raw/listen-lean-v1.png",
+          "sha256": "48cec8b28422eacae157766ccbc9f6c5403ec3b43c24026180597d226f2e386c",
+          "role": "edit target"
+        },
+        {
+          "path": "references/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "role": "supporting identity/anatomy reference"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "gather-out-v2",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-out-v2.png",
+      "rawSHA256": "5de4f21728ff768521b0bb44fdc0d3c8e75edca52bbf680628caba295a415b00",
+      "exactPrompt": "prompts/gather-out-v2.txt",
+      "promptSHA256": "2a0bb012b8f68587e559d5a196a6cc995e9dcee182cd3906336b23642f883636",
+      "inputImagesInOrder": [
+        {
+          "path": "raw/gather-out-v1.png",
+          "sha256": "c15af23c3d90292b686d1525b71e4b3baedf4a9cafe00eea472afd72caf4453a",
+          "role": "edit target"
+        },
+        {
+          "path": "references/open-user.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "role": "supporting identity/anatomy reference"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "gather-in-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-in-v1.png",
+      "rawSHA256": "891ef2ffa28c2607a407ec83b8b529de350babac92f94d910722a564a308ed48",
+      "exactPrompt": "prompts/gather-in-v1.txt",
+      "promptSHA256": "2f5a512d896d7383db722527aa7066a76713e957a832dc9d76cfe36217cafe82",
+      "inputImagesInOrder": [
+        {
+          "path": "frames/gather-out-v2.png",
+          "sha256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+          "role": "edit target"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "listen-left-lean-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/listen-left-lean-v1.png",
+      "rawSHA256": "11af684e64d9fb48255d14c01808731d9aea7fdae8bab0e8b81bb5c9a30165eb",
+      "exactPrompt": "prompts/listen-left-lean-v1.txt",
+      "promptSHA256": "3e4f2898623bc486487fa79e5da462ac9d18e9853be639946bc30978753f1ba3",
+      "inputImagesInOrder": [
+        {
+          "path": "references/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "role": "edit target"
+        },
+        {
+          "path": "references/search-left.png",
+          "sha256": "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263",
+          "role": "supporting identity/anatomy reference"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "gather-user-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-user-v1.png",
+      "rawSHA256": "70f762347393d1b826ccf05c2f8dc6e28cbe21164a098d13649f3fe21fdbfcad",
+      "exactPrompt": "prompts/gather-user-v1.txt",
+      "promptSHA256": "a68a11022d2c907751fde233dce618b5296f9d843da4f86a085ac3c089beed51",
+      "inputImagesInOrder": [
+        {
+          "path": "frames/gather-in-v1.png",
+          "sha256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf",
+          "role": "edit target"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "gather-release-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-release-v1.png",
+      "rawSHA256": "1eee27e3c0d5c88c55162fdce1a5faa8dbbe99e04221c5924886b3313b8409a8",
+      "exactPrompt": "prompts/gather-release-v1.txt",
+      "promptSHA256": "0f083b1a6b61dec18350d3605b3e760d96a28e62dafacd20a8a9db1a3bb74686",
+      "inputImagesInOrder": [
+        {
+          "path": "references/open-user.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "role": "edit target"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "gather-sweep-mid-v2",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-sweep-mid-v2.png",
+      "rawSHA256": "e59184e0be0b8f3ca5d3fb7d3ef92dab73b0996f3bf1c6d0c83365bf2dcdd980",
+      "exactPrompt": "prompts/gather-sweep-mid-v2.txt",
+      "promptSHA256": "d75a3540f31c9f2480bab036c7d325f9dedae75218048dd527f99499c1091eb1",
+      "inputImagesInOrder": [
+        {
+          "path": "frames/gather-out-v2.png",
+          "sha256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+          "role": "edit target"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "gather-in-no-stool-donor-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-in-no-stool-donor-v1.png",
+      "rawSHA256": "4975e218a460eb6ab839306a26b2b0ce006422b1d503101b4fb57eb75b2695b9",
+      "exactPrompt": "prompts/gather-in-no-stool-donor-v1.txt",
+      "promptSHA256": "fd7c24258bd71a5918331a772ca80c25f535f6ed33759214e1dffa9a821dc36b",
+      "inputImagesInOrder": [
+        {
+          "path": "frames/gather-in-v1.png",
+          "sha256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf",
+          "role": "edit target"
+        },
+        {
+          "path": "integration-support/selected-v1/references/clean-donor.png",
+          "sha256": "8a79e84bf2266d7565079aaa1c957a2a160bdc33a4247d9b0976409d16a92db8",
+          "role": "supporting identity/anatomy reference"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "gather-out-no-stool-donor-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-out-no-stool-donor-v1.png",
+      "rawSHA256": "c39fb1598e1b1240bf54719b3e668af880823a50bbb95f701a2b2c79eb929989",
+      "exactPrompt": "prompts/gather-out-no-stool-donor-v1.txt",
+      "promptSHA256": "ab6341d856aca1bdc0036b13917dfc0fcb12743e10f717bb662b64b57fee741e",
+      "inputImagesInOrder": [
+        {
+          "path": "frames/gather-out-v2.png",
+          "sha256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+          "role": "edit target"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    },
+    {
+      "id": "gather-sweep-no-stool-donor-v1",
+      "generator": "built-in image_gen",
+      "raw": "raw/gather-sweep-no-stool-donor-v1.png",
+      "rawSHA256": "9ff32a13a3f3f42996339028ec1303ae25f363a9cf34924f5f1d7c340ea4c2dc",
+      "exactPrompt": "prompts/gather-sweep-no-stool-donor-v1.txt",
+      "promptSHA256": "ab6341d856aca1bdc0036b13917dfc0fcb12743e10f717bb662b64b57fee741e",
+      "inputImagesInOrder": [
+        {
+          "path": "frames/gather-sweep-mid-v2.png",
+          "sha256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+          "role": "edit target"
+        }
+      ],
+      "runtimeSelection": "selected source or hidden-surface donor"
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "status": "QA exposure study, not final animation acceptance",
+  "frameInterpolation": "none; authored cels only",
+  "exitNote": "Reverse traversal uses actual matching authored poses, not synthesized deformation",
+  "frames": [
+    {
+      "source": "shared/upright-open-neutral-v2.png",
+      "durationMs": 500,
+      "cue": "FAN_OUT"
+    },
+    {
+      "source": "search-left-middle-v1-candidate.png",
+      "durationMs": 100,
+      "cue": "SCAN_SIDE_A_ENTER"
+    },
+    {
+      "source": "search-left-v1-candidate.png",
+      "durationMs": 650,
+      "cue": "SCAN_SIDE_A"
+    },
+    {
+      "source": "search-left-middle-v1-candidate.png",
+      "durationMs": 90,
+      "cue": "release"
+    },
+    {
+      "source": "shared/upright-open-neutral-v2.png",
+      "durationMs": 230,
+      "cue": "attend"
+    },
+    {
+      "source": "search-right-middle-v1-candidate.png",
+      "durationMs": 100,
+      "cue": "SCAN_SIDE_B_ENTER"
+    },
+    {
+      "source": "search-right-v1-candidate.png",
+      "durationMs": 950,
+      "cue": "SCAN_SIDE_B"
+    },
+    {
+      "source": "search-right-middle-v1-candidate.png",
+      "durationMs": 110,
+      "cue": "release"
+    },
+    {
+      "source": "shared/upright-open-neutral-v2.png",
+      "durationMs": 140,
+      "cue": "return"
+    },
+    {
+      "source": "shared/open-screen-read-v2.png",
+      "durationMs": 180,
+      "cue": "SELECT_PREPARE"
+    },
+    {
+      "source": "search-focus-v1-candidate.png",
+      "durationMs": 180,
+      "cue": "SELECT"
+    },
+    {
+      "source": "shared/open-screen-read-v2.png",
+      "durationMs": 600,
+      "cue": "exit"
+    }
+  ]
+}

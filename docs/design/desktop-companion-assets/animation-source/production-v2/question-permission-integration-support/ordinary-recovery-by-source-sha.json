@@ -1,0 +1,422 @@
+{
+  "mappingKey": "exact original sourceSHA256, not semantic state name",
+  "never": "Do not run answered/allowed/completed receipt tails for generic interruption. No nod in these routes. Never close laptop just to acknowledge tap.",
+  "pathBase": "production-v2 root (parent directory of this manifest directory)",
+  "routes": {
+    "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/poses/listen-rest.png",
+      "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 160,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "31e2e0989dff6647dbcd2f6a046713db6dff1a45490868da0d1a520bcd1dab18": {
+      "endpoint": "upright-v2:closed-rest",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/wave/closed-peak.png",
+      "sourceSHA256": "31e2e0989dff6647dbcd2f6a046713db6dff1a45490868da0d1a520bcd1dab18",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 120,
+          "phase": "exit",
+          "source": "question-permission/wave/closed-mid.png",
+          "sourceSHA256": "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/wave/closed-smile.png",
+          "sourceSHA256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+        }
+      ]
+    },
+    "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/blink/listen-rest-half.png",
+      "sourceSHA256": "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 80,
+          "phase": "exit",
+          "source": "question-permission/poses/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 160,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/references/upright-open-neutral-v2.png",
+      "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "steps": []
+    },
+    "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811": {
+      "endpoint": "upright-v2:closed-rest",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/wave/closed-smile.png",
+      "sourceSHA256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+        }
+      ]
+    },
+    "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3": {
+      "endpoint": "upright-v2:closed-rest",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/wave/closed-mid.png",
+      "sourceSHA256": "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/wave/closed-smile.png",
+          "sourceSHA256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+        }
+      ]
+    },
+    "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/wave/open-mid.png",
+      "sourceSHA256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/wave/open-smile.png",
+          "sourceSHA256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6": {
+      "endpoint": "upright-v2:closed-rest",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/local-closures/closed-quiet-blink-closed.png",
+      "sourceSHA256": "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 80,
+          "phase": "exit",
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+        }
+      ]
+    },
+    "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/poses/nod-soft.png",
+      "sourceSHA256": "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/references/open-screen-read-v2.png",
+      "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b": {
+      "endpoint": "upright-v2:closed-rest",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/local-closures/closed-quiet-blink-half.png",
+      "sourceSHA256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 80,
+          "phase": "exit",
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+        }
+      ]
+    },
+    "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb": {
+      "endpoint": "upright-v2:closed-rest",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/references/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "steps": []
+    },
+    "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/poses/offer-mid.png",
+      "sourceSHA256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/poses/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/poses/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 160,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/blink/listen-rest-closed.png",
+      "sourceSHA256": "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 80,
+          "phase": "exit",
+          "source": "question-permission/poses/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 160,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "dd320f6b55172c9ef31c2ed617a49ddb14bb9a2686f39f22168b2337bc65678a": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/blink/neutral-closed.png",
+      "sourceSHA256": "dd320f6b55172c9ef31c2ed617a49ddb14bb9a2686f39f22168b2337bc65678a",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 80,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/wave/open-smile.png",
+      "sourceSHA256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/poses/offer.png",
+      "sourceSHA256": "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 130,
+          "phase": "exit",
+          "source": "question-permission/poses/offer-mid.png",
+          "sourceSHA256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/poses/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/poses/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 160,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/poses/ask.png",
+      "sourceSHA256": "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/poses/attend-corrected.png",
+          "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/poses/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 160,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/wave/open-peak.png",
+      "sourceSHA256": "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 120,
+          "phase": "exit",
+          "source": "question-permission/wave/open-mid.png",
+          "sourceSHA256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/wave/open-smile.png",
+          "sourceSHA256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "efc14d3eaa97fcb1dafdfa8f21142286b3b06674940e4c16f180424895c9ab6f": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/blink/neutral-half.png",
+      "sourceSHA256": "efc14d3eaa97fcb1dafdfa8f21142286b3b06674940e4c16f180424895c9ab6f",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 80,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    },
+    "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f": {
+      "endpoint": "upright-v2:open-user",
+      "rule": "ordinary interruption only; no nod/approval/completion cue; runtime resolves original sourceSHA to matching stool-less derivative without changing timing",
+      "source": "question-permission/poses/attend-corrected.png",
+      "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+      "steps": [
+        {
+          "businessEvent": null,
+          "durationMs": 140,
+          "phase": "exit",
+          "source": "question-permission/poses/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a"
+        },
+        {
+          "businessEvent": null,
+          "durationMs": 160,
+          "phase": "exit",
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+        }
+      ]
+    }
+  },
+  "safeHandoff": "After final exact endpoint, controller may start matching hinge/relocation entry. Do not reset exposure clock within a recovery route or skip via whole-person crossfade.",
+  "scope": "question permission blink welcome tap completion and local open-tap actual exposures",
+  "status": "author supplied ordinary interruption return prefixes; existing reviewed artwork only; controller compile pending",
+  "version": 1
+}

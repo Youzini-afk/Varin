@@ -1,0 +1,872 @@
+{
+  "geometryReference": "varin-upright-v2",
+  "donor": "frames/secure-no-stool-clean-donor-v1.png",
+  "method": "actual no-stool hidden-surface drawing; source-specific foreground exclusion; no body rescale",
+  "entries": [
+    {
+      "source": "varin-animation-production-v2/lid/frames/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "detachedSource": "current-source-detached-v2/d029c4fc7e78432f.png",
+      "detachedSHA256": "d19e8eb5376d230e3a50068d1f7b9f5ec1801b13a73b66934c71dc3940c81e1a",
+      "mask": "current-source-detached-v2/d029c4fc7e78432f-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing",
+        "local-tap",
+        "local-tap",
+        "local-welcome",
+        "local-welcome"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/contact-000-registered-v3.png",
+      "sourceSHA256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+      "detachedSource": "current-source-detached-v2/1b3aad22a86becb9.png",
+      "detachedSHA256": "f249505845baa3bbf2bd7497b5071cd9436d9715e334073fd0e38154e0e6a921",
+      "mask": "current-source-detached-v2/1b3aad22a86becb9-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 13,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/contact-015-registered-v3.png",
+      "sourceSHA256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+      "detachedSource": "current-source-detached-v2/8ceda1407199a8ff.png",
+      "detachedSHA256": "0d28059a6bf899da59759b8070bb24fe6e6052a0cd0c40f25eafe800490c8cab",
+      "mask": "current-source-detached-v2/8ceda1407199a8ff-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 8,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/contact-030-registered-v3.png",
+      "sourceSHA256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+      "detachedSource": "current-source-detached-v2/a06197dc119a9763.png",
+      "detachedSHA256": "f43308c5e804ceedeb86f462399926e3c4e15519bc3b7837ceb3219bee3e7ca7",
+      "mask": "current-source-detached-v2/a06197dc119a9763-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 15,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/contact-045-registered-v3.png",
+      "sourceSHA256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+      "detachedSource": "current-source-detached-v2/a450f1760c1b86d0.png",
+      "detachedSHA256": "12a940ed2c8eff3ee3fbadc60e9187130bb1229935a49ae7102fcef2b6dec2be",
+      "mask": "current-source-detached-v2/a450f1760c1b86d0-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 14,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/contact-055-registered-v3.png",
+      "sourceSHA256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12",
+      "detachedSource": "current-source-detached-v2/274d464e9d25105e.png",
+      "detachedSHA256": "5e573505a09ae9459e2e88a5c6608db2c390f06062a2d5a4c7ae6139cddb7e79",
+      "mask": "current-source-detached-v2/274d464e9d25105e-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 12,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/contact-070-registered-v3.png",
+      "sourceSHA256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3",
+      "detachedSource": "current-source-detached-v2/f4079cd03524a164.png",
+      "detachedSHA256": "160c91697d546d1c437652c942ce9170f96fdcb10d8cbf0cc2b719e02456e4c8",
+      "mask": "current-source-detached-v2/f4079cd03524a164-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 15,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/contact-100-registered-v3.png",
+      "sourceSHA256": "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd",
+      "detachedSource": "current-source-detached-v2/e210e85d0e0951c1.png",
+      "detachedSHA256": "d6c1c7af1b5cbe1d671f5c39f4cab9dc3595ad4aaf9a0a1886b3575d6d429170",
+      "mask": "current-source-detached-v2/e210e85d0e0951c1-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 16,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/release-first-registered-v2.png",
+      "sourceSHA256": "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75",
+      "detachedSource": "current-source-detached-v2/6c95a04464786dfa.png",
+      "detachedSHA256": "760205bf8f2167ad379b29d41253374dd6189298a883b7a64c14a3d118b84ddc",
+      "mask": "current-source-detached-v2/6c95a04464786dfa-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 9,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/release-near-registered-v2.png",
+      "sourceSHA256": "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d",
+      "detachedSource": "current-source-detached-v2/26733b57f612201b.png",
+      "detachedSHA256": "0252e9f9fad1cfc5e4ef6316b9a184842f1328ec7a747d6615057cdc31bbfafa",
+      "mask": "current-source-detached-v2/26733b57f612201b-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 9,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/release-low-registered-v2.png",
+      "sourceSHA256": "f483496bfd97c4f88f38b2e8d105ea87359818ebf57742e3d9555c9f90dca369",
+      "detachedSource": "current-source-detached-v2/f483496bfd97c4f8.png",
+      "detachedSHA256": "767b82570f4ec9478f84ae7a073b6f9e67c19e60cedfab5a59a9ffbf5c906976",
+      "mask": "current-source-detached-v2/f483496bfd97c4f8-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 12,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/lid/frames/open-rest-v1.png",
+      "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "detachedSource": "current-source-detached-v2/55eeda4052ec2055.png",
+      "detachedSHA256": "1bad548f14e043ea7b7721964a67f3e07d27ad0308d8f48aa7bc309369020f8e",
+      "mask": "current-source-detached-v2/55eeda4052ec2055-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "lid-opening",
+        "lid-closing",
+        "permissionAllow",
+        "permissionAllow",
+        "permissionDenyOrCancel",
+        "questionAnswered",
+        "questionAnswered",
+        "questionCancel",
+        "questionEnter",
+        "reading",
+        "reading",
+        "search",
+        "search",
+        "search",
+        "collaboration",
+        "collaboration",
+        "local-completion",
+        "local-completion",
+        "upright-gaze-screen-to-user",
+        "upright-gaze-user-to-screen"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+      "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+      "detachedSource": "current-source-detached-v4/0633d12e97fd3e8f.png",
+      "detachedSHA256": "6fae4acc2b40dfc7e498ab35e42f661325590ba6331c4fa5efc9a63c04bedcfd",
+      "mask": "current-source-detached-v4/0633d12e97fd3e8f-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 194,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "permissionAllow",
+        "permissionDenyOrCancel",
+        "permissionEnter",
+        "questionAnswered",
+        "questionCancel",
+        "questionEnter"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending",
+      "foregroundTailCleanup": "../question-permission-integration-support/tail-cleanup-manifest.json"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/poses/nod-soft.png",
+      "sourceSHA256": "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482",
+      "detachedSource": "current-source-detached-v2/b1cf7a2325e40d8e.png",
+      "detachedSHA256": "69e00e645c3f8f83de5e139aa12708613882c61b898bff15851d7b1d765e4b73",
+      "mask": "current-source-detached-v2/b1cf7a2325e40d8e-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "permissionAllow",
+        "questionAnswered"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/references/open-screen-read-v2.png",
+      "sourceSHA256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "detachedSource": "current-source-detached-v2/bfb89d2c259e4de0.png",
+      "detachedSHA256": "5753299e3fe53eb76597f175299ddc3d47e42414235aebbbc29f4b82e870ca8f",
+      "mask": "current-source-detached-v2/bfb89d2c259e4de0-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "permissionAllow",
+        "permissionDenyOrCancel",
+        "permissionEnter",
+        "questionAnswered",
+        "questionCancel",
+        "questionEnter",
+        "search",
+        "search",
+        "editing",
+        "editing",
+        "collaboration",
+        "collaboration",
+        "upright-gaze-screen-to-user",
+        "upright-gaze-user-to-screen"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/poses/attend-corrected.png",
+      "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+      "detachedSource": "current-source-detached-v4/fe99fc6fdc421272.png",
+      "detachedSHA256": "4377d8f7a5ab57067314a475c8ce2ecfbdc8e7f7dd25cbbccfe7cb15a69a14a4",
+      "mask": "current-source-detached-v4/fe99fc6fdc421272-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 193,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "permissionEnter",
+        "permissionEnter",
+        "questionEnter",
+        "questionEnter"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending",
+      "foregroundTailCleanup": "../question-permission-integration-support/tail-cleanup-manifest.json"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/poses/offer-mid.png",
+      "sourceSHA256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+      "detachedSource": "current-source-detached-v4/d2e83a6ffc411797.png",
+      "detachedSHA256": "9028c0abd3cb8831c45171125298500bd64fdd49299831a84667b40f8bfce993",
+      "mask": "current-source-detached-v4/d2e83a6ffc411797-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 216,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "permissionEnter",
+        "permissionEnter"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending",
+      "foregroundTailCleanup": "../question-permission-integration-support/tail-cleanup-manifest.json"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/poses/offer.png",
+      "sourceSHA256": "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570",
+      "detachedSource": "current-source-detached-v4/e1ec07972535f18e.png",
+      "detachedSHA256": "37997ee42c3f05352afbaa44dc74efcdf83d8b20030458125d6d07844e26f73e",
+      "mask": "current-source-detached-v4/e1ec07972535f18e-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 209,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "permissionEnter"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending",
+      "foregroundTailCleanup": "../question-permission-integration-support/tail-cleanup-manifest.json"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/poses/ask.png",
+      "sourceSHA256": "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020",
+      "detachedSource": "current-source-detached-v4/e94bad1a611a0667.png",
+      "detachedSHA256": "aba1f2b091dbbd37953f25ef34f7816f5ebacd6b58006d6577455e4c7cec9387",
+      "mask": "current-source-detached-v4/e94bad1a611a0667-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 183,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "questionEnter"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending",
+      "foregroundTailCleanup": "../question-permission-integration-support/tail-cleanup-manifest.json"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/read-prepare-v2-candidate.png",
+      "sourceSHA256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482",
+      "detachedSource": "current-source-detached-v2/c462dedbd8474209.png",
+      "detachedSHA256": "7a5d0133824f4cbef0baed4d1d867823724c7714064c18453742ceed7c077c57",
+      "mask": "current-source-detached-v2/c462dedbd8474209-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "reading",
+        "reading"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/read-middle-v1-candidate.png",
+      "sourceSHA256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa",
+      "detachedSource": "current-source-detached-v2/fbc12a86f30268cf.png",
+      "detachedSHA256": "cf53c45bca1d972e703efdc9cdec92c66143d3213b051f59fb52629dd24bf95c",
+      "mask": "current-source-detached-v2/fbc12a86f30268cf-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "reading",
+        "reading"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/read-settle-v1-candidate.png",
+      "sourceSHA256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+      "detachedSource": "current-source-detached-v2/8d3fcaeb238c937f.png",
+      "detachedSHA256": "996da6eeae799f9710fa73090fd807cf6ee5c1b703d9536f8620050c202c264d",
+      "mask": "current-source-detached-v2/8d3fcaeb238c937f-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "reading",
+        "reading"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/read-hand-prepare-v1-candidate.png",
+      "sourceSHA256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825",
+      "detachedSource": "current-source-detached-v2/0d0eacea2797a283.png",
+      "detachedSHA256": "2c18673e66df49bfedcd925f4f8809546a20349086a8c804782227ced3243594",
+      "mask": "current-source-detached-v2/0d0eacea2797a283-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "reading",
+        "reading"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/read-turn-v1-candidate.png",
+      "sourceSHA256": "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742",
+      "detachedSource": "current-source-detached-v2/a054b4fd21078b9d.png",
+      "detachedSHA256": "786331902392c6ccc835e7b35d1a276fd46f8f0e8f1349a72e3af68cb9a2a7cc",
+      "mask": "current-source-detached-v2/a054b4fd21078b9d-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "reading"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/search-left-middle-v1-candidate.png",
+      "sourceSHA256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce",
+      "detachedSource": "current-source-detached-v2/5a364fff536d7bfc.png",
+      "detachedSHA256": "1c6da04d4bb15de203454493ea110e5e044fc8dd82df0e764b1779b5846a3e96",
+      "mask": "current-source-detached-v2/5a364fff536d7bfc-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "search",
+        "search"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/search-left-v1-candidate.png",
+      "sourceSHA256": "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263",
+      "detachedSource": "current-source-detached-v2/80eb7082b48da3fc.png",
+      "detachedSHA256": "48bb794b345a6c6b44ffe4cde570b310853fbe65f4060811b9a886c90e47a83b",
+      "mask": "current-source-detached-v2/80eb7082b48da3fc-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "search"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/search-right-middle-v1-candidate.png",
+      "sourceSHA256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5",
+      "detachedSource": "current-source-detached-v2/94f5abbb2dd3a1b3.png",
+      "detachedSHA256": "52089045b018ab1ccd2d07fc42a4a0cb2d9f18d11b85d5a6357eeab53b44aaf0",
+      "mask": "current-source-detached-v2/94f5abbb2dd3a1b3-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "search",
+        "search"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/search-right-v1-candidate.png",
+      "sourceSHA256": "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852",
+      "detachedSource": "current-source-detached-v2/be98c75f7b414826.png",
+      "detachedSHA256": "e9ca2f2d4b51f8f1a6bb8dbcfdc8e264bc28136b3a90c61106b540b6a7642433",
+      "mask": "current-source-detached-v2/be98c75f7b414826-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "search"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/reading-search/search-focus-v1-candidate.png",
+      "sourceSHA256": "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b",
+      "detachedSource": "current-source-detached-v2/ede1c1f9bc6a588b.png",
+      "detachedSHA256": "c16f4f828b293ccf29b24adce6655a0331f10d9f5236a44831dcd93007d56b14",
+      "mask": "current-source-detached-v2/ede1c1f9bc6a588b-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "search"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/type-burst.png",
+      "sourceSHA256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+      "detachedSource": "current-source-detached-v2/da120f3f2677022d.png",
+      "detachedSHA256": "8af68a3b6f7c549eab61c7eaa5bd385cca3829133a65651186fb4b47b1ff4b96",
+      "mask": "current-source-detached-v2/da120f3f2677022d-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 11,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "editing",
+        "editing",
+        "editing",
+        "editing",
+        "collaboration"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/type-prepare.png",
+      "sourceSHA256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+      "detachedSource": "current-source-detached-v2/23608ccc309b5d78.png",
+      "detachedSHA256": "f547fb9237110bdf194d5d4b2bd460d48b140079152bea69afebbfeac25e96bf",
+      "mask": "current-source-detached-v2/23608ccc309b5d78-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 27,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "editing",
+        "editing",
+        "editing",
+        "editing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/type-forward.png",
+      "sourceSHA256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+      "detachedSource": "current-source-detached-v2/d90f98b9e7788ad4.png",
+      "detachedSHA256": "879318f4e13de5b0075d9917694d7bfbf64eddbd396d308bf45618be31959765",
+      "mask": "current-source-detached-v2/d90f98b9e7788ad4-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 27,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "editing",
+        "editing",
+        "editing",
+        "editing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/type-forward-hands-b.png",
+      "sourceSHA256": "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d",
+      "detachedSource": "current-source-detached-v2/53af80828518845f.png",
+      "detachedSHA256": "69496d96f0987172c32b70850594031246fc9bc7d68bfbf5d662b93a6f2e67a0",
+      "mask": "current-source-detached-v2/53af80828518845f-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 27,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "editing",
+        "editing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/review-rise.png",
+      "sourceSHA256": "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6",
+      "detachedSource": "current-source-detached-v2/35446977eeccfe3d.png",
+      "detachedSHA256": "c92e965fbaa3cde93e42a4df9e2c4efb2435541a6fcd13175f2c10336840ab52",
+      "mask": "current-source-detached-v2/35446977eeccfe3d-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "editing",
+        "editing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/review.png",
+      "sourceSHA256": "2ff88020f1da38714ac9484698cc921b3db0cd3d93dccf72833b0b052ba571f2",
+      "detachedSource": "current-source-detached-v2/2ff88020f1da3871.png",
+      "detachedSHA256": "a23dc161838ee89ae2a05764b74540a2663f5e63f5719b10cc52cf4588bb465c",
+      "mask": "current-source-detached-v2/2ff88020f1da3871-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "editing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/select.png",
+      "sourceSHA256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+      "detachedSource": "current-source-detached-v2/f2782751d0af1f20.png",
+      "detachedSHA256": "b6ef53983dd5bac47cb11e2d3bcf2ef7216b3cab7f60607d586969e869abd5b8",
+      "mask": "current-source-detached-v2/f2782751d0af1f20-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 24,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "editing"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/review-v2.png",
+      "sourceSHA256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+      "detachedSource": "current-source-detached-v2/6dce48dd5e9d1c6c.png",
+      "detachedSHA256": "8f297d1cef962acbc443a4198a3384dc40b180db0d49d09a8ad6467bc1865417",
+      "mask": "current-source-detached-v2/6dce48dd5e9d1c6c-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 12,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "collaboration",
+        "collaboration"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/split-gaze.png",
+      "sourceSHA256": "6adbd265d91917ffedabfcc7fa1fdbe6400ec8aaeb6188903a64ee6f28149d25",
+      "detachedSource": "current-source-detached-v2/6adbd265d91917ff.png",
+      "detachedSHA256": "0cf8cd342a501ab78d0e3b57840e6eb3c4167b9662aefb95a89f186ec7adbe64",
+      "mask": "current-source-detached-v2/6adbd265d91917ff-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 12,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "collaboration"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-rise-gaze.png",
+      "sourceSHA256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+      "detachedSource": "current-source-detached-v2/5d4d15266492ad44.png",
+      "detachedSHA256": "cd8a8ef7351568125e3d13842fae67c6330b9c870b6a2ca2db75efc9f9f1578f",
+      "mask": "current-source-detached-v2/5d4d15266492ad44-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 998,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "collaboration",
+        "collaboration"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-a-gaze.png",
+      "sourceSHA256": "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb",
+      "detachedSource": "current-source-detached-v2/ab20db707e2626d6.png",
+      "detachedSHA256": "e50231559f08665e9eaaeb4e40185db6a20b6e8817404fb8d53bd7d3562567d5",
+      "mask": "current-source-detached-v2/ab20db707e2626d6-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 1874,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "collaboration"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-transit-gazeB.png",
+      "sourceSHA256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+      "detachedSource": "current-source-detached-v2/527fec887984b39c.png",
+      "detachedSHA256": "9232dd7e94e51f6ed355a70d28afbd774b1100499f0ced74073d115269b83ac1",
+      "mask": "current-source-detached-v2/527fec887984b39c-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 669,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "collaboration",
+        "collaboration"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-b-v2-gazeB.png",
+      "sourceSHA256": "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1",
+      "detachedSource": "current-source-detached-v2/631cd46348bc7059.png",
+      "detachedSHA256": "52a4072d553adfb4e42053e640c367fd5badf132490226888a92cd46ae7485ac",
+      "mask": "current-source-detached-v2/631cd46348bc7059-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 324,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "collaboration"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/editing-dispatch/frames/gaze-right.png",
+      "sourceSHA256": "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04",
+      "detachedSource": "current-source-detached-v2/f7b962a3a3c626c3.png",
+      "detachedSHA256": "88856309c902a797ffd4f1b11c0045c5f4d52a00e40c93be8fb35553ae9caa8b",
+      "mask": "current-source-detached-v2/f7b962a3a3c626c3-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "collaboration"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/wave/open-mid.png",
+      "sourceSHA256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+      "detachedSource": "current-source-detached-v2/99b6488cc9bec1d8.png",
+      "detachedSHA256": "53a444be7ca322f50cf52aa11c653664a0caea28126e5b480ab073a600b59cd7",
+      "mask": "current-source-detached-v2/99b6488cc9bec1d8-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 113,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "local-completion",
+        "local-completion"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/wave/open-peak.png",
+      "sourceSHA256": "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15",
+      "detachedSource": "current-source-detached-v2/ec5196e0e74ca38c.png",
+      "detachedSHA256": "f93a5ed8de33b871f198dde4fa37571c468ed455b1d7c357907138e029249ebe",
+      "mask": "current-source-detached-v2/ec5196e0e74ca38c-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 113,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "local-completion"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/wave/open-smile.png",
+      "sourceSHA256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+      "detachedSource": "current-source-detached-v2/e11e8ffe9617e971.png",
+      "detachedSHA256": "03db1555c0f04e6d707778a6d824e3511110966c986ee7139cd398381721804b",
+      "mask": "current-source-detached-v2/e11e8ffe9617e971-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "local-completion"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/wave/closed-mid.png",
+      "sourceSHA256": "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3",
+      "detachedSource": "current-source-detached-v2/75cdf8fb7f58db0e.png",
+      "detachedSHA256": "81e1c2e66f881e6611e2d09d77db288f79074073512ac4286969513033fb4076",
+      "mask": "current-source-detached-v2/75cdf8fb7f58db0e-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 113,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "local-tap",
+        "local-tap",
+        "local-welcome",
+        "local-welcome"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/wave/closed-peak.png",
+      "sourceSHA256": "31e2e0989dff6647dbcd2f6a046713db6dff1a45490868da0d1a520bcd1dab18",
+      "detachedSource": "current-source-detached-v2/31e2e0989dff6647.png",
+      "detachedSHA256": "bc867bec8e630b6573ad7cfab72744b594a0c34192f77bf68e39d232e9030084",
+      "mask": "current-source-detached-v2/31e2e0989dff6647-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 113,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "local-tap",
+        "local-welcome"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/wave/closed-smile.png",
+      "sourceSHA256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811",
+      "detachedSource": "current-source-detached-v2/5bcffbbd86ec0a2b.png",
+      "detachedSHA256": "e849d54ad9fd68d1f2b31bda03959cc9b11ba6008a17c5c223d8779268836ae1",
+      "mask": "current-source-detached-v2/5bcffbbd86ec0a2b-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "local-tap",
+        "local-welcome"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/blink/listen-rest-half.png",
+      "sourceSHA256": "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e",
+      "detachedSource": "current-source-detached-v4/3e6b8200dce9badf.png",
+      "detachedSHA256": "d4647bbb5c9fd777ab230bac445eb7c69b42193ea75abcec477f18dee4fbe760",
+      "mask": "current-source-detached-v4/3e6b8200dce9badf-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 194,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "waiting-blink",
+        "waiting-blink"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending",
+      "foregroundTailCleanup": "../question-permission-integration-support/tail-cleanup-manifest.json"
+    },
+    {
+      "source": "varin-animation-production-v2/question-permission/blink/listen-rest-closed.png",
+      "sourceSHA256": "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c",
+      "detachedSource": "current-source-detached-v4/d348609a22369e18.png",
+      "detachedSHA256": "2de582fff78e1974788e4cf891620ae89273e0522951ffea283c25a7626825db",
+      "mask": "current-source-detached-v4/d348609a22369e18-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 194,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "waiting-blink"
+      ],
+      "stage": "same-geometry derived candidate; finite visual review pending",
+      "foregroundTailCleanup": "../question-permission-integration-support/tail-cleanup-manifest.json"
+    },
+    {
+      "source": "varin-animation-production-v2/closed-idle/frames/blink-half.png",
+      "sourceSHA256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b",
+      "detachedSource": "current-source-detached-v3/c5547f4f69d88dfe.png",
+      "detachedSHA256": "4e4b25a91bf03000a03cd87454e552c86f4877f5588ff48e29566953dce36a24",
+      "mask": "frames/canonical-stool-removal-mask-v5.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "closed-idle"
+      ],
+      "stage": "same lower geometry as approved closed; source-level review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/closed-idle/frames/blink-closed.png",
+      "sourceSHA256": "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6",
+      "detachedSource": "current-source-detached-v3/a1a14583842ac30c.png",
+      "detachedSHA256": "4a9f26c0f387ea9b8b6001fab2ccb7c0c992c2d03e05ed65df409820303fcc15",
+      "mask": "frames/canonical-stool-removal-mask-v5.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "closed-idle"
+      ],
+      "stage": "same lower geometry as approved closed; source-level review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/closed-idle/frames/look-left-middle.png",
+      "sourceSHA256": "25efd7fb746e9650425cccb15f1f77e6029080101fdbaa898cb40bcc9c457df8",
+      "detachedSource": "current-source-detached-v3/25efd7fb746e9650.png",
+      "detachedSHA256": "14ec0145de4b862b88d313188dec9d7cb8159b088d4ea3a813930995d27af45a",
+      "mask": "frames/canonical-stool-removal-mask-v5.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "closed-idle"
+      ],
+      "stage": "same lower geometry as approved closed; source-level review pending"
+    },
+    {
+      "source": "varin-animation-production-v2/closed-idle/frames/look-left-peak.png",
+      "sourceSHA256": "b2bbc33f62b529e7be2dc4dceb2e6fd98f28f725e611be173cb18e9080dfacf3",
+      "detachedSource": "current-source-detached-v3/b2bbc33f62b529e7.png",
+      "detachedSHA256": "f16d89295336f6c5764ffc713ec7f600e9bafcb26e4bbed000d2f7d22f91097d",
+      "mask": "frames/canonical-stool-removal-mask-v5.png",
+      "outsideMaskPixelExact": true,
+      "foregroundDifferencePixelsProtected": 0,
+      "embeddedStool": false,
+      "sequenceIds": [
+        "closed-idle"
+      ],
+      "stage": "same lower geometry as approved closed; source-level review pending"
+    }
+  ],
+  "missing": [],
+  "closedIdleManifest": "../closed-idle/manifest.json",
+  "stage": "55 exact-source no-stool drawings; finite pixel review, runtime pending"
+}

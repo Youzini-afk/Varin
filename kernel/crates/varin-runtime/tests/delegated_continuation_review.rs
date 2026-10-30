@@ -1192,6 +1192,18 @@ fn directed_request_reuses_delegated_source_and_original_message_history_without
         assert!(
             matches!(&next.trigger,DelegatedTrigger::MessageRequest{message_id,previous_run_id,..} if message_id==&message.identity.message_id && previous_run_id==&child.receipt.as_ref().unwrap().run_id)
         );
+        // The same relation and Agent are asked again; attention shows the new request cursor
+        // beside the earlier report instead of replaying that report as new.
+        let attention = f.db.capture_attention_read().load(&|| false).unwrap();
+        let relation = attention
+            .delegations
+            .iter()
+            .find(|relation| relation.operation_id == child.operation_id)
+            .unwrap();
+        assert_eq!(relation.continued_cursor, Some(next.cursor));
+        assert_eq!(relation.continued_by_thread_id.as_deref(), Some(child.parent_thread_id.as_str()));
+        assert!(relation.report_cursor.is_some_and(|cursor| cursor < next.cursor));
+        assert_eq!(relation.report_outcome.as_deref(), Some("succeeded"));
         let read =
             f.db.capture_message(
                 &child.child_thread_id,

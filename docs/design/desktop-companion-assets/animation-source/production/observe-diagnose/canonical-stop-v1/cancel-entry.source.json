@@ -1,0 +1,50 @@
+{
+  "family": "OBSERVE_DIAGNOSE",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "loop": null,
+  "entryPose": "seated-open-gaze-screen",
+  "exitPose": "observe-hands-raised-serious",
+  "warning": "Candidate entry only; terminal hold is attentive, not stopped/completed. No automatic success/recovery. Shoulder release and continuing hold need further art.",
+  "id": "observe.cancel-entry-v1",
+  "frames": [
+    {
+      "source": "rest.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "enter",
+      "contacts": {},
+      "pose": "seated-open-gaze-screen"
+    },
+    {
+      "source": "middle-serious.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "enter",
+      "contacts": {},
+      "pose": "observe-hands-transition"
+    },
+    {
+      "source": "raised-serious.png",
+      "durationMs": 1200,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "observe-hands-raised-serious"
+    }
+  ]
+}

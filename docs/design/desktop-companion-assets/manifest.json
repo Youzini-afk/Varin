@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "character": "Varin",
+  "palette": "default",
+  "stage": "design-checkpoint-not-production-animation",
+  "files": [
+    {
+      "path": "references/Varin_turnaround_superres_4x-g.png",
+      "sha256": "cd1000b082b9c9ae535040942311e1f92dd74f2dae0187c01c858c5c2fff2a7d",
+      "bytes": 2695261,
+      "role": "original-turnaround",
+      "status": "reference",
+      "width": 2048,
+      "height": 1365
+    },
+    {
+      "path": "references/Varin_Character_Bible_and_Prompts.md",
+      "sha256": "2c8e48621bef1892f26cd0d28d526572247839925a71059c55309d2b3c18a827",
+      "bytes": 28963,
+      "role": "original-character-bible",
+      "status": "reference-with-overrides"
+    },
+    {
+      "path": "masters/Varin-chibi-original-reference.png",
+      "sha256": "cc797d4344d36171335f1a555e02c81bb3d6538434aae3f692166d4c11d00b6e",
+      "bytes": 1378673,
+      "role": "chibi-identity-master",
+      "status": "selected",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "path": "storyboards/01-work-cycle.png",
+      "sha256": "e09e65738fbcf16dfd633bfb3e1c613dc094bcae34b552e5d2975ba23e6931ba",
+      "bytes": 2338458,
+      "role": "storyboard",
+      "status": "selected-style-reference",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "storyboards/02-computer-activities.png",
+      "sha256": "9f63400ff3cf2cea2c87d5c592c2dee484dfbaec31dcda8358b3202c8f022a62",
+      "bytes": 2323903,
+      "role": "storyboard",
+      "status": "current-draft",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "storyboards/03-organization-collaboration.png",
+      "sha256": "439f5501eac783768fb221f98638a8d68245bdd5d99ab0ad6791c774069c8d69",
+      "bytes": 2224193,
+      "role": "storyboard",
+      "status": "current-draft",
+      "width": 1278,
+      "height": 1230
+    },
+    {
+      "path": "storyboards/04-waiting-response.png",
+      "sha256": "bdfa0ff8be839f6764024b9be9850ad1b94134d7d37b3628ddc6bc94b527dcdc",
+      "bytes": 2311580,
+      "role": "storyboard",
+      "status": "current-draft",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "storyboards/05-errors-recovery.png",
+      "sha256": "d423ec7920c5031d2813aedfd7e49bdf2d4640804c0aa56b697e9f3e1b94e037",
+      "bytes": 2305141,
+      "role": "storyboard",
+      "status": "current-draft",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "storyboards/06-cancellation.png",
+      "sha256": "dcc62f2608571daa0bdfc523ae15b543e4f12626879cd59258471d5e0db05c31",
+      "bytes": 2006695,
+      "role": "storyboard",
+      "status": "current-draft",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "storyboards/07-daily-interactions.png",
+      "sha256": "e49f6bac513779894acf47f988463fc4068c386c94f1caa250bd7fbfdfb435bd",
+      "bytes": 2365866,
+      "role": "storyboard",
+      "status": "current-draft-partially-superseded",
+      "supersededPanels": [
+        3,
+        4
+      ],
+      "replacement": "storyboards/08-reposition-lift-and-sit.png",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "storyboards/08-reposition-lift-and-sit.png",
+      "sha256": "7e40ba470ca69ae2cf47236e7bf90bca769be11ab16d09ebd916f3ebb948b2dc",
+      "bytes": 2202605,
+      "role": "storyboard",
+      "status": "current-draft",
+      "replaces": {
+        "path": "storyboards/07-daily-interactions.png",
+        "panels": [
+          3,
+          4
+        ]
+      },
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "archive/not-selected/01-work-cycle-playful.png",
+      "sha256": "18eeb744637105ee40be1a32df1eacfbb344c36a7881a67893ec4fa4dc28b5bd",
+      "bytes": 2456112,
+      "role": "storyboard-style-iteration",
+      "status": "not-selected",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "archive/not-selected/01-work-cycle-balanced.png",
+      "sha256": "3f6c017d26d3c73a76109d1d33e507c4ce624e42bc206b73dd072e8ece9d600a",
+      "bytes": 2394051,
+      "role": "storyboard-style-iteration",
+      "status": "not-selected",
+      "width": 1536,
+      "height": 1024
+    },
+    {
+      "path": "archive/not-selected/exploration/seated-work-v1.png",
+      "sha256": "067e9b207892d1020a8648a62db36aad6dfac983b791ee1e5f9e7b9bbdb7759e",
+      "bytes": 1587794,
+      "width": 1254,
+      "height": 1254,
+      "role": "exploration",
+      "status": "not-selected-seat-master"
+    },
+    {
+      "path": "archive/not-selected/exploration/standing-pendant-v3.png",
+      "sha256": "eb185a164765734c94903520cd78459954bdf830d9a71bc73393bd736fad5c81",
+      "bytes": 1369216,
+      "width": 1254,
+      "height": 1254,
+      "role": "exploration",
+      "status": "not-selected-pendant-iteration"
+    },
+    {
+      "path": "archive/not-selected/exploration/standing-master-v2.png",
+      "sha256": "40c7a18c73e324a875d86d5fc003bd21c5b4f5851720b1fe8215d7cd0d96a9ab",
+      "bytes": 1371549,
+      "width": 1254,
+      "height": 1254,
+      "role": "exploration",
+      "status": "not-selected-master"
+    },
+    {
+      "path": "archive/not-selected/exploration/C04-thinking.png",
+      "sha256": "8eee0d68516d778b2e4b6c23a0e61fd19e510a5485a28f0f69422a3a687f5183",
+      "bytes": 1351669,
+      "width": 1254,
+      "height": 1254,
+      "role": "exploration",
+      "status": "obsolete-standing-state-direction"
+    },
+    {
+      "path": "archive/not-selected/exploration/L02-blink.png",
+      "sha256": "82600c4196ebcf35094f4ed6f50e2384438266f7c18abe9589edfff30de58385",
+      "bytes": 1356555,
+      "width": 1254,
+      "height": 1254,
+      "role": "exploration",
+      "status": "obsolete-standing-state-direction"
+    },
+    {
+      "path": "archive/not-selected/exploration/C02-accepted.png",
+      "sha256": "06adf6bf232c785da3122b993334959edae627d91cf2d37ed66f358903da08f9",
+      "bytes": 1392996,
+      "width": 1254,
+      "height": 1254,
+      "role": "exploration",
+      "status": "obsolete-standing-state-direction"
+    },
+    {
+      "path": "archive/not-selected/exploration/W02-authorization.png",
+      "sha256": "af4914bd6bcf9d8e0dd5191f09f12099b9ddfe12f40948b7ffd2c77adc3e34f0",
+      "bytes": 1372246,
+      "width": 1254,
+      "height": 1254,
+      "role": "exploration",
+      "status": "obsolete-standing-state-direction"
+    },
+    {
+      "path": "archive/not-selected/exploration/standing-proportion-rejected.png",
+      "sha256": "7986eaa8c7645b71df5bcff7083e2d9559515556a71b1685d7b36b9e590571a9",
+      "bytes": 1304107,
+      "width": 1254,
+      "height": 1254,
+      "role": "exploration",
+      "status": "rejected-proportions"
+    },
+    {
+      "path": "archive/not-selected/exploration/reposition-floating-stool-rejected.png",
+      "sha256": "178ab7f77dfe66a9a0cfea5cc1f43af55a11959eba29e55c0193f06d22c45c86",
+      "bytes": 2221235,
+      "width": 1536,
+      "height": 1024,
+      "role": "exploration",
+      "status": "rejected-floating-stool"
+    },
+    {
+      "path": "archive/not-selected/exploration/reposition-skirt-rejected.png",
+      "sha256": "cd3c25aa27eb2fc3475d748f7f062648901d00381a4eda299004f53b35722113",
+      "bytes": 2184098,
+      "width": 1536,
+      "height": 1024,
+      "role": "exploration",
+      "status": "rejected-missing-outer-skirt"
+    }
+  ]
+}

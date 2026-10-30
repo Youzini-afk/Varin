@@ -1,0 +1,48 @@
+[
+  {
+    "id": "open-hover-attend-v1",
+    "tool": "built-in imagegen",
+    "prompt": "prompts/open-hover-attend-v1.txt",
+    "exactPrompt": "Use case: identity-preserve. Edit image 1, a transparent 512x512 animation frame of Varin seated with OPEN laptop. Image 2 is ONLY an acting reference for friendly attentive posture; do not copy its closed laptop or hand placement. Create ONE true hand-drawn next key pose: she has noticed the nearby user, gently inclines her upper torso forward a little from the waist and draws her shoulders inward, neck natural and straight (no sideways head tilt), face clearly focused toward viewer with bright attentive blue eyes and a very small closed-mouth smile. The skull keeps exactly the same size and age; head follows torso slightly downward/forward, not enlarged; crown must remain inside same canvas. It should read as intentional 'oh, you're here' physical attention, not merely changed pupils. Keep both hands touching the same open keyboard/laptop support locations as image 1, wrists anatomically natural; alter sleeves/upper chest only as necessary for real lean. Preserve identity, blue-gray outfit, hair volume and side bun, viewer-right hair ornament, hollow diamond pendant. Freeze pelvis, crossed knees, boots, stool, open laptop angle/shape/position, lower hair silhouette, camera, framing and all unrelated pixels. No new props/text/sparkles, no open mouth, no stretched/rotated whole body, no head resizing. Same exact full 512 square viewport with genuine transparent background, one character frame, not a sheet.\n",
+    "inputs": [
+      {
+        "path": "references/upright-open-neutral-v2.png",
+        "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+      },
+      {
+        "path": "references/hover-attend-v1.png",
+        "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30"
+      }
+    ],
+    "raw": "raw/open-hover-attend-v1.png",
+    "rawSHA256": "670492c7196d4a62844e78419a4b3405ff9bf3e3cf8d17c950bbeb2e308470c6"
+  },
+  {
+    "id": "open-hover-middle-v2",
+    "tool": "built-in imagegen",
+    "prompt": "prompts/open-hover-middle-v2.txt",
+    "exactPrompt": "Identity-preserving animation edit, ONE frame. Start with this exact open-laptop neutral Varin image. Create the EARLY anticipation, not the forward-lean peak: torso still upright and almost unchanged, chin and crown only 2-3 pixels lower in the 512 canvas, shoulders just begin to draw inward a little, blue eyes notice the user; closed-mouth neutral small smile. Keep neck straight, no head roll, SAME head width/height, hair and face shape. Do not move pelvis, knees, boots, stool, laptop or keyboard-contact hands. Preserve clothing and hollow diamond pendant, hair ornament, side bun and all colors. No zoom/crop, transparent 512 square full viewport. A tiny anatomical shoulder preparation with head-follow, not scaled/transformed body, not a new face. Keep non-upper-body pixels exactly. This is an actual hand-drawn 120ms intermediary before a stronger 8px forward/downward attentive lean.\n",
+    "inputs": [
+      {
+        "path": "references/upright-open-neutral-v2.png",
+        "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+      }
+    ],
+    "raw": "raw/open-hover-middle-v2.png",
+    "rawSHA256": "cc3b9bbd5f2745435608ebfa3ef33d54ddbb444ddd2c75ea11de5e2b0e4f0ab2"
+  },
+  {
+    "id": "open-tap-playful-v1",
+    "tool": "built-in imagegen",
+    "prompt": "prompts/open-tap-playful-v1.txt",
+    "exactPrompt": "Use case: identity-preserve, precise local facial expression edit. Edit this exact transparent Varin open-laptop sprite. Change ONLY eyebrows, eyelids and small mouth inside her face, keep face outline/skull/eyes size, hair, ornament, neck, pendant, costume, hands, computer, stool, knees, boots and entire canvas geometry precisely unchanged. Draw a restrained playful response to a second friendly tap: one eyebrow slightly lifted in a soft amused 'yes, I noticed you' look, eyes still blue and open with gently relaxed lids, a tiny closed-mouth asymmetrical smile. Warm and lightly teasing, NOT angry, not sad, not flirtatious, no blush increase, no pout, no wink, no eye-roll, no nod/head tilt, no open mouth or text. Same head and eye size and direction toward user. One full 512x512 transparent frame with exact original layout; no background and no added symbols. All non-face pixels unchanged. This is a real new expression keyframe for a subtle 350ms hold, not a facial redesign.\n",
+    "inputs": [
+      {
+        "path": "references/upright-open-neutral-v2.png",
+        "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+      }
+    ],
+    "raw": "raw/open-tap-playful-v1.png",
+    "rawSHA256": "646b3e28e73bbfc98f8d13cdf2345d6df35fc07e7e312e03706fd29852d8c27e"
+  }
+]

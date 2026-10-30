@@ -1,0 +1,14 @@
+{
+  "status": "candidate source archive, no selected/public change",
+  "independentRepositoryInputsRebuild": {
+    "PNG": 1,
+    "mask": 1,
+    "indexByteExact": true
+  },
+  "actualActionRecoveryUniqueSources": 2,
+  "missing": [],
+  "sourceSHA256": "8dde658ad824907c8aab61d5a3a37c0062f2c11d93d11f044732e1c89a19b697",
+  "visualReview": "light/dark full body: no remaining stool, no changed hands/laptop/legs; source outside matte exact; source y>=200 exact to closed endpoint",
+  "ordinaryRecovery": "exact closed endpoint in100ms, no approval/nod semantics",
+  "workspaceDependencies": false
+}

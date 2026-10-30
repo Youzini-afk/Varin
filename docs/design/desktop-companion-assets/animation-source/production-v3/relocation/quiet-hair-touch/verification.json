@@ -1,0 +1,13 @@
+{
+  "status": "candidate source archive; selected/public unchanged",
+  "independentRepositoryInputsRebuild": {
+    "PNGExact": 5,
+    "maskExact": 5,
+    "indexByteExact": true
+  },
+  "actualActionRecoveryUniqueSources": 7,
+  "missing": [],
+  "visualReview": "all5 whole-body light/dark reviewed; no stool remnant or sleeve truncation; unchanged right hand and laptop; source outside matte exact",
+  "ordinaryRecovery": "actual author per-SHA chain; contact continues smooth\u2192detach\u2192release\u2192closed, never jumps directly",
+  "workspaceDependencies": false
+}

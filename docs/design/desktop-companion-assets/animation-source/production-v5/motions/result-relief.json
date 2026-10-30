@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "id": "result-relief-r3-ordinary",
+  "action": "completion",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 160
+    },
+    {
+      "sourceId": "t0-attention",
+      "durationMs": 100
+    },
+    {
+      "sourceId": "t1-held-inhale",
+      "durationMs": 140,
+      "interruptionExitIds": [
+        "t2-exhale-mid",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "t2-exhale-mid",
+      "durationMs": 240
+    },
+    {
+      "sourceId": "t3-engaged-relief",
+      "durationMs": 240
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 400
+    }
+  ],
+  "runtimeApproval": false,
+  "family": "W11-scoped-result",
+  "originalDetachedSequenceId": "result-relief-r3-detached",
+  "semantic": "One real scoped run completed; never project completion. Agent is notifier, not manager.",
+  "interruptionPolicy": {
+    "t1-held-inhale": [
+      "t2-exhale-mid",
+      "neutral"
+    ],
+    "forcedT3": false,
+    "note": "T3 remains normal-phrase relief, not a forced completion gesture on interruption."
+  }
+}

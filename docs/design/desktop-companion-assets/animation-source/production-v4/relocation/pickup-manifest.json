@@ -1,0 +1,386 @@
+{
+  "replaceEntrySources": [
+    "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+  ],
+  "nodes": [
+    {
+      "id": "v2-authored-open-rest-seated",
+      "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+      "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "durationMs": 1,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-approach-detached",
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [],
+        "embeddedStool": true,
+        "settled": true,
+        "restoreOnRelease": false,
+        "grabImmediate": "v2-authored-open-rest-detached"
+      }
+    },
+    {
+      "id": "v2-authored-open-rest-detached",
+      "source": "../../production-v2/relocation/current-source-detached-v2/55eeda4052ec2055.png",
+      "sourceSHA256": "1bad548f14e043ea7b7721964a67f3e07d27ad0308d8f48aa7bc309369020f8e",
+      "durationMs": 70,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-approach-detached",
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "entrySourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+      }
+    },
+    {
+      "id": "v2-authored-open-approach-seated",
+      "source": "frames/approach-seated.png",
+      "sourceSHA256": "30fcae5b0ed29c1aa847cb6daa2f71bfd7885c08afa52b546b5b793ee2a96110",
+      "durationMs": 80,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabImmediate": "v2-authored-open-approach-detached"
+      }
+    },
+    {
+      "id": "v2-authored-open-approach-detached",
+      "source": "frames/approach-detached.png",
+      "sourceSHA256": "da5d45d49f0305be39059d762a618e1d332508ed1586762ffdf0bfb597b26b01",
+      "durationMs": 85,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-approach-seated",
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    },
+    {
+      "id": "v2-authored-open-secure-seated",
+      "source": "frames/secure-seated.png",
+      "sourceSHA256": "b94b7cad7e4a4421591ffa5607fb9b0d2ae6d76e79dc7744b21ecd1daf24148c",
+      "durationMs": 100,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-approach-seated",
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabImmediate": "v2-authored-open-secure-detached"
+      }
+    },
+    {
+      "id": "v2-authored-open-secure-detached",
+      "source": "frames/secure-detached.png",
+      "sourceSHA256": "ed744ad6443b5f6815fbd89942f61bc1f1c6bddc271cdbd70ed030a6c7993ed5",
+      "durationMs": 90,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-secure-seated",
+          "v2-authored-open-approach-seated",
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    },
+    {
+      "id": "v2-authored-open-lift-half",
+      "source": "frames/lift-half.png",
+      "sourceSHA256": "65e14a852f1fff60900ca6ef362fa8f77e4e8980affcee328a1b7f6e9acc382a",
+      "durationMs": 100,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-land-contact-detached",
+          "v2-authored-open-land-contact-seated",
+          "v2-authored-open-secure-seated",
+          "v2-authored-open-approach-seated",
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    },
+    {
+      "id": "v2-authored-open-airborne",
+      "source": "frames/airborne.png",
+      "sourceSHA256": "b44668623bd93962d30cbfbc54f232b8f085f864456df6e8a74799608b4daf66",
+      "durationMs": 120,
+      "gesture": {
+        "grabNext": [],
+        "releaseNext": [
+          "v2-authored-open-land-contact-detached",
+          "v2-authored-open-land-contact-seated",
+          "v2-authored-open-secure-seated",
+          "v2-authored-open-approach-seated",
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    },
+    {
+      "id": "v2-authored-open-land-contact-detached",
+      "source": "frames/land-contact-detached.png",
+      "sourceSHA256": "bab6e856ad48ef4c3f0673cde914a9736d73216dc06293e53a7d9948ad5854f2",
+      "durationMs": 80,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-land-contact-seated",
+          "v2-authored-open-secure-seated",
+          "v2-authored-open-approach-seated",
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    },
+    {
+      "id": "v2-authored-open-land-contact-seated",
+      "source": "frames/land-contact-seated.png",
+      "sourceSHA256": "1414b8451f47acbdddf451f4ce4bc1d9832123dd1386e548529e6c09ade8e555",
+      "durationMs": 100,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-secure-seated",
+          "v2-authored-open-approach-seated",
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabImmediate": "v2-authored-open-land-contact-detached"
+      }
+    },
+    {
+      "id": "v2-authored-open-return-hover",
+      "source": "../response/frames/keyboard-hover.png",
+      "sourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+      "durationMs": 90,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-return-mid-detached",
+          "v2-authored-open-approach-detached",
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabImmediate": "v2-authored-open-return-hover-detached"
+      }
+    },
+    {
+      "id": "v2-authored-open-return-contact",
+      "source": "../response/frames/keyboard-contact.png",
+      "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+      "durationMs": 110,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-return-hover-detached",
+          "v2-authored-open-return-mid-detached",
+          "v2-authored-open-approach-detached",
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabImmediate": "v2-authored-open-return-contact-detached"
+      }
+    },
+    {
+      "id": "v2-authored-open-return-mid-seated",
+      "source": "frames/return-mid-seated.png",
+      "sourceSHA256": "9ae12017ead98ca86853a12787d1fd3fbe443b3853532ea06f6642ef1fb6fafa",
+      "durationMs": 85,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-approach-detached",
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": true,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true,
+        "grabImmediate": "v2-authored-open-return-mid-detached"
+      }
+    },
+    {
+      "id": "v2-authored-open-return-mid-detached",
+      "source": "frames/return-mid-detached.png",
+      "sourceSHA256": "7b63dc9b4728f575965144a226d81109a53032e7c6631ccc2e9a65228ee3bf2d",
+      "durationMs": 85,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-approach-detached",
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-return-mid-seated",
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    },
+    {
+      "id": "v2-authored-open-return-hover-detached",
+      "source": "../response/detached/keyboard-hover.png",
+      "sourceSHA256": "e5b059183df98633f8b28558e9b7e3989b46e46f61e8c0e43bef12a8bca5737c",
+      "durationMs": 90,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-return-mid-detached",
+          "v2-authored-open-approach-detached",
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-return-hover",
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    },
+    {
+      "id": "v2-authored-open-return-contact-detached",
+      "source": "../response/detached/keyboard-contact.png",
+      "sourceSHA256": "ac4845ca2e98f8fdde9fb25f80dd64f9b4ec9e3eed00f5e65e73495ac6eea691",
+      "durationMs": 110,
+      "gesture": {
+        "grabNext": [
+          "v2-authored-open-return-hover-detached",
+          "v2-authored-open-return-mid-detached",
+          "v2-authored-open-approach-detached",
+          "v2-authored-open-secure-detached",
+          "v2-authored-open-lift-half",
+          "v2-authored-open-airborne"
+        ],
+        "releaseNext": [
+          "v2-authored-open-return-contact",
+          "v2-authored-open-rest-seated"
+        ],
+        "embeddedStool": false,
+        "settled": false,
+        "restoreOnRelease": false,
+        "releaseViaFrames": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,5140 @@
+{
+  "utc": "2026-10-28T22:43:27.248Z",
+  "scope": "Actual shared controller, current accepted inventory. Pure routing/timing test complements visual peer review, not replacement.",
+  "packageCount": 32,
+  "checks": 370,
+  "failures": [],
+  "maxResolutionMs": 2856,
+  "results": [
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2601,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 663,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1445,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 1003,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1445,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1156,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 1003,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 1003,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2499,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 544,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1326,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 901,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1326,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 901,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 901,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2380,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 442,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1224,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1224,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 935,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 55,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2329,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 55,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 391,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 55,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1156,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 55,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 55,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1156,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 55,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 867,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 55,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 1,
+      "offset": 55,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2278,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 323,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1105,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 680,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1105,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 816,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 680,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 680,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 40,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2227,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 40,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 289,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 40,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1071,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 40,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 646,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 40,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1071,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 40,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 40,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 646,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 2,
+      "offset": 40,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 646,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 900,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 900,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 900,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 900,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 900,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 900,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 900,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 3,
+      "offset": 900,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2380,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 442,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1224,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1224,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 935,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 25,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2363,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 25,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 408,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 25,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1190,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 25,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 765,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 25,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1190,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 25,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 901,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 25,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 765,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 4,
+      "offset": 25,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 765,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2329,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 391,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1173,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1173,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 884,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 35,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2295,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 35,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 357,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 35,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1139,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 35,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 35,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1139,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 35,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 850,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 35,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 5,
+      "offset": 35,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2261,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 323,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1105,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 663,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1105,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 816,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 663,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 663,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 35,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2227,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 35,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 289,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 35,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1071,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 35,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 629,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 35,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1071,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 35,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 35,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 629,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 6,
+      "offset": 35,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 629,
+      "events": [
+        "permission-unresolved-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 750,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 750,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 750,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 750,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 750,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 750,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 750,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 7,
+      "offset": 750,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2431,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 493,
+      "events": [
+        "relaxed-settled-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1275,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1275,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 986,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 800,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2431,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 800,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 493,
+      "events": [
+        "relaxed-settled-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 800,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1275,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 800,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 800,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1275,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 800,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 986,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 800,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 8,
+      "offset": 800,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 500,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 500,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 500,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 500,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 500,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 500,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 500,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "frame": 9,
+      "offset": 500,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "permission",
+      "unresolved90s": true,
+      "ok": true,
+      "current": "permission-unresolved-hold-v1",
+      "timeMs": 4740
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2856,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 901,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1683,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 1258,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1683,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1394,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 1258,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 1258,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2737,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 799,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1581,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 1139,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1581,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1292,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 1139,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 0,
+      "offset": 110,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 1139,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2635,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 680,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1462,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1462,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1173,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 40,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2584,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 40,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 646,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 40,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1428,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 40,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 986,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 40,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1428,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 40,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1139,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 40,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 986,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 1,
+      "offset": 40,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 986,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2550,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 612,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1377,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 952,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1377,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1088,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 952,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 952,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 42,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2499,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 42,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 561,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 42,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1343,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 42,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 918,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 42,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1343,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 42,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1054,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 42,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 918,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 2,
+      "offset": 42,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 918,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2465,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 527,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1292,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 867,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1292,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 1003,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 867,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 867,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 40,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2431,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 40,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 476,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 40,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1258,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 40,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 40,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1258,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 40,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 969,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 40,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 3,
+      "offset": 40,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2380,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 442,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1224,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1224,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 935,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 45,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2346,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 45,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 391,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 45,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1173,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 45,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 748,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 45,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1173,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 45,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 884,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 45,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 748,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 4,
+      "offset": 45,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 748,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2295,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 357,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1122,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1122,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 50,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2244,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 50,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 306,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 50,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1071,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 50,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 646,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 50,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1071,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 50,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 50,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 646,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 5,
+      "offset": 50,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 646,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 900,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 900,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 900,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 900,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 900,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 900,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 900,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 6,
+      "offset": 900,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2380,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 442,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1224,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1224,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 935,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 25,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2363,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 25,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 408,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 25,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1190,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 25,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 765,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 25,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1190,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 25,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 901,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 25,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 765,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 7,
+      "offset": 25,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 765,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2329,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 391,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1173,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1173,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 884,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 35,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2295,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 35,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 357,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 35,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1139,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 35,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 35,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1139,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 35,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 850,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 35,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 8,
+      "offset": 35,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 697,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2261,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 323,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1105,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 663,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1105,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 816,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 663,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 663,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 35,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2227,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 35,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 289,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 35,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1071,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 35,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 629,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 35,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1071,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 35,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 782,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 35,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 629,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 9,
+      "offset": 35,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 629,
+      "events": [
+        "question-unanswered-hold-v1",
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 750,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 750,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 750,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 750,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 750,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 750,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 750,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 10,
+      "offset": 750,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2431,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 493,
+      "events": [
+        "relaxed-settled-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1275,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1275,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 986,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 800,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2431,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 800,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 493,
+      "events": [
+        "relaxed-settled-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 800,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1275,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 800,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 800,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1275,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 800,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 986,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 800,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 11,
+      "offset": 800,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 833,
+      "events": [
+        "relaxed-settled-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 0,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 0,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 0,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 0,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 0,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 0,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 0,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 0,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 500,
+      "outcome": "idle-closed",
+      "ok": true,
+      "elapsed": 2193,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "seated-work.closing-hybrid-v2"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 500,
+      "outcome": "understood",
+      "ok": true,
+      "elapsed": 255,
+      "events": [
+        "relaxed-to-neutral-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 500,
+      "outcome": "external-wait",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.wait-enter-v1-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 500,
+      "outcome": "editing",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 500,
+      "outcome": "disconnected",
+      "ok": true,
+      "elapsed": 1037,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.unknown-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 500,
+      "outcome": "cancel-settling",
+      "ok": true,
+      "elapsed": 731,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1",
+        "observe.cancel-entry-boundary-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 500,
+      "outcome": "failure",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "frame": 12,
+      "offset": 500,
+      "outcome": "unknown-effect-check",
+      "ok": true,
+      "elapsed": 595,
+      "events": [
+        "relaxed-to-neutral-v1",
+        "observe.gaze-to-screen-v1-pose-v1"
+      ],
+      "blocker": null
+    },
+    {
+      "action": "query",
+      "unresolved90s": true,
+      "ok": true,
+      "current": "question-unanswered-hold-v1",
+      "timeMs": 4740
+    }
+  ]
+}

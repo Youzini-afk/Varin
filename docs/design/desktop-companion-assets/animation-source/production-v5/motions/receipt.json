@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "id": "v5-receipt-working-phrase",
+  "family": "W12",
+  "action": "understood",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 220,
+      "phase": "exact canonical available endpoint",
+      "interruptionExitIds": []
+    },
+    {
+      "sourceId": "receipt-contact",
+      "durationMs": 90,
+      "phase": "early descent; nominal filename contact is NOT bottom",
+      "interruptionExitIds": [
+        "receipt-recovery",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "receipt-descent",
+      "durationMs": 110,
+      "phase": "late descent",
+      "interruptionExitIds": [
+        "receipt-recover-mid",
+        "receipt-recovery",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "receipt-entry",
+      "durationMs": 120,
+      "phase": "acknowledgment bottom; nominal filename entry is NOT beginning",
+      "interruptionExitIds": [
+        "receipt-recover-mid",
+        "receipt-recovery",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "receipt-recover-mid",
+      "durationMs": 120,
+      "phase": "early upward recovery",
+      "interruptionExitIds": [
+        "receipt-recovery",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "receipt-recovery",
+      "durationMs": 100,
+      "phase": "late upward recovery",
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 320,
+      "phase": "exact canonical available endpoint",
+      "interruptionExitIds": []
+    }
+  ],
+  "durationMs": 1080,
+  "routes": "receipt-routes.json",
+  "runtimeApproval": false,
+  "eventBindingChanged": false,
+  "trigger": "real matching answer or decision receipt only; not local click, permission prompt, or execution success",
+  "existingOwnerActionBindings": [
+    {
+      "action": "understood",
+      "when": "New actual matching clarification answer, current scope and current health only."
+    },
+    {
+      "action": "permission-allowed",
+      "when": "Actual matching permission resolve outcome allowed, current scope and current health only."
+    }
+  ],
+  "unsupportedBinding": "Do not map denied, disappeared, unknown or historical requests to permission-allowed. No generic receipt action is introduced.",
+  "oneShotPolicy": "Never local click, approval prompt or execution success; no extra nod or replay after interruption."
+}

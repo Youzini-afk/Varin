@@ -1,0 +1,9 @@
+{
+  "raw/listen-lean-v1.png": "sideways head roll too strong; generated v2 correction selected",
+  "raw/gather-out-v1.png": "sideways head roll too strong; generated v2 correction selected",
+  "raw/listen-turn-v1.png": "generated supposed halfway turn overshot peak yaw; excluded, genuine existing right-yaw intermediate registered instead",
+  "raw/gather-sweep-mid-v1.png": "nearly repeated inward endpoint, not a meaningful sweep intermediate; v2 redraw moves actual palm halfway",
+  "raw/gather-hidden-hip-plate-v1.png": "not selected: generic sleeve-free backing caused local coat/hair discontinuity across different active sleeves; replaced with each pose own no-stool drawing",
+  "integration-support/build_support.py": "development experiment only; selected-v1 is the sole consumption directory",
+  "integration-support/build_support-rejected-v1.py": "rejected translated hair patch, not runtime"
+}

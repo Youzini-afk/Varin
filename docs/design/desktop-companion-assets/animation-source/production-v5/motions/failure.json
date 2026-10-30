@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "id": "v5-failure-working-phrase",
+  "action": "failure",
+  "family": "W13",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 240,
+      "phase": "canonical",
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "failure-brake-early",
+      "durationMs": 130,
+      "phase": "controlled-stop-entry",
+      "interruptionExitIds": [
+        "failure-brake-early",
+        "failure-recover-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "failure-concern-peak",
+      "durationMs": 120,
+      "phase": "contraction-entry-mid-not-peak",
+      "interruptionExitIds": [
+        "failure-concern-peak",
+        "failure-recover-mid",
+        "failure-recover-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "failure-contract-mid",
+      "durationMs": 260,
+      "phase": "maximum-contraction-crest",
+      "interruptionExitIds": [
+        "failure-contract-mid",
+        "failure-release-first",
+        "failure-recover-mid",
+        "failure-recover-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "failure-release-first",
+      "durationMs": 130,
+      "phase": "chest-release-early",
+      "interruptionExitIds": [
+        "failure-release-first",
+        "failure-recover-mid",
+        "failure-recover-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "failure-recover-mid",
+      "durationMs": 120,
+      "phase": "attentive-upright-recovery",
+      "interruptionExitIds": [
+        "failure-recover-mid",
+        "failure-recover-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "failure-recover-ready",
+      "durationMs": 120,
+      "phase": "near-canonical-settle",
+      "interruptionExitIds": [
+        "failure-recover-ready",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 360,
+      "phase": "canonical",
+      "interruptionExitIds": [
+        "neutral"
+      ]
+    }
+  ],
+  "durationMs": 1480,
+  "routes": "failure-routes.json",
+  "knownFailureOnly": true,
+  "failureAutoResolved": false,
+  "runtimeApproval": false,
+  "semantic": "Only authoritative failed outcome; never unknown effect or fabricated approval. Recovery does not resolve failure."
+}

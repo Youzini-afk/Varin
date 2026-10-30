@@ -1,0 +1,50 @@
+{
+  "ask": {
+    "canvas": [
+      512,
+      512
+    ],
+    "changedPixelCount": 27095,
+    "outsideMaskChangedPixels": 0
+  },
+  "attend-corrected": {
+    "canvas": [
+      512,
+      512
+    ],
+    "changedPixelCount": 27259,
+    "outsideMaskChangedPixels": 0
+  },
+  "listen-rest": {
+    "canvas": [
+      512,
+      512
+    ],
+    "changedPixelCount": 28176,
+    "outsideMaskChangedPixels": 0
+  },
+  "nod-soft": {
+    "canvas": [
+      512,
+      512
+    ],
+    "changedPixelCount": 41479,
+    "outsideMaskChangedPixels": 0
+  },
+  "offer": {
+    "canvas": [
+      512,
+      512
+    ],
+    "changedPixelCount": 26050,
+    "outsideMaskChangedPixels": 0
+  },
+  "offer-mid": {
+    "canvas": [
+      512,
+      512
+    ],
+    "changedPixelCount": 26238,
+    "outsideMaskChangedPixels": 0
+  }
+}

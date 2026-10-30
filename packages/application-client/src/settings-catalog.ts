@@ -978,6 +978,13 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       availability: { desktopLocal: true, platform: 'not-mac' } },
   },
   {
+    id: 'sessions.desktop-companion', category: 'appearance', owner: 'app',
+    field: { path: 'desktopCompanionEnabled', kind: 'boolean' }, apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.varin.desktopNetwork.field.companion',
+      descriptionKey: 'settings.varin.desktopNetwork.field.companionDescription',
+      keywords: ['desktop', 'companion', 'pet', 'animation'], availability: { desktopLocal: true } },
+  },
+  {
     id: 'sessions.desktop-keep-awake', category: 'sessions', owner: 'app',
     field: { path: 'desktopKeepAwakeEnabled', kind: 'boolean' },
     apply: 'immediate',

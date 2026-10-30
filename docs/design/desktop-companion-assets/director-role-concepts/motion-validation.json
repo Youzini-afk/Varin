@@ -1,0 +1,11 @@
+{
+  "htmlBytes": 811898,
+  "cases": 12,
+  "source": "executed embedded motion-concepts.html script with deterministic clock",
+  "phases": {
+    "anticipationMs": 700,
+    "travelMs": 1900,
+    "holdMs": 2400
+  },
+  "status": "passed: each generated SVG rasterized; avatar/character data present; no undefined fields"
+}

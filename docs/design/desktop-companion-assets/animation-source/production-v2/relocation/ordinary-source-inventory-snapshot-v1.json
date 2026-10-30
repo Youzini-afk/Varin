@@ -1,0 +1,1457 @@
+{
+  "stage": "source staging only; no runtime acceptance",
+  "geometryReference": "varin-upright-v2",
+  "sequences": [
+    {
+      "id": "lid-opening",
+      "sourceManifest": "varin-animation-production-v2/lid/sequence-source-v3.json",
+      "manifestSha256": "8208d5a3de7a042f7a8051973f9c605324bfc8ead765758f922246c75169bc3c",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 650,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-045-registered-v3.png",
+          "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+          "durationMs": 70,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-055-registered-v3.png",
+          "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12",
+          "durationMs": 65,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-070-registered-v3.png",
+          "sha256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3",
+          "durationMs": 65,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-100-registered-v3.png",
+          "sha256": "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd",
+          "durationMs": 120,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/release-first-registered-v2.png",
+          "sha256": "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75",
+          "durationMs": 65,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/release-near-registered-v2.png",
+          "sha256": "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d",
+          "durationMs": 90,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/release-low-registered-v2.png",
+          "sha256": "f483496bfd97c4f88f38b2e8d105ea87359818ebf57742e3d9555c9f90dca369",
+          "durationMs": 90,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/open-rest-v1.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 850,
+          "cue": null,
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "closed",
+      "exitAnchor": "open-user",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "lid-closing",
+      "sourceManifest": "varin-animation-production-v2/lid/sequence-source-v3.json",
+      "manifestSha256": "8208d5a3de7a042f7a8051973f9c605324bfc8ead765758f922246c75169bc3c",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/lid/frames/open-rest-v1.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 850,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/release-low-registered-v2.png",
+          "sha256": "f483496bfd97c4f88f38b2e8d105ea87359818ebf57742e3d9555c9f90dca369",
+          "durationMs": 90,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/release-near-registered-v2.png",
+          "sha256": "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d",
+          "durationMs": 90,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/release-first-registered-v2.png",
+          "sha256": "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75",
+          "durationMs": 65,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-100-registered-v3.png",
+          "sha256": "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd",
+          "durationMs": 120,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-070-registered-v3.png",
+          "sha256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3",
+          "durationMs": 65,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-055-registered-v3.png",
+          "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12",
+          "durationMs": 65,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-045-registered-v3.png",
+          "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+          "durationMs": 70,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": null,
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 650,
+          "cue": null,
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-user",
+      "exitAnchor": "closed",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "permissionAllow",
+      "sourceManifest": "varin-animation-production-v2/question-permission/manifest.json",
+      "manifestSha256": "a50df367d1c928163439f3e2badffdb9e8e3ae0141e9a0ba6dd0ace3b6926908",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 140,
+          "cue": "ALLOW_EVENT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 120,
+          "cue": "HANDS_RETURN",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/nod-soft.png",
+          "sha256": "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482",
+          "durationMs": 160,
+          "cue": "ALLOW_RECEIVED",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 120,
+          "cue": "RECOVER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 160,
+          "cue": "RETURN",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": null,
+      "exitAnchor": "open-screen",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "permissionDenyOrCancel",
+      "sourceManifest": "varin-animation-production-v2/question-permission/manifest.json",
+      "manifestSha256": "a50df367d1c928163439f3e2badffdb9e8e3ae0141e9a0ba6dd0ace3b6926908",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 180,
+          "cue": "RETRACT_NEUTRAL",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 220,
+          "cue": "NEUTRAL",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 160,
+          "cue": "RETURN",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": null,
+      "exitAnchor": "open-screen",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "permissionEnter",
+      "sourceManifest": "varin-animation-production-v2/question-permission/manifest.json",
+      "manifestSha256": "a50df367d1c928163439f3e2badffdb9e8e3ae0141e9a0ba6dd0ace3b6926908",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/references/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 120,
+          "cue": "ACTIVE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/attend-corrected.png",
+          "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+          "durationMs": 240,
+          "cue": "STOP",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/offer-mid.png",
+          "sha256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+          "durationMs": 130,
+          "cue": "OFFER_START",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/offer.png",
+          "sha256": "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570",
+          "durationMs": 650,
+          "cue": "OFFER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/offer-mid.png",
+          "sha256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+          "durationMs": 180,
+          "cue": "LOWER_PALM",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/attend-corrected.png",
+          "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+          "durationMs": 150,
+          "cue": "RETRACT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": null,
+          "cue": "UNRESOLVED",
+          "eventHold": true
+        }
+      ],
+      "entryAnchor": "open-screen",
+      "exitAnchor": null,
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "questionAnswered",
+      "sourceManifest": "varin-animation-production-v2/question-permission/manifest.json",
+      "manifestSha256": "a50df367d1c928163439f3e2badffdb9e8e3ae0141e9a0ba6dd0ace3b6926908",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 140,
+          "cue": "RECEIVED",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 120,
+          "cue": "LOWER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/nod-soft.png",
+          "sha256": "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482",
+          "durationMs": 160,
+          "cue": "ANSWER_RECEIVED",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 120,
+          "cue": "RECOVER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 180,
+          "cue": "RETURN",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": null,
+      "exitAnchor": "open-screen",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "questionCancel",
+      "sourceManifest": "varin-animation-production-v2/question-permission/manifest.json",
+      "manifestSha256": "a50df367d1c928163439f3e2badffdb9e8e3ae0141e9a0ba6dd0ace3b6926908",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 120,
+          "cue": "RETRACT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "NEUTRAL",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 180,
+          "cue": "RETURN",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": null,
+      "exitAnchor": "open-screen",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "questionEnter",
+      "sourceManifest": "varin-animation-production-v2/question-permission/manifest.json",
+      "manifestSha256": "a50df367d1c928163439f3e2badffdb9e8e3ae0141e9a0ba6dd0ace3b6926908",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/references/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 160,
+          "cue": "READ",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 200,
+          "cue": "ADDRESS",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/attend-corrected.png",
+          "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+          "durationMs": 120,
+          "cue": "LIFT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/ask.png",
+          "sha256": "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020",
+          "durationMs": 520,
+          "cue": "ASK",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/attend-corrected.png",
+          "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+          "durationMs": 160,
+          "cue": "LOWER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": null,
+          "cue": "ATTEND",
+          "eventHold": true
+        }
+      ],
+      "entryAnchor": "open-screen",
+      "exitAnchor": null,
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "reading",
+      "sourceManifest": "varin-animation-production-v2/reading-search/reading-timing-v2.json",
+      "manifestSha256": "8145b0eb7f190a1f86b9e6c939f192f92163b68706e38a84e6aa2296c4637b88",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 550,
+          "cue": "prepare",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-prepare-v2-candidate.png",
+          "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482",
+          "durationMs": 100,
+          "cue": "PAGE_PRESENT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-middle-v1-candidate.png",
+          "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa",
+          "durationMs": 110,
+          "cue": "READ_ENTER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-settle-v1-candidate.png",
+          "sha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+          "durationMs": 800,
+          "cue": "READ_SETTLE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-hand-prepare-v1-candidate.png",
+          "sha256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825",
+          "durationMs": 100,
+          "cue": "PAGE_TURN_PREPARE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-turn-v1-candidate.png",
+          "sha256": "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742",
+          "durationMs": 180,
+          "cue": "PAGE_TURN",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-hand-prepare-v1-candidate.png",
+          "sha256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825",
+          "durationMs": 90,
+          "cue": "PAGE_TURN_RELEASE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-settle-v1-candidate.png",
+          "sha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+          "durationMs": 450,
+          "cue": "READ_SETTLE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-middle-v1-candidate.png",
+          "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa",
+          "durationMs": 120,
+          "cue": "release",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/read-prepare-v2-candidate.png",
+          "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482",
+          "durationMs": 110,
+          "cue": "release",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 700,
+          "cue": "exit",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-user",
+      "exitAnchor": "open-user",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "search",
+      "sourceManifest": "varin-animation-production-v2/reading-search/search-timing-v2.json",
+      "manifestSha256": "739e659d159a9219e755960722d0b0da385f2a76d012144f3bf5b45b16ae0240",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 500,
+          "cue": "FAN_OUT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/search-left-middle-v1-candidate.png",
+          "sha256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce",
+          "durationMs": 100,
+          "cue": "SCAN_SIDE_A_ENTER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/search-left-v1-candidate.png",
+          "sha256": "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263",
+          "durationMs": 650,
+          "cue": "SCAN_SIDE_A",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/search-left-middle-v1-candidate.png",
+          "sha256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce",
+          "durationMs": 90,
+          "cue": "release",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 230,
+          "cue": "attend",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/search-right-middle-v1-candidate.png",
+          "sha256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5",
+          "durationMs": 100,
+          "cue": "SCAN_SIDE_B_ENTER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/search-right-v1-candidate.png",
+          "sha256": "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852",
+          "durationMs": 950,
+          "cue": "SCAN_SIDE_B",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/search-right-middle-v1-candidate.png",
+          "sha256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5",
+          "durationMs": 110,
+          "cue": "release",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "return",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 180,
+          "cue": "SELECT_PREPARE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/search-focus-v1-candidate.png",
+          "sha256": "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b",
+          "durationMs": 180,
+          "cue": "SELECT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 600,
+          "cue": "exit",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-user",
+      "exitAnchor": "open-screen",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "editing",
+      "sourceManifest": "varin-animation-production-v2/editing-dispatch/sequence-manifest.json",
+      "manifestSha256": "1e353c3a6fa0c59ac25a58ad53105c7982791c653818a73adb163755c6877f7f",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 240,
+          "cue": "ENTER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 160,
+          "cue": "TYPE_READY",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-prepare.png",
+          "sha256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+          "durationMs": 160,
+          "cue": "TYPE_PREPARE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-forward.png",
+          "sha256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+          "durationMs": 180,
+          "cue": "TYPE_BURST",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-forward-hands-b.png",
+          "sha256": "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d",
+          "durationMs": 150,
+          "cue": "TYPE_ALTERNATE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-forward.png",
+          "sha256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+          "durationMs": 180,
+          "cue": "TYPE_BURST",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-prepare.png",
+          "sha256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+          "durationMs": 180,
+          "cue": "TYPE_STOP",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 150,
+          "cue": "TYPE_RELEASE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/review-rise.png",
+          "sha256": "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6",
+          "durationMs": 180,
+          "cue": "REVIEW_RISE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/review.png",
+          "sha256": "2ff88020f1da38714ac9484698cc921b3db0cd3d93dccf72833b0b052ba571f2",
+          "durationMs": 720,
+          "cue": "REVIEW",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/review-rise.png",
+          "sha256": "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6",
+          "durationMs": 180,
+          "cue": "REVIEW_LOWER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/select.png",
+          "sha256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+          "durationMs": 400,
+          "cue": "SELECT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 150,
+          "cue": "REVISE_PREPARE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-prepare.png",
+          "sha256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+          "durationMs": 160,
+          "cue": "REVISE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-forward.png",
+          "sha256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+          "durationMs": 180,
+          "cue": "REVISE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-forward-hands-b.png",
+          "sha256": "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d",
+          "durationMs": 150,
+          "cue": "REVISE_ALTERNATE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-forward.png",
+          "sha256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+          "durationMs": 160,
+          "cue": "REVISE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-prepare.png",
+          "sha256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+          "durationMs": 180,
+          "cue": "EDIT_RELEASE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 160,
+          "cue": "EDIT_SETTLE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 650,
+          "cue": "EXIT",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-screen",
+      "exitAnchor": "open-screen",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "collaboration",
+      "sourceManifest": "varin-animation-production-v2/editing-dispatch/sequence-manifest.json",
+      "manifestSha256": "1e353c3a6fa0c59ac25a58ad53105c7982791c653818a73adb163755c6877f7f",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/neutral.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 240,
+          "cue": "ENTER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/review-v2.png",
+          "sha256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "durationMs": 200,
+          "cue": "SPLIT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/split-gaze.png",
+          "sha256": "6adbd265d91917ffedabfcc7fa1fdbe6400ec8aaeb6188903a64ee6f28149d25",
+          "durationMs": 180,
+          "cue": "GAZE_A",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-rise-gaze.png",
+          "sha256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+          "durationMs": 180,
+          "cue": "DISPATCH_RISE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-a-gaze.png",
+          "sha256": "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb",
+          "durationMs": 400,
+          "cue": "DISPATCH_A",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-rise-gaze.png",
+          "sha256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+          "durationMs": 160,
+          "cue": "DISPATCH_TRANSIT_OUT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-transit-gazeB.png",
+          "sha256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+          "durationMs": 180,
+          "cue": "GAZE_B_TRANSIT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-b-v2-gazeB.png",
+          "sha256": "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1",
+          "durationMs": 400,
+          "cue": "DISPATCH_B",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/dispatch-transit-gazeB.png",
+          "sha256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+          "durationMs": 180,
+          "cue": "RETURN_ROTATE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/review-v2.png",
+          "sha256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "durationMs": 180,
+          "cue": "RETURN_LOWER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/gaze-right.png",
+          "sha256": "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04",
+          "durationMs": 900,
+          "cue": "WATCH",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/neutral.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 450,
+          "cue": "WATCH_CENTER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 300,
+          "cue": "RELEASE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 180,
+          "cue": "WORK",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 500,
+          "cue": "EXIT",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-user",
+      "exitAnchor": "open-screen",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "local-completion",
+      "sourceManifest": "varin-animation-production-v2/question-permission/wave/manifest.json",
+      "manifestSha256": "65d1a1418e756438cbb8d94766b6346083fb613c5b5c55cac5422d8d5d6eee9b",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "ADDRESS",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/open-mid.png",
+          "sha256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+          "durationMs": 130,
+          "cue": "LIFT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/open-peak.png",
+          "sha256": "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15",
+          "durationMs": 280,
+          "cue": "WAVE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/open-mid.png",
+          "sha256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+          "durationMs": 150,
+          "cue": "LOWER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/open-smile.png",
+          "sha256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+          "durationMs": 260,
+          "cue": "SOFT_SMILE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-user",
+      "exitAnchor": "open-user",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "local-tap",
+      "sourceManifest": "varin-animation-production-v2/question-permission/wave/manifest.json",
+      "manifestSha256": "65d1a1418e756438cbb8d94766b6346083fb613c5b5c55cac5422d8d5d6eee9b",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "cue": "ADDRESS",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/closed-mid.png",
+          "sha256": "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3",
+          "durationMs": 80,
+          "cue": "LIFT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/closed-peak.png",
+          "sha256": "31e2e0989dff6647dbcd2f6a046713db6dff1a45490868da0d1a520bcd1dab18",
+          "durationMs": 130,
+          "cue": "WAVE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/closed-mid.png",
+          "sha256": "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3",
+          "durationMs": 90,
+          "cue": "LOWER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/closed-smile.png",
+          "sha256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811",
+          "durationMs": 100,
+          "cue": "SOFT_SMILE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "cue": "REST",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "closed",
+      "exitAnchor": "closed",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "local-welcome",
+      "sourceManifest": "varin-animation-production-v2/question-permission/wave/manifest.json",
+      "manifestSha256": "65d1a1418e756438cbb8d94766b6346083fb613c5b5c55cac5422d8d5d6eee9b",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 160,
+          "cue": "ADDRESS",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/closed-mid.png",
+          "sha256": "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3",
+          "durationMs": 110,
+          "cue": "LIFT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/closed-peak.png",
+          "sha256": "31e2e0989dff6647dbcd2f6a046713db6dff1a45490868da0d1a520bcd1dab18",
+          "durationMs": 300,
+          "cue": "WAVE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/closed-mid.png",
+          "sha256": "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3",
+          "durationMs": 140,
+          "cue": "LOWER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/closed-smile.png",
+          "sha256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811",
+          "durationMs": 240,
+          "cue": "SOFT_SMILE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 150,
+          "cue": "REST",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "closed",
+      "exitAnchor": "closed",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "relocation-core",
+      "sourceManifest": "varin-animation-production-v2/relocation/core-sequence-v2.json",
+      "manifestSha256": "da0aa793a7198c03051b3c00b0451032b37860887749804148baa2536f2996be",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 650,
+          "cue": "closed rest",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/lap-release-mid-v1.png",
+          "sha256": "bf97fc9a073bbb9e7b8a3b06904bb061f94ccff71e656c552c3794ba20f6edb0",
+          "durationMs": 100,
+          "cue": "left hand starts securing",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/seated-secure-v2.png",
+          "sha256": "4ee1d68beeda32a13ae769e2dc1c6de692e98f6b28b29b06845c6af6d3044a37",
+          "durationMs": 110,
+          "cue": "both hands secure",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/land-contact-v1.png",
+          "sha256": "ff68442a4a8632f6e41020297393ff42446e2ef9a712c6057d0821b0d54dee1a",
+          "durationMs": 90,
+          "cue": "seat unloading",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/detach-first-v2.png",
+          "sha256": "ece6e77b48bbc40ba261a9a9cd98b7e464bf6d705f59fd8a2e91ad24a0918a9d",
+          "durationMs": 140,
+          "cue": "seat released",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/airborne-response-v3.png",
+          "sha256": "69b755e9b468a5233d1398b359a6a223de1052bd7cabb0b86ab0f11138d856a1",
+          "durationMs": 150,
+          "cue": "loose leg response",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/detach-first-v2.png",
+          "sha256": "ece6e77b48bbc40ba261a9a9cd98b7e464bf6d705f59fd8a2e91ad24a0918a9d",
+          "durationMs": 300,
+          "cue": "supported airborne",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/land-contact-v1.png",
+          "sha256": "ff68442a4a8632f6e41020297393ff42446e2ef9a712c6057d0821b0d54dee1a",
+          "durationMs": 120,
+          "cue": "seat takes weight",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/seated-secure-v2.png",
+          "sha256": "4ee1d68beeda32a13ae769e2dc1c6de692e98f6b28b29b06845c6af6d3044a37",
+          "durationMs": 110,
+          "cue": "body settles",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/relocation/frames/lap-release-mid-v1.png",
+          "sha256": "bf97fc9a073bbb9e7b8a3b06904bb061f94ccff71e656c552c3794ba20f6edb0",
+          "durationMs": 110,
+          "cue": "release grip onto lap",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 700,
+          "cue": "closed rest",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "closed",
+      "exitAnchor": "closed",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "upright-gaze-screen-to-user",
+      "sourceManifest": "varin-animation-production-v2/reading-search/gaze-bridge/source-sequences.json",
+      "manifestSha256": "bc87986cb27e2ec9bbb965e07afc57d13ce78f0ad3106e738458dd0710674701",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 50,
+          "cue": "GAZE_PREPARE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 130,
+          "cue": "GAZE_TO_USER",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-screen",
+      "exitAnchor": "open-user",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "upright-gaze-user-to-screen",
+      "sourceManifest": "varin-animation-production-v2/reading-search/gaze-bridge/source-sequences.json",
+      "manifestSha256": "bc87986cb27e2ec9bbb965e07afc57d13ce78f0ad3106e738458dd0710674701",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 50,
+          "cue": "GAZE_PREPARE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/reading-search/shared/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 130,
+          "cue": "GAZE_TO_SCREEN",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-user",
+      "exitAnchor": "open-screen",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "waiting-blink",
+      "sourceManifest": "varin-animation-production-v2/question-permission/blink/manifest.json",
+      "manifestSha256": "067f9edec892ac9983142029fe7a0e9ff1760239c761444e9223571ac6073572",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/blink/listen-rest-half.png",
+          "sha256": "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e",
+          "durationMs": 45,
+          "cue": "ATTEND",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/blink/listen-rest-closed.png",
+          "sha256": "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c",
+          "durationMs": 75,
+          "cue": "ATTEND",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/blink/listen-rest-half.png",
+          "sha256": "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e",
+          "durationMs": 45,
+          "cue": "ATTEND",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": null,
+      "exitAnchor": null,
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    },
+    {
+      "id": "local-open-tap",
+      "sourceManifest": "varin-animation-production-v2/question-permission/local-closures/manifest.json",
+      "manifestSha256": "d724ca9b31a22a780be3cfea13aed03344dc0769e430e386cf42a4677cf8dbc3",
+      "reviewStatus": "candidate-not-promoted",
+      "frames": [
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 80,
+          "cue": "ADDRESS",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/open-mid.png",
+          "sha256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+          "durationMs": 80,
+          "cue": "LIFT",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/open-peak.png",
+          "sha256": "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15",
+          "durationMs": 130,
+          "cue": "LOCAL_WAVE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/open-mid.png",
+          "sha256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+          "durationMs": 90,
+          "cue": "LOWER",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/wave/open-smile.png",
+          "sha256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+          "durationMs": 100,
+          "cue": "SOFT_SMILE",
+          "eventHold": false
+        },
+        {
+          "source": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 80,
+          "cue": "REST",
+          "eventHold": false
+        }
+      ],
+      "entryAnchor": "open-user",
+      "exitAnchor": "open-user",
+      "requiresContract": [
+        "authored safe-exit points",
+        "loop bounds or finite declaration",
+        "source-specific pickup route",
+        "finite visual review scope"
+      ]
+    }
+  ],
+  "uniqueSourceCount": 56,
+  "uniqueSources": {
+    "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb": "varin-animation-production-v2/lid/frames/closed-rest-rigid-v2.png",
+    "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc": "varin-animation-production-v2/lid/frames/contact-000-registered-v3.png",
+    "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77": "varin-animation-production-v2/lid/frames/contact-015-registered-v3.png",
+    "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049": "varin-animation-production-v2/lid/frames/contact-030-registered-v3.png",
+    "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7": "varin-animation-production-v2/lid/frames/contact-045-registered-v3.png",
+    "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12": "varin-animation-production-v2/lid/frames/contact-055-registered-v3.png",
+    "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3": "varin-animation-production-v2/lid/frames/contact-070-registered-v3.png",
+    "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd": "varin-animation-production-v2/lid/frames/contact-100-registered-v3.png",
+    "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75": "varin-animation-production-v2/lid/frames/release-first-registered-v2.png",
+    "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d": "varin-animation-production-v2/lid/frames/release-near-registered-v2.png",
+    "f483496bfd97c4f88f38b2e8d105ea87359818ebf57742e3d9555c9f90dca369": "varin-animation-production-v2/lid/frames/release-low-registered-v2.png",
+    "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f": "varin-animation-production-v2/question-permission/references/upright-open-neutral-v2.png",
+    "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a": "varin-animation-production-v2/question-permission/poses/listen-rest.png",
+    "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482": "varin-animation-production-v2/question-permission/poses/nod-soft.png",
+    "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb": "varin-animation-production-v2/reading-search/shared/open-screen-read-v2.png",
+    "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f": "varin-animation-production-v2/question-permission/poses/attend-corrected.png",
+    "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a": "varin-animation-production-v2/question-permission/poses/offer-mid.png",
+    "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570": "varin-animation-production-v2/question-permission/poses/offer.png",
+    "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020": "varin-animation-production-v2/question-permission/poses/ask.png",
+    "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482": "varin-animation-production-v2/reading-search/read-prepare-v2-candidate.png",
+    "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa": "varin-animation-production-v2/reading-search/read-middle-v1-candidate.png",
+    "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3": "varin-animation-production-v2/reading-search/read-settle-v1-candidate.png",
+    "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825": "varin-animation-production-v2/reading-search/read-hand-prepare-v1-candidate.png",
+    "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742": "varin-animation-production-v2/reading-search/read-turn-v1-candidate.png",
+    "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce": "varin-animation-production-v2/reading-search/search-left-middle-v1-candidate.png",
+    "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263": "varin-animation-production-v2/reading-search/search-left-v1-candidate.png",
+    "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5": "varin-animation-production-v2/reading-search/search-right-middle-v1-candidate.png",
+    "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852": "varin-animation-production-v2/reading-search/search-right-v1-candidate.png",
+    "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b": "varin-animation-production-v2/reading-search/search-focus-v1-candidate.png",
+    "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f": "varin-animation-production-v2/editing-dispatch/frames/type-burst.png",
+    "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b": "varin-animation-production-v2/editing-dispatch/frames/type-prepare.png",
+    "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613": "varin-animation-production-v2/editing-dispatch/frames/type-forward.png",
+    "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d": "varin-animation-production-v2/editing-dispatch/frames/type-forward-hands-b.png",
+    "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6": "varin-animation-production-v2/editing-dispatch/frames/review-rise.png",
+    "2ff88020f1da38714ac9484698cc921b3db0cd3d93dccf72833b0b052ba571f2": "varin-animation-production-v2/editing-dispatch/frames/review.png",
+    "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b": "varin-animation-production-v2/editing-dispatch/frames/select.png",
+    "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9": "varin-animation-production-v2/editing-dispatch/frames/review-v2.png",
+    "6adbd265d91917ffedabfcc7fa1fdbe6400ec8aaeb6188903a64ee6f28149d25": "varin-animation-production-v2/editing-dispatch/frames/split-gaze.png",
+    "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d": "varin-animation-production-v2/editing-dispatch/frames/dispatch-rise-gaze.png",
+    "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb": "varin-animation-production-v2/editing-dispatch/frames/dispatch-a-gaze.png",
+    "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec": "varin-animation-production-v2/editing-dispatch/frames/dispatch-transit-gazeB.png",
+    "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1": "varin-animation-production-v2/editing-dispatch/frames/dispatch-b-v2-gazeB.png",
+    "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04": "varin-animation-production-v2/editing-dispatch/frames/gaze-right.png",
+    "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2": "varin-animation-production-v2/question-permission/wave/open-mid.png",
+    "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15": "varin-animation-production-v2/question-permission/wave/open-peak.png",
+    "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc": "varin-animation-production-v2/question-permission/wave/open-smile.png",
+    "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3": "varin-animation-production-v2/question-permission/wave/closed-mid.png",
+    "31e2e0989dff6647dbcd2f6a046713db6dff1a45490868da0d1a520bcd1dab18": "varin-animation-production-v2/question-permission/wave/closed-peak.png",
+    "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811": "varin-animation-production-v2/question-permission/wave/closed-smile.png",
+    "bf97fc9a073bbb9e7b8a3b06904bb061f94ccff71e656c552c3794ba20f6edb0": "varin-animation-production-v2/relocation/frames/lap-release-mid-v1.png",
+    "4ee1d68beeda32a13ae769e2dc1c6de692e98f6b28b29b06845c6af6d3044a37": "varin-animation-production-v2/relocation/frames/seated-secure-v2.png",
+    "ff68442a4a8632f6e41020297393ff42446e2ef9a712c6057d0821b0d54dee1a": "varin-animation-production-v2/relocation/frames/land-contact-v1.png",
+    "ece6e77b48bbc40ba261a9a9cd98b7e464bf6d705f59fd8a2e91ad24a0918a9d": "varin-animation-production-v2/relocation/frames/detach-first-v2.png",
+    "69b755e9b468a5233d1398b359a6a223de1052bd7cabb0b86ab0f11138d856a1": "varin-animation-production-v2/relocation/frames/airborne-response-v3.png",
+    "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e": "varin-animation-production-v2/question-permission/blink/listen-rest-half.png",
+    "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c": "varin-animation-production-v2/question-permission/blink/listen-rest-closed.png"
+  },
+  "sourceIssues": []
+}

@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 1,
+  "geometryReference": "varin-upright-v2",
+  "stage": "new core interaction contract for integration review; not universal family coverage",
+  "canvas": [
+    512,
+    512
+  ],
+  "closedEndpoint": "closedSeated",
+  "nodes": {
+    "closedSeated": {
+      "source": "../lid/frames/closed-rest-rigid-v2.png",
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "embeddedStool": true,
+      "handsSupported": true,
+      "stage": "parent accepted for integration; native not yet verified",
+      "grabImmediate": "closedDetached",
+      "grabNext": [
+        {
+          "node": "midDetached",
+          "durationMs": 80
+        },
+        {
+          "node": "secureDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "contactDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "airborneNeutral",
+          "durationMs": 140
+        }
+      ],
+      "releaseNext": []
+    },
+    "midSeated": {
+      "source": "frames/lap-release-mid-v1.png",
+      "sourceSHA256": "bf97fc9a073bbb9e7b8a3b06904bb061f94ccff71e656c552c3794ba20f6edb0",
+      "embeddedStool": true,
+      "handsSupported": true,
+      "stage": "parent accepted for integration; native not yet verified",
+      "grabImmediate": "midDetached",
+      "grabNext": [
+        {
+          "node": "secureDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "contactDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "airborneNeutral",
+          "durationMs": 140
+        }
+      ],
+      "releaseNext": []
+    },
+    "secureSeated": {
+      "source": "frames/seated-secure-v2.png",
+      "sourceSHA256": "4ee1d68beeda32a13ae769e2dc1c6de692e98f6b28b29b06845c6af6d3044a37",
+      "embeddedStool": true,
+      "handsSupported": true,
+      "stage": "parent accepted for integration; native not yet verified",
+      "grabImmediate": "secureDetached",
+      "grabNext": [
+        {
+          "node": "contactDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "airborneNeutral",
+          "durationMs": 140
+        }
+      ],
+      "releaseNext": []
+    },
+    "contactSeated": {
+      "source": "frames/land-contact-v1.png",
+      "sourceSHA256": "ff68442a4a8632f6e41020297393ff42446e2ef9a712c6057d0821b0d54dee1a",
+      "embeddedStool": true,
+      "handsSupported": true,
+      "stage": "parent accepted for integration; native not yet verified",
+      "grabImmediate": "contactDetached",
+      "grabNext": [
+        {
+          "node": "airborneNeutral",
+          "durationMs": 140
+        }
+      ],
+      "releaseNext": []
+    },
+    "closedDetached": {
+      "source": "frames/closed-rest-no-stool-v4.png",
+      "sourceSHA256": "d19e8eb5376d230e3a50068d1f7b9f5ec1801b13a73b66934c71dc3940c81e1a",
+      "embeddedStool": false,
+      "handsSupported": true,
+      "stage": "parent core visual direction accepted; no-stool derivatives pending focused peer",
+      "grabImmediate": "closedDetached",
+      "grabNext": [
+        {
+          "node": "midDetached",
+          "durationMs": 80
+        },
+        {
+          "node": "secureDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "contactDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "airborneNeutral",
+          "durationMs": 140
+        }
+      ],
+      "releaseNext": [
+        {
+          "node": "closedSeated",
+          "durationMs": 100
+        }
+      ],
+      "originalSeatedSource": "../lid/frames/closed-rest-rigid-v2.png",
+      "originalSeatedSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+    },
+    "midDetached": {
+      "source": "frames/lap-release-mid-no-stool-v4.png",
+      "sourceSHA256": "bb09731484ce1b19b6e3add8807ad83e47f3725b5a9348563d93466f66fcf673",
+      "embeddedStool": false,
+      "handsSupported": true,
+      "stage": "parent core visual direction accepted; no-stool derivatives pending focused peer",
+      "grabImmediate": "midDetached",
+      "grabNext": [
+        {
+          "node": "secureDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "contactDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "airborneNeutral",
+          "durationMs": 140
+        }
+      ],
+      "releaseNext": [
+        {
+          "node": "midSeated",
+          "durationMs": 100
+        },
+        {
+          "node": "closedSeated",
+          "durationMs": 110
+        }
+      ],
+      "originalSeatedSource": "frames/lap-release-mid-v1.png",
+      "originalSeatedSHA256": "bf97fc9a073bbb9e7b8a3b06904bb061f94ccff71e656c552c3794ba20f6edb0"
+    },
+    "secureDetached": {
+      "source": "frames/secure-no-stool-v4.png",
+      "sourceSHA256": "9d63fb8a67c52d77f8c02ef078a0e124128f075d54fa901479332e590fb8ed08",
+      "embeddedStool": false,
+      "handsSupported": true,
+      "stage": "parent core visual direction accepted; no-stool derivatives pending focused peer",
+      "grabImmediate": "secureDetached",
+      "grabNext": [
+        {
+          "node": "contactDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "airborneNeutral",
+          "durationMs": 140
+        }
+      ],
+      "releaseNext": [
+        {
+          "node": "secureSeated",
+          "durationMs": 100
+        },
+        {
+          "node": "midSeated",
+          "durationMs": 110
+        },
+        {
+          "node": "closedSeated",
+          "durationMs": 110
+        }
+      ],
+      "originalSeatedSource": "frames/seated-secure-v2.png",
+      "originalSeatedSHA256": "4ee1d68beeda32a13ae769e2dc1c6de692e98f6b28b29b06845c6af6d3044a37"
+    },
+    "contactDetached": {
+      "source": "frames/contact-no-stool-v3.png",
+      "sourceSHA256": "a08e90d5f3c42397f59341ef3b4383d5e9ad8c1795a9532e1d79a399075f2564",
+      "embeddedStool": false,
+      "handsSupported": true,
+      "stage": "parent core visual direction accepted; no-stool derivatives pending focused peer",
+      "grabImmediate": "contactDetached",
+      "grabNext": [
+        {
+          "node": "airborneNeutral",
+          "durationMs": 140
+        }
+      ],
+      "releaseNext": [
+        {
+          "node": "contactSeated",
+          "durationMs": 100
+        },
+        {
+          "node": "secureSeated",
+          "durationMs": 110
+        },
+        {
+          "node": "midSeated",
+          "durationMs": 110
+        },
+        {
+          "node": "closedSeated",
+          "durationMs": 110
+        }
+      ],
+      "originalSeatedSource": "frames/land-contact-v1.png",
+      "originalSeatedSHA256": "ff68442a4a8632f6e41020297393ff42446e2ef9a712c6057d0821b0d54dee1a"
+    },
+    "airborneNeutral": {
+      "source": "frames/detach-first-v2.png",
+      "sourceSHA256": "ece6e77b48bbc40ba261a9a9cd98b7e464bf6d705f59fd8a2e91ad24a0918a9d",
+      "embeddedStool": false,
+      "handsSupported": true,
+      "stage": "parent core visual direction accepted; no-stool derivatives pending focused peer",
+      "grabImmediate": "airborneNeutral",
+      "grabNext": [],
+      "releaseNext": [
+        {
+          "node": "contactDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "contactSeated",
+          "durationMs": 100
+        },
+        {
+          "node": "secureSeated",
+          "durationMs": 110
+        },
+        {
+          "node": "midSeated",
+          "durationMs": 110
+        },
+        {
+          "node": "closedSeated",
+          "durationMs": 110
+        }
+      ]
+    },
+    "airborneResponse": {
+      "source": "frames/airborne-response-v3.png",
+      "sourceSHA256": "69b755e9b468a5233d1398b359a6a223de1052bd7cabb0b86ab0f11138d856a1",
+      "embeddedStool": false,
+      "handsSupported": true,
+      "stage": "parent core visual direction accepted; no-stool derivatives pending focused peer",
+      "grabImmediate": "airborneResponse",
+      "grabNext": [
+        {
+          "node": "airborneNeutral",
+          "durationMs": 120
+        }
+      ],
+      "releaseNext": [
+        {
+          "node": "airborneNeutral",
+          "durationMs": 90
+        },
+        {
+          "node": "contactDetached",
+          "durationMs": 90
+        },
+        {
+          "node": "contactSeated",
+          "durationMs": 100
+        },
+        {
+          "node": "secureSeated",
+          "durationMs": 110
+        },
+        {
+          "node": "midSeated",
+          "durationMs": 110
+        },
+        {
+          "node": "closedSeated",
+          "durationMs": 110
+        }
+      ]
+    }
+  },
+  "entries": [
+    {
+      "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+      "currentNode": "closedSeated",
+      "detachedNode": "closedDetached",
+      "immediate": true
+    },
+    {
+      "sourceSHA256": "bf97fc9a073bbb9e7b8a3b06904bb061f94ccff71e656c552c3794ba20f6edb0",
+      "currentNode": "midSeated",
+      "detachedNode": "midDetached",
+      "immediate": true
+    },
+    {
+      "sourceSHA256": "4ee1d68beeda32a13ae769e2dc1c6de692e98f6b28b29b06845c6af6d3044a37",
+      "currentNode": "secureSeated",
+      "detachedNode": "secureDetached",
+      "immediate": true
+    },
+    {
+      "sourceSHA256": "ff68442a4a8632f6e41020297393ff42446e2ef9a712c6057d0821b0d54dee1a",
+      "currentNode": "contactSeated",
+      "detachedNode": "contactDetached",
+      "immediate": true
+    }
+  ],
+  "worldStool": {
+    "source": "frames/world-stool-grounded-v4.png",
+    "sourceSHA256": "b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7",
+    "freezeAtDragOrigin": true,
+    "fadeOutMs": 100,
+    "landingFadeInMs": 100,
+    "contactAnchorApprox": [
+      280,
+      349
+    ],
+    "ownership": "never render world stool together with embeddedStool=true; atomically hide world layer at embedded counterpart takeover"
+  },
+  "interactionRules": [
+    "At drag threshold, synchronously display grabImmediate from actual sourceSHA before moving root; never wait for the artistic recovery chain.",
+    "During any recovery or landing exposure, regrab uses that actual node grabImmediate, not the original entry.",
+    "Releasing a same-leg detached node restores its exact originalSeatedSource after chair fade-in; no forced leg curling or route through airborne response.",
+    "Release from airborne uses current supported pose and explicit contact chain.",
+    "No-stool frames remain body-only while pointer root moves; the world stool stays at the captured origin.",
+    "All open-laptop and six-family current-pose entries remain missing until explicitly authored/mapped; do not alias these closed-only entries by family name."
+  ],
+  "airborneOptionalResponse": [
+    {
+      "node": "airborneResponse",
+      "durationMs": 150
+    },
+    {
+      "node": "airborneNeutral",
+      "durationMs": 180
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "baselinePixelSha256": "021c1b72caded40502c9dbaa854f87f69ba7bd0725881a3283c91406e75d8106",
+  "baselineFile": "../../shared/seated-open-canonical-alpha-v1.png",
+  "technique": "held full cel with localized actual generated redrawing, not bones/mesh or frame blending",
+  "sourceBoxes": [
+    [
+      24,
+      108,
+      508,
+      439
+    ],
+    [
+      527,
+      108,
+      1012,
+      439
+    ],
+    [
+      1031,
+      108,
+      1520,
+      439
+    ],
+    [
+      22,
+      575,
+      509,
+      909
+    ],
+    [
+      527,
+      575,
+      1012,
+      909
+    ],
+    [
+      1029,
+      575,
+      1519,
+      909
+    ]
+  ],
+  "contextOutputSize": [
+    160,
+    104
+  ],
+  "contextCanvasOrigin": [
+    205,
+    250
+  ],
+  "unchangedOutsideMask": true
+}

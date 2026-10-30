@@ -1,0 +1,116 @@
+{
+  "id": "rest.quiet-settle-v1",
+  "family": "REST",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "seated-closed-neutral",
+  "exitPose": "seated-closed-neutral",
+  "loop": null,
+  "warning": "Sparse quiet companion candidate; no work-state meaning. Authored upper-body settle reused over exact closed-lap support; normal-speed and mask seam review pending.",
+  "frames": [
+    {
+      "source": "neutral.png",
+      "durationMs": 2200,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "seated-closed-neutral"
+    },
+    {
+      "source": "half.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "rest-quiet-transition"
+    },
+    {
+      "source": "closed.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "rest-quiet-transition"
+    },
+    {
+      "source": "half.png",
+      "durationMs": 60,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "rest-quiet-transition"
+    },
+    {
+      "source": "neutral.png",
+      "durationMs": 1500,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "seated-closed-neutral"
+    },
+    {
+      "source": "between.png",
+      "durationMs": 180,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "rest-quiet-transition"
+    },
+    {
+      "source": "settle.png",
+      "durationMs": 3200,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "rest-quiet-settle"
+    },
+    {
+      "source": "between.png",
+      "durationMs": 190,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "rest-quiet-transition"
+    },
+    {
+      "source": "neutral.png",
+      "durationMs": 2400,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "seated-closed-neutral"
+    }
+  ]
+}

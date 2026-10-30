@@ -1,0 +1,86 @@
+[
+  {
+    "frame": 1,
+    "component": 1,
+    "sourceBBox": [
+      91,
+      10,
+      507,
+      468
+    ],
+    "canvasTranslation": [
+      -44,
+      16
+    ]
+  },
+  {
+    "frame": 2,
+    "component": 2,
+    "sourceBBox": [
+      580,
+      10,
+      989,
+      468
+    ],
+    "canvasTranslation": [
+      -532,
+      16
+    ]
+  },
+  {
+    "frame": 3,
+    "component": 3,
+    "sourceBBox": [
+      1056,
+      11,
+      1474,
+      468
+    ],
+    "canvasTranslation": [
+      -1008,
+      16
+    ]
+  },
+  {
+    "frame": 4,
+    "component": 5,
+    "sourceBBox": [
+      73,
+      507,
+      514,
+      980
+    ],
+    "canvasTranslation": [
+      -44,
+      -496
+    ]
+  },
+  {
+    "frame": 5,
+    "component": 6,
+    "sourceBBox": [
+      576,
+      507,
+      998,
+      980
+    ],
+    "canvasTranslation": [
+      -532,
+      -496
+    ]
+  },
+  {
+    "frame": 6,
+    "component": 4,
+    "sourceBBox": [
+      1070,
+      506,
+      1489,
+      980
+    ],
+    "canvasTranslation": [
+      -1008,
+      -496
+    ]
+  }
+]

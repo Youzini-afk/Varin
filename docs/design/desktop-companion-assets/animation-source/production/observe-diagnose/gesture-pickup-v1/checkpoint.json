@@ -1,0 +1,63 @@
+{
+  "stage": "motion-candidate",
+  "newSourceOnly": true,
+  "files": [
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/near-support-source.png",
+      "bytes": 1641871,
+      "sha256": "6f06eed9b1331ab9fb65de6a26aeed75872e9c1f2c05f4ce86a9bbe4e092a654"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/derive_sequences.py",
+      "bytes": 5070,
+      "sha256": "5dfab80ae1b9f45d3f5ad24512411ab5f74c369198bfb8775863a390d4754784"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/far-arm-mask.png",
+      "bytes": 1372,
+      "sha256": "c8083f2c37a3eafee5a91515148cc160fb7a369850f0bdfd5757653d4d5a0342"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/build.py",
+      "bytes": 2720,
+      "sha256": "05c4783ebe9d7c0bfba57b7ce36a7c1be158755301d40909fc79956df6215c39"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/near-support-mask.png",
+      "bytes": 1298,
+      "sha256": "f59799b4e21f8302094000833c14ddafe3d395264be5d4e19894ceb79c21ea28"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/index.json",
+      "bytes": 6236,
+      "sha256": "40112d37c183a75f2161e147bdccf0ca00cc23e1fab3fbde7650c4cc41450bf8"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/far-screen-grip-source.png",
+      "bytes": 1725240,
+      "sha256": "1611eee22936db3ab68ac8bbeb51c86e55f92d3e9cc8bf1417cddd10837c9fc2"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/far-pregrip-source.png",
+      "bytes": 1639274,
+      "sha256": "1bc7d45eb03d86e6ae2b7d3ce92d54620d517f95f10912d33a616babccad5484"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/far-early-source.png",
+      "bytes": 1605201,
+      "sha256": "14298d8fa09afe4e5ba1c0317b4a1a2d714f2591e3868f61a638407c10f54017"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/closed-near-support-source.png",
+      "bytes": 1668186,
+      "sha256": "538e63d77b5519402327288d3cb0bcd313ec3aaa022488d7445b19bcb0c9a592"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v1/provenance.json",
+      "bytes": 1727,
+      "sha256": "2e1ccaa1a48d984714bb96e952d00ad20b7a22d38d6eebfde6d09bec0b13267a"
+    }
+  ],
+  "pathBase": "production-root",
+  "originalManifestSha256": "9e793246095c41e36f5706977f388941a134b5c979fc50afdb6b6b5884ec7652"
+}

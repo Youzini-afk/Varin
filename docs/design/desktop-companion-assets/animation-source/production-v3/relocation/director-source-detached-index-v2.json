@@ -1,0 +1,113 @@
+{
+  "pathBase": "production-v3",
+  "geometryReference": "varin-upright-v2",
+  "entries": [
+    {
+      "source": "director-performance/frames/listen-turn-reuse-v2.png",
+      "sourceSHA256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442",
+      "detachedSource": "relocation/director-derived/listen-turn-reuse-v2.png",
+      "detachedSHA256": "e82d97c2785127add038e69c44174fdfd6282feb73b5332e86b272d51c909b68",
+      "mask": "relocation/director-derived/listen-turn-reuse-v2-mask.png",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": true,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending",
+      "method": "exact inherited listen lower-body pixels, same accepted v2 listen-specific matte and hidden-surface patch"
+    },
+    {
+      "source": "director-performance/frames/listen-lean-v2.png",
+      "sourceSHA256": "a3cea784fdff757bb5aa502757718371fd615db9f59455d6fddb842def3b1b40",
+      "detachedSource": "relocation/director-derived/listen-lean-v2.png",
+      "detachedSHA256": "5f833ba1fa4cca2a591a7c06536754b8e28332cc18ff9e055ffcef2f6abde37d",
+      "mask": "relocation/director-derived/listen-lean-v2-mask.png",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": true,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending",
+      "method": "exact inherited listen lower-body pixels, same accepted v2 listen-specific matte and hidden-surface patch"
+    },
+    {
+      "source": "director-performance/frames/listen-left-turn-reuse-v1.png",
+      "sourceSHA256": "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7",
+      "detachedSource": "relocation/director-derived/listen-left-turn-reuse-v1.png",
+      "detachedSHA256": "894286dac0ca1e309db0e0ef097f18e245bf96f41c44664dba3c0479fe302316",
+      "mask": "relocation/director-derived/listen-left-turn-reuse-v1-mask.png",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": true,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending",
+      "method": "exact inherited listen lower-body pixels, same accepted v2 listen-specific matte and hidden-surface patch"
+    },
+    {
+      "source": "director-performance/frames/listen-left-lean-v1.png",
+      "sourceSHA256": "69c450b47e2c5a44383e8ad17d633b1bcfe14d20c3452e6f49ecdb5e0e82fda3",
+      "detachedSource": "relocation/director-derived/listen-left-lean-v1.png",
+      "detachedSHA256": "6b92877fccda6f7ac25fd7b4e920082fbaae642ed7b5226f2813bc553488879c",
+      "mask": "relocation/director-derived/listen-left-lean-v1-mask.png",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": true,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending",
+      "method": "exact inherited listen lower-body pixels, same accepted v2 listen-specific matte and hidden-surface patch"
+    },
+    {
+      "source": "director-performance/frames/gather-sweep-mid-v2.png",
+      "sourceSHA256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+      "detachedSource": "relocation/director-derived/38d417e028d5bb35.png",
+      "detachedSHA256": "645f3ce8f5d6394522e9d10c812984f3ae922e279be08d8679696054b68b3ead",
+      "mask": "relocation/director-derived/38d417e028d5bb35-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundSupportManifest": "director-performance/integration-support/selected-v1/manifest.json",
+      "foregroundRecord": "gather-sweep-mid-v2",
+      "embeddedStool": false,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending"
+    },
+    {
+      "source": "director-performance/frames/gather-out-v2.png",
+      "sourceSHA256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+      "detachedSource": "relocation/director-derived/44cfbcf18137c43e.png",
+      "detachedSHA256": "9f596fa4b55906c2b936524854962fcb837813f3b45ffbd1f3530ccaacb0728a",
+      "mask": "relocation/director-derived/44cfbcf18137c43e-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundSupportManifest": "director-performance/integration-support/selected-v1/manifest.json",
+      "foregroundRecord": "gather-out-v2",
+      "embeddedStool": false,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending"
+    },
+    {
+      "source": "director-performance/frames/gather-release-v1.png",
+      "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+      "detachedSource": "relocation/director-derived/8faafa5486908c7d.png",
+      "detachedSHA256": "e99f36fa4d7e47c65fb662aa62a78bd8cfdaa05e81f3bdc38b4f7c6e840c1f32",
+      "mask": "relocation/director-derived/8faafa5486908c7d-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundSupportManifest": "director-performance/integration-support/selected-v1/manifest.json",
+      "foregroundRecord": "gather-release-v1",
+      "embeddedStool": false,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending"
+    },
+    {
+      "source": "director-performance/frames/gather-in-v1.png",
+      "sourceSHA256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf",
+      "detachedSource": "relocation/director-derived/c359a6e8ccee20bb.png",
+      "detachedSHA256": "9f8d0193e1e3fd3ccefe227bca496bcf8b0441c92a97cd3c69bff25f949a1533",
+      "mask": "relocation/director-derived/c359a6e8ccee20bb-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundSupportManifest": "director-performance/integration-support/selected-v1/manifest.json",
+      "foregroundRecord": "gather-in-v1",
+      "embeddedStool": false,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending"
+    },
+    {
+      "source": "director-performance/frames/gather-user-v1.png",
+      "sourceSHA256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20",
+      "detachedSource": "relocation/director-derived/ecbadf94a1047de8.png",
+      "detachedSHA256": "89dbdaaeab778e0f2dc3ad3562b14e72e0e894c6da814d19a53abe8c77499cb3",
+      "mask": "relocation/director-derived/ecbadf94a1047de8-mask.png",
+      "outsideMaskPixelExact": true,
+      "foregroundSupportManifest": "director-performance/integration-support/selected-v1/manifest.json",
+      "foregroundRecord": "gather-user-v1",
+      "embeddedStool": false,
+      "stage": "finite static light/dark no-stool and sleeve/contact review passed; full motion/native acceptance pending"
+    }
+  ],
+  "sourceContract": "director-performance/current-source-index.json",
+  "recoveryContract": "director-performance/manifest.json",
+  "stage": "review-only candidate; append to frozen 55+21 source coverage, do not replace them"
+}

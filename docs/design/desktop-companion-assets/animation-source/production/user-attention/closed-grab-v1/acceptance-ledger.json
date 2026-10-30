@@ -1,0 +1,521 @@
+{
+  "scope": "Exact current local-event exposures, no neutral reset. Immediate pointer tracking separate native responsibility. No new generation. Existing authored supporting hands and real wave retraction only.",
+  "groups": [
+    "closed-head-response",
+    "closed-wave-return"
+  ],
+  "sourceCount": 21,
+  "uniqueSourceCount": 12,
+  "frames": [
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-000.png",
+      "sourceSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-000.png",
+      "currentDetachedSha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-010.png",
+          "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-010.png",
+          "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-001.png",
+      "sourceSha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-001.png",
+      "currentDetachedSha256": "8a880786a33c9d4684331e80e8eaf454bc85d4baa55d34953ae2f177ae4c6033",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/current-008.png",
+          "sha256": "8a880786a33c9d4684331e80e8eaf454bc85d4baa55d34953ae2f177ae4c6033",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+          "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-002.png",
+      "sourceSha256": "68709b429a10eb1a5abfda2dfe9009738dd10c6debf899b7dd33def9d2de5dcf",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-002.png",
+      "currentDetachedSha256": "67ea6c55e378abf27324aeb272449525d555b7900f6a8d9ff03c087d94d96a9b",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/current-002.png",
+          "sha256": "67ea6c55e378abf27324aeb272449525d555b7900f6a8d9ff03c087d94d96a9b",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-002.png",
+          "sha256": "5703ba7cb718a7560cdc9da87a6682eb8a6f07fc5b36d3ea55d8d40967f90d27",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+          "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+          "durationMs": 45
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-003.png",
+      "sourceSha256": "ac8f871a2058c73fbe4db1fbb3e3544efefdc058144b5bb5b96ed0e4cf14137a",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-003.png",
+      "currentDetachedSha256": "88fe8cb1394056f3a7d7be48fc7513c5a74019d0a8eb27f4927c1e873e70202f",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/current-003.png",
+          "sha256": "88fe8cb1394056f3a7d7be48fc7513c5a74019d0a8eb27f4927c1e873e70202f",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-003.png",
+          "sha256": "d345da8bc0593c57670fcf868aee01168252ec3286ee2989d3670993d7d54d21",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-007.png",
+          "sha256": "ce4efd04d46b39a0fb08060e885acfba2b17ad9fc48a7593a55ad06a2d0d0ce7",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+          "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+          "durationMs": 45
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-004.png",
+      "sourceSha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-004.png",
+      "currentDetachedSha256": "5db05cbfda21acd76cf9733cec7a41b2be38e6d4dc17e3a066b98682376c4da3",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/current-006.png",
+          "sha256": "5db05cbfda21acd76cf9733cec7a41b2be38e6d4dc17e3a066b98682376c4da3",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-006.png",
+          "sha256": "8d9227addc367703d9b05d260c74cb0966934f95bb4b9cff49a619960e27103e",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-007.png",
+          "sha256": "ce4efd04d46b39a0fb08060e885acfba2b17ad9fc48a7593a55ad06a2d0d0ce7",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+          "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+          "durationMs": 45
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-005.png",
+      "sourceSha256": "64b656a090ce6d1d04c60eec2fe6d9658a48709693ed49c7223723b0a4c0d9ae",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-005.png",
+      "currentDetachedSha256": "24742c5a1de4387b040748cc75bb2b3569626aa61f3d71cd4614e6ece85173d6",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/current-005.png",
+          "sha256": "24742c5a1de4387b040748cc75bb2b3569626aa61f3d71cd4614e6ece85173d6",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-005.png",
+          "sha256": "ef16cd1a7f1e272930667e7fc4d46b448a78ae18e27c5568aa42c0e988662762",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-007.png",
+          "sha256": "ce4efd04d46b39a0fb08060e885acfba2b17ad9fc48a7593a55ad06a2d0d0ce7",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+          "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+          "durationMs": 45
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-006.png",
+      "sourceSha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-006.png",
+      "currentDetachedSha256": "5db05cbfda21acd76cf9733cec7a41b2be38e6d4dc17e3a066b98682376c4da3",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/current-006.png",
+          "sha256": "5db05cbfda21acd76cf9733cec7a41b2be38e6d4dc17e3a066b98682376c4da3",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-006.png",
+          "sha256": "8d9227addc367703d9b05d260c74cb0966934f95bb4b9cff49a619960e27103e",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-007.png",
+          "sha256": "ce4efd04d46b39a0fb08060e885acfba2b17ad9fc48a7593a55ad06a2d0d0ce7",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+          "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+          "durationMs": 45
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-007.png",
+      "sourceSha256": "96d72d685bdf9ca74a88bce9684b88468167904e4cbe40a844e46562d7b83b78",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-007.png",
+      "currentDetachedSha256": "cae797bb087d77a25f08913927929d832c89ad1956f383c0a6b7def6f739470a",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/current-007.png",
+          "sha256": "cae797bb087d77a25f08913927929d832c89ad1956f383c0a6b7def6f739470a",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-007.png",
+          "sha256": "ce4efd04d46b39a0fb08060e885acfba2b17ad9fc48a7593a55ad06a2d0d0ce7",
+          "durationMs": 55
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+          "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+          "durationMs": 45
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-008.png",
+      "sourceSha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-008.png",
+      "currentDetachedSha256": "8a880786a33c9d4684331e80e8eaf454bc85d4baa55d34953ae2f177ae4c6033",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/current-008.png",
+          "sha256": "8a880786a33c9d4684331e80e8eaf454bc85d4baa55d34953ae2f177ae4c6033",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+          "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/welcome-closed-v2/pose-009.png",
+      "sourceSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "group": "closed-wave-return",
+      "currentDetached": "user-attention/closed-grab-v1/welcome-closed-v2/current-009.png",
+      "currentDetachedSha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-010.png",
+          "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-010.png",
+          "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-000.png",
+      "sourceSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-000.png",
+      "currentDetachedSha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-010.png",
+          "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-010.png",
+          "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-001.png",
+      "sourceSha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-001.png",
+      "currentDetachedSha256": "6287228d1fafe1bbea0184e410762a69488ec0dd1708f27e8991684d5f0f00a1",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-009.png",
+          "sha256": "6287228d1fafe1bbea0184e410762a69488ec0dd1708f27e8991684d5f0f00a1",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-009.png",
+          "sha256": "7a72127433a9ba41e1dd7f60e2c751574b60c7c35eaa4de293e8b71cb9896b56",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-002.png",
+      "sourceSha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-002.png",
+      "currentDetachedSha256": "9414b741b7e43e5513e682568b606f8177fdcff410fbef50a33c9261698a4d0a",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-008.png",
+          "sha256": "9414b741b7e43e5513e682568b606f8177fdcff410fbef50a33c9261698a4d0a",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-008.png",
+          "sha256": "dbf37cc220b0e77af2d425d32647ad0a64b7fd8e71360f0a8faab492548365d2",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-003.png",
+      "sourceSha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-003.png",
+      "currentDetachedSha256": "55dd717ff8e0406cee80ce681bcbee606f42134b0b1d87c6c5fe3b5c4b555c38",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-007.png",
+          "sha256": "55dd717ff8e0406cee80ce681bcbee606f42134b0b1d87c6c5fe3b5c4b555c38",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-007.png",
+          "sha256": "83031cd43cc8e752f9f3a216a00dacc67e70a59ca57e595573f17cf7208b9d5a",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-004.png",
+      "sourceSha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-004.png",
+      "currentDetachedSha256": "05f7e42bc29e7a204ad2a876bb2a26551b02e20b1ea0eae99631c4bbc2bfe66a",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-006.png",
+          "sha256": "05f7e42bc29e7a204ad2a876bb2a26551b02e20b1ea0eae99631c4bbc2bfe66a",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-006.png",
+          "sha256": "866edd6401a8f5363977faef34cde0ee890dba42d93214ec9e34fa35edd7f105",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-005.png",
+      "sourceSha256": "d3a75fbc6057bbe1b9e88eb341911074d99d5fd2b1fbed2c4bb17c11fe87228e",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-005.png",
+      "currentDetachedSha256": "e68a2804364e9766544359a6aedf58af608bae59262a1b479b8bf3926afeda5f",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-005.png",
+          "sha256": "e68a2804364e9766544359a6aedf58af608bae59262a1b479b8bf3926afeda5f",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-005.png",
+          "sha256": "77b0f25a935bd1590e05be3658456af38007d0ae2572aa5d4b1c011026b0a879",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-006.png",
+      "sourceSha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-006.png",
+      "currentDetachedSha256": "05f7e42bc29e7a204ad2a876bb2a26551b02e20b1ea0eae99631c4bbc2bfe66a",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-006.png",
+          "sha256": "05f7e42bc29e7a204ad2a876bb2a26551b02e20b1ea0eae99631c4bbc2bfe66a",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-006.png",
+          "sha256": "866edd6401a8f5363977faef34cde0ee890dba42d93214ec9e34fa35edd7f105",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-007.png",
+      "sourceSha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-007.png",
+      "currentDetachedSha256": "55dd717ff8e0406cee80ce681bcbee606f42134b0b1d87c6c5fe3b5c4b555c38",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-007.png",
+          "sha256": "55dd717ff8e0406cee80ce681bcbee606f42134b0b1d87c6c5fe3b5c4b555c38",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-007.png",
+          "sha256": "83031cd43cc8e752f9f3a216a00dacc67e70a59ca57e595573f17cf7208b9d5a",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-008.png",
+      "sourceSha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-008.png",
+      "currentDetachedSha256": "9414b741b7e43e5513e682568b606f8177fdcff410fbef50a33c9261698a4d0a",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-008.png",
+          "sha256": "9414b741b7e43e5513e682568b606f8177fdcff410fbef50a33c9261698a4d0a",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-008.png",
+          "sha256": "dbf37cc220b0e77af2d425d32647ad0a64b7fd8e71360f0a8faab492548365d2",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-009.png",
+      "sourceSha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-009.png",
+      "currentDetachedSha256": "6287228d1fafe1bbea0184e410762a69488ec0dd1708f27e8991684d5f0f00a1",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-009.png",
+          "sha256": "6287228d1fafe1bbea0184e410762a69488ec0dd1708f27e8991684d5f0f00a1",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-009.png",
+          "sha256": "7a72127433a9ba41e1dd7f60e2c751574b60c7c35eaa4de293e8b71cb9896b56",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    },
+    {
+      "source": "user-attention/registered/click-closed-v5/pose-010.png",
+      "sourceSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "group": "closed-head-response",
+      "currentDetached": "user-attention/closed-grab-v1/click-closed-v5/current-010.png",
+      "currentDetachedSha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+      "route": [
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/current-010.png",
+          "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+          "durationMs": 35
+        },
+        {
+          "source": "user-attention/closed-grab-v1/click-closed-v5/supported-010.png",
+          "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe",
+          "durationMs": 55
+        }
+      ],
+      "unchangedOutsideStoolMask": true,
+      "status": "accepted-for-runtime-bridge"
+    }
+  ],
+  "peer": {
+    "reviewer": "produce_observation_rest_animation",
+    "method": "independent tab20 320px 1x autoplay",
+    "representatives": {
+      "welcome005": [
+        150,
+        399,
+        533,
+        681
+      ],
+      "tap003": [
+        132,
+        150,
+        348,
+        565
+      ]
+    },
+    "findings": "No stool remnant, extra hand or laptop reopening; near support through gathering coherent. First exact exposure supported by source SHA and unchanged-mask checks, not every entry separately played."
+  }
+}

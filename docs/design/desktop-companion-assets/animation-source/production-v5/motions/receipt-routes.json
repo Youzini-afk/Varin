@@ -1,0 +1,238 @@
+{
+  "version": 1,
+  "status": "selected-source-checkpoint-not-runtime-admission",
+  "recipe": "../seated-preparation.json",
+  "sharedMotion": "lift-open.json",
+  "existingE": {
+    "side": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+      "sha256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+    },
+    "support": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+      "sha256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+    },
+    "bridge": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/bridge.png",
+      "sha256": "82014752faf61d1284f1f37f44821426113813e54ae8a3afae54292c7d0ac6b0"
+    },
+    "float": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/float.png",
+      "sha256": "d4c64492ac01465c5084e99c212534bb855bb9f847986baf39743ba288001ec9"
+    }
+  },
+  "exitRoutes": {
+    "open-neutral": [],
+    "contact": [
+      {
+        "sourceId": "receipt-recovery",
+        "durationMs": 80
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 80
+      }
+    ],
+    "descent": [
+      {
+        "sourceId": "receipt-recover-mid",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "receipt-recovery",
+        "durationMs": 80
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 80
+      }
+    ],
+    "entry": [
+      {
+        "sourceId": "receipt-recover-mid",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "receipt-recovery",
+        "durationMs": 80
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 80
+      }
+    ],
+    "recover-mid": [
+      {
+        "sourceId": "receipt-recovery",
+        "durationMs": 80
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 80
+      }
+    ],
+    "recovery": [
+      {
+        "sourceId": "neutral",
+        "durationMs": 80
+      }
+    ]
+  },
+  "authorPickupRoutes": {
+    "open-neutral": {
+      "startSamePoseD": {
+        "sourceId": "neutral",
+        "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+        "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+      },
+      "recovery": [],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rootMotion": "immediate threshold following, independent of body recovery",
+      "newIntent": "discard remaining acknowledgment descent; never force bottom or replay nod"
+    },
+    "contact": {
+      "startSamePoseD": {
+        "sourceId": "receipt-contact",
+        "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/contact.png",
+        "sha256": "3ac9d1574566c3934f676178d5c4adb6bbc988f21ee84c6edc79f043dde1a8fb"
+      },
+      "recovery": [
+        {
+          "sourceId": "receipt-recovery",
+          "durationMs": 80
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 80
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rootMotion": "immediate threshold following, independent of body recovery",
+      "newIntent": "discard remaining acknowledgment descent; never force bottom or replay nod"
+    },
+    "descent": {
+      "startSamePoseD": {
+        "sourceId": "receipt-descent",
+        "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/descent.png",
+        "sha256": "e1ca249cc5ddabda521e7496fe475f57afb56d7a35b8e1818d00dd4a7c98ce20"
+      },
+      "recovery": [
+        {
+          "sourceId": "receipt-recover-mid",
+          "durationMs": 100
+        },
+        {
+          "sourceId": "receipt-recovery",
+          "durationMs": 80
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 80
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rootMotion": "immediate threshold following, independent of body recovery",
+      "newIntent": "discard remaining acknowledgment descent; never force bottom or replay nod"
+    },
+    "entry": {
+      "startSamePoseD": {
+        "sourceId": "receipt-entry",
+        "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/entry.png",
+        "sha256": "9e0358d8da4c651a23cee73d0ca120bf13a0bf2fe6136ecbf39a1398bfb312c9"
+      },
+      "recovery": [
+        {
+          "sourceId": "receipt-recover-mid",
+          "durationMs": 100
+        },
+        {
+          "sourceId": "receipt-recovery",
+          "durationMs": 80
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 80
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rootMotion": "immediate threshold following, independent of body recovery",
+      "newIntent": "discard remaining acknowledgment descent; never force bottom or replay nod"
+    },
+    "recover-mid": {
+      "startSamePoseD": {
+        "sourceId": "receipt-recover-mid",
+        "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/recover-mid.png",
+        "sha256": "321f4edb0a584fe654d5a592e7f3b5de0db417fa39f3594f3cc5458c88129789"
+      },
+      "recovery": [
+        {
+          "sourceId": "receipt-recovery",
+          "durationMs": 80
+        },
+        {
+          "sourceId": "neutral",
+          "durationMs": 80
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rootMotion": "immediate threshold following, independent of body recovery",
+      "newIntent": "discard remaining acknowledgment descent; never force bottom or replay nod"
+    },
+    "recovery": {
+      "startSamePoseD": {
+        "sourceId": "receipt-recovery",
+        "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/receipt/recovery.png",
+        "sha256": "44315537301b630bbe4d7df1448cf153acc6d1cf4d69a2a482e552be06f31f7b"
+      },
+      "recovery": [
+        {
+          "sourceId": "neutral",
+          "durationMs": 80
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rootMotion": "immediate threshold following, independent of body recovery",
+      "newIntent": "discard remaining acknowledgment descent; never force bottom or replay nod"
+    }
+  },
+  "interruptions": {
+    "A0": "canonical neutral, cancel immediately; E route begins there",
+    "A1": "not applicable, no new hand contact/departure",
+    "B": "current-pose D then shortest listed upward recovery, never continue descent",
+    "P": "current bottom D then upward recovery",
+    "S": "remaining upward recovery only",
+    "highPriority": "information immediate; body takes same shortest safe route",
+    "reducedMotionHide": "nearest safe supported state, no backlog replay",
+    "earlyDropRegrab": "after existing E begins, use existing E stage-specific support/landing; no new unverified landing invented"
+  }
+}

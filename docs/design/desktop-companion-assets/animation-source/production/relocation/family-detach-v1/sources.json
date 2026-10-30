@@ -1,0 +1,42 @@
+{
+  "stage": "candidate-no-stool-contact",
+  "method": "canonical original legs retained; authored stool replacement region, subtract new arm occlusion mask; no geometry warp",
+  "frames": [
+    {
+      "name": "permission",
+      "upperSource": "user-attention/drag-bridges-v1/permission-support-registered.png",
+      "upperSha256": "a2dea7efc5a10c4ff31694dc49f4d3b8511e3c6dd21e2fbd31cbe1a500b0b965",
+      "output": "permission-detach.png"
+    },
+    {
+      "name": "query",
+      "upperSource": "user-attention/drag-bridges-v1/query-support-registered.png",
+      "upperSha256": "8e47edf77d3ff3aa0ad8c3c9892a99ba8a7d83dceaaea512d256768fa943947b",
+      "output": "query-detach.png"
+    },
+    {
+      "name": "wait-000",
+      "upperSource": "user-attention/drag-bridges-v1/wait-000-support-registered.png",
+      "upperSha256": "0e47d979683820d316ee237f2ea0539304529d45349eb0987f80d05559fb8dd5",
+      "output": "wait-000-detach.png"
+    },
+    {
+      "name": "wait-001",
+      "upperSource": "user-attention/drag-bridges-v1/wait-001-support-registered.png",
+      "upperSha256": "0da0defba0c5a09d072383f8459cf4f4dc7f278ae11f9653e01b2e8ee41246d5",
+      "output": "wait-001-detach.png"
+    },
+    {
+      "name": "wait-002",
+      "upperSource": "user-attention/drag-bridges-v1/wait-002-support-registered.png",
+      "upperSha256": "d9118cb151af1749e766d5f9bc6a94a54103446c2ef17b6af3d579667c26f7dc",
+      "output": "wait-002-detach.png"
+    },
+    {
+      "name": "wait-005",
+      "upperSource": "user-attention/drag-bridges-v1/wait-005-support-registered.png",
+      "upperSha256": "f1e58e66c0ed3999d9e112a83dba56dd014aef4d4cd4e134026e976cae5595bf",
+      "output": "wait-005-detach.png"
+    }
+  ]
+}

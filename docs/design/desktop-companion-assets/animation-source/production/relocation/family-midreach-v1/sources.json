@@ -1,0 +1,44 @@
+[
+  {
+    "source": "user-attention/drag-bridges-v1/permission-mid-reach.png",
+    "sourceSha256": "f4d95dfab3003703cb57609fd9538679123e71eefe1b3aac49e42097313ee0e4",
+    "detachedSource": "relocation/family-midreach-v1/permission-detach.png",
+    "sha256": "75a0cdc24b955d287e4eb70fa710089a8b4853af688c161be2b86da6a509e615",
+    "durationMs": 45
+  },
+  {
+    "source": "user-attention/drag-bridges-v1/query-mid-reach.png",
+    "sourceSha256": "bf08e51aa2d234c4cd665e3f559ba7d8ba343ce2f81ce7d0f9a8c76abe450f45",
+    "detachedSource": "relocation/family-midreach-v1/query-detach.png",
+    "sha256": "b1c4223121c647943a08b0bb851039de9b2a8f6988b212f80d641204e654684e",
+    "durationMs": 45
+  },
+  {
+    "source": "user-attention/drag-bridges-v1/wait-000-mid-reach.png",
+    "sourceSha256": "204e12250a473e519a0c00a7bdb443cdd1c610e50ab643ee2d9d194a73503c2e",
+    "detachedSource": "relocation/family-midreach-v1/wait-000-detach.png",
+    "sha256": "16ac2865f2ddc59ed6dcaf5db95b43726db5ea512e3eb6bbef55b30904dcd031",
+    "durationMs": 45
+  },
+  {
+    "source": "user-attention/drag-bridges-v1/wait-001-mid-reach.png",
+    "sourceSha256": "9fabb3d8c45f437d827f11bc2e0e7df75341a6ad6a10b90521ee7621acfef906",
+    "detachedSource": "relocation/family-midreach-v1/wait-001-detach.png",
+    "sha256": "373f8d9ad09e208fb8b30584c7de6854d972445ce9047ac337980e84d611f5e8",
+    "durationMs": 45
+  },
+  {
+    "source": "user-attention/drag-bridges-v1/wait-002-mid-reach.png",
+    "sourceSha256": "1efb5234c287e1d076c162834a5d36e96d2479e6d890f6acc1e01f2d20b01f34",
+    "detachedSource": "relocation/family-midreach-v1/wait-002-detach.png",
+    "sha256": "a7884abe1d349cc3f5e60f77ce6d85e0df8cea1e4f18a4593639bc08a8bd69ea",
+    "durationMs": 45
+  },
+  {
+    "source": "user-attention/drag-bridges-v1/wait-005-mid-reach.png",
+    "sourceSha256": "f60345bd0aae0368e5ee076f20dee0bceb805eccbeb29b9df2ff9d831523cdc8",
+    "detachedSource": "relocation/family-midreach-v1/wait-005-detach.png",
+    "sha256": "8a736ce008aecdcf0d0fb9ced922389e801e3b6d05e7c5ef80d8679ee8f319cc",
+    "durationMs": 45
+  }
+]

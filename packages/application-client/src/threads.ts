@@ -16,6 +16,62 @@ import type { VarinExtensionServiceProvision } from '@varin/extension-contract';
 
 /** Explicit authority selection. A thread never opens a Pi session. */
 export interface ThreadIdentity { runtime: 'agent'; threadId: string; branchId: string }
+/** One transaction-consistent, content-free view of the authenticated Host's native work. */
+export interface ThreadAttentionRun {
+  id: string; state: Run['state']; revision: number; cancelRequested: boolean;
+  /** Terminal latest Runs only: whether the Run published output the user can read. A quiet
+   * round ends with false; null while the Run has not ended (and for current Runs). */
+  visibleOutput: boolean | null;
+}
+export interface ThreadAttentionBranch {
+  threadId: string; branchId: string; title: string; avatar?: string;
+  parentThreadId: string | null; archived: boolean; deleted: boolean;
+  /** Catalog ownership, including child ancestry. Null is unbound. */
+  botId: string | null;
+  /** The Bot conversation whose execution ancestry contains this Thread; equal to threadId for
+   * the session itself. Null for unbound work and for Bot helpers outside any conversation. */
+  botSessionThreadId: string | null;
+  activeRunId: string | null; currentRun: ThreadAttentionRun | null; latestRun: ThreadAttentionRun | null;
+  hasUnsettledWork: boolean;
+}
+export interface ThreadAttentionItem {
+  /** Structured identity serialized as JSON, never a delimiter-concatenated business key. */
+  key: string; threadId: string; branchId: string; runId: string;
+  operationId?: string; requestId?: string; permissionId?: string; revision: number;
+  kind: 'permission' | 'question' | 'computer_permission' | 'mcp_elicitation'
+    | 'mcp_sampling_request' | 'mcp_sampling_output' | 'mcp_error' | 'effect_unknown'
+    | 'run_failed' | 'preparation_failed' | 'cancelling';
+  /** Result/error/cancellation information is not necessarily a request the user can answer. */
+  actionable: boolean;
+}
+/** Latest original delegated execution of a current task-family member; no history/body hydration. */
+export interface ThreadAttentionTeamExecution {
+  parentThreadId: string; parentBranchId: string; parentRunId: string;
+  childOperationId: string; executionId: string; childThreadId: string; childBranchId: string;
+  avatar?: string; state: string; childRunId: string | null; childRunState: Run['state'] | null;
+  activity?: 'preparing' | 'running' | 'waiting' | 'settling' | 'preparation_failed';
+}
+/** Stable original dispatch relation, including completed work; no task or tool bodies. */
+export interface ThreadAttentionDelegation {
+  operationId: string; parentThreadId: string; parentBranchId: string; parentRunId: string;
+  childThreadId: string; childBranchId: string; acceptedCursor: number | null;
+  /** Latest time the same Agent was asked again through a message request, and who asked. */
+  continuedCursor: number | null; continuedByThreadId: string | null;
+  /** Latest report the child actually returned to its requester, and its outcome. */
+  reportCursor: number | null; reportOutcome: string | null;
+}
+/** An ordinary task a Bot follows by explicit association. Following is never dispatch. */
+export interface ThreadAttentionFollow { botId: string; matterId: string; threadId: string; branchId: string }
+export interface ThreadAttentionSnapshot {
+  epoch: number; eventCursor: number;
+  coverage: { native: 'complete'; external: 'unsupported'; scope: 'host' };
+  branches: ThreadAttentionBranch[]; items: ThreadAttentionItem[];
+  teamExecutions: ThreadAttentionTeamExecution[];
+  /** Only visible work and its necessary ancestry are included. */
+  delegations: ThreadAttentionDelegation[];
+  follows: ThreadAttentionFollow[];
+  counts: { actionRequired: number; affectedBranches: number; unknownEffects: number };
+}
 export type ThreadThinkingLevel = import('@varin/protocol').ThinkingLevel;
 export interface ThreadModel { providerId: string; modelId: string; thinkingLevel?: ThreadThinkingLevel; temperature?: number }
 export interface ThreadModelInfo extends ThreadModel { name?: string; acceptsImages?: boolean; contextWindowTokens?: number; thinkingLevels?: ThreadThinkingLevel[] }
@@ -422,6 +478,8 @@ export interface ThreadsAPI {
   selectModel(input: ThreadIdentity & { runId: string; key: string; model: ThreadModel }): Promise<RunModelSelection>;
   /** Search title/identity. Default excludes archived and deleted Threads. */
   list(options?: ThreadListOptions, signal?: AbortSignal): Promise<ThreadSummary[]>;
+  /** Complete native attention metadata; never hydrates history, arguments or request bodies. */
+  attention(signal?: AbortSignal): Promise<ThreadAttentionSnapshot>;
   /** One Catalog command; an uncertain retry retains its key, patch and original revision. */
   update(input: ThreadUpdate): Promise<ThreadSummary>;
   /** Hide this Thread and close fresh user admission. Existing work and its resources continue. */

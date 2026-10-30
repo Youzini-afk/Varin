@@ -1,0 +1,9 @@
+from pathlib import Path
+import json,shutil,subprocess
+P=Path(__file__).resolve().parent;R=P.parents[1];T=R.parent/'varin-main-20261028/tools/desktop-companion-animation';rows=json.load(open(P/'source-map.json'))['frames'];routes=json.load(open(P/'routes.json'))
+for family,n in [('welcome-closed-v2',5),('welcome-closed-v2',2),('click-closed-v5',5),('click-closed-v5',3)]:
+ row=next(x for x in rows if x['source'].endswith(f'{family}/pose-{n:03}.png'));seq=routes[row['sourceSha256']]+[['observe-diagnose/gesture-pickup-v2/closed-handoff.png',70],['relocation/shared-entry-v1/closed-detached.png',70],['relocation/rapid-pickup-v2/precontact.png',90],['relocation/rapid-pickup-v1/closed.png',280]];out=P/f'review-{family}-{n:03}';out.mkdir(exist_ok=True);frames=[]
+ for i,(src,ms) in enumerate(seq):
+  dest=f'pose-{i:03}.png';shutil.copyfile(R/src,out/dest);frames.append(dict(source=dest,durationMs=ms,offset=[0,0],phase=src))
+ d=dict(id=out.name,family='USER_ATTENTION_CLOSED_GRAB',canvas=[512,512],frames=frames,loop=None,warning='Current-pose immediate detach, near hand supports before existing far-arm recovery. Native window follows pointer immediately. Candidate representative review only.');(out/'sequence.source.json').write_text(json.dumps(d,indent=2));subprocess.run(['python',str(T/'pack_sequence.py'),str(out/'sequence.source.json'),str(out/'export')],check=True,capture_output=True);subprocess.run(['python',str(T/'make_review.py'),str(out/'export/sequence.json'),str(out/'review.html'),'--stage','motion-candidate'],check=True,capture_output=True);s=(out/'review.html').read_text();(out/'autoplay-review.html').write_text(s.replace('images=v;draw();requestAnimationFrame(tick);',"images=v;running=true;document.querySelector('#repeat').checked=true;draw();requestAnimationFrame(tick);"))
+ print(out.name)

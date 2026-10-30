@@ -1,0 +1,66 @@
+{
+  "frames": 480,
+  "maxMean": {
+    "frame": 182,
+    "meanAbsoluteRGB": 0.58245625,
+    "pixelsAnyChannelAbove32": 2458
+  },
+  "maxChanged": {
+    "frame": 182,
+    "meanAbsoluteRGB": 0.58245625,
+    "pixelsAnyChannelAbove32": 2458
+  },
+  "note": "Numerical adjacent-frame diagnostic only; not artistic or perceptual QA. Blink correctly has larger local changes.",
+  "top10": [
+    {
+      "frame": 182,
+      "meanAbsoluteRGB": 0.58245625,
+      "pixelsAnyChannelAbove32": 2458
+    },
+    {
+      "frame": 181,
+      "meanAbsoluteRGB": 0.5646125,
+      "pixelsAnyChannelAbove32": 2320
+    },
+    {
+      "frame": 180,
+      "meanAbsoluteRGB": 0.5299010416666666,
+      "pixelsAnyChannelAbove32": 2004
+    },
+    {
+      "frame": 179,
+      "meanAbsoluteRGB": 0.476803125,
+      "pixelsAnyChannelAbove32": 1594
+    },
+    {
+      "frame": 178,
+      "meanAbsoluteRGB": 0.41539322916666666,
+      "pixelsAnyChannelAbove32": 1141
+    },
+    {
+      "frame": 177,
+      "meanAbsoluteRGB": 0.3402171875,
+      "pixelsAnyChannelAbove32": 633
+    },
+    {
+      "frame": 81,
+      "meanAbsoluteRGB": 0.31358541666666667,
+      "pixelsAnyChannelAbove32": 415
+    },
+    {
+      "frame": 84,
+      "meanAbsoluteRGB": 0.30878333333333335,
+      "pixelsAnyChannelAbove32": 456
+    },
+    {
+      "frame": 83,
+      "meanAbsoluteRGB": 0.3072552083333333,
+      "pixelsAnyChannelAbove32": 482
+    },
+    {
+      "frame": 85,
+      "meanAbsoluteRGB": 0.304659375,
+      "pixelsAnyChannelAbove32": 456
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "v5-quiet-sleeve-smooth-working-phrase",
+  "action": "quiet-sleeve-smooth",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 500
+    },
+    {
+      "sourceId": "life-sleeve-01b-onset-r2",
+      "durationMs": 90
+    },
+    {
+      "sourceId": "life-sleeve-02-enter-r1",
+      "durationMs": 100
+    },
+    {
+      "sourceId": "life-sleeve-03-contact-r2",
+      "durationMs": 210
+    },
+    {
+      "sourceId": "life-sleeve-04-smooth-r2",
+      "durationMs": 190
+    },
+    {
+      "sourceId": "life-sleeve-05-release-r3",
+      "durationMs": 140
+    },
+    {
+      "sourceId": "life-sleeve-05-release-r1",
+      "durationMs": 160
+    },
+    {
+      "sourceId": "closed-neutral",
+      "durationMs": 600
+    }
+  ],
+  "routes": "closed-life-routes.json",
+  "runtimeApproval": false,
+  "semantic": "Local life gesture only; no execution, approval, answer or completion claim."
+}

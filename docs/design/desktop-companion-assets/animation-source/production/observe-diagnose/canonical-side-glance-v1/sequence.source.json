@@ -1,0 +1,83 @@
+{
+  "id": "observe.side-glance-v1",
+  "family": "OBSERVE_DIAGNOSE",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "seated-open-read-screen",
+  "exitPose": "seated-open-read-screen",
+  "loop": null,
+  "warning": "Brief peripheral queue awareness candidate, not a fake wait or progress event. Eyes overlay is only compatible with exact fixed canonical head, never arbitrary angles. Fullframe does not model concurrent typing.",
+  "frames": [
+    {
+      "source": "read-screen.png",
+      "durationMs": 800,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "glance",
+      "pose": "seated-open-read-screen"
+    },
+    {
+      "source": "half.png",
+      "durationMs": 40,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "glance",
+      "pose": "observe-side-glance"
+    },
+    {
+      "source": "side-glance.png",
+      "durationMs": 460,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "glance",
+      "pose": "observe-side-glance"
+    },
+    {
+      "source": "half.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "glance",
+      "pose": "observe-side-glance"
+    },
+    {
+      "source": "closed.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "glance",
+      "pose": "observe-side-glance"
+    },
+    {
+      "source": "read-screen.png",
+      "durationMs": 800,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "glance",
+      "pose": "seated-open-read-screen"
+    }
+  ]
+}

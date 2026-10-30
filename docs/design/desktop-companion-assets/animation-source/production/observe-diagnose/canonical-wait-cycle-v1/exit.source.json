@@ -1,0 +1,91 @@
+{
+  "id": "observe.wait-exit-v1",
+  "family": "OBSERVE_DIAGNOSE",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "observe-chin-contact",
+  "exitPose": "seated-open-read-screen",
+  "loop": null,
+  "warning": "Continuous attentive wait candidate; small shoulder/hand-supported head settle, hand comfort adjustment, sparse eye contact. No progress/retry/success implied. Normal-speed loop and shoulder seam QA pending.",
+  "frames": [
+    {
+      "source": "pose-005.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "exit",
+      "pose": "observe-chin-contact",
+      "exitTo": [
+        "observe-chin-contact"
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "exit",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "exit",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "exit",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "exit",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "pose-000.png",
+      "durationMs": 180,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "exit",
+      "pose": "seated-open-read-screen",
+      "exitTo": []
+    }
+  ]
+}

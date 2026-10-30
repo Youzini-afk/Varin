@@ -1,0 +1,321 @@
+{
+  "status": "candidate, parent direction reviewed; full sequence pending",
+  "geometryReference": "varin-upright-v2",
+  "sources": [
+    {
+      "id": "listen-turn-reuse-v2",
+      "source": "frames/listen-turn-reuse-v2.png",
+      "sourceSHA256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442",
+      "authorEditMask": "masks/listen-turn-reuse-v2.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical listen-rest",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/listen-turn-reuse-v2.png",
+        "actualPose": "upright-v2:director:listen-turn-reuse-v2",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:listen",
+        "frames": [
+          {
+            "source": "references/listen-rest.png",
+            "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+            "pose": "upright-v2:listen",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    },
+    {
+      "id": "listen-lean-v2",
+      "source": "frames/listen-lean-v2.png",
+      "sourceSHA256": "a3cea784fdff757bb5aa502757718371fd615db9f59455d6fddb842def3b1b40",
+      "authorEditMask": "masks/listen-lean-v2.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical listen-rest",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/listen-lean-v2.png",
+        "actualPose": "upright-v2:director:listen-lean-v2",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:listen",
+        "frames": [
+          {
+            "source": "frames/listen-turn-reuse-v2.png",
+            "sourceSHA256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442",
+            "pose": "upright-v2:director:listen-turn-reuse-v2",
+            "durationMs": 100,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": false
+          },
+          {
+            "source": "references/listen-rest.png",
+            "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+            "pose": "upright-v2:listen",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    },
+    {
+      "id": "listen-left-turn-reuse-v1",
+      "source": "frames/listen-left-turn-reuse-v1.png",
+      "sourceSHA256": "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7",
+      "authorEditMask": "masks/listen-left-turn-reuse-v1.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical listen-rest",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/listen-left-turn-reuse-v1.png",
+        "actualPose": "upright-v2:director:listen-left-turn-reuse-v1",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:listen",
+        "frames": [
+          {
+            "source": "references/listen-rest.png",
+            "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+            "pose": "upright-v2:listen",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    },
+    {
+      "id": "listen-left-lean-v1",
+      "source": "frames/listen-left-lean-v1.png",
+      "sourceSHA256": "69c450b47e2c5a44383e8ad17d633b1bcfe14d20c3452e6f49ecdb5e0e82fda3",
+      "authorEditMask": "masks/listen-left-lean-v1.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical listen-rest",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/listen-left-lean-v1.png",
+        "actualPose": "upright-v2:director:listen-left-lean-v1",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:listen",
+        "frames": [
+          {
+            "source": "frames/listen-left-turn-reuse-v1.png",
+            "sourceSHA256": "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7",
+            "pose": "upright-v2:director:listen-left-turn-reuse-v1",
+            "durationMs": 100,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": false
+          },
+          {
+            "source": "references/listen-rest.png",
+            "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+            "pose": "upright-v2:listen",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    },
+    {
+      "id": "gather-release-v1",
+      "source": "frames/gather-release-v1.png",
+      "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+      "authorEditMask": "masks/gather-release-v1.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical open-user; active sleeve changes",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/gather-release-v1.png",
+        "actualPose": "upright-v2:director:gather-release-v1",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:open-user",
+        "frames": [
+          {
+            "source": "references/open-user.png",
+            "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+            "pose": "upright-v2:open-user",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    },
+    {
+      "id": "gather-sweep-mid-v2",
+      "source": "frames/gather-sweep-mid-v2.png",
+      "sourceSHA256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+      "authorEditMask": "masks/gather-sweep-mid-v2.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical open-user; active sleeve changes",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/gather-sweep-mid-v2.png",
+        "actualPose": "upright-v2:director:gather-sweep-mid-v2",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:open-user",
+        "frames": [
+          {
+            "source": "frames/gather-release-v1.png",
+            "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+            "pose": "upright-v2:director:gather-release-v1",
+            "durationMs": 100,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": false
+          },
+          {
+            "source": "references/open-user.png",
+            "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+            "pose": "upright-v2:open-user",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    },
+    {
+      "id": "gather-out-v2",
+      "source": "frames/gather-out-v2.png",
+      "sourceSHA256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+      "authorEditMask": "masks/gather-out-v2.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical open-user; active sleeve changes",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/gather-out-v2.png",
+        "actualPose": "upright-v2:director:gather-out-v2",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:open-user",
+        "frames": [
+          {
+            "source": "frames/gather-sweep-mid-v2.png",
+            "sourceSHA256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+            "pose": "upright-v2:director:gather-sweep-mid-v2",
+            "durationMs": 100,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": false
+          },
+          {
+            "source": "frames/gather-release-v1.png",
+            "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+            "pose": "upright-v2:director:gather-release-v1",
+            "durationMs": 100,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": false
+          },
+          {
+            "source": "references/open-user.png",
+            "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+            "pose": "upright-v2:open-user",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    },
+    {
+      "id": "gather-in-v1",
+      "source": "frames/gather-in-v1.png",
+      "sourceSHA256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf",
+      "authorEditMask": "masks/gather-in-v1.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical open-user; active sleeve changes",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/gather-in-v1.png",
+        "actualPose": "upright-v2:director:gather-in-v1",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:open-user",
+        "frames": [
+          {
+            "source": "frames/gather-user-v1.png",
+            "sourceSHA256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20",
+            "pose": "upright-v2:director:gather-user-v1",
+            "durationMs": 100,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": false
+          },
+          {
+            "source": "frames/gather-release-v1.png",
+            "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+            "pose": "upright-v2:director:gather-release-v1",
+            "durationMs": 100,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": false
+          },
+          {
+            "source": "references/open-user.png",
+            "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+            "pose": "upright-v2:open-user",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    },
+    {
+      "id": "gather-user-v1",
+      "source": "frames/gather-user-v1.png",
+      "sourceSHA256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20",
+      "authorEditMask": "masks/gather-user-v1.png",
+      "notForegroundMask": true,
+      "lowerBody": "canonical open-user; active sleeve changes",
+      "ordinaryRecoveryPending": "manifest forthcoming",
+      "ordinaryRecovery": {
+        "actualSource": "frames/gather-user-v1.png",
+        "actualPose": "upright-v2:director:gather-user-v1",
+        "currentExposureMaxRemainingMs": 40,
+        "endpoint": "upright-v2:open-user",
+        "frames": [
+          {
+            "source": "frames/gather-release-v1.png",
+            "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+            "pose": "upright-v2:director:gather-release-v1",
+            "durationMs": 100,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": false
+          },
+          {
+            "source": "references/open-user.png",
+            "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+            "pose": "upright-v2:open-user",
+            "durationMs": 80,
+            "cue": "ORDINARY_RETURN",
+            "phase": "exit",
+            "pauseSafe": true
+          }
+        ],
+        "discardOldSemanticCue": true
+      }
+    }
+  ]
+}

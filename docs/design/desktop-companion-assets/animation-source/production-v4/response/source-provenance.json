@@ -1,0 +1,382 @@
+{
+  "canvas": [
+    512,
+    512
+  ],
+  "sources": [
+    {
+      "source": "frames/attention.png",
+      "sha256": "03f8833bd9620eb483354064340dc76ee8741f61ba33cee22427670fdc3b3f64",
+      "originalSHA256": "28e8e6f9eb9fe14e87b61b6f462320c34fae15d49784886df701f2e632f01d20",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/attention.png",
+      "sha256": "86acc94ae93cdd7d1eb0a88c561fcff226b6a581eb5bcce8793ee1bb8b1892e9",
+      "originalSHA256": "4549e44c51cac91af8c1be6b8e3b8f375fefd3755f50e33976fe0da303340c50",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/lift.png",
+      "sha256": "7d056fb851da57f45f55590e82aa658d12164a9b6e0be98c21496d5179ff458f",
+      "originalSHA256": "e69fe8e83bb9ea4500d0f6c0da516e49f8b321d569b7c7cd9c3c31610cebadf3",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/lift.png",
+      "sha256": "8ca7619c4d776d1b5125f1906c6b1720ed66a304d7d16ef38a66e083bc84c2a6",
+      "originalSHA256": "9726fed98ed2f1efcef4f752e84e8cdacd730a58a98a27496be08c420a436151",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/palm-opening.png",
+      "sha256": "6c611cd761887c68f67b052cb2885ab91fcf3e0885a7e98bd9754a415351627d",
+      "originalSHA256": "e14bf46f1933a4e7feacc3e34bea14f52f9611b4a0308f78173bd01eee5aa42a",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/palm-opening.png",
+      "sha256": "6da02ee6399c1da98c7fa947ae3e3d2b6d68840c41cbd96dfc3108db23c9b784",
+      "originalSHA256": "40a4c9769de0c473e5eb29b82ec78282a89219f0965a0505408370fc1e58704a",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/palm.png",
+      "sha256": "9dfa8549de49261a6decc9eb466ca9f9d9ee75ea4035d408e67283d8aa98986b",
+      "originalSHA256": "32851b490f0d6d94e2703e1e1ec862c939df3cb2a7601bc0da0202d0aa30171e",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/palm.png",
+      "sha256": "da52dc9f7a619247ce64702a7b0e03dbe07a6174d1351867d54076e3e77b8625",
+      "originalSHA256": "ebececabc5111273b47a75b88f834d1ca3c1687fb4c427c0d642293e2974494c",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/lower.png",
+      "sha256": "d018349372c6b85b6d307c88da1406bd4857ba7b1c7614b59bd1376d4f363fba",
+      "originalSHA256": "fd4fad1b88aea857f2edfa51bc926a3a685e1c6946149f4b93b34670133d9c39",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/lower.png",
+      "sha256": "e30cb2c25e60895dda7afd3ee9994f30cd4f64654af43945c1c836031a96abbf",
+      "originalSHA256": "d0291a0b5214e1258c18783b3b911490e3fb3b6ec58d8fc9530327eb0cfc63f2",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/keyboard-hover.png",
+      "sha256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+      "originalSHA256": "41258b62810f4125bf2daa507398bd61df09fe3907dfde9757cbbdf40f8ec07c",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/keyboard-hover.png",
+      "sha256": "e5b059183df98633f8b28558e9b7e3989b46e46f61e8c0e43bef12a8bca5737c",
+      "originalSHA256": "4357cd31b498bfb6313d48c1c7d69930a8695d19d1e25aebd69eb08ec46489fb",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/keyboard-contact.png",
+      "sha256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+      "originalSHA256": "ab160154046759b66e156a8e70fc9b7514ad47439145530f0e1c06333df937ea",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/keyboard-contact.png",
+      "sha256": "ac4845ca2e98f8fdde9fb25f80dd64f9b4ec9e3eed00f5e65e73495ac6eea691",
+      "originalSHA256": "01a8817fc2952d72c80be65eec3e5ad77285c709d83467e3d90047c7bb60b765",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/busy-ack.png",
+      "sha256": "a3a700d58a93cf18e442b7410153bbfc3da9d5ada7d547cfe9fbd9f335338e4b",
+      "originalSHA256": "9f969dbb211e8f138a7da40503900ef17d7614f93a553f4febd87dc778039510",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/busy-ack.png",
+      "sha256": "5386071033ca3aa9a6197924202ecc60e04bb7cb439ccf0100bfe7caa7192693",
+      "originalSHA256": "3305dfdf1621773ad6dc384a39ddc00ad4e77e5b819b9ca5eb8106ee20c33746",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/busy-release.png",
+      "sha256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+      "originalSHA256": "94c80986c36a388611174d11337090e6c7004549c21eeb72a42d29213545512c",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/busy-release.png",
+      "sha256": "07c0eff197eb4e345c28c6f1dbe1912bd178f96269e9241bb8b31f57499c8ac5",
+      "originalSHA256": "a13fb23c319fe2f2cee2e72f7c8056d3ad10e8a9fcc46757c4366e133d309f18",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/playful-entry.png",
+      "sha256": "8fe783f2d8f73b2d88f72d873a6306c66a4f094ca9b503d9d425d3e3bf2a0f7c",
+      "originalSHA256": "72ed527b8dd9289506a9e7d90e7b3d14747df54330cf822a296cfe454c723b2a",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/playful-entry.png",
+      "sha256": "ba2e1c8b1f09453716f2013bd1124c3249611829248480c22207b2c4d89a9bb7",
+      "originalSHA256": "8b219f206b4c8d06c94c85b08d2d28345e90f47b5de59480941e777a0ad1e4fc",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    },
+    {
+      "source": "frames/playful-gather.png",
+      "sha256": "89b68835cb583f9931ce823253c5f8a3103d8ed6d2b65878c4f096ae2ea49ae3",
+      "originalSHA256": "30d1cf37e5a0a868675d240bf96820b56b8f78ce93f0714608c5ba4452e45d1d",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "exact declared cell; uniform whole-canvas resize only; original alpha retained"
+    },
+    {
+      "source": "detached/playful-gather.png",
+      "sha256": "9f86ef39f2718b39aaa88fd3f46d4b4da68944839f6091310024a33d5d323ed4",
+      "originalSHA256": "810442fa8d435a17f89bc511b394917ed9979ea01bb9438ca0f43e6b6c48d018",
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "uniformScale": 0.4082934609250399,
+      "translation": [
+        0,
+        0
+      ],
+      "method": "same-pose imagegen stool removal; uniform whole-canvas LANCZOS export; no mask, bbox fit, warp or alpha repaint"
+    }
+  ]
+}

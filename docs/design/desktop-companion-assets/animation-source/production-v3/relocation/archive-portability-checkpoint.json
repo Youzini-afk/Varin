@@ -1,0 +1,10 @@
+{
+  "selectedFilesCopiedAndHashVerified": 50,
+  "sourceDependenciesMissing": [],
+  "finalDerivedPNGRebuildHashMatchCount": 21,
+  "finalDerivedPNGCount": 21,
+  "status": "complete: repository-local production-v2 anchor/mask and production-v3 authors/raw-support rebuild every derived PNG with exact recorded SHA256",
+  "donorResolution": "Frozen v2 donor was not in old archive selection. Use byte-identical preserved task-reactions/references/secure-no-stool-clean-donor-v1.png; no external workspace dependency.",
+  "command": "python docs/design/desktop-companion-assets/animation-source/production-v3/relocation/rebuild.py",
+  "notClaimed": "runtime/native aesthetic acceptance"
+}

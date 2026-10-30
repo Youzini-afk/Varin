@@ -1,0 +1,2488 @@
+{
+  "stage": "frozen-complete-source-routing-for-native-validation",
+  "depends": [
+    "CURRENT_EXPORT_INCREMENT_V6.json",
+    "CURRENT_EXPORT_INCREMENT_V7.json"
+  ],
+  "files": [
+    {
+      "path": "build_transition_contract_v7.py",
+      "bytes": 10102,
+      "sha256": "8d5b3470b4f5a0f7bd1733ddb88e2ff4acd1a8006a799cf8fa9b1c0d0e4030cb"
+    },
+    {
+      "path": "transition-contract-v7/relocation.source.json",
+      "bytes": 6849235,
+      "sha256": "4c4a2dfa76de5849697487cbe2ee93d10f6d7ed7a757d42b4e79fdbc20d9f717"
+    },
+    {
+      "path": "core-acceptance-ledger-v1.json",
+      "bytes": 10193,
+      "sha256": "d0dc8ae013d6b7a6b615a0ee421a9c744d67f9b79b02ae8e645628d1f0cd05e6"
+    },
+    {
+      "path": "work-entry-acceptance-ledger-v1.json",
+      "bytes": 35839,
+      "sha256": "6955fcaf4f6e0e5bc7fdf4d2fe53c204c9aa51e1beb8476e3258430a9f92039a"
+    },
+    {
+      "path": "reviews/mid-boot-correction-verification.json",
+      "bytes": 293,
+      "sha256": "c327af142bf743d119980786c9e2bfa7b0b4bc661cde8fc692f95f9ed728be2f"
+    }
+  ],
+  "externalDependencies": [
+    {
+      "path": "../observe-diagnose/canonical-chin-v2/hold-closed.png",
+      "sha256": "cb3bbea7be2e9282e380587c36ad6d08ca43a4682647407f5af64a2482c90bd9"
+    },
+    {
+      "path": "../observe-diagnose/canonical-chin-v2/hold-half.png",
+      "sha256": "fa76ec4c24fdcee17b55ce1701ff9dc55283a4752443a1244ba69325c3d3a956"
+    },
+    {
+      "path": "../observe-diagnose/canonical-chin-v2/pose-000.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1"
+    },
+    {
+      "path": "../observe-diagnose/canonical-chin-v2/pose-001.png",
+      "sha256": "e0757a3837d659b3f6015eb168932667fdaeaca537abcd43c4b6dff04eea3404"
+    },
+    {
+      "path": "../observe-diagnose/canonical-chin-v2/pose-002.png",
+      "sha256": "3d432405b24022b9f068293624f0cf63940f5a0a1f3550cc58551f6467024e43"
+    },
+    {
+      "path": "../observe-diagnose/canonical-chin-v2/pose-003.png",
+      "sha256": "ae13c9f58666b277628768a528885b88e05c984490f13aa454c8a6cc8831d191"
+    },
+    {
+      "path": "../observe-diagnose/canonical-chin-v2/pose-004.png",
+      "sha256": "878b9db63ea007ef20b94d3b244ebd2d1272b7d9a64c6a16f1da9b02e7ce346d"
+    },
+    {
+      "path": "../observe-diagnose/canonical-chin-v2/pose-005.png",
+      "sha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87"
+    },
+    {
+      "path": "../observe-diagnose/canonical-gaze-v1/closed.png",
+      "sha256": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f"
+    },
+    {
+      "path": "../observe-diagnose/canonical-gaze-v1/half.png",
+      "sha256": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824"
+    },
+    {
+      "path": "../observe-diagnose/canonical-gaze-v1/read-screen.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/check-000.png",
+      "sha256": "84ee8a6abd9d9a0c7b4aa4bff3ad5e77f162c75024114cca542f041e9e928270"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/check-001.png",
+      "sha256": "326d4fcce29ffa40fadb3d8d14186ac23d91d92e1e5c03c989e618aae377e81f"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/check-002.png",
+      "sha256": "639ea19851dedc963e9dd5d88cdea9b3ee83079746da4654203e9cddf6911b00"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/check-003.png",
+      "sha256": "a1c931bef3b940bf8e50af0a506b6695a0d9dce602309e0e150adfe01f3d9e25"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/check-004.png",
+      "sha256": "c8c4ec19eb6fcf1f68cc8cd68fc2f2f2d07682a6675e8c6c42819d663de4f621"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/check-005.png",
+      "sha256": "6adf830b01666d5c23b4e45e97ce5b08057e94f129312efc63722a6a931b7e18"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/middle-focused.png",
+      "sha256": "cfe5597e8d81ab00bcd7362883e1c29692d79478ce5d275ccc78d9027a65e33f"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/raised-closed.png",
+      "sha256": "b87df537bb124afa25bd9be7ec9cc775decf2f10c417efbf692850a9336d0823"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/raised-focused.png",
+      "sha256": "2bcfdde1bbc9e690cc705ea3cded5edf9ebcd4ec316f4a76a8e1621fa8d92030"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/raised-half.png",
+      "sha256": "f2ec68ed05f9553053d4c8c55ab5b53e1efce256a1ac5d495c801169644fa41f"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/raised-serious.png",
+      "sha256": "12e9d291a7fb5c479d76f3b445c93b3b80a4312f86840153d4b8622ee5fe93b3"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/rest-closed.png",
+      "sha256": "5b1454b39deb72781973b9f6f0bd2fba1ae702eec87ac12804e0f76e421743c6"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/rest-focused.png",
+      "sha256": "5eedd7d91a13f90106550b7329816bf826b7a3dfd4012c04e5f453b347ee3fb9"
+    },
+    {
+      "path": "../observe-diagnose/canonical-recovery-v1/rest-half.png",
+      "sha256": "f26683c6d0f669c5a1bf2e431dcc287218b1b89883f051fe94759a055c62bf41"
+    },
+    {
+      "path": "../observe-diagnose/canonical-stop-v1/middle-surprise.png",
+      "sha256": "41004ce0b9730cd5d53d3ad5170edabc99e6278f3c159a989965b02c013433f9"
+    },
+    {
+      "path": "../observe-diagnose/canonical-stop-v1/raised-surprise.png",
+      "sha256": "85668658799a6c27e9f810f83b65f1031c9f320c897bcabd0d64e056ce5d8622"
+    },
+    {
+      "path": "../observe-diagnose/canonical-wait-cycle-v1/chin-glance-user.png",
+      "sha256": "8ce2c012514281146a422c9369df895242f6642f03c07535568dafd6861bd780"
+    },
+    {
+      "path": "../observe-diagnose/canonical-wait-cycle-v1/chin-settled.png",
+      "sha256": "916e137dc07b3dc9e8e5ff6ce3dc6a80761fdc37d0821d1ffc4e6b728447baf8"
+    },
+    {
+      "path": "../observe-diagnose/canonical-wait-cycle-v1/rim-approach.png",
+      "sha256": "09da09c185209721f9890563d264267c8a99a660bafcebd5242b515aa6c7bbdb"
+    },
+    {
+      "path": "../observe-diagnose/canonical-wait-cycle-v1/rim-rest.png",
+      "sha256": "aec5891fd40471c2d4dfd4dd370d95fe5b450bdf2bcaaad86124ca21fa6a5722"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/acceptance-ledger.json",
+      "sha256": "86f6af3c40e0ec19de5376994cdd1ee57f6d436004d8c347eb7691ee5e378764"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/chin-000-supported.png",
+      "sha256": "b26402e88436a4d33ccc6fc3318434aabb9c5c1d8377321291ac74bd78554c01"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/current-detached.png",
+      "sha256": "d1c8ed9e446cd5f6d80dab932a24133badad56e09854fe735294b4c5c06d9b31"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-000/sequence.source.json",
+      "sha256": "152cf2b4ecf9bbebc38fed5ec006c6a9bf64996ad079957c48aa3fe61a628617"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-001/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-001/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-001/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-001/current-detached.png",
+      "sha256": "0792436f298e15f30aa95a6598968b76d425b0b06bc43cd6ab900717374901c8"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-001/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-001/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-001/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-001/sequence.source.json",
+      "sha256": "ce7769eb988d2d8d2ad0bb517b01305c93d72843e833a20fcf244d3e08242e9f"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-002/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-002/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-002/current-detached.png",
+      "sha256": "35b0e885ece35de1ac0b654d9d241fd511b0596ff938fca5548dd0357c712993"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-002/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-002/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-002/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-002/sequence.source.json",
+      "sha256": "698669020f56da16ceba31ce27bb19681d03e66bb40528f6f582b18d01c1347d"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-003/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-003/current-detached.png",
+      "sha256": "db3862be4bbe00f39ee00b66c4c27e6872f93f99f6372f03e4ee7015dfb77a66"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-003/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-003/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-003/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-003/sequence.source.json",
+      "sha256": "de925589a5acc15655f3959fbf6f71d1aa196f38123af96b0094ffa0e757129b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-004/chin-004-supported.png",
+      "sha256": "9636abfe97116876052267e7ff5ee81a7a79c7420993e2320129cb20848a7825"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-004/current-detached.png",
+      "sha256": "548d8428c770442f3896cb5f6c61e4668b8c329cd9b1168d4ca51a65c1118949"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-004/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-004/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-004/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-004/sequence.source.json",
+      "sha256": "9d1298d7f2de8f694cc463c8bec3d23af7d17870960f19641f910320a732863a"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-005/chin-005-supported.png",
+      "sha256": "2023c59feb6809a9603f9dc1dd95dedea8e595610d1a9304b5103aadae25e425"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-005/current-detached.png",
+      "sha256": "fbda19991f505caa15d58d154a9ad0b63acd09ce449fb3027cd7870095f0bbc2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-005/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-005/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-005/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-005/sequence.source.json",
+      "sha256": "3eef61b10de4b113e49249c6c896c9f77c37725e787ae43a5061e7f38d4d2a72"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-closed/chin-closed-supported.png",
+      "sha256": "7c0d1f62044a55c7c40e113539452bebd4b9f508e5d6659bd29be06cd812b37a"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-closed/current-detached.png",
+      "sha256": "b79c3c2e115d758e26634c2dbaaf7019688162728d1076acfa81cd0ea9fbb6f3"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-closed/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-closed/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-closed/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-closed/sequence.source.json",
+      "sha256": "c04c9f0dfd7d61e9a784180d1cbf3d7af084530ed22b04ad13051027b4bdf35e"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-half/chin-half-supported.png",
+      "sha256": "57f36b003ec6da511ee57b3cfb10180982b3b58deeaeba52dd2c6678c71b33cf"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-half/current-detached.png",
+      "sha256": "3ab198d1ff426d84944b5752d1b8743d55168903ee189f3bc45c138bd18c6329"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-half/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-half/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-half/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-half/sequence.source.json",
+      "sha256": "94ccaf35f6d7d5bf7beb7040f538969fb750627ece668df34e0a15bd50cd63c3"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-rim/chin-rim-supported.png",
+      "sha256": "d8af76226c10145e8b56d21c4a73516da3db1f95a42f891995a88b8a0aa8940b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-rim/current-detached.png",
+      "sha256": "eb218c4cbc28767b31083d16dc63a0c19f0fbf629af80018c0d0a85bf1bc48e3"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-rim/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-rim/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-rim/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-rim/sequence.source.json",
+      "sha256": "34e2c1536866eae9049cef49f6fbceccd641108e0f4127c900aaf62f57acda1e"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-settled/chin-settled-supported.png",
+      "sha256": "09c1b186e65b58a9be162a9889fbe4c7cb571b70c13fdffbc2c7cd9d0b41cee0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-settled/current-detached.png",
+      "sha256": "4ac1fddfd343961bf60416ff768a8d148d9d41aac385ad7801f63d2142912998"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-settled/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-settled/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-settled/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/chin-settled/sequence.source.json",
+      "sha256": "5ea673e6bc4c318cd42a073bb3cdead843b558c2d3f61945260f2aea608d4624"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/closed-handoff.png",
+      "sha256": "ba4c15f4c6f32c86401279e662d31c62da3864048361ab6725e8a7b2cd15274e"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-09da09c18520/chin-005-supported.png",
+      "sha256": "2023c59feb6809a9603f9dc1dd95dedea8e595610d1a9304b5103aadae25e425"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-09da09c18520/current-detached.png",
+      "sha256": "434e73ab61c52be13b6535359e45fb8f60b1f19f65f89402b0026b6c8a85df0a"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-09da09c18520/current-supported.png",
+      "sha256": "a30412e7ad8b8100be0613fb121fb662452277115c3d530dcfa60c1db358b11b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-09da09c18520/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-09da09c18520/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-09da09c18520/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-09da09c18520/sequence.source.json",
+      "sha256": "f155a503be3a52beca74fc99858f8c7b6f010bfd95d7e904c6d7f1b0dc8b3cf9"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/current-detached.png",
+      "sha256": "34e7419ca1bfe1df4f95f31035d3b3228575ffa45995a8431d7d5787272a8fe6"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/current-supported.png",
+      "sha256": "e872aaf805c53d0c55684fb8617c54d5f60de5314d7f4a1a9ccc0887195edd40"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/sequence.source.json",
+      "sha256": "798333d4ccab939195fe9d37678f2cd10fb8fa9d2ffb4771642e1a7b70d07ca1"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-3f70a6861d87/current-detached.png",
+      "sha256": "8f5a3763830a3e4bc9f383421152428e4354593f34a466b273e9c7d01f66d304"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-3f70a6861d87/current-supported.png",
+      "sha256": "13508355695694943d679f193e58181e93d428786f7b9ddfa77b21e72942e4ff"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-3f70a6861d87/sequence.source.json",
+      "sha256": "154c2a42c59a4441c0ecf89f819075128a343804d7c617da73cbb3f0dc2cbabd"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-3f70a6861d87/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/current-detached.png",
+      "sha256": "f43726e98ae63351aa931e25646539608a74bb201f51846527981b6e9d06f1de"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/current-supported.png",
+      "sha256": "dff4d3050d89a6ff5a1ace186b85ea17f395b6d7d5ccddde5fd9dfb2cf4a0bb9"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/sequence.source.json",
+      "sha256": "77dfb900803bcd3d98917b8524a9a6b2eea3366d7908ca215e64a91390451cb2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/chin-000-supported.png",
+      "sha256": "b26402e88436a4d33ccc6fc3318434aabb9c5c1d8377321291ac74bd78554c01"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/current-detached.png",
+      "sha256": "b9e587a62c93137b564c815f0a91450849289b72235f5cb34bd638fb4c833988"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/current-supported.png",
+      "sha256": "727554989f87c8add3dfc6864505c264def0206abbf1947d10a433cdd1c2b985"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/sequence.source.json",
+      "sha256": "08840ec0451952f752f69c92ae321f1d15ce5b01b1cc79327aa159aa77b37e06"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/chin-000-supported.png",
+      "sha256": "b26402e88436a4d33ccc6fc3318434aabb9c5c1d8377321291ac74bd78554c01"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/current-detached.png",
+      "sha256": "b18e43f9b0aa20e6d2610da66c0da620963d9a51cad19d30ac17d332095c8311"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/current-supported.png",
+      "sha256": "ff8568dd1047dbf5808415e64c23a18aa0b943be796eaa59c99b9d2b2dd28dda"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/sequence.source.json",
+      "sha256": "1e63dedb8aa2e811cab24797ceb3122169a0b52b5b769aa4accfe22cfe4339ce"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-639ea19851de/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-639ea19851de/current-detached.png",
+      "sha256": "5d4f971589f0014d5c0530fcded642dbce82289cabf1119bdc496fa41fb13b12"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-639ea19851de/current-supported.png",
+      "sha256": "43bc0ac0ad73111d8cefc274471388d9faa8547114916c378daef917e8825100"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-639ea19851de/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-639ea19851de/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-639ea19851de/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-639ea19851de/sequence.source.json",
+      "sha256": "00ec9bcc55b5c533f90cb2b66d250fa86f4f1d923687dc882f6cc2570dd48f04"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-6adf830b0166/chin-005-supported.png",
+      "sha256": "2023c59feb6809a9603f9dc1dd95dedea8e595610d1a9304b5103aadae25e425"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-6adf830b0166/current-detached.png",
+      "sha256": "91af26a209f35b81d32398a9436a1bbbb1bada52bb1f9035ab882804a786179d"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-6adf830b0166/current-supported.png",
+      "sha256": "8afd2245248057053aa55428af529da0b39310feb0f4e22ebf68def6d61bf0d0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-6adf830b0166/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-6adf830b0166/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-6adf830b0166/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-6adf830b0166/sequence.source.json",
+      "sha256": "4c9aeece5ef767020732922e32681c27c295acde8eee719414567d8e44b1ac54"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/chin-000-supported.png",
+      "sha256": "b26402e88436a4d33ccc6fc3318434aabb9c5c1d8377321291ac74bd78554c01"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/current-detached.png",
+      "sha256": "6e113884e168d6664187196bb49fcd9d276abceb46674f32f9103c5ed05841d0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/current-supported.png",
+      "sha256": "d02f8c7391af4758de20a2daf54aec266291333428c713fc35d2caf5f7a6d588"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/sequence.source.json",
+      "sha256": "344d3262b12d56cf428a7bc12738229d60f785df63e6a2a24111fa8f11b9ad32"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-85668658799a/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-85668658799a/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-85668658799a/current-detached.png",
+      "sha256": "922bedc51db3d126f7b82bfb9e55d805cf357e863275e4885263a57de99fc48b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-85668658799a/current-supported.png",
+      "sha256": "fc07b6a9d2d25c5ad8b6881f13381890821f198b70a3c0fa626f4ac15bb33294"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-85668658799a/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-85668658799a/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-85668658799a/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-85668658799a/sequence.source.json",
+      "sha256": "4287295ca1fb6196aaa3f7583172356cee99cd67c0451b1f3e7b6a0ffeff52ba"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8820543d00b6/current-detached.png",
+      "sha256": "ed2994c9e7399671859fdce6e380c0c6a393fb9bd674c95d85a9213a398cd295"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8820543d00b6/current-supported.png",
+      "sha256": "756525c545bf9400b7acc2830258899f3b04a569fb1e0d2cfc4e05c1706ff174"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8820543d00b6/sequence.source.json",
+      "sha256": "f6228ae07d14250352f0cede40c0d325266af59fb1ae65f07b3b09437ab27ea4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8820543d00b6/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/chin-000-supported.png",
+      "sha256": "b26402e88436a4d33ccc6fc3318434aabb9c5c1d8377321291ac74bd78554c01"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/current-detached.png",
+      "sha256": "f2dc6831e40b11751ec0eaa2386364da6de46d9299589ddb38f6b97832167138"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/current-supported.png",
+      "sha256": "edcefc0eef173e46be1e17afcc9b5ab42314c03250b22745d76f56cf029a4142"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/sequence.source.json",
+      "sha256": "739bd84f470ac444d5aade7e2ed05ad1f5e34656f3a1bc96a8229d82d6a2a358"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8ce2c0125142/chin-005-supported.png",
+      "sha256": "2023c59feb6809a9603f9dc1dd95dedea8e595610d1a9304b5103aadae25e425"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8ce2c0125142/current-detached.png",
+      "sha256": "1ba12ca5b31002c2b04edd899495422930320ad2a2325ada049b46c47be87f6d"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8ce2c0125142/current-supported.png",
+      "sha256": "eb4241e17e4365d537730a3bb826c86322ddc8e9c7b2494de121963af2530cbd"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8ce2c0125142/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8ce2c0125142/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8ce2c0125142/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8ce2c0125142/sequence.source.json",
+      "sha256": "85e3f398d214fce2a6b0e00f5d6cfc3e33dd180fcc8e02b5679fbf1aea3ccac1"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8e5d15ee0307/current-detached.png",
+      "sha256": "0151ecb36704309d4b6583b962b65673853c3e9809a69b8090d883a0f011b75d"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8e5d15ee0307/current-supported.png",
+      "sha256": "c8ac1b51539658f62c102da3bfc71db33ffb0d10355fdf5598817d49d22de62c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8e5d15ee0307/sequence.source.json",
+      "sha256": "33c4a2da897597290760422f0b13c4d993bba3a121a74058f5feb4f9a9b341f6"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-8e5d15ee0307/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-a1c931bef3b9/chin-004-supported.png",
+      "sha256": "9636abfe97116876052267e7ff5ee81a7a79c7420993e2320129cb20848a7825"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-a1c931bef3b9/current-detached.png",
+      "sha256": "6f49e08914615d20a3b1739ee3fad590546cbcfff2176b1a459afbbc7e711da4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-a1c931bef3b9/current-supported.png",
+      "sha256": "cf50d1adf3cdcd403ef77bb43b1803e5d52166905c8402d23959e87a34d8b98e"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-a1c931bef3b9/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-a1c931bef3b9/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-a1c931bef3b9/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-a1c931bef3b9/sequence.source.json",
+      "sha256": "5a6c5304fd9738ed6d2f3d46a04a36fd61497e9a47c163fff49e1d42cb57c89a"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/chin-000-supported.png",
+      "sha256": "b26402e88436a4d33ccc6fc3318434aabb9c5c1d8377321291ac74bd78554c01"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/current-detached.png",
+      "sha256": "71cf9d612c395be048f90b2a11062fd264622f54ce2ab2168d93a18a50412064"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/current-supported.png",
+      "sha256": "3d11c9a00fc298c2a1c7ea369e3c3e8f1de1ad23220f4df71dceee483835e32a"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/sequence.source.json",
+      "sha256": "80bfea4578223b2f6330d467469eaaddc61bc0a3b7120727ced0932ab99ccca2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-acceptance-ledger.json",
+      "sha256": "60908630652470cb9565fb31048de7bb53e7ead531a1a1c1da7993ec10a001d1"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/current-detached.png",
+      "sha256": "44dc92c271edd4595c5d56f5daef749f88056dad201ca6536b4b87aa6bef8d0d"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/current-supported.png",
+      "sha256": "1500762b9dd9ad2d6cad257b2d5cb21cc6c009249efe93f2c5b27db6208bc20b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/sequence.source.json",
+      "sha256": "72a1cdac0582b30b3e3cbff76030e5ff2e6a72d2cdd87311a6b0dedc696f2309"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-c8c4ec19eb6f/chin-005-supported.png",
+      "sha256": "2023c59feb6809a9603f9dc1dd95dedea8e595610d1a9304b5103aadae25e425"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-c8c4ec19eb6f/current-detached.png",
+      "sha256": "675a1a7c77b27bb4822ec182aa1d8323c4054acadd2a2b0ef420bb8eca64368b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-c8c4ec19eb6f/current-supported.png",
+      "sha256": "44722b063889c253587787a50cdc2fffbf2610e3ba3c64a0ab826adb5ee4a36d"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-c8c4ec19eb6f/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-c8c4ec19eb6f/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-c8c4ec19eb6f/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-c8c4ec19eb6f/sequence.source.json",
+      "sha256": "c802276fdb692c577f4df10d4821a118a6389d7c66ecf6c47acf8b13ded436bf"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/current-detached.png",
+      "sha256": "dcf475a256e5cb2b3d03c037e4e8d4bd302670bce73b8c6191ec82c195c7c3b0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/current-supported.png",
+      "sha256": "870fe31db9fd982fb056fca8dd770910ed37ba643b390f5d89c8660bac01b8a7"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/sequence.source.json",
+      "sha256": "fcffc5d76fe2472bae5b2d3caed092ba200c411166d2588bb31e5928863b08f3"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-dca23aa400e1/current-detached.png",
+      "sha256": "d0b581b7805613ca8421c69fc0556487f89ac987024ab5a677eb673da235ebcc"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-dca23aa400e1/current-supported.png",
+      "sha256": "c499ddd083bfb857b5d2a6252aaa51cb6362af248e979fad6f6a46fac30cb8a2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-dca23aa400e1/sequence.source.json",
+      "sha256": "5eb981a5c169b1a04afca6126f3fe95fc0b22d8a5b2053ef1895119aca461bda"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-dca23aa400e1/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/chin-000-supported.png",
+      "sha256": "b26402e88436a4d33ccc6fc3318434aabb9c5c1d8377321291ac74bd78554c01"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/chin-001-supported.png",
+      "sha256": "a6d97765bfc0668a15f88a07271b01c537e53b8436f449289f570d40196e38f2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/current-detached.png",
+      "sha256": "e5555cea029bc136d3f63d4d0ac612c9b16feec2c9ff16dbdd29eee955c91600"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/current-supported.png",
+      "sha256": "9ff7f8fb867670f7a628362b1266a24cfaf6c102393738fe01fb53fb5a453dc5"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/sequence.source.json",
+      "sha256": "e0d6ce7c8097fab31717a2262ab42162a6dc6a7a920f4ea76196f0827660d082"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/current-detached.png",
+      "sha256": "184a92ff9024a85c9e06988d95d75a80c8910991a2509e87e879346c96c0d609"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/current-supported.png",
+      "sha256": "07e9df086fa27fee3982e21803b8d04f26404bf8ca15f81addd8d3576a043145"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/sequence.source.json",
+      "sha256": "4151274061cc1641cfee341a34134807bef790e463c1e6804686cc0762003115"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/coverage-index.json",
+      "sha256": "186c8f91f263dd0e0f2e8b2224e4ed5ac3d6b67cf64d8cb26dfd8eeca23f4b6e"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/eye-rub-004/current-detached.png",
+      "sha256": "eb4dd5e5ddca345358e072c30faa3a4a6bed803ac718ea8d90ca1bcd4528f139"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/eye-rub-004/eye-rub-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/eye-rub-004/eye-rub-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/eye-rub-004/eye-rub-002-supported.png",
+      "sha256": "e476f2706cf87b5e6d27d51ff85e76a2d178b4331f1a9d08f5455cfdad459ad4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/eye-rub-004/eye-rub-003-supported.png",
+      "sha256": "b38e245f05275d541ac71bb79254a7a44d1d99e748ca0021883095d515769074"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/eye-rub-004/eye-rub-004-supported.png",
+      "sha256": "5edc24719ef7293d82731ab392147e6e920f958a38f5f3c3f0f5a7acedd013bf"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/eye-rub-004/sequence.source.json",
+      "sha256": "27b9a02ab5b62798284bd6c75c0c198e129714e2b5b7467ac09b5461678240f4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/index.json",
+      "sha256": "d6ee09b22f9fe20d077baf4cf4925a5efb57c2c2e69de07457437d8a1aeecb25"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-focused/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-focused/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-focused/current-detached.png",
+      "sha256": "6e2a2f1c8c373584bc108e9b34b2371aa4c07d121985a562135576abb363ac38"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-focused/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-focused/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-focused/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-focused/raised-focused-supported.png",
+      "sha256": "f23c3502429f259cdec91918aa52f2d6ba93ab7ed0e0cc18f2c79dc50b41c4d6"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-focused/sequence.source.json",
+      "sha256": "6178cb2e34da67c286fe2e82013eb323298171fb86180d3bedd4739c7ec288c2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-serious/chin-002-supported.png",
+      "sha256": "965b9796cd080cc4b173475fe599f1c1cf6b606cc7c59ba3542049a2ec124d83"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-serious/chin-003-supported.png",
+      "sha256": "1b99440dd6812020f9b71a1020b7759a31c19e5a2a3afaa4118be2c42ea881e0"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-serious/current-detached.png",
+      "sha256": "ab9589e5d371dca876565beda108d8cd4f6ae60885be07b13cc9001ae18dec93"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-serious/early-detached.png",
+      "sha256": "021c84684607b17ecf10ec6cc9a17e900bb2c42037a67afe988a4576adba50fb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-serious/grip-detached.png",
+      "sha256": "8c515c3136a0a2845c60dcc5134ea0189c51785b330fb0866d6ac47fd2f6b27c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-serious/pregrip-detached.png",
+      "sha256": "9735f06a4cbb786a31b1f13c98d5927c2fa3ac9f0383ab72c01107309268f13b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-serious/raised-serious-supported.png",
+      "sha256": "f8f9dcafa8a73791b254a7f7e08b2e51e03b79062e01c7d6687880a247fbab56"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/raised-serious/sequence.source.json",
+      "sha256": "85751bcfec2946dddc8a182f5a0b9d6dc9f5de771dafe0c66931894b0c636761"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-000/current-detached.png",
+      "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-000/sequence.source.json",
+      "sha256": "578d8190ebf8280654be492b1b9cdae30544d55a9e4e418d58ce8add13c07bca"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-000/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-001/current-detached.png",
+      "sha256": "2709a4ed14c4eb42866bfd32b91dd44606b7fad287689d1c00863ec6b84280e3"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-001/sequence.source.json",
+      "sha256": "78502d9ebe2bcd31f4736cdbfbaf57a40f8fd0ac3652aa8b7f4157de060b1887"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-001/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-001/stretch-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-002/current-detached.png",
+      "sha256": "ec7c918e7da4f377366f4fc717c70ee5c10b10ab618af537e9d4da6fd02542a7"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-002/sequence.source.json",
+      "sha256": "655a685f77041df67af3dd5cf5cd52d94c0365bc3ac471092e89699d95d0ca77"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-002/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-002/stretch-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-002/stretch-002-supported.png",
+      "sha256": "e476f2706cf87b5e6d27d51ff85e76a2d178b4331f1a9d08f5455cfdad459ad4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-003/current-detached.png",
+      "sha256": "7e8f1bbe8e05986d4431f0cc73477fbef2584952529013d0691be94c1fec5fa5"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-003/sequence.source.json",
+      "sha256": "45dd14c7271b532a11849b548af0c88dfb45fa6e88411f21dd1f7a0fb41cbc77"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-003/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-003/stretch-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-003/stretch-002-supported.png",
+      "sha256": "e476f2706cf87b5e6d27d51ff85e76a2d178b4331f1a9d08f5455cfdad459ad4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-003/stretch-003-supported.png",
+      "sha256": "b38e245f05275d541ac71bb79254a7a44d1d99e748ca0021883095d515769074"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-004/current-detached.png",
+      "sha256": "a30fbfa2c5e66644111a57d8572eae8407b0fe95fdaa42abc7fa8939a4f1d012"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-004/sequence.source.json",
+      "sha256": "a6159215d45211f69b46847ea68ad822617be58b7d5758440f2b89521f02b35e"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-004/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-004/stretch-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-004/stretch-002-supported.png",
+      "sha256": "e476f2706cf87b5e6d27d51ff85e76a2d178b4331f1a9d08f5455cfdad459ad4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-004/stretch-003-supported.png",
+      "sha256": "b38e245f05275d541ac71bb79254a7a44d1d99e748ca0021883095d515769074"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-004/stretch-004-supported.png",
+      "sha256": "9daf2431727ce2303fc18d14d4155948e5784031a167f9e1daf67d0414f96bb2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-005/current-detached.png",
+      "sha256": "a3747e5275ff8eaf03c4a970202da879c62ce7128a7f37c94353298971548f3a"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-005/sequence.source.json",
+      "sha256": "459f790263fef61b6efe86d7d4e506bd4fd7fcd3c19ea05a6a653b14d95dba5e"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-005/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-005/stretch-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-005/stretch-002-supported.png",
+      "sha256": "e476f2706cf87b5e6d27d51ff85e76a2d178b4331f1a9d08f5455cfdad459ad4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-005/stretch-003-supported.png",
+      "sha256": "b38e245f05275d541ac71bb79254a7a44d1d99e748ca0021883095d515769074"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-005/stretch-004-supported.png",
+      "sha256": "9daf2431727ce2303fc18d14d4155948e5784031a167f9e1daf67d0414f96bb2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-005/stretch-005-supported.png",
+      "sha256": "fd8f2da5d48d96a9efb7171bbed2e09f92a0c20d2a778204f2c752cf87d7c8eb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/current-detached.png",
+      "sha256": "571296d55dd17609df6e4618db89b29cc87d47d412293ae2ffadd1aa97dd2438"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/sequence.source.json",
+      "sha256": "860780bd4bdae623f5a443a4c13394f08507d5a09a7b27cf55c2d017f0964e3c"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/stretch-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/stretch-002-supported.png",
+      "sha256": "e476f2706cf87b5e6d27d51ff85e76a2d178b4331f1a9d08f5455cfdad459ad4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/stretch-003-supported.png",
+      "sha256": "b38e245f05275d541ac71bb79254a7a44d1d99e748ca0021883095d515769074"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/stretch-004-supported.png",
+      "sha256": "9daf2431727ce2303fc18d14d4155948e5784031a167f9e1daf67d0414f96bb2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/stretch-005-supported.png",
+      "sha256": "fd8f2da5d48d96a9efb7171bbed2e09f92a0c20d2a778204f2c752cf87d7c8eb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-006/stretch-006-supported.png",
+      "sha256": "4e149fe870f105791e3f7a0df4312fc8989fdb5201a6269bce8dbec767c44543"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/current-detached.png",
+      "sha256": "004e11d40c0c1063864bbf3dfebccc9ef1dcfa5813480a55b317785fcb09e548"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/sequence.source.json",
+      "sha256": "cc552f7545a13cb3e8492052137258a19f1c6145721724b7e2ad028d039da865"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/stretch-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/stretch-002-supported.png",
+      "sha256": "e476f2706cf87b5e6d27d51ff85e76a2d178b4331f1a9d08f5455cfdad459ad4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/stretch-003-supported.png",
+      "sha256": "b38e245f05275d541ac71bb79254a7a44d1d99e748ca0021883095d515769074"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/stretch-004-supported.png",
+      "sha256": "9daf2431727ce2303fc18d14d4155948e5784031a167f9e1daf67d0414f96bb2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/stretch-005-supported.png",
+      "sha256": "fd8f2da5d48d96a9efb7171bbed2e09f92a0c20d2a778204f2c752cf87d7c8eb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/stretch-006-supported.png",
+      "sha256": "4e149fe870f105791e3f7a0df4312fc8989fdb5201a6269bce8dbec767c44543"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-007/stretch-007-supported.png",
+      "sha256": "a925eade983ba5d7e9b14190bd008c775416f66316c75dab7869c9862ee52f96"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/current-detached.png",
+      "sha256": "f5215ff114218492875e247b1594f5d2a8c1125aa77877bc28057efd86908e05"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/sequence.source.json",
+      "sha256": "037884e2e91648675e907a51166f225db8363170325ba70b85ac48ab089476bf"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-000-supported.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-001-supported.png",
+      "sha256": "f3aa7b52a86e9e44011880f0bc8bc6766d17623ddb1e5cccff0c7fa22379536b"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-002-supported.png",
+      "sha256": "e476f2706cf87b5e6d27d51ff85e76a2d178b4331f1a9d08f5455cfdad459ad4"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-003-supported.png",
+      "sha256": "b38e245f05275d541ac71bb79254a7a44d1d99e748ca0021883095d515769074"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-004-supported.png",
+      "sha256": "9daf2431727ce2303fc18d14d4155948e5784031a167f9e1daf67d0414f96bb2"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-005-supported.png",
+      "sha256": "fd8f2da5d48d96a9efb7171bbed2e09f92a0c20d2a778204f2c752cf87d7c8eb"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-006-supported.png",
+      "sha256": "4e149fe870f105791e3f7a0df4312fc8989fdb5201a6269bce8dbec767c44543"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-007-supported.png",
+      "sha256": "a925eade983ba5d7e9b14190bd008c775416f66316c75dab7869c9862ee52f96"
+    },
+    {
+      "path": "../observe-diagnose/gesture-pickup-v2/stretch-008/stretch-008-supported.png",
+      "sha256": "f57df269e83548ac982ba3ea986a9cac0ef48a13128df097b224d30227899d8a"
+    },
+    {
+      "path": "../rest/canonical-eye-rub-v1/pose-004.png",
+      "sha256": "ebe9c0ce1fc1ef0fb2527229155c211c248c061e52ef21c17dec26e8eb7fccce"
+    },
+    {
+      "path": "../rest/canonical-quiet-v1/between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e"
+    },
+    {
+      "path": "../rest/canonical-quiet-v1/closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1"
+    },
+    {
+      "path": "../rest/canonical-quiet-v1/half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f"
+    },
+    {
+      "path": "../rest/canonical-quiet-v1/settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-004.png",
+      "sha256": "3e8510d61b4fba530ba26c0d1a248a394dd18ecf8bc542ed2ad311f3f97acefa"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-005.png",
+      "sha256": "83cf11a74ce177e7d10326aa2c4ab9be5c05dc6ab863a9b64f8fcb0e31fde8e7"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-006.png",
+      "sha256": "7d9897deb4e13e0a15002b281e6f64a2ff255abeb7398fd010f09448b57ccacd"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-007.png",
+      "sha256": "511cb52602068b691562161a69cf80af2c82141a781c727ba86c9315cdaaef90"
+    },
+    {
+      "path": "../rest/canonical-stretch-v1/pose-008.png",
+      "sha256": "a178622139811eeb1a4f1c17c78430028c5026cf55351e11b216fec0f3e755e8"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v1/closed-canonical-candidate.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-001.png",
+      "sha256": "16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-002.png",
+      "sha256": "de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-003.png",
+      "sha256": "2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-004.png",
+      "sha256": "d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-005.png",
+      "sha256": "5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-006.png",
+      "sha256": "6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-007.png",
+      "sha256": "57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-008.png",
+      "sha256": "f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-009.png",
+      "sha256": "11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-010.png",
+      "sha256": "1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-011.png",
+      "sha256": "d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-012.png",
+      "sha256": "e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-013.png",
+      "sha256": "0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-014.png",
+      "sha256": "0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-015.png",
+      "sha256": "5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-016.png",
+      "sha256": "ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-017.png",
+      "sha256": "61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-018.png",
+      "sha256": "477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-019.png",
+      "sha256": "58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-020.png",
+      "sha256": "d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-021.png",
+      "sha256": "6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-022.png",
+      "sha256": "9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-023.png",
+      "sha256": "ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-024.png",
+      "sha256": "f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-025.png",
+      "sha256": "725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-026.png",
+      "sha256": "e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-027.png",
+      "sha256": "54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-028.png",
+      "sha256": "da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-029.png",
+      "sha256": "d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-030.png",
+      "sha256": "888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-031.png",
+      "sha256": "a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-032.png",
+      "sha256": "7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-033.png",
+      "sha256": "f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-034.png",
+      "sha256": "22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-035.png",
+      "sha256": "8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/closing/frame-036.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-001.png",
+      "sha256": "8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-002.png",
+      "sha256": "22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-003.png",
+      "sha256": "f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-004.png",
+      "sha256": "7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-005.png",
+      "sha256": "a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-006.png",
+      "sha256": "888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-007.png",
+      "sha256": "d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-008.png",
+      "sha256": "da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-009.png",
+      "sha256": "54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-010.png",
+      "sha256": "e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-011.png",
+      "sha256": "725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-012.png",
+      "sha256": "f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-013.png",
+      "sha256": "ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-014.png",
+      "sha256": "9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-015.png",
+      "sha256": "6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-016.png",
+      "sha256": "d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-017.png",
+      "sha256": "58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-018.png",
+      "sha256": "477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-019.png",
+      "sha256": "61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-020.png",
+      "sha256": "ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-021.png",
+      "sha256": "5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-022.png",
+      "sha256": "0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-023.png",
+      "sha256": "0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-024.png",
+      "sha256": "e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-025.png",
+      "sha256": "d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-026.png",
+      "sha256": "1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-028.png",
+      "sha256": "11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-029.png",
+      "sha256": "f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-030.png",
+      "sha256": "57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-031.png",
+      "sha256": "6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-032.png",
+      "sha256": "5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-033.png",
+      "sha256": "d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-034.png",
+      "sha256": "2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-035.png",
+      "sha256": "de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69"
+    },
+    {
+      "path": "../seated-work/canonical-lid-v2/opening/frame-036.png",
+      "sha256": "16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f"
+    },
+    {
+      "path": "../seated-work/canonical-scroll-v2/frame-002.png",
+      "sha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343"
+    },
+    {
+      "path": "../seated-work/canonical-scroll-v2/frame-003.png",
+      "sha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c"
+    },
+    {
+      "path": "../seated-work/canonical-scroll-v2/frame-004.png",
+      "sha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316"
+    },
+    {
+      "path": "../seated-work/canonical-scroll-v2/frame-005.png",
+      "sha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef"
+    },
+    {
+      "path": "../seated-work/canonical-typing-v2/frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1"
+    },
+    {
+      "path": "../seated-work/canonical-typing-v2/frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a"
+    },
+    {
+      "path": "../seated-work/canonical-typing-v2/frame-004.png",
+      "sha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629"
+    },
+    {
+      "path": "../seated-work/canonical-typing-v2/frame-005.png",
+      "sha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316.png",
+      "sha256": "677f60a134cf5fb6a18ac87ab3d6fa7f22215ae367187102ee5b4e8c368fc53e"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646.png",
+      "sha256": "0637c3ae3c3163cd13e6bc4810233d575236767bfb54885888ea9f6339e88106"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc.png",
+      "sha256": "4f5c644b8f216ae575257fae155a430f395e95e0c23f764263895130e4dc16cd"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548.png",
+      "sha256": "0f97560ac7eaa93a340b0a3b04e393b0b68c3860ae6b15a71a799906808360a7"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f.png",
+      "sha256": "4fbc512b09ea2fc2dcc4f20e830b2dfd651245283faedb3c1f064d25c5c486a1"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff.png",
+      "sha256": "9ac214ac24c41cef4038970d694392732a125f4654c24327f682d1165dc4620a"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8.png",
+      "sha256": "556b48b0281ed71d2a8e83e65d2e73093183fd4f97676aa3c106f8cdf2fecb43"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721.png",
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285.png",
+      "sha256": "9e2aa89a9a28e439ccfcbd2e01897a09d0e2cc79f00b8970eea04fb19c610dbb"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/43c4150df0ea0dbbd8efbe97d9c8cb33393ebff29c1b09cfa4a991e087d5749f.png",
+      "sha256": "3bb724ce23581ac2c1656706205a3eeab8909a33a886ad2f1298bda297f9e59b"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a.png",
+      "sha256": "4ff4dd31f98c16f964d2b11d72e7b3b263d47fad11ef603f58c631a0a3ae7710"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a.png",
+      "sha256": "c9ea578499f12fde99517432ec8579369cc926898c49ddb23201c6f96561df6a"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9.png",
+      "sha256": "aca2e140e628571439fd683723a83f0069f298b6afed5f62b44b7dfd52768f90"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20.png",
+      "sha256": "1dd08d32a691571c0a4637f7bbd62e749b21cfa2d053e698433eb2aecf48f8ca"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1.png",
+      "sha256": "1ba3b5cad3c4f2286df6f3185957c45118ecb865e176bc101ac5f432412bbb59"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b.png",
+      "sha256": "a2ca1263ef8450e2dc46de91595211794f2a11551108f87e4359fe2190e6265c"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2.png",
+      "sha256": "dca24ad3e45621335d59585da711cc87f463c35eb0094b8f83b6ab547c3190ab"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1.png",
+      "sha256": "f8bc862cba54afe4507886496a70c4218e3fa1b127dabb405a93328669e7eee8"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f.png",
+      "sha256": "91b94d26aea48cb1f29310f20e533af8e0b3d3c5184c5fa8a1802b97068d1939"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343.png",
+      "sha256": "669eb2698843a4f3d39ee92a11a4295eae22b7469b6cda5e81dcc50d535f1456"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8.png",
+      "sha256": "4b39e02d4d3dbdc12000f1defbb8feb13e3e81286724da41599691ee6bce2cb5"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16.png",
+      "sha256": "493c3d93a5e2d42cae0c594e6864890fc7673796ce79be74372ddac09c772166"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6.png",
+      "sha256": "87a9e7a8b69c7263980638d10db9c258469e741c133a205ccc6592e283095a63"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99.png",
+      "sha256": "c7ba4ac7d2a106673d76189fbc48bcebec41fda5916e21620ba3fc897d451612"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81.png",
+      "sha256": "a8dff163c3d97fd15bc21ae02ca80dce97cdb6aa2a557c7a365df01b14316934"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/88bce77bad478a010102cf7ab270fc73d2fe8ec1e15b894a2ad376d886fbb495.png",
+      "sha256": "5088e02861d7c9753814b1289b7788070447a31cd2846abdc69d3c3eb424a352"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f.png",
+      "sha256": "8c0e2e7122e029fa97a23c34c9c43ca6e181c1d055a8b4224f4d464374a81ba9"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef.png",
+      "sha256": "d57018d09a1ce6f44d9a194a7eff8f307ac027de95ea602b6a2f4f3935c5a4cc"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9.png",
+      "sha256": "8692c992ceb5340d5008711af2ae33543e50c4898c44eb9bfc2104222347e4c1"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629.png",
+      "sha256": "fc754ac334d6dd77396f6150250fd1d50bd74356f293bda824cc5e5ee48e2003"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba.png",
+      "sha256": "d1c849014e32ff8ab47e5c639b71848d144d1b236a80d2428b4c578497463d56"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f.png",
+      "sha256": "29b47534643882d7ac66c78183e6ebff9476d37648dfbe1d683033dedbe1925d"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824.png",
+      "sha256": "c895c08619ee2b8ade7996d0f7ba11d1f3c28186324ffeaf644d4edde91abbbd"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1.png",
+      "sha256": "b340235c06dd312d8d5c97cc8544ee123b72546115cf745200d6eb8e5bd6b442"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7.png",
+      "sha256": "b9e65c1a6cc94bb28fa0cc2c5961e249e5ed967c7dfde999a0cbb7bd707b38e0"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c.png",
+      "sha256": "d697d3003e5886c57f0a5d5d38d728fb8f7947cf8853469d7cc5b4a30671c9e9"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3.png",
+      "sha256": "466eff5bf12ca54b9ffa068cd1799ee4c81f08b378399353dd53fefec1d006ea"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869.png",
+      "sha256": "f8e2bc2ef98a2ddf7797225aa8f74ea31eff5d0c21e9c54d02b3d5e440017e7b"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287.png",
+      "sha256": "30fc16a3a0b5e3c19d14d98fc015cf6ba329a35281c40f52d1b31ed46e926fb9"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15.png",
+      "sha256": "b097fd2cedeb800005f690af320f1896a74cd9041000a59cc7ab469f7d2b25ce"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80.png",
+      "sha256": "8ae77cadd558316a9e954ca0e7ae50c5089ce6efcb9c6f919bf0ffe89abc4a73"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/d31a3c129539f503b716459a8347f372bee77f656a3c2ba71d20613b03747aaa.png",
+      "sha256": "3700ed411947f705710d457762458e82629cfefebe0ac6d34a72b7e1c9bdbd1b"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9.png",
+      "sha256": "200a6b2d1b942fcff8f03d6935033b9a410d4930c63d31cb17ca7db04a8af97e"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d.png",
+      "sha256": "b2fdb7ae99c57d60c2a840f0a3255d0a0435c149f3be11c41c64238df12dc1ce"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67.png",
+      "sha256": "6459ede634f5a373f92034be446b668610a6c5fd974236f0a0e78016533d3341"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69.png",
+      "sha256": "268705d67d2ab8ea0299100e34909b057cc7d63bab091de6507caa41b1c7e4b6"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611.png",
+      "sha256": "56af199bcce677409634228117913819c35aa9591ffdf817baa50c4126606a3a"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9.png",
+      "sha256": "e0ccc991f98dfad818f5a5efad9989967894df8a056df94677c4f99c667806ba"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05.png",
+      "sha256": "ef1bcb95557fdd2954ac812798532ffdd88f6ac010ba3127210e05cea9b70fd8"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd.png",
+      "sha256": "ff579ce88a3a8d88ee864a60eb167aa9a84d814597a61ccf7c14faa0a044ae31"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v1/frames/f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6.png",
+      "sha256": "854572d3ce68d5c29e78fd30654364544b997b2383d00a0b7fdc86265bed7d69"
+    },
+    {
+      "path": "../seated-work/current-pose-detach-v2/current-pose-entries.json",
+      "sha256": "b57ab3d38f280c347f0564aeea1429dccb432dde633568f245ec2f7f937a2193"
+    },
+    {
+      "path": "../shared/seated-open-canonical-alpha-v1.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/acceptance-ledger.json",
+      "sha256": "9a325bf968148db5116cdcecdfc3eb695c22e82b08801187a56789269414500d"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/current-005.png",
+      "sha256": "e68a2804364e9766544359a6aedf58af608bae59262a1b479b8bf3926afeda5f"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/current-006.png",
+      "sha256": "05f7e42bc29e7a204ad2a876bb2a26551b02e20b1ea0eae99631c4bbc2bfe66a"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/current-007.png",
+      "sha256": "55dd717ff8e0406cee80ce681bcbee606f42134b0b1d87c6c5fe3b5c4b555c38"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/current-008.png",
+      "sha256": "9414b741b7e43e5513e682568b606f8177fdcff410fbef50a33c9261698a4d0a"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/current-009.png",
+      "sha256": "6287228d1fafe1bbea0184e410762a69488ec0dd1708f27e8991684d5f0f00a1"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/supported-005.png",
+      "sha256": "77b0f25a935bd1590e05be3658456af38007d0ae2572aa5d4b1c011026b0a879"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/supported-006.png",
+      "sha256": "866edd6401a8f5363977faef34cde0ee890dba42d93214ec9e34fa35edd7f105"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/supported-007.png",
+      "sha256": "83031cd43cc8e752f9f3a216a00dacc67e70a59ca57e595573f17cf7208b9d5a"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/supported-008.png",
+      "sha256": "dbf37cc220b0e77af2d425d32647ad0a64b7fd8e71360f0a8faab492548365d2"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/click-closed-v5/supported-009.png",
+      "sha256": "7a72127433a9ba41e1dd7f60e2c751574b60c7c35eaa4de293e8b71cb9896b56"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/routes.json",
+      "sha256": "4f04649cb02f7e1d60fc8b7d0ba539e107e627118ec341672e83f6dde31aa43b"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/source-map.json",
+      "sha256": "18506cea99a8e4708eb426a2d44ca0917e89496502839746c8dce2ce7f7318af"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/current-002.png",
+      "sha256": "67ea6c55e378abf27324aeb272449525d555b7900f6a8d9ff03c087d94d96a9b"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/current-003.png",
+      "sha256": "88fe8cb1394056f3a7d7be48fc7513c5a74019d0a8eb27f4927c1e873e70202f"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/current-005.png",
+      "sha256": "24742c5a1de4387b040748cc75bb2b3569626aa61f3d71cd4614e6ece85173d6"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/current-006.png",
+      "sha256": "5db05cbfda21acd76cf9733cec7a41b2be38e6d4dc17e3a066b98682376c4da3"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/current-007.png",
+      "sha256": "cae797bb087d77a25f08913927929d832c89ad1956f383c0a6b7def6f739470a"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/current-008.png",
+      "sha256": "8a880786a33c9d4684331e80e8eaf454bc85d4baa55d34953ae2f177ae4c6033"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/supported-002.png",
+      "sha256": "5703ba7cb718a7560cdc9da87a6682eb8a6f07fc5b36d3ea55d8d40967f90d27"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/supported-003.png",
+      "sha256": "d345da8bc0593c57670fcf868aee01168252ec3286ee2989d3670993d7d54d21"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/supported-005.png",
+      "sha256": "ef16cd1a7f1e272930667e7fc4d46b448a78ae18e27c5568aa42c0e988662762"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/supported-006.png",
+      "sha256": "8d9227addc367703d9b05d260c74cb0966934f95bb4b9cff49a619960e27103e"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/supported-007.png",
+      "sha256": "ce4efd04d46b39a0fb08060e885acfba2b17ad9fc48a7593a55ad06a2d0d0ce7"
+    },
+    {
+      "path": "../user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+      "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/user-grab-acceptance-ledger-v1.json",
+      "sha256": "1074bb24b62093c05752f5a2b522ac8d0e8e2e06b0728b601545ff83aa9f34b5"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/acceptance-ledger.json",
+      "sha256": "c53200a974a5b2ff9624b4c6f12ef6cc417868d104150c36577bc7846882b627"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/current-000.png",
+      "sha256": "451ba5615c637d8424b96c8caedb5bee35deaae769df2f1a29d37f48b872ba6f"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/current-001.png",
+      "sha256": "8cdbf71ef87cfd43fb7522560453037571ca1f1af3d208bddef79fa3687826cf"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/current-002.png",
+      "sha256": "5785f254bb4a465d215ee6d9b9e00da8b6a1211b19d6a35ac6727fcbc4dd0b0a"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/current-003.png",
+      "sha256": "3ca091ba8a77ef897afbf71de6f8af3c6ccd61e08a58e67190bc0f5787114428"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/current-004.png",
+      "sha256": "d77c7bf1d79be3cce1fcf1d7f61beb165cb087339925ca97b51854c0d26f0ee0"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/midreach-000.png",
+      "sha256": "0dfa816a7bcbaaedd3e9b007eca61a7322960a9c5efa8fc5b131f54c6b21bc37"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/midreach-001.png",
+      "sha256": "f464a5d002e6f0db323f99a5e34fe60294ebf61644b879b7713bcd922e620e87"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/midreach-002.png",
+      "sha256": "861da7ae2f15ce6ab75171fc811e067bc2f6ff48cceb2679c7e8b6102759b6a7"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/midreach-003.png",
+      "sha256": "fd1e17fb4928a9ef3f241c3cd557368bf296825f1593be93706553d6b77e7b79"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/midreach-004.png",
+      "sha256": "a759b20267a51232d5e7a2c0cae729f3e73937f46f64baf48a5505db15f64427"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/support-000.png",
+      "sha256": "f1d783a019f1ac239ab910ee9528cd08ed783a97cf6bca04d19e4a5fc0c9c77f"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/support-001.png",
+      "sha256": "e0645a38d2a3f0bef8f33c820011d3917e8dc0647ba4477387b4d38f33cb2cd2"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/support-002.png",
+      "sha256": "ea98f9ddaf05b395b3fe170046028655d22151e5f43981d963749199e46861ce"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/support-003.png",
+      "sha256": "d08f2032e8d6ed126b1eab0fce5921874201e80626630b329cfcabd066fdbfd0"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/attention-sequence-v2/support-004.png",
+      "sha256": "f8928d7f95da85ee84fa62c0a7c27bce0d993057a7af463394fd318a83b315fb"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/current-001.png",
+      "sha256": "3e9d6490af4da23c30a31bbf8294b498ff6db9d597f51891c20482b471459f27"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/current-003.png",
+      "sha256": "a145ec1d663a8b66db4790522f7e44ef6af394ca68ffaa4eaeb33ce699469bf6"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/current-004.png",
+      "sha256": "04b3f49ba2648afcf4fd2981adc357c52e1d364245797aec5f734ce0efb888b4"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/current-006.png",
+      "sha256": "1cabdb9e89fe26dc98f0390bea0ac5e4072d7623236e01ad124bb01a86f06d7d"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/current-007.png",
+      "sha256": "e15cbe8b170484e8df9522ec3c3e57025f0cfb2b014d7315c199f6c0ef7ec1f7"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/current-008.png",
+      "sha256": "f9995a79cc1560d6640e6bc6d69524048e76f8a6d2a1a8322a2597d3cca2a801"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/current-009.png",
+      "sha256": "de382784155e388b49c866f37963ff10c70176d0c0bfeb7d9edd3d4e25dd9fa6"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/midreach-001.png",
+      "sha256": "531ff97a9ff5dc53225634ad6d56837d26ca1afa58937ed2cbf17798607c6af3"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/midreach-009.png",
+      "sha256": "6abd4462dd9e16cefd287ad7a36d4fb45e6e9b33f14a003a8e94ad20b46f0ea8"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/near-003.png",
+      "sha256": "abb48c7fe6b6cdff5aab73d61b75f8b495e9512b8bb6e330e19905f7ea13a300"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/near-004.png",
+      "sha256": "92f801e4effb144aae0011f350fae8ad84b6db1efefedcd706622ff31fd12928"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/near-006.png",
+      "sha256": "ee97c1ef397058ef7d14796e521e729838e9e24c1517ae96bff658f605c9f707"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/near-007.png",
+      "sha256": "2a3b9c4467d4780ff990842143447d1fa09af6e3d105e03bf2bd24455820a2bd"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/near-008.png",
+      "sha256": "ae73608d47a5ea07cfda2bff74d706781c06cf4bc63a330516518ead1b7054fb"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/near-009.png",
+      "sha256": "d49cdc6ae1f1b7c2b2107e38d2150ac8a813ed9adabaea82781e04b2421c0476"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/support-001.png",
+      "sha256": "ca4e807488d40ea26f227ac335cc4002b1b95e21248a02fd388148ae757527f7"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/completion-wave-v2/support-009.png",
+      "sha256": "39c1c64d2c4e5f59de80bf3101062fb91c6c86bfb9fdd4694db1af56875a5bfb"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/routes.json",
+      "sha256": "f5f36bd874802b50eb05537d8de717bec6cf4968d944a86e743d6aa66343a6c0"
+    },
+    {
+      "path": "../user-attention/open-event-grab-v1/source-map.json",
+      "sha256": "dbc38d308d03030a3073fda86fc4a87317469b28fd2191273328c91d26d70b6b"
+    },
+    {
+      "path": "../user-attention/registered/attention-sequence-v2/pose-000.png",
+      "sha256": "279130a0bcabe34a2b8e78908af71d5be2b7ab02db8496a44a3c365918a550d5"
+    },
+    {
+      "path": "../user-attention/registered/attention-sequence-v2/pose-001.png",
+      "sha256": "c6fac141e72b6f5961f88939e0827ad818ace719457da3dbc9d987411d427048"
+    },
+    {
+      "path": "../user-attention/registered/attention-sequence-v2/pose-002.png",
+      "sha256": "cd99d09d7e3ba480d0cc6626ac056bf86b2ffd92f6e4ff6f0cd2dc230f995ae5"
+    },
+    {
+      "path": "../user-attention/registered/attention-sequence-v2/pose-003.png",
+      "sha256": "9ac14650174359058ad356c0cafe49b50b43dbe688345b4622318c0d984a7a55"
+    },
+    {
+      "path": "../user-attention/registered/attention-sequence-v2/pose-004.png",
+      "sha256": "d696a98820bb12ce672bf3899769d2a21c2708bd756aaf6840b1a743d74c5122"
+    },
+    {
+      "path": "../user-attention/registered/click-closed-v5/pose-001.png",
+      "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c"
+    },
+    {
+      "path": "../user-attention/registered/click-closed-v5/pose-002.png",
+      "sha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3"
+    },
+    {
+      "path": "../user-attention/registered/click-closed-v5/pose-003.png",
+      "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225"
+    },
+    {
+      "path": "../user-attention/registered/click-closed-v5/pose-004.png",
+      "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef"
+    },
+    {
+      "path": "../user-attention/registered/click-closed-v5/pose-005.png",
+      "sha256": "d3a75fbc6057bbe1b9e88eb341911074d99d5fd2b1fbed2c4bb17c11fe87228e"
+    },
+    {
+      "path": "../user-attention/registered/completion-wave-v2/pose-001.png",
+      "sha256": "29b55065f6613a9ab687568cbeef48a58d4c30113faf6eb41197c08abb1e7948"
+    },
+    {
+      "path": "../user-attention/registered/completion-wave-v2/pose-002.png",
+      "sha256": "97f5f7adbaf8f112b3ec73d2eac5992445b505aea645dc23f273b1c9c1425441"
+    },
+    {
+      "path": "../user-attention/registered/completion-wave-v2/pose-003.png",
+      "sha256": "a7fe8e7b98a36a834047b2012d6afd1ed2c2c3e4c8b23cdf7d352468f86a1e07"
+    },
+    {
+      "path": "../user-attention/registered/completion-wave-v2/pose-004.png",
+      "sha256": "cc00515a55b9c6e8cc9a493ab5169adeb4029311d367c57221404ced4532f939"
+    },
+    {
+      "path": "../user-attention/registered/completion-wave-v2/pose-005.png",
+      "sha256": "ad13c1ebf5db4b4f555f4ae8f3b538729d5df1e5d5c0be2a6aae6f21d4bee21e"
+    },
+    {
+      "path": "../user-attention/registered/completion-wave-v2/pose-006.png",
+      "sha256": "bb8cc4c02822e008bd7969e7d464a131c33173f738ca28f71dcd9e19e26a6842"
+    },
+    {
+      "path": "../user-attention/registered/completion-wave-v2/pose-008.png",
+      "sha256": "0f22b577e5234cf8da4cf611c1f99f806ddd7bcf9e9acbd880a628220625b34c"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-001.png",
+      "sha256": "7a7e59882efd7a259186da25c88cfd3f9350a29dac9aa4dd89cb1f6168a4bb7e"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-002.png",
+      "sha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-003.png",
+      "sha256": "c224944557fed9f2da49a7b1073c645deb2f5e44ae3119bc4ea1b3d9f8995c15"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-004.png",
+      "sha256": "a1d49752eca51651f08cab3f76676e49257cb91fbacce6841c83f210736458f4"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-005.png",
+      "sha256": "9d548c5769377748e3ac47908dacf753f6a3a30c2fba44482223aa9809f4fa56"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-006.png",
+      "sha256": "f567b6b4da1b088df7ea92b8190ac5784ccc9de6b38d28b6122a29d045420f18"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-007.png",
+      "sha256": "fa90c96d80c7e95094b0ed3ee1872d467b0b0f5fefef14b4338a041266f54c32"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-008.png",
+      "sha256": "409aa7714ab85498aa01dd353de3c12ae7eb2b77b0970eee2fa316a40b4ba91e"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-009.png",
+      "sha256": "5843feb9a48fe08371ce5667a1718ab49e0c656708996d3335cd51e6580c6ca9"
+    },
+    {
+      "path": "../user-attention/registered/permission-cycle-v2/pose-010.png",
+      "sha256": "64adb42cea608c7590473bf74844d49aa87b640483361d26e7d3b037061c35d0"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-001.png",
+      "sha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-002.png",
+      "sha256": "026ccb6ed968c03e11ae922c4dc94f88492193ea66920582df6b9ef37cf694b3"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-003.png",
+      "sha256": "071577bc01dcbae22f0d12b0204153cd79e1fc43fc79e17785b45abc14eefa33"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-004.png",
+      "sha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-005.png",
+      "sha256": "594ebbb8f66a066882a82e1ead4b1d5508d82c6aceef08aa7b39c9e8cd27d49e"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-007.png",
+      "sha256": "9388abed6cd5ef04e649837b6faf1e191f2c1a89850d3ad5c3945c7bebf324ff"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-008.png",
+      "sha256": "034855f9a5c3a419f92338610892b2d9e7621b4b1bc70f7c296e23c21f8f36fb"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-011.png",
+      "sha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5"
+    },
+    {
+      "path": "../user-attention/registered/query-understand-v1/pose-012.png",
+      "sha256": "a82f21fc77c882592e89f6f318abd1888db691569db353f40e23961e519f7788"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-000.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-001.png",
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-002.png",
+      "sha256": "84fd24637cc576f83afd8b1cf29cf08ff4e2f3d130d70c6f61fb3e0a7bc60a7f"
+    },
+    {
+      "path": "../user-attention/registered/wait-relaxed-v1/pose-005.png",
+      "sha256": "07db95e7a079b4b84bf7ef6e7dd9794fae6f9ed9c5815d93d02c20c1c0863ccf"
+    },
+    {
+      "path": "../user-attention/registered/welcome-closed-v2/pose-001.png",
+      "sha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4"
+    },
+    {
+      "path": "../user-attention/registered/welcome-closed-v2/pose-002.png",
+      "sha256": "68709b429a10eb1a5abfda2dfe9009738dd10c6debf899b7dd33def9d2de5dcf"
+    },
+    {
+      "path": "../user-attention/registered/welcome-closed-v2/pose-003.png",
+      "sha256": "ac8f871a2058c73fbe4db1fbb3e3544efefdc058144b5bb5b96ed0e4cf14137a"
+    },
+    {
+      "path": "../user-attention/registered/welcome-closed-v2/pose-004.png",
+      "sha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db"
+    },
+    {
+      "path": "../user-attention/registered/welcome-closed-v2/pose-005.png",
+      "sha256": "64b656a090ce6d1d04c60eec2fe6d9658a48709693ed49c7223723b0a4c0d9ae"
+    },
+    {
+      "path": "../user-attention/registered/welcome-closed-v2/pose-007.png",
+      "sha256": "96d72d685bdf9ca74a88bce9684b88468167904e4cbe40a844e46562d7b83b78"
+    }
+  ],
+  "bytes": 6905662,
+  "coreNodes": 25,
+  "uniqueCurrentSourceHashes": 134,
+  "acceptance": "All entries explicit grouped visual/source ledger accepted for runtime integration; native OS behavior not claimed"
+}

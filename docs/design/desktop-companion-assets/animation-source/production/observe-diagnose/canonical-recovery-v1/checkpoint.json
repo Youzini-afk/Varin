@@ -1,0 +1,173 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/check-005.png",
+      "sha256": "6adf830b01666d5c23b4e45e97ce5b08057e94f129312efc63722a6a931b7e18",
+      "bytes": 309168
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/unknown-entry.source.json",
+      "sha256": "58884de67a085ba5786a6c226f9de0a9c88bd2928fcaf30db5b64f17a5fab2e4",
+      "bytes": 1417
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/check-003.png",
+      "sha256": "a1c931bef3b940bf8e50af0a506b6695a0d9dce602309e0e150adfe01f3d9e25",
+      "bytes": 309435
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/rest-half.png",
+      "sha256": "f26683c6d0f669c5a1bf2e431dcc287218b1b89883f051fe94759a055c62bf41",
+      "bytes": 309453
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/middle-surprise.png",
+      "sha256": "41004ce0b9730cd5d53d3ad5170edabc99e6278f3c159a989965b02c013433f9",
+      "bytes": 310824
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/uncertain-release.source.json",
+      "sha256": "f3f76af54361e81c251e381310777fe270563125d5ab83cf4e6f8562c75d6eee",
+      "bytes": 2049
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/rest-serious.png",
+      "sha256": "ff60042d4080de8c2c20da611baa8bd013642d83898ff6ad3b98dcc4172f21ab",
+      "bytes": 309453
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/raised-closed.png",
+      "sha256": "b87df537bb124afa25bd9be7ec9cc775decf2f10c417efbf692850a9336d0823",
+      "bytes": 309642
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/stopped-release.source.json",
+      "sha256": "8a668abafcdab252a551744a955c8d3e6211959d721dcce04d6acdaabe9325b3",
+      "bytes": 2288
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/rest-focused.png",
+      "sha256": "5eedd7d91a13f90106550b7329816bf826b7a3dfd4012c04e5f453b347ee3fb9",
+      "bytes": 309631
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/raised-serious.png",
+      "sha256": "12e9d291a7fb5c479d76f3b445c93b3b80a4312f86840153d4b8622ee5fe93b3",
+      "bytes": 310151
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/middle-focused.png",
+      "sha256": "cfe5597e8d81ab00bcd7362883e1c29692d79478ce5d275ccc78d9027a65e33f",
+      "bytes": 310784
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/rest-surprise.png",
+      "sha256": "3860c489695938bbf3df5dfbd54700c60cc9128a582c30e16f8fc563166fce7d",
+      "bytes": 309672
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/sync-attention.source.json",
+      "sha256": "d260d844b96859835c8d2dce781f11a9efe3fa2cf601e5cfcc2de718aaddd317",
+      "bytes": 1632
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/build.py",
+      "sha256": "945a5272cfa5a71142d4d688df9df25e676f48813fb3b33e32f187f98db0db97",
+      "bytes": 3811
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/uncertain-check.source.json",
+      "sha256": "2835a610c6cc91d7e6e02a7d4775399d485da5ee57b32f8055477efaf4ea35f0",
+      "bytes": 2048
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/cancel-hold.source.json",
+      "sha256": "169b77cf592fae0db4fdeb5848f58e3952d8b4419afe243df158bca81a43f36b",
+      "bytes": 1617
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/check-000.png",
+      "sha256": "84ee8a6abd9d9a0c7b4aa4bff3ad5e77f162c75024114cca542f041e9e928270",
+      "bytes": 309295
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/neutral.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/check-001.png",
+      "sha256": "326d4fcce29ffa40fadb3d8d14186ac23d91d92e1e5c03c989e618aae377e81f",
+      "bytes": 309463
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/cancel-entry.source.json",
+      "sha256": "9dade5820a1cd69f512f2b8191bd1e4d9a8bfd0b1d5810e6c76d591fe1712add",
+      "bytes": 1208
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/failure-entry.source.json",
+      "sha256": "c0473dae0f5a55b1d4a3398c8e6529f6eecba7f409146257b1e6b44da04582cd",
+      "bytes": 1430
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/check-004.png",
+      "sha256": "c8c4ec19eb6fcf1f68cc8cd68fc2f2f2d07682a6675e8c6c42819d663de4f621",
+      "bytes": 309492
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/raised-focused.png",
+      "sha256": "2bcfdde1bbc9e690cc705ea3cded5edf9ebcd4ec316f4a76a8e1621fa8d92030",
+      "bytes": 310330
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/read.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/raised-surprise.png",
+      "sha256": "85668658799a6c27e9f810f83b65f1031c9f320c897bcabd0d64e056ce5d8622",
+      "bytes": 310378
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/rest-closed.png",
+      "sha256": "5b1454b39deb72781973b9f6f0bd2fba1ae702eec87ac12804e0f76e421743c6",
+      "bytes": 308937
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/contract-comparison-320.jpg",
+      "sha256": "943b76dac3da1d3119f6ce7ca79055c18a0c91fb3216e3d0348d6ef6c221e79a",
+      "bytes": 88757
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/raised-half.png",
+      "sha256": "f2ec68ed05f9553053d4c8c55ab5b53e1efce256a1ac5d495c801169644fa41f",
+      "bytes": 310156
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/unknown-hold.source.json",
+      "sha256": "f80b9b041d648d4fd8a94f0323bfd216a1a68ef907cd0c2093fd203e8ca250ad",
+      "bytes": 1590
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/check-002.png",
+      "sha256": "639ea19851dedc963e9dd5d88cdea9b3ee83079746da4654203e9cddf6911b00",
+      "bytes": 309560
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/middle-serious.png",
+      "sha256": "79e50736cfa772683e9c8eb4846dfc27d739585e45c5a15e7de45be4b850fb5d",
+      "bytes": 310600
+    },
+    {
+      "path": "observe-diagnose/canonical-recovery-v1/provenance.json",
+      "sha256": "9d1dd913b4de8da098b2743779c852f12e3a77e3523301e5569058e13e4f9edb",
+      "bytes": 277
+    }
+  ],
+  "pathBase": "production-root",
+  "originalManifestSha256": "b27b2e71714a649b8bc3a72f204497e740b84c7947322c03e0d10087bdffb993",
+  "publicationNote": "Paths are relative to production/; source bytes and hashes are unchanged."
+}

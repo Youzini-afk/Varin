@@ -1,0 +1,94 @@
+{
+  "id": "seated-work.canonical-key-tap-v1",
+  "family": "SEATED_WORK",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "motion-candidate",
+  "reviewStatus": "needs-normal-speed-review",
+  "entryPose": "seated-open-canonical-v1",
+  "exitPose": "seated-open-canonical-v1",
+  "loop": null,
+  "frames": [
+    {
+      "source": "frame-001.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "rest",
+      "pose": "rest",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "finger-lift",
+      "pose": "finger-lift",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 110,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "key-contact",
+      "pose": "key-contact",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 320,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "release-rest",
+      "pose": "release-rest",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ]
+      },
+      "exitTo": []
+    }
+  ],
+  "warning": "Single visual key-tap only. Does not emit input or assert task execution/completion; may be triggered by a real existing state transition.",
+  "sourceReuse": {
+    "from": "../canonical-typing-v1",
+    "sourceFrames": [
+      1,
+      2,
+      3,
+      6
+    ],
+    "meaning": "Same real index-finger drawings with a distinct single-tap timing, not a duplicate generated asset claim."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "samePixelOutsideBootEditMask": true,
+  "changedPixels": 13429,
+  "frameSize": [
+    512,
+    512
+  ],
+  "scope": "localized authored boot correction, no full-body scale/transform",
+  "peer": "seated agent viewed dark composite: proportions/support/no-stool accepted as static candidate"
+}

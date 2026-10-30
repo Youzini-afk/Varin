@@ -1,0 +1,26 @@
+{
+  "source": "seated-open-canonical-v1.png",
+  "sourceSha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "output": "seated-open-canonical-alpha-v1.png",
+  "outputSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+  "geometry": "unchanged 512x512; no scale, warp or reposition",
+  "method": "border-connected near-white matte, one-pixel boundary white unmatting; internal source colors unchanged",
+  "backgroundPixels": 117627,
+  "unmattedBoundaryPixels": 1599,
+  "visuallyReviewedEnclosedBackgroundComponents": [
+    19,
+    43,
+    97,
+    108,
+    111,
+    121,
+    140,
+    143,
+    159,
+    162,
+    169,
+    175
+  ],
+  "interiorRgbChanges": 0,
+  "status": "shared alpha visually reviewed on white, dark and gray backgrounds; geometric canonical unchanged; not motion approval"
+}

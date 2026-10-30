@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "references/closed-rest-rigid-v2.png",
+  "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+  "raw": "raw/yawn-hand-release-v1.png",
+  "rawSHA256": "4360c04e00e297950c998d116bc04e865bad73fa854bbab9661f1e01e579ff68",
+  "prompt": "prompts/yawn-hand-release-v1.txt",
+  "output": "frames/yawn-hand-release-v1.png",
+  "sha256": "47ca064726ecacb855e22460554e5961d84e3ccd4e4d5fd3d7158ab1061e2c69",
+  "mask": "masks/yawn-hand-release-v1.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

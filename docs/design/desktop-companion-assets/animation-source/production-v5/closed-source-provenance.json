@@ -1,0 +1,571 @@
+{
+  "version": 1,
+  "status": "selected-source-checkpoint-not-runtime-admission",
+  "inputs": [
+    {
+      "reference": "local-review:studies/lid-v5-supported-carry/RESULT-selected-r7.md",
+      "sha256": "4ad77f1f2d36b005b5fc50c51f9a4d0cde31f4caec4c93497f7cedc28e229759"
+    },
+    {
+      "reference": "local-review:studies/lid-v5-supported-carry/selected-bridge-sources-r7.json",
+      "sha256": "4234d5f40874c82ceb0aa8b6ec538a216d204fd6e1f4f68c43dc84aa87a6cd0e"
+    },
+    {
+      "reference": "local-review:studies/lid-v5-supported-carry/ordered-paths-and-timing-r7.json",
+      "sha256": "001080c6221f0526fb382e842f320e6792121e78aa43c1cdddcef438d65ca890"
+    },
+    {
+      "reference": "local-review:studies/lid-v5-supported-carry/seated-preparation-selected-r7.json",
+      "sha256": "3be8e6f5541b46d79f3f301da7814a6109b4155a41fe730b876dc2930c1cb206"
+    },
+    {
+      "reference": "local-review:studies/lid-v5-detached/selected-detached-r2.json",
+      "sha256": "d415f252cf6b817387490f35c8935da8aa164a631adf401c46fdb926ff136b24"
+    },
+    {
+      "reference": "local-review:studies/closed-life-calibrated-v5/r2/compiler-handoff-r1.json",
+      "sha256": "1b7c78e28fa243562eda4c3e087470588a3f779cc0b98f4b4ff9338f918b2e6e"
+    },
+    {
+      "reference": "local-review:studies/idle-body-v5/ordered-l09-exits-r2.json",
+      "sha256": "623a0702d33247f06799f187f18aa3d37b097232f7dab91e4aa5c84531240074"
+    },
+    {
+      "reference": "local-review:studies/idle-body-v5/manifest-r1.json",
+      "sha256": "a1c08c96df6124a5541e1e858f521b03a4507fe191a4fb4aa86013f67bba48b7"
+    },
+    {
+      "reference": "local-review:studies/idle-body-v5/seated-preparation-l09-r2.json",
+      "sha256": "558db5b638181ab2f2ece656c4d8c42dc6a433b719e7f1c3e39e039fc1059308"
+    }
+  ],
+  "evidence": {
+    "reference": "local-review:v5-runtime-stretch-integrated.md",
+    "reportSHA256": "9930e2d04b64996415a580c4b207c451bd5bcaa87dec1808a8eba2045855d798",
+    "candidateBundleSHA256": "4d1f754a13be2a3d4515349812a907c2af3dfee796a1feb4e4c6cfcb596c2238"
+  },
+  "selectedSources": [
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-neutral.png",
+      "sha256": "decd2524ee6a93513f85f33f52d663522fb1b9d08479ae2e048396a6796431a7",
+      "operation": "selected-whole-image-redraw"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-neutral-r1.png",
+      "sha256": "dee734aff96500792a898d21f80ae5ebad779a54c56d866b522f879cfc292535",
+      "operation": "selected-whole-image-redraw"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-000.png",
+      "sha256": "10b74670a50ffd6cbf5ef049e9e29babef276b42d14f7af3bf6de82aa7fe6d18",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-000-r1.png",
+      "sha256": "d0fb493ac4a3a4584fdad5c3860c6f4dd921fd02fc74acfdf712850a36fb2794",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-015.png",
+      "sha256": "d19b7204a89930ff9d1c80f7ac91e7fddbc347bbdabf3aeaf706052634a485b0",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-015-r2.png",
+      "sha256": "0533c93c2e176a0d85af47f28d749d743725f412ef91090f4109acfc798b00e7",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-030.png",
+      "sha256": "dc658aa2b7a62c61feb5e9cba1d96b05275911fb2fd5fa85f3fd041625e0dbcd",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-030-r1.png",
+      "sha256": "02ed4914fcd57db054fa04b9ddc8c593a8ee9e6b3dcc9febce0b2a03e5a5cf73",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-045.png",
+      "sha256": "10d659907e46cb92592bfa9d18323121ce7b165c0ac324c5a0db3b57d1100190",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-045-r1.png",
+      "sha256": "f5b0ca168fc826f0eeba8ec0df3b28297108ea30a74354b1848bb7fd2dbfde84",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-055.png",
+      "sha256": "10e2d79fd93fd19b74dbddb15e0fe5f07ec8b40a14546b90848d328c26cf0af5",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-055-r1.png",
+      "sha256": "dfbc27ea59e8bd84eb182a35baaa5c758d49900ddb4de7e69866d6bcdf469bbc",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-070.png",
+      "sha256": "eb66b589ef5597ea44d09acb95df03d4a72aa57c3b7daf2fe51c37c56cbbc86e",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-070-r1.png",
+      "sha256": "1fd5401b2fcfb1e6b1cef91a501b3f38260269b3c9421c660bbe4277a2b98fbb",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-085.png",
+      "sha256": "5a3b9da77be1d8ee1659367db56aa8b3198cfbdfba0577bf3234672ad7284e73",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-085-r1.png",
+      "sha256": "bff78ff4eb1b11fa8581d51dcf5bc8376d217e27c0f5e8f242504ffaccd7a215",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/contact-100.png",
+      "sha256": "80daf1cf3c420e5a8d221072c5cdc0dd9bc95e7351ff921d717b9c598b94d13b",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/contact-100-r1.png",
+      "sha256": "78bedc2c06c801019188d3bf4009f926a970ed44ecf88177b00ba8d337f73aaa",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/release-first.png",
+      "sha256": "aa8fffbc5aa732e9c96749e9d12b205a9ea695339f2ea1874899940a84c30164",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/release-first-r1.png",
+      "sha256": "b5e50f333fc6aef5dd2b4fe5fe1d30ff9a610fe991aeb893d2072761dad185e5",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/release-middle.png",
+      "sha256": "13128ed154e8143ceae8d1b7fbd252361d6cfa0808b4a50de11afd494437b89f",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/release-middle-r1.png",
+      "sha256": "d0e156d7ab1a1b900e0295a65a65a512bf9e61d4c63c8882f4333e8b267be031",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/release-low.png",
+      "sha256": "06249853bc404eb49b6fbe9adeff1c55ca077495d88692e0684ec3537edfefff",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/release-low-r1.png",
+      "sha256": "e7061aa65355ccacb0f4c256b9dcb2c4fb4c6996a02e3b0b18aea5c39a013428",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/closing-lift.png",
+      "sha256": "c326dedf46a2b056e7c125ced13e384bc9bf903c056726a1a9bf70783ecbdba2",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closing-lift-r1.png",
+      "sha256": "6697564220f4bd4987c2d2d0caad360abbda2e8ca6c2213503964dbc9f5ae656",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/closing-approach.png",
+      "sha256": "f4225dc3c3caf7570d7508c844ddcf4d6da4e81cad62bddc15e8e09dce1afa49",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closing-approach-r1.png",
+      "sha256": "39e0f542c80b150f43fb54e663d73e77843d52ddf14ee64659e93f4b291dada3",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid/closing-settle.png",
+      "sha256": "915e3bc1b9290b69c85b4041246a41419c894df9f4eb203080623c9ff2fd5006",
+      "operation": "reuse"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closing-settle-r1.png",
+      "sha256": "78d797a61d09b2ca0bc03040c629d15eaac1f5c3aa14b0cc6fcca77a7b861088",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-000-fg-r1.png",
+      "sha256": "6db2dce263ec522628aab718d0306a790baefa65a8ee245da2d3a097c935caa1",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-000-d-r1.png",
+      "sha256": "d81c6b796044beceab9e908275e2da538c33723307c43a05f59f0b18ebeb3cb0",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-015-fg-r1.png",
+      "sha256": "432e50a4d4b165dab2bf7bcfacae06aba3e53a2a9fff4c458151ab4877bc57c2",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-015-d-r1.png",
+      "sha256": "886f833d2bef40fda1b1d2fd0690b13b83f03efa03cf516392149915264a8ad0",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-030-fg-r1.png",
+      "sha256": "a2919b5845945761764cb68bb5383397812d25c185db5c2fc1473d7cc3dbed7e",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-030-d-r1.png",
+      "sha256": "b5f546d723680a4426ab3471d687a611a34f78160e14e533aab4f8be64611806",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-045-fg-r1.png",
+      "sha256": "a9873dbfda3e4b94a944f20da3654402f6a698707c7721bfe3e905de6d441254",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-045-d-r1.png",
+      "sha256": "a09ac3dfebd0c8ab95b22452cbd3bc34ca2166a0161a6a3fd66363b957230325",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-055-fg-r1.png",
+      "sha256": "a8c001bfd96dd1016c0a287a60f896268b60a43784a74b67719284220430c9b3",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-055-d-r1.png",
+      "sha256": "6547aa7deeec3055403a1174a5790af628009198e5ce1a8712ddf0eb236485b4",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-070-fg-r1.png",
+      "sha256": "3792798e7e7b81a80c8e4391f9aa4d75dbd3997013af159471ef5738dc9f453d",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-070-d-r1.png",
+      "sha256": "ef78ec1ca2d4c0b5089381c70f9056257e0330c5c02200c11f2e116b13b66513",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-085-fg-r1.png",
+      "sha256": "dd0dc4ca66ab1dd5c215eee06d4ad8d0ce7e67a319026017470dc65708b50c0f",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-085-d-r1.png",
+      "sha256": "cf1aab1e75c287893ee86de2472ffaa3dbbc211bdc572d12e42945ad898e863f",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/supported-100-fg-r1.png",
+      "sha256": "ee31d1734a209e4043efc52cd723dd40e27a273b279c99dd4d1e9edf2fb80627",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/supported-100-d-r1.png",
+      "sha256": "892a4782e86dbf897a597727b70136c49f26ebb7c4e39f40f41e544057a97528",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-015-fg-r1.png",
+      "sha256": "403d6009accfa03980bd655140eb2c5cc6cfa1a49727b64b24a612b53b72e035",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-015-d-r1.png",
+      "sha256": "3a5ca2b345853a2c0dad88aa286bdf12c8ee52bd8f427d6651b94d4fe76c4462",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-045-fg-r1.png",
+      "sha256": "8cdeb48d57d35822e8d368775e49e249a7aedb6e169022d1e59d5ab70b5975cd",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-045-d-r1.png",
+      "sha256": "439b229e707013ca8a72956d4579893a83bd3976bbf0416fd7a87e1ddf693e57",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-055-fg-r1.png",
+      "sha256": "ebe4f93fc1b805e6c2be75865161be1c39d5b0b1e81378092a93512ecd698c33",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-055-d-r1.png",
+      "sha256": "a4572a1d95f54211b33b7008b8f959f512f886ed9eeb449dd874d77ce7f6986f",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-070-fg-r1.png",
+      "sha256": "1d2bfbb9a60a9bc6b75521d5f2f6f18ed028f2b04f92320f047312754a04f04e",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-070-d-r1.png",
+      "sha256": "3815009cf9f8e61b4b761d490f26bf4abfc722ae5dbb92ca4d90f148b70cb99a",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-085-fg-r1.png",
+      "sha256": "03efb8fcf5e53ba3430511e776fb999e14b7d14da92ffeb48d72ee4f5b92f9c4",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-085-d-r1.png",
+      "sha256": "7950fc05981efa82e57e10f022deeb3a9ae0078c6ae1da45fbac9904f8d8811c",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/acquire-100-fg-r1.png",
+      "sha256": "6871b19715b9e1fcf29e159a71c96f2654833600986218660dc6ad23e0c3fda0",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/acquire-100-d-r1.png",
+      "sha256": "3a0d13baf18399a0276b068990de59c88eb0a17123c04d9030b45581ae047a6a",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/closed-side-canonical-fg-r7.png",
+      "sha256": "c1efb3d77ed48071926274990549b336978d182f0c8d95cc6fa225e5e2483931",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-side-canonical-d-r7.png",
+      "sha256": "e37f3e6c98ceeba14d339d3f5adffb64a468c3568ead69f03888f453983d7b94",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/lid-supported/closed-secure-canonical-fg-r7.png",
+      "sha256": "d3060b6d14a0cf07fcf48f16338d1d62e72219851dfb254c376c5e1b976899a3",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-secure-canonical-d-r7.png",
+      "sha256": "d129fd8d2b46f5a3df25bcfd988103ebffd754a0eb4b5fac5cf7d24e27828d98",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lid-supported/closed-relax-canonical-d-r7.png",
+      "sha256": "98ec7f72e66fc23e5c128807d67d08ef3d3a07925cc3289524c2ee46713da313",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/02-approach-r2.png",
+      "sha256": "59efdba681c03140ab37573c2f617a91034684d00eac927c7e8a404c464f2e69",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/02-approach-r2.png",
+      "sha256": "6ed1b9891ad102620ba581a9ac76fa8a2bc82a135f8ca4ce515f02c52e7417c6",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/02b-near-lock-r3.png",
+      "sha256": "731aa0ef39ea5a53b7d21d497c68b5754455f1e0a9638686e78eb29ff507af8c",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/02b-near-lock-r3.png",
+      "sha256": "9360f77cae4a2d2b40dedb33073dbe91b91e4e3f84a58d848fbf89d1a8b682fd",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/03-contact-r2.png",
+      "sha256": "d205110008b331d13b4fd39f1dd9ff38873f780555e5b8ea00e8a920b93db130",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/03-contact-r2.png",
+      "sha256": "16a687126bfa6fb9b1c5e22ddbbb1315f7df78382eb7a6aa2e729d80af984c9a",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/04-smooth-r1.png",
+      "sha256": "42448e6765e3d10c3e9b1236bf47f040dec4c21ceb097c36d466263d208c8c7a",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/04-smooth-r1.png",
+      "sha256": "3cd63541a9e0871d5290ce2e08aa850c0deee11e330b9d30602784f569258e74",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/05-release-r3.png",
+      "sha256": "2d8616b4175ac7740c9761e7f5512b887d433d548dc65eff4e9d92f557b1688d",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/05-release-r3.png",
+      "sha256": "cc7dcb73560f91059c41bd1d62f556a44bb4ad1cdfa555bd32ece7400809c867",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/05b-lower-arm-r3.png",
+      "sha256": "5e817f0c8ce5424f49f3698730e2f6f97ee68de233ea13d079cf1f8598514585",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/05b-lower-arm-r3.png",
+      "sha256": "07aa77eca0dee34ec693770342019f45b57a57982c702397450960d1ac5e3979",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/hair/06-return-r1.png",
+      "sha256": "2a2fbd295ae94693e8356ec286a6883b8ada8a5319c0d87be72fde50ddb8c0df",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/hair/06-return-r1.png",
+      "sha256": "8907e85246a829f432f230e91c45871696375245c4b6730b9a23b03a6ca2e883",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/01b-onset-r2.png",
+      "sha256": "bca0e6fb2c03b4b45fee4d9a960fc496b6bbb9f3d256a227ff3b7db0bc7cff59",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/01b-onset-r2.png",
+      "sha256": "37407e4e0bbf88368ed5d19339e804ebebd11cf98a944e3a46fcf5a8eee4f0b6",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/02-enter-r1.png",
+      "sha256": "43a1f4bfba6625bfb2f43da816197e1e78a06f02557d7586fc6f36a0e41f0457",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/02-enter-r1.png",
+      "sha256": "3270ef8efc8851947ce9c5e765a0175dbfe2f47f30481e788272bc581707b020",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/03-contact-r2.png",
+      "sha256": "dafb9bf53417e19d2eb6b3a0e849a8f98a105ade23502b641699f42aa55ca03d",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/03-contact-r2.png",
+      "sha256": "d346543c11a132761000321079df961b21277db7f0e85d62b3d6410dbbf95780",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/04-smooth-r2.png",
+      "sha256": "49e3802f9443707f8ea6322585989c9d59d4474e091010dfcf28c48045656625",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/04-smooth-r2.png",
+      "sha256": "e1c329376c2cc645dbff4990fd25d55a6c6cde806b39651c75a055801fa0eac9",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/05-release-r3.png",
+      "sha256": "806dda85004e11bfdbc3c399f38c85fef2f784b74c9d380e328d6446e8f30c92",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/05-release-r3.png",
+      "sha256": "2dd8e14ed73a85c18fd6ea76fa64f03c68a11be3f39e459510860079c4fe5372",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/closed-life/sleeve/05-release-r1.png",
+      "sha256": "729a231b5e36716e5050c05540e75ece79ecfe2fce867ec31b3c2ee16c711e6e",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/closed-life/sleeve/05-release-r1.png",
+      "sha256": "734dc13b65ef10295f8e2b7d01ed57e9a8fc4c354429bd90ef42630d8f576a44",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-01-release.png",
+      "sha256": "f1b8258b166aec71707eb99cace5b978a47455b4b52955dbde15eef51fc0ad41",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-01-release-d-r1.png",
+      "sha256": "aa133e31c4f0ad02bbf3044faf32221ec2bda49db4d027409fa3dc1826acd49a",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-02-rise.png",
+      "sha256": "a78f591240de5130eaf8238fbb609356483dc69c6ec5f1c271aa5d08884c223a",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-02-rise-d-r1.png",
+      "sha256": "7960c65df7996b3cc0208d3d93d96d1cd01c999197db5eba2cd6e04fec233a07",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-03-peak-r2.png",
+      "sha256": "adc99031fdbf807bd3478312e506c6a939ed34f6cfae080d2c552054050b8b2e",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-03-peak-r2-d-r1.png",
+      "sha256": "33c9a46b13087a5a34efd0a60866849b673eee2825fd3d384ce8f53f3e8b1543",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-04-return-r3.png",
+      "sha256": "5972dcc675862100d16394e9a9637d84b816809cdea120f037cbe9fe8c05f4a9",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-04-return-r3-d-r1.png",
+      "sha256": "2592fe5d174285f8a0163e982b1629a77cd451c35a7499683203f8dbe1dab6de",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/stretch/l09-05-contact.png",
+      "sha256": "6e38529adbf34260c318913dd23e13a86c063f6e5d4ec4fa0c824450967aec72",
+      "operation": "copy-selected"
+    },
+    {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/stretch/l09-05-contact-d-r1.png",
+      "sha256": "6c80b64be43e9a691218cc989fc70f913886265ece02e545e4bcfedeb837a3f1",
+      "operation": "copy-selected"
+    }
+  ],
+  "normalization": "Whole original canvas to 512 zero offset; fixed existing stool under FG only. No crops, warps, interpolation or new generated art.",
+  "limitations": [
+    "Source checkpoint only; no normal production admission or public installation.",
+    "Temporal consistency and native world-stool/root integration remain separate gates.",
+    "Prepared display SHA and original source SHA are distinct; recompute and verify prepared outputs before compilation."
+  ],
+  "rolePolicy": "Bot coordination and Agent notifier semantics unchanged; life gestures do not establish project/run completion.",
+  "closedNeutralRevision": {
+    "date": "2026-10-30",
+    "selection": "User selected candidate C; same-pose complete detached redraw supplied separately.",
+    "seated": {
+      "source": "foreground/closed-neutral.png",
+      "sha256": "decd2524ee6a93513f85f33f52d663522fb1b9d08479ae2e048396a6796431a7",
+      "preparedSHA256": "962f62c2655d7c225e45efc867601ddef11418cbffba48d38eb1718762d690a0"
+    },
+    "detached": {
+      "source": "detached/lid-supported/closed-neutral-r1.png",
+      "sha256": "dee734aff96500792a898d21f80ae5ebad779a54c56d866b522f879cfc292535",
+      "preparedSHA256": "6216cbb1ef399c9569f5298fd448349d18d54bbd304088d5b27da82d4910f36d"
+    },
+    "method": "Whole-image redraw; full-canvas preparation on original fixed stool; no face patches, warps or per-frame bbox scaling.",
+    "priorEvidenceScope": "Other entries retain previous checkpoint evidence; prior local-review inputs and evidence do not attest this new closed-neutral pair.",
+    "notClaimed": [
+      "Full native cross-platform acceptance",
+      "New approval of other245 drawings"
+    ]
+  }
+}

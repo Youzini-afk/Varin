@@ -1,0 +1,512 @@
+{
+  "version": 1,
+  "status": "selected-source-checkpoint-not-runtime-admission",
+  "recipe": "../seated-preparation.json",
+  "sharedMotion": "lift-open.json",
+  "existingE": {
+    "side": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+      "sha256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+    },
+    "support": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+      "sha256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+    },
+    "bridge": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/bridge.png",
+      "sha256": "82014752faf61d1284f1f37f44821426113813e54ae8a3afae54292c7d0ac6b0"
+    },
+    "float": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/float.png",
+      "sha256": "d4c64492ac01465c5084e99c212534bb855bb9f847986baf39743ba288001ec9"
+    }
+  },
+  "exitRoutes": {
+    "open-neutral": [
+      {
+        "sourceId": "neutral",
+        "durationMs": 80
+      }
+    ],
+    "attend-release": [
+      {
+        "sourceId": "welcome-attend-release",
+        "durationMs": 60
+      },
+      {
+        "sourceId": "welcome-lowering-ready",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 160
+      }
+    ],
+    "greeting-rise": [
+      {
+        "sourceId": "welcome-greeting-rise",
+        "durationMs": 60
+      },
+      {
+        "sourceId": "welcome-lowering-mid",
+        "durationMs": 120
+      },
+      {
+        "sourceId": "welcome-lowering-ready",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 160
+      }
+    ],
+    "greeting-near-cheek": [
+      {
+        "sourceId": "welcome-greeting-near-cheek",
+        "durationMs": 60
+      },
+      {
+        "sourceId": "welcome-lowering-mid",
+        "durationMs": 150
+      },
+      {
+        "sourceId": "welcome-lowering-ready",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 160
+      }
+    ],
+    "wrist-arc-end-r2": [
+      {
+        "sourceId": "welcome-wrist-arc-end-r2",
+        "durationMs": 60
+      },
+      {
+        "sourceId": "welcome-lowering-mid",
+        "durationMs": 150
+      },
+      {
+        "sourceId": "welcome-lowering-ready",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 160
+      }
+    ],
+    "lowering-mid": [
+      {
+        "sourceId": "welcome-lowering-mid",
+        "durationMs": 60
+      },
+      {
+        "sourceId": "welcome-lowering-ready",
+        "durationMs": 100
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 160
+      }
+    ],
+    "lowering-ready": [
+      {
+        "sourceId": "welcome-lowering-ready",
+        "durationMs": 60
+      },
+      {
+        "sourceId": "neutral",
+        "durationMs": 160
+      }
+    ]
+  },
+  "authorRoutes": {
+    "open-neutral": {
+      "ordinary": [
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+          "durationMs": 80
+        }
+      ],
+      "detached": [
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+          "durationMs": 80
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Cancel remaining welcome intent immediately; before peak do not rise to peak or add wrist arc. Lower along independently authored recovery. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "attend-release": {
+      "ordinary": [
+        {
+          "id": "attend-release",
+          "sourceId": "welcome-attend-release",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/attend-release.png",
+          "sha256": "e278a1adb282dd8008ddf1e68ca795e8ba893c189aef57612449e739194f71af",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-ready.png",
+          "sha256": "92d09e7bd00620f5011af6b4e45687c548b58507a7d71d3eed2ae6ef1ebc71e2",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+          "durationMs": 160
+        }
+      ],
+      "detached": [
+        {
+          "id": "attend-release",
+          "sourceId": "welcome-attend-release",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/attend-release.png",
+          "sha256": "6314b333edaa9522619b94891f161f907ae1fcb8e9924ea304a593621a3de033",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-ready.png",
+          "sha256": "08d97384eb453233d160b734fffaf1e010b86538bc9909b72cb71112ca0bb258",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+          "durationMs": 160
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Cancel remaining welcome intent immediately; before peak do not rise to peak or add wrist arc. Lower along independently authored recovery. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "greeting-rise": {
+      "ordinary": [
+        {
+          "id": "greeting-rise",
+          "sourceId": "welcome-greeting-rise",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/greeting-rise.png",
+          "sha256": "45e9a4726a518402a96bf9c6b08a3f38fb1239bb5f68e4d3cee1e6bede34dec0",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-mid",
+          "sourceId": "welcome-lowering-mid",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-mid.png",
+          "sha256": "68e86b85afae50ce7ea5eac4abf69e1ba79018ff6b6c33078cad1603446d831d",
+          "durationMs": 120
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-ready.png",
+          "sha256": "92d09e7bd00620f5011af6b4e45687c548b58507a7d71d3eed2ae6ef1ebc71e2",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+          "durationMs": 160
+        }
+      ],
+      "detached": [
+        {
+          "id": "greeting-rise",
+          "sourceId": "welcome-greeting-rise",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/greeting-rise.png",
+          "sha256": "fa9a26b183a7185275200449d4d32c84bdc61dd1ad6c5a22db6cd7bd8275fbd5",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-mid",
+          "sourceId": "welcome-lowering-mid",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-mid.png",
+          "sha256": "71f88003cc90f309771a90c456850031fafe648ed0d95426f9f9cb6aad06eb7e",
+          "durationMs": 120
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-ready.png",
+          "sha256": "08d97384eb453233d160b734fffaf1e010b86538bc9909b72cb71112ca0bb258",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+          "durationMs": 160
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Cancel remaining welcome intent immediately; before peak do not rise to peak or add wrist arc. Lower along independently authored recovery. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "greeting-near-cheek": {
+      "ordinary": [
+        {
+          "id": "greeting-near-cheek",
+          "sourceId": "welcome-greeting-near-cheek",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/greeting-near-cheek.png",
+          "sha256": "d284ecee91a9b14e651666fd02f46109e748698b6163bd8f29739c6cd5b82b9c",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-mid",
+          "sourceId": "welcome-lowering-mid",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-mid.png",
+          "sha256": "68e86b85afae50ce7ea5eac4abf69e1ba79018ff6b6c33078cad1603446d831d",
+          "durationMs": 150
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-ready.png",
+          "sha256": "92d09e7bd00620f5011af6b4e45687c548b58507a7d71d3eed2ae6ef1ebc71e2",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+          "durationMs": 160
+        }
+      ],
+      "detached": [
+        {
+          "id": "greeting-near-cheek",
+          "sourceId": "welcome-greeting-near-cheek",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/greeting-near-cheek.png",
+          "sha256": "e6239304c3edb6ff89519a7ecffb8176b66bbceea779bbfe0fe01ee5adabd8b4",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-mid",
+          "sourceId": "welcome-lowering-mid",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-mid.png",
+          "sha256": "71f88003cc90f309771a90c456850031fafe648ed0d95426f9f9cb6aad06eb7e",
+          "durationMs": 150
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-ready.png",
+          "sha256": "08d97384eb453233d160b734fffaf1e010b86538bc9909b72cb71112ca0bb258",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+          "durationMs": 160
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Cancel remaining welcome intent immediately; before peak do not rise to peak or add wrist arc. Lower along independently authored recovery. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "wrist-arc-end-r2": {
+      "ordinary": [
+        {
+          "id": "wrist-arc-end-r2",
+          "sourceId": "welcome-wrist-arc-end-r2",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/wrist-arc-end-r2.png",
+          "sha256": "7884ff1725acef6f3b9dcea97685a82854f6ca731bd60a5f9f14d3029bc733ed",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-mid",
+          "sourceId": "welcome-lowering-mid",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-mid.png",
+          "sha256": "68e86b85afae50ce7ea5eac4abf69e1ba79018ff6b6c33078cad1603446d831d",
+          "durationMs": 150
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-ready.png",
+          "sha256": "92d09e7bd00620f5011af6b4e45687c548b58507a7d71d3eed2ae6ef1ebc71e2",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+          "durationMs": 160
+        }
+      ],
+      "detached": [
+        {
+          "id": "wrist-arc-end-r2",
+          "sourceId": "welcome-wrist-arc-end-r2",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/wrist-arc-end-r2.png",
+          "sha256": "2d97138ff6ccff430594be45007e6db795718b350a17b3f6eb31ee6363cafa46",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-mid",
+          "sourceId": "welcome-lowering-mid",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-mid.png",
+          "sha256": "71f88003cc90f309771a90c456850031fafe648ed0d95426f9f9cb6aad06eb7e",
+          "durationMs": 150
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-ready.png",
+          "sha256": "08d97384eb453233d160b734fffaf1e010b86538bc9909b72cb71112ca0bb258",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+          "durationMs": 160
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Cancel remaining welcome intent immediately; before peak do not rise to peak or add wrist arc. Lower along independently authored recovery. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "lowering-mid": {
+      "ordinary": [
+        {
+          "id": "lowering-mid",
+          "sourceId": "welcome-lowering-mid",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-mid.png",
+          "sha256": "68e86b85afae50ce7ea5eac4abf69e1ba79018ff6b6c33078cad1603446d831d",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-ready.png",
+          "sha256": "92d09e7bd00620f5011af6b4e45687c548b58507a7d71d3eed2ae6ef1ebc71e2",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+          "durationMs": 160
+        }
+      ],
+      "detached": [
+        {
+          "id": "lowering-mid",
+          "sourceId": "welcome-lowering-mid",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-mid.png",
+          "sha256": "71f88003cc90f309771a90c456850031fafe648ed0d95426f9f9cb6aad06eb7e",
+          "durationMs": 60
+        },
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-ready.png",
+          "sha256": "08d97384eb453233d160b734fffaf1e010b86538bc9909b72cb71112ca0bb258",
+          "durationMs": 100
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+          "durationMs": 160
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Cancel remaining welcome intent immediately; before peak do not rise to peak or add wrist arc. Lower along independently authored recovery. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "lowering-ready": {
+      "ordinary": [
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/welcome/lowering-ready.png",
+          "sha256": "92d09e7bd00620f5011af6b4e45687c548b58507a7d71d3eed2ae6ef1ebc71e2",
+          "durationMs": 60
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0",
+          "durationMs": 160
+        }
+      ],
+      "detached": [
+        {
+          "id": "lowering-ready",
+          "sourceId": "welcome-lowering-ready",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/welcome/lowering-ready.png",
+          "sha256": "08d97384eb453233d160b734fffaf1e010b86538bc9909b72cb71112ca0bb258",
+          "durationMs": 60
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3",
+          "durationMs": 160
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Cancel remaining welcome intent immediately; before peak do not rise to peak or add wrist arc. Lower along independently authored recovery. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    }
+  },
+  "rootMotion": "Threshold root follows immediately; authored body recovery independent."
+}

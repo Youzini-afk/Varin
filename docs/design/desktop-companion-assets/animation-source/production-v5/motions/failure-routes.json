@@ -1,0 +1,430 @@
+{
+  "version": 1,
+  "status": "selected-source-checkpoint-not-runtime-admission",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "original-png-sources",
+  "authorRoutes": {
+    "open-neutral": {
+      "ordinary": [
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 80,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+        }
+      ],
+      "detached": [
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 80,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Current stop/contact remains safely low. Reduce contraction along authored recovery; never force full concern. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "brake-early": {
+      "ordinary": [
+        {
+          "id": "brake-early",
+          "sourceId": "failure-brake-early",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/brake-early.png",
+          "sha256": "0811182f10eb613b1b36ab52145e81e87053c147cd46d0572aa8388d0b3de7b6"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-ready.png",
+          "sha256": "32d17a3f63733ab62cfd2060e63a0f51dbf8d47f55f2786ea39e813083756525"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+        }
+      ],
+      "detached": [
+        {
+          "id": "brake-early",
+          "sourceId": "failure-brake-early",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/brake-early.png",
+          "sha256": "d13c09ebe6b2c2c27137ce240b3723924440d495a87d101f28f866362989666e"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-ready.png",
+          "sha256": "78920f4e65c77cb701ed22ec38a1e9a28395b11ec00271b95905cd7f8aecbcf0"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Current stop/contact remains safely low. Reduce contraction along authored recovery; never force full concern. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "concern-peak": {
+      "ordinary": [
+        {
+          "id": "concern-peak",
+          "sourceId": "failure-concern-peak",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/concern-peak.png",
+          "sha256": "5da241400ff0d08294d653ad1dfd817c19df1f4123fb7c427243ba183ed504fd"
+        },
+        {
+          "id": "recover-mid",
+          "sourceId": "failure-recover-mid",
+          "durationMs": 120,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-mid.png",
+          "sha256": "e6230590e822f8a489a7dd07763bae33985a67409ba8e3468857cbfec5f8946e"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-ready.png",
+          "sha256": "32d17a3f63733ab62cfd2060e63a0f51dbf8d47f55f2786ea39e813083756525"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+        }
+      ],
+      "detached": [
+        {
+          "id": "concern-peak",
+          "sourceId": "failure-concern-peak",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/concern-peak.png",
+          "sha256": "5ff66f4bc85061d5e53ecbe828c01d6a62789048ded336da661f5f5752a288a3"
+        },
+        {
+          "id": "recover-mid",
+          "sourceId": "failure-recover-mid",
+          "durationMs": 120,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-mid.png",
+          "sha256": "5302bd0f2d1140421099fbdfea413705a21b870e390bb29921c49b76850376f6"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-ready.png",
+          "sha256": "78920f4e65c77cb701ed22ec38a1e9a28395b11ec00271b95905cd7f8aecbcf0"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Current stop/contact remains safely low. Reduce contraction along authored recovery; never force full concern. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "contract-mid": {
+      "ordinary": [
+        {
+          "id": "contract-mid",
+          "sourceId": "failure-contract-mid",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/contract-mid.png",
+          "sha256": "1d131c78aea90b21710f8c2b8bf7a65b191041e31ec49a2cc0a142d084d7532b"
+        },
+        {
+          "id": "release-first",
+          "sourceId": "failure-release-first",
+          "durationMs": 120,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/release-first.png",
+          "sha256": "a1267550dbdf6ba6349ede9317e848f82cd6364d9b93dbc2d9969d0a00a65e0d"
+        },
+        {
+          "id": "recover-mid",
+          "sourceId": "failure-recover-mid",
+          "durationMs": 120,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-mid.png",
+          "sha256": "e6230590e822f8a489a7dd07763bae33985a67409ba8e3468857cbfec5f8946e"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-ready.png",
+          "sha256": "32d17a3f63733ab62cfd2060e63a0f51dbf8d47f55f2786ea39e813083756525"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+        }
+      ],
+      "detached": [
+        {
+          "id": "contract-mid",
+          "sourceId": "failure-contract-mid",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/contract-mid.png",
+          "sha256": "03dc65ed379333aa32f10185d265cd65e151b81990dfc651a4ff5c6b91b884f9"
+        },
+        {
+          "id": "release-first",
+          "sourceId": "failure-release-first",
+          "durationMs": 120,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/release-first.png",
+          "sha256": "2fbdc8dcfed6481e2a29e0195c1cdde597fa1898c8a1a52b3f8654644d25954a"
+        },
+        {
+          "id": "recover-mid",
+          "sourceId": "failure-recover-mid",
+          "durationMs": 120,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-mid.png",
+          "sha256": "5302bd0f2d1140421099fbdfea413705a21b870e390bb29921c49b76850376f6"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-ready.png",
+          "sha256": "78920f4e65c77cb701ed22ec38a1e9a28395b11ec00271b95905cd7f8aecbcf0"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Current stop/contact remains safely low. Reduce contraction along authored recovery; never force full concern. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "release-first": {
+      "ordinary": [
+        {
+          "id": "release-first",
+          "sourceId": "failure-release-first",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/release-first.png",
+          "sha256": "a1267550dbdf6ba6349ede9317e848f82cd6364d9b93dbc2d9969d0a00a65e0d"
+        },
+        {
+          "id": "recover-mid",
+          "sourceId": "failure-recover-mid",
+          "durationMs": 120,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-mid.png",
+          "sha256": "e6230590e822f8a489a7dd07763bae33985a67409ba8e3468857cbfec5f8946e"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-ready.png",
+          "sha256": "32d17a3f63733ab62cfd2060e63a0f51dbf8d47f55f2786ea39e813083756525"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+        }
+      ],
+      "detached": [
+        {
+          "id": "release-first",
+          "sourceId": "failure-release-first",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/release-first.png",
+          "sha256": "2fbdc8dcfed6481e2a29e0195c1cdde597fa1898c8a1a52b3f8654644d25954a"
+        },
+        {
+          "id": "recover-mid",
+          "sourceId": "failure-recover-mid",
+          "durationMs": 120,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-mid.png",
+          "sha256": "5302bd0f2d1140421099fbdfea413705a21b870e390bb29921c49b76850376f6"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-ready.png",
+          "sha256": "78920f4e65c77cb701ed22ec38a1e9a28395b11ec00271b95905cd7f8aecbcf0"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Current stop/contact remains safely low. Reduce contraction along authored recovery; never force full concern. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "recover-mid": {
+      "ordinary": [
+        {
+          "id": "recover-mid",
+          "sourceId": "failure-recover-mid",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-mid.png",
+          "sha256": "e6230590e822f8a489a7dd07763bae33985a67409ba8e3468857cbfec5f8946e"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-ready.png",
+          "sha256": "32d17a3f63733ab62cfd2060e63a0f51dbf8d47f55f2786ea39e813083756525"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+        }
+      ],
+      "detached": [
+        {
+          "id": "recover-mid",
+          "sourceId": "failure-recover-mid",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-mid.png",
+          "sha256": "5302bd0f2d1140421099fbdfea413705a21b870e390bb29921c49b76850376f6"
+        },
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 100,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-ready.png",
+          "sha256": "78920f4e65c77cb701ed22ec38a1e9a28395b11ec00271b95905cd7f8aecbcf0"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Current stop/contact remains safely low. Reduce contraction along authored recovery; never force full concern. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    },
+    "recover-ready": {
+      "ordinary": [
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/failure/recover-ready.png",
+          "sha256": "32d17a3f63733ab62cfd2060e63a0f51dbf8d47f55f2786ea39e813083756525"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/foreground/open-neutral.png",
+          "sha256": "41456e66a9558c4b0e0302b69f8a16c3736995d9459eb71d60941441de3143d0"
+        }
+      ],
+      "detached": [
+        {
+          "id": "recover-ready",
+          "sourceId": "failure-recover-ready",
+          "durationMs": 60,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/failure/recover-ready.png",
+          "sha256": "78920f4e65c77cb701ed22ec38a1e9a28395b11ec00271b95905cd7f8aecbcf0"
+        },
+        {
+          "id": "open-neutral",
+          "sourceId": "neutral",
+          "durationMs": 160,
+          "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/open-neutral.png",
+          "sha256": "139c01a387827c8dbb46714742c2ddf537ee850c4d7e912809a27d751fc78cf3"
+        }
+      ],
+      "thenExistingE": [
+        "side",
+        "support",
+        "bridge",
+        "float"
+      ],
+      "rationale": "Current stop/contact remains safely low. Reduce contraction along authored recovery; never force full concern. Canonical D then existing side/support establishes laptop hold before bridge/float leg release."
+    }
+  },
+  "existingE": {
+    "side": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/side.png",
+      "sha256": "cfa40cea3d929bfed5735be079730c9036ae5d5df1c0119fbe68208de63aad78"
+    },
+    "support": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/support.png",
+      "sha256": "68067049585bce9d94d938d5e1a7f6ba2411e660ebd7efc681ea849a3e998af5"
+    },
+    "bridge": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/bridge.png",
+      "sha256": "82014752faf61d1284f1f37f44821426113813e54ae8a3afae54292c7d0ac6b0"
+    },
+    "float": {
+      "source": "docs/design/desktop-companion-assets/animation-source/production-v5/detached/lift/float.png",
+      "sha256": "d4c64492ac01465c5084e99c212534bb855bb9f847986baf39743ba288001ec9"
+    }
+  },
+  "sharedMotion": "lift-open.json",
+  "rootMotion": "Threshold root follows immediately; authored body recovery independent.",
+  "knownFailureOnly": true,
+  "failureAutoResolved": false,
+  "policy": "Same-pose D then authored recovery to exact open canonical then existing open E; never force peak. Recovery is availability, not success or resolution."
+}

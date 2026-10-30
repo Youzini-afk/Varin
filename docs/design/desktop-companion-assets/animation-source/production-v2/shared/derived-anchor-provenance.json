@@ -1,0 +1,20 @@
+[
+  {
+    "path": "closed-neutral-v1.png",
+    "raw": "closed-neutral-v1-raw.png",
+    "rawSha256": "2b0a8c085c25904e11623ef8444897a08093a7be62ae61f47497c9c1582e3360",
+    "sha256": "d263bfc23b10bbad1978df2eeeb0fac715b25478d3edf39b63c9fc2ee78c9de0",
+    "mask": "closed-neutral-edit-mask.png",
+    "outsideMaskExact": true,
+    "changedPixels": 25196
+  },
+  {
+    "path": "open-screen-gaze-v1.png",
+    "raw": "open-screen-gaze-v1-raw.png",
+    "rawSha256": "d7fdc62ed2b58be674cddc5580e297bbfdfa55cd95f7883a87fe38d68bdf61a4",
+    "sha256": "cb588e1be065b85d8e0fc520a2ebebfb1f39617e486415dc43b1463a145ffc7f",
+    "mask": "open-screen-gaze-edit-mask.png",
+    "outsideMaskExact": true,
+    "changedPixels": 4371
+  }
+]

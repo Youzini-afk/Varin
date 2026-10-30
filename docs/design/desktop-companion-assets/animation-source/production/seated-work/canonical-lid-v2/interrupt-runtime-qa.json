@@ -1,0 +1,530 @@
+{
+  "status": "technical-contract-pass-not-visual-acceptance",
+  "cases": [
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 0,
+      "reverseTailMs": 250,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 1,
+      "reverseTailMs": 305,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 2,
+      "reverseTailMs": 360,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 3,
+      "reverseTailMs": 415,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 4,
+      "reverseTailMs": 470,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 5,
+      "reverseTailMs": 525,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 6,
+      "reverseTailMs": 580,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 7,
+      "reverseTailMs": 635,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 8,
+      "reverseTailMs": 690,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 9,
+      "reverseTailMs": 730,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 10,
+      "reverseTailMs": 770,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 11,
+      "reverseTailMs": 810,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 12,
+      "reverseTailMs": 850,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 13,
+      "reverseTailMs": 890,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 14,
+      "reverseTailMs": 930,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 15,
+      "reverseTailMs": 970,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 16,
+      "reverseTailMs": 1010,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 17,
+      "reverseTailMs": 1050,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 18,
+      "reverseTailMs": 1090,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 19,
+      "reverseTailMs": 1130,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 20,
+      "reverseTailMs": 1170,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 21,
+      "reverseTailMs": 1210,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 22,
+      "reverseTailMs": 1250,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 23,
+      "reverseTailMs": 1290,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 24,
+      "reverseTailMs": 1330,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 25,
+      "reverseTailMs": 1370,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 26,
+      "reverseTailMs": 1450,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 27,
+      "reverseTailMs": 1450,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 28,
+      "reverseTailMs": 1485,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 29,
+      "reverseTailMs": 1520,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 30,
+      "reverseTailMs": 1555,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 31,
+      "reverseTailMs": 1590,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 32,
+      "reverseTailMs": 1625,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 33,
+      "reverseTailMs": 1660,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 34,
+      "reverseTailMs": 1695,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 35,
+      "reverseTailMs": 1730,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 36,
+      "reverseTailMs": 1765,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.opening-hybrid-v2",
+      "frameIndex": 37,
+      "reverseTailMs": 1945,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 0,
+      "reverseTailMs": 200,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 1,
+      "reverseTailMs": 240,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 2,
+      "reverseTailMs": 280,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 3,
+      "reverseTailMs": 320,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 4,
+      "reverseTailMs": 360,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 5,
+      "reverseTailMs": 400,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 6,
+      "reverseTailMs": 440,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 7,
+      "reverseTailMs": 480,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 8,
+      "reverseTailMs": 520,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 9,
+      "reverseTailMs": 560,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 10,
+      "reverseTailMs": 690,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 11,
+      "reverseTailMs": 730,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 12,
+      "reverseTailMs": 770,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 13,
+      "reverseTailMs": 810,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 14,
+      "reverseTailMs": 850,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 15,
+      "reverseTailMs": 890,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 16,
+      "reverseTailMs": 930,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 17,
+      "reverseTailMs": 970,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 18,
+      "reverseTailMs": 1010,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 19,
+      "reverseTailMs": 1050,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 20,
+      "reverseTailMs": 1090,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 21,
+      "reverseTailMs": 1130,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 22,
+      "reverseTailMs": 1170,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 23,
+      "reverseTailMs": 1210,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 24,
+      "reverseTailMs": 1250,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 25,
+      "reverseTailMs": 1290,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 26,
+      "reverseTailMs": 1330,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 27,
+      "reverseTailMs": 1370,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 28,
+      "reverseTailMs": 1410,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 29,
+      "reverseTailMs": 1450,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 30,
+      "reverseTailMs": 1490,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 31,
+      "reverseTailMs": 1530,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 32,
+      "reverseTailMs": 1570,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 33,
+      "reverseTailMs": 1610,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 34,
+      "reverseTailMs": 1650,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 35,
+      "reverseTailMs": 1770,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    },
+    {
+      "sequence": "seated-work.closing-hybrid-v2",
+      "frameIndex": 36,
+      "reverseTailMs": 1950,
+      "pixelContinuous": true,
+      "closedRequestReachesSafeEndpoint": true
+    }
+  ]
+}

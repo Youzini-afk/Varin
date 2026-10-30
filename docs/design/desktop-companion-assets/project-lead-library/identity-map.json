@@ -1,0 +1,582 @@
+{
+  "rolePresentationOnly": true,
+  "globalAvatarReplacement": false,
+  "entries": [
+    {
+      "avatarId": "slope-lilac",
+      "role": "project-lead",
+      "sourceAvatarId": "slope-lilac",
+      "asset": "svg/slope-lilac.svg",
+      "primaryColor": "#C7B5EF",
+      "liningColor": "#d3c4ef",
+      "sha256": "e2c2e7c86436b006e0c8d9db1fa7e4500b909a484e354c4d5b2d85c3c44115cb"
+    },
+    {
+      "avatarId": "dome-ivory",
+      "role": "project-lead",
+      "sourceAvatarId": "dome-ivory",
+      "asset": "svg/dome-ivory.svg",
+      "primaryColor": "#E9DED0",
+      "liningColor": "#eee4d7",
+      "sha256": "df4fc667807afdd63bfea356324fba12d727df05e3e30df4b57a5b2391434623"
+    },
+    {
+      "avatarId": "taper-sage",
+      "role": "project-lead",
+      "sourceAvatarId": "taper-sage",
+      "asset": "svg/taper-sage.svg",
+      "primaryColor": "#A8BD96",
+      "liningColor": "#bbcaaa",
+      "sha256": "760abc7831b7b674870ebc48973b14640cd419cc546db314dfb689b431935c50"
+    },
+    {
+      "avatarId": "pebble-blue",
+      "role": "project-lead",
+      "sourceAvatarId": "pebble-blue",
+      "asset": "svg/pebble-blue.svg",
+      "primaryColor": "#85B3D2",
+      "liningColor": "#a0c3d9",
+      "sha256": "a6fa38736dab6bd96662b8e790218e80e6c6f8899da2a20b5529c53801ccee0e"
+    },
+    {
+      "avatarId": "overlap-coral",
+      "role": "project-lead",
+      "sourceAvatarId": "overlap-coral",
+      "asset": "svg/overlap-coral.svg",
+      "primaryColor": "#EE9583",
+      "liningColor": "#f2ab9b",
+      "sha256": "552ea44a66bf5027045d35986c01ef3896b8433fcf07d5f7acc7fa4d85c0c80e"
+    },
+    {
+      "avatarId": "notch-ochre",
+      "role": "project-lead",
+      "sourceAvatarId": "notch-ochre",
+      "asset": "svg/notch-ochre.svg",
+      "primaryColor": "#E9C16E",
+      "liningColor": "#eece8b",
+      "sha256": "39c9d3f8392dd2311a6a7cbf9de516eb6d4f9f2c2c665a7ba250d3b869d9f1da"
+    },
+    {
+      "avatarId": "slant-mint",
+      "role": "project-lead",
+      "sourceAvatarId": "slant-mint",
+      "asset": "svg/slant-mint.svg",
+      "primaryColor": "#96C4B4",
+      "liningColor": "#add0c1",
+      "sha256": "8dc35d436641020e04763a742339548e291ef2852804094cddadc8ab9a71ea00"
+    },
+    {
+      "avatarId": "round-lilac",
+      "role": "project-lead",
+      "sourceAvatarId": "round-lilac",
+      "asset": "svg/round-lilac.svg",
+      "primaryColor": "#B9ACD7",
+      "liningColor": "#c8bddd",
+      "sha256": "b5fde0e25b624e7341d19b209fb50840a6e3f40f9e39a9ad555f308ff8172f88"
+    },
+    {
+      "avatarId": "tile-blue",
+      "role": "project-lead",
+      "sourceAvatarId": "tile-blue",
+      "asset": "svg/tile-blue.svg",
+      "primaryColor": "#91ADC8",
+      "liningColor": "#a9bed1",
+      "sha256": "4e539beb935958157217f76a64e8bb3f9fd373cb587df9c936b11825d57c2038"
+    },
+    {
+      "avatarId": "fold-sage",
+      "role": "project-lead",
+      "sourceAvatarId": "fold-sage",
+      "asset": "svg/fold-sage.svg",
+      "primaryColor": "#B2BDA2",
+      "liningColor": "#c3cab3",
+      "sha256": "b58a8e10ccd9c7f089db7a5ce5bceabec31eb62ff2f4ac1ea2d5b548003a57ca"
+    },
+    {
+      "avatarId": "cap-coral",
+      "role": "project-lead",
+      "sourceAvatarId": "cap-coral",
+      "asset": "svg/cap-coral.svg",
+      "primaryColor": "#DA9C99",
+      "liningColor": "#e2b1ac",
+      "sha256": "0922942f1083196bb121877e6602fe0afc00c688428032db5324e3ff6cfe2885"
+    },
+    {
+      "avatarId": "wave-ivory",
+      "role": "project-lead",
+      "sourceAvatarId": "wave-ivory",
+      "asset": "svg/wave-ivory.svg",
+      "primaryColor": "#DCD2BD",
+      "liningColor": "#e4dbc8",
+      "sha256": "0e388b811f68dc152e2f206c823be7bbaacc841a51bf78caa2c540c20d27a50c"
+    },
+    {
+      "avatarId": "capsule-sky",
+      "role": "project-lead",
+      "sourceAvatarId": "capsule-sky",
+      "asset": "svg/capsule-sky.svg",
+      "primaryColor": "#A2C7DC",
+      "liningColor": "#b6d2e0",
+      "sha256": "e82e757d076ed741475a51515312b1586c1ab80a0b4ca5cf08f963797244e177"
+    },
+    {
+      "avatarId": "pillar-lilac",
+      "role": "project-lead",
+      "sourceAvatarId": "pillar-lilac",
+      "asset": "svg/pillar-lilac.svg",
+      "primaryColor": "#C6B4DD",
+      "liningColor": "#d3c3e1",
+      "sha256": "1a6c74f6636b0f016b724dbc450a483b05983f931a35867da2d3b83f566c621b"
+    },
+    {
+      "avatarId": "lozenge-mint",
+      "role": "project-lead",
+      "sourceAvatarId": "lozenge-mint",
+      "asset": "svg/lozenge-mint.svg",
+      "primaryColor": "#A5CAB7",
+      "liningColor": "#b9d5c4",
+      "sha256": "74e46542a7df4612572398b025b79f671073814ac32ab66ab79591c6a3894054"
+    },
+    {
+      "avatarId": "wedge-apricot",
+      "role": "project-lead",
+      "sourceAvatarId": "wedge-apricot",
+      "asset": "svg/wedge-apricot.svg",
+      "primaryColor": "#E8B48B",
+      "liningColor": "#edc3a1",
+      "sha256": "eb0eea58414e63acaa62c61c28404193242f40759d840686b3b9d6d5c98c7918"
+    },
+    {
+      "avatarId": "arch-butter",
+      "role": "project-lead",
+      "sourceAvatarId": "arch-butter",
+      "asset": "svg/arch-butter.svg",
+      "primaryColor": "#E8D58E",
+      "liningColor": "#eddda4",
+      "sha256": "9fb914ceda464caf931257b22f9ef5224344334d8783d686e968bc9718693022"
+    },
+    {
+      "avatarId": "oval-rose",
+      "role": "project-lead",
+      "sourceAvatarId": "oval-rose",
+      "asset": "svg/oval-rose.svg",
+      "primaryColor": "#D6A4B4",
+      "liningColor": "#dfb7c1",
+      "sha256": "069db3a4d0e12a435a06d49853851733618fa8afe6b7c4b6ea3bdb67b1734c01"
+    },
+    {
+      "avatarId": "squircle-periwinkle",
+      "role": "project-lead",
+      "sourceAvatarId": "squircle-periwinkle",
+      "asset": "svg/squircle-periwinkle.svg",
+      "primaryColor": "#AAB8DE",
+      "liningColor": "#bdc7e2",
+      "sha256": "449f71ff46c5850ea680896a41fd580ccb2f6e164b586d86e89746a47381271e"
+    },
+    {
+      "avatarId": "shield-sage",
+      "role": "project-lead",
+      "sourceAvatarId": "shield-sage",
+      "asset": "svg/shield-sage.svg",
+      "primaryColor": "#ADBD9D",
+      "liningColor": "#bfcaaf",
+      "sha256": "de42ed36d1827d56af5ba08afd4f70c68ba73a03ea1a28de6bc69cc090d21f50"
+    },
+    {
+      "avatarId": "sail-ivory",
+      "role": "project-lead",
+      "sourceAvatarId": "sail-ivory",
+      "asset": "svg/sail-ivory.svg",
+      "primaryColor": "#DFD4BD",
+      "liningColor": "#e6dcc8",
+      "sha256": "7012046db4fe6068b3f11748be3252fa83b1820251305733cbcca9c7947c2490"
+    },
+    {
+      "avatarId": "lean-coral",
+      "role": "project-lead",
+      "sourceAvatarId": "lean-coral",
+      "asset": "svg/lean-coral.svg",
+      "primaryColor": "#DF9A87",
+      "liningColor": "#e6af9e",
+      "sha256": "f558b302893e42084c8672fcd46020e424eda8fbb8e810ab0026543aebbc27ca"
+    },
+    {
+      "avatarId": "bridge-aqua",
+      "role": "project-lead",
+      "sourceAvatarId": "bridge-aqua",
+      "asset": "svg/bridge-aqua.svg",
+      "primaryColor": "#9ECBC8",
+      "liningColor": "#b3d5d1",
+      "sha256": "c9779459901e1ddd5c821369147d345a2f4181f793563bcb08c8781a4b479344"
+    },
+    {
+      "avatarId": "crest-lilac",
+      "role": "project-lead",
+      "sourceAvatarId": "crest-lilac",
+      "asset": "svg/crest-lilac.svg",
+      "primaryColor": "#B7A6D5",
+      "liningColor": "#c7b8db",
+      "sha256": "eec12cdd24455dead38b20e07725562f58082e71dfecdce8a41cf130af916b37"
+    },
+    {
+      "avatarId": "step-blue",
+      "role": "project-lead",
+      "sourceAvatarId": "step-blue",
+      "asset": "svg/step-blue.svg",
+      "primaryColor": "#8FB7D2",
+      "liningColor": "#a8c6d9",
+      "sha256": "c6b74000b6613167629a35e4704bcc434060c6d503e411dd8cec04b36d30a55e"
+    },
+    {
+      "avatarId": "offset-peach",
+      "role": "project-lead",
+      "sourceAvatarId": "offset-peach",
+      "asset": "svg/offset-peach.svg",
+      "primaryColor": "#EABDA5",
+      "liningColor": "#efcab6",
+      "sha256": "dff83aa83e67e37cfd9b001c8fd5d0d5f7ff6550f2613fedb8b9873f4a935df7"
+    },
+    {
+      "avatarId": "orbit-sage",
+      "role": "project-lead",
+      "sourceAvatarId": "orbit-sage",
+      "asset": "svg/orbit-sage.svg",
+      "primaryColor": "#B8C5A3",
+      "liningColor": "#c8d1b4",
+      "sha256": "2b0a001e39a516c21bc9af423a21a5428e4ab7b9170def0476a886463f2e68da"
+    },
+    {
+      "avatarId": "cushion-ochre",
+      "role": "project-lead",
+      "sourceAvatarId": "cushion-ochre",
+      "asset": "svg/cushion-ochre.svg",
+      "primaryColor": "#D8BB7E",
+      "liningColor": "#e1c997",
+      "sha256": "7535dec7132c89e04e092a7f981d2e8e7dd744fa1b10c5b2a875b173ccff4af8"
+    },
+    {
+      "avatarId": "curve-mint",
+      "role": "project-lead",
+      "sourceAvatarId": "curve-mint",
+      "asset": "svg/curve-mint.svg",
+      "primaryColor": "#9EC2AF",
+      "liningColor": "#b3cebd",
+      "sha256": "c1a29ef9a119e5ad66bf9d4fe8952197ec3834649f389e51be97624b56c4137b"
+    },
+    {
+      "avatarId": "bevel-rose",
+      "role": "project-lead",
+      "sourceAvatarId": "bevel-rose",
+      "asset": "svg/bevel-rose.svg",
+      "primaryColor": "#CF9EB0",
+      "liningColor": "#dab2be",
+      "sha256": "3905eca96c72352e44ecb2641be4c11df3bd6f390ddc479c0a70bf4e9ca9b4eb"
+    },
+    {
+      "avatarId": "drift-blue",
+      "role": "project-lead",
+      "sourceAvatarId": "drift-blue",
+      "asset": "svg/drift-blue.svg",
+      "primaryColor": "#9AAFD0",
+      "liningColor": "#b0c0d7",
+      "sha256": "800185eaf98b7deeb66f83e66b7a36ddc7c9bff0ef18268c618e6436134d66f5"
+    },
+    {
+      "avatarId": "stack-ivory",
+      "role": "project-lead",
+      "sourceAvatarId": "stack-ivory",
+      "asset": "svg/stack-ivory.svg",
+      "primaryColor": "#E2D8C5",
+      "liningColor": "#e8dfce",
+      "sha256": "490502cc9c9588791a7850173518aa83e3225d8cd58b5a8ad1da9c1201edde0a"
+    },
+    {
+      "avatarId": "tilt-pistachio",
+      "role": "project-lead",
+      "sourceAvatarId": "tilt-pistachio",
+      "asset": "svg/tilt-pistachio.svg",
+      "primaryColor": "#C6CF9C",
+      "liningColor": "#d3d8ae",
+      "sha256": "10b8bf35cb711530a154a256849e239b57e0b889a67b6621a8469c313018ae23"
+    },
+    {
+      "avatarId": "fan-coral",
+      "role": "project-lead",
+      "sourceAvatarId": "fan-coral",
+      "asset": "svg/fan-coral.svg",
+      "primaryColor": "#E6A28D",
+      "liningColor": "#ecb5a3",
+      "sha256": "1c6a720b63367b7ed8a4949d9b8bfc41883d861e71ff355c0ddb227c00c444cc"
+    },
+    {
+      "avatarId": "mound-lavender",
+      "role": "project-lead",
+      "sourceAvatarId": "mound-lavender",
+      "asset": "svg/mound-lavender.svg",
+      "primaryColor": "#C3B4D9",
+      "liningColor": "#d0c3de",
+      "sha256": "be6b0ba838a263d187275cab06ef119d4abc1e7a3d883cad758068bd8570083c"
+    },
+    {
+      "avatarId": "tab-butter",
+      "role": "project-lead",
+      "sourceAvatarId": "tab-butter",
+      "asset": "svg/tab-butter.svg",
+      "primaryColor": "#E4CD86",
+      "liningColor": "#ead79d",
+      "sha256": "cadbb29c9ecf1fb1b01a7d4647236061aa9e0cedd60094fab951625f15d52e46"
+    },
+    {
+      "avatarId": "span-jade",
+      "role": "project-lead",
+      "sourceAvatarId": "span-jade",
+      "asset": "svg/span-jade.svg",
+      "primaryColor": "#91B9AB",
+      "liningColor": "#a9c7ba",
+      "sha256": "c754d2f7e83c988c2679193cce4cf2cd8a2404febbafb43ca9f4dc9c5f5ee578"
+    },
+    {
+      "avatarId": "ripple-peach",
+      "role": "project-lead",
+      "sourceAvatarId": "ripple-peach",
+      "asset": "svg/ripple-peach.svg",
+      "primaryColor": "#E9B699",
+      "liningColor": "#eec5ac",
+      "sha256": "6546db8214b5ef221c29331d3b09dd808e52c321e1675e831f21b12d9b982c27"
+    },
+    {
+      "avatarId": "facet-blue",
+      "role": "project-lead",
+      "sourceAvatarId": "facet-blue",
+      "asset": "svg/facet-blue.svg",
+      "primaryColor": "#91AEC7",
+      "liningColor": "#a9bfd0",
+      "sha256": "4900b54c719024947e6323d098a4c56cff3812614eeece34ddf66768cb9094f2"
+    },
+    {
+      "avatarId": "comma-lilac",
+      "role": "project-lead",
+      "sourceAvatarId": "comma-lilac",
+      "asset": "svg/comma-lilac.svg",
+      "primaryColor": "#BCACD5",
+      "liningColor": "#cbbddb",
+      "sha256": "42b113b7d856f9f090459b40cf7bf43bc647ef5eb854f2dd160e3e7bb0b4b559"
+    },
+    {
+      "avatarId": "inset-sage",
+      "role": "project-lead",
+      "sourceAvatarId": "inset-sage",
+      "asset": "svg/inset-sage.svg",
+      "primaryColor": "#A9BA98",
+      "liningColor": "#bcc8ab",
+      "sha256": "87bf212e51045624e338bef447d4dcd48aaed44e30fe04591667a8136e62fb1c"
+    },
+    {
+      "avatarId": "pocket-rose",
+      "role": "project-lead",
+      "sourceAvatarId": "pocket-rose",
+      "asset": "svg/pocket-rose.svg",
+      "primaryColor": "#DBB0B7",
+      "liningColor": "#e3c0c4",
+      "sha256": "c202ac4af1189491314aeacbe62e115848dde3241479205c09062219a361f79e"
+    },
+    {
+      "avatarId": "rise-ivory",
+      "role": "project-lead",
+      "sourceAvatarId": "rise-ivory",
+      "asset": "svg/rise-ivory.svg",
+      "primaryColor": "#D9CFB9",
+      "liningColor": "#e1d8c5",
+      "sha256": "126ce65a34069975d26cf8a5851dc932485315a225cd31cd17ca6369cae4ea02"
+    },
+    {
+      "avatarId": "sweep-aqua",
+      "role": "project-lead",
+      "sourceAvatarId": "sweep-aqua",
+      "asset": "svg/sweep-aqua.svg",
+      "primaryColor": "#91C1C3",
+      "liningColor": "#a9cecd",
+      "sha256": "2d8adb82a0d4465d471838d414fbadb0e074164215a0dcb410cac49ce84299f2"
+    },
+    {
+      "avatarId": "bend-ochre",
+      "role": "project-lead",
+      "sourceAvatarId": "bend-ochre",
+      "asset": "svg/bend-ochre.svg",
+      "primaryColor": "#DEC08E",
+      "liningColor": "#e5cda4",
+      "sha256": "700fead6c9cd56d88b3cca332be8f2ccbb668163544d86153f1710a0b2c0442f"
+    },
+    {
+      "avatarId": "twin-periwinkle",
+      "role": "project-lead",
+      "sourceAvatarId": "twin-periwinkle",
+      "asset": "svg/twin-periwinkle.svg",
+      "primaryColor": "#B5BFE2",
+      "liningColor": "#c5cce5",
+      "sha256": "b9c6aa8b7e44aa00e4acaa94a577bb059a029f1e07355711da41cc960cced93e"
+    },
+    {
+      "avatarId": "arc-apricot",
+      "role": "project-lead",
+      "sourceAvatarId": "arc-apricot",
+      "asset": "svg/arc-apricot.svg",
+      "primaryColor": "#D9B08C",
+      "liningColor": "#e1c0a2",
+      "sha256": "27093cdc3abf62430ef089f1a9678996833c1b07976409c9b506a9b7a389de79"
+    },
+    {
+      "avatarId": "tuck-jade",
+      "role": "project-lead",
+      "sourceAvatarId": "tuck-jade",
+      "asset": "svg/tuck-jade.svg",
+      "primaryColor": "#A0BBA2",
+      "liningColor": "#b5c9b3",
+      "sha256": "d3af9d4fe6e2122eb4ed7727651c281c2ac02cbab78da1f6a028f30fcc03c4bc"
+    },
+    {
+      "avatarId": "plate-lavender",
+      "role": "project-lead",
+      "sourceAvatarId": "plate-lavender",
+      "asset": "svg/plate-lavender.svg",
+      "primaryColor": "#BEB2D9",
+      "liningColor": "#ccc2de",
+      "sha256": "1f0c5642832d57b65bbc44ecf0d3cfd26f9834cbbf64f59316732845dcb0baba"
+    },
+    {
+      "avatarId": "drop-melon",
+      "role": "project-lead",
+      "sourceAvatarId": "drop-melon",
+      "asset": "svg/drop-melon.svg",
+      "primaryColor": "#E4B19D",
+      "liningColor": "#eac1af",
+      "sha256": "13362fbabb64a4baff46c9ba89488e1e614d5e54442dc03795e3123bb1db6963"
+    },
+    {
+      "avatarId": "ribbon-blue",
+      "role": "project-lead",
+      "sourceAvatarId": "ribbon-blue",
+      "asset": "svg/ribbon-blue.svg",
+      "primaryColor": "#99B9D5",
+      "liningColor": "#afc7db",
+      "sha256": "033bdf9b9e055e883a26136dacd00568f2e9a951784cffa10a591ad398dee18f"
+    },
+    {
+      "avatarId": "cove-sage",
+      "role": "project-lead",
+      "sourceAvatarId": "cove-sage",
+      "asset": "svg/cove-sage.svg",
+      "primaryColor": "#B2C1A2",
+      "liningColor": "#c3ceb3",
+      "sha256": "c23af82a5ecce6fa1f795f624a7f8c5fa82a059263e3726f4f883d38d07ac1cd"
+    },
+    {
+      "avatarId": "terrace-ivory",
+      "role": "project-lead",
+      "sourceAvatarId": "terrace-ivory",
+      "asset": "svg/terrace-ivory.svg",
+      "primaryColor": "#E1D7C6",
+      "liningColor": "#e8dfcf",
+      "sha256": "60dc01bd19dd58b18901276dd95eadbb7948de2279ebc24383ddc8834a35a435"
+    },
+    {
+      "avatarId": "slide-rose",
+      "role": "project-lead",
+      "sourceAvatarId": "slide-rose",
+      "asset": "svg/slide-rose.svg",
+      "primaryColor": "#D7ADBE",
+      "liningColor": "#e0bec9",
+      "sha256": "81de450bcfa2be300f6fd80cb0eb8045bae3046292707df0482412239083ec80"
+    },
+    {
+      "avatarId": "ramp-mint",
+      "role": "project-lead",
+      "sourceAvatarId": "ramp-mint",
+      "asset": "svg/ramp-mint.svg",
+      "primaryColor": "#9DC6B6",
+      "liningColor": "#b3d1c3",
+      "sha256": "a93bc5f2f6ab1be394729a634559941a0056a9ac48478b401bcb6698f12587fa"
+    },
+    {
+      "avatarId": "echo-ochre",
+      "role": "project-lead",
+      "sourceAvatarId": "echo-ochre",
+      "asset": "svg/echo-ochre.svg",
+      "primaryColor": "#E5C588",
+      "liningColor": "#ebd19f",
+      "sha256": "f8d60fe34838edda2a09d8943328c56cade50ae5bef514486ff1581c16bdb5c1"
+    },
+    {
+      "avatarId": "lens-lilac",
+      "role": "project-lead",
+      "sourceAvatarId": "lens-lilac",
+      "asset": "svg/lens-lilac.svg",
+      "primaryColor": "#B8AED9",
+      "liningColor": "#c8bfde",
+      "sha256": "41730adea6481a5ce997ad32c44e842b43ec9bb32c03d2c3ae671af784f6dfe2"
+    },
+    {
+      "avatarId": "ledge-aqua",
+      "role": "project-lead",
+      "sourceAvatarId": "ledge-aqua",
+      "asset": "svg/ledge-aqua.svg",
+      "primaryColor": "#98BFBF",
+      "liningColor": "#afccca",
+      "sha256": "94c72ac55f93dcb1c899227c85943810314077067a40d520feeb9fa55347c701"
+    },
+    {
+      "avatarId": "swell-apricot",
+      "role": "project-lead",
+      "sourceAvatarId": "swell-apricot",
+      "asset": "svg/swell-apricot.svg",
+      "primaryColor": "#DEB48F",
+      "liningColor": "#e5c3a4",
+      "sha256": "1d9958a554ea55577440d957466acadd58e04dd2eeb7c1c57717acb00fda9a80"
+    },
+    {
+      "avatarId": "parcel-periwinkle",
+      "role": "project-lead",
+      "sourceAvatarId": "parcel-periwinkle",
+      "asset": "svg/parcel-periwinkle.svg",
+      "primaryColor": "#ABBADF",
+      "liningColor": "#bdc8e3",
+      "sha256": "f26573cbf9062cc7e99ffe446040dbbd6ad0b900320fdf99fb50b7b06d58e818"
+    },
+    {
+      "avatarId": "scoop-pistachio",
+      "role": "project-lead",
+      "sourceAvatarId": "scoop-pistachio",
+      "asset": "svg/scoop-pistachio.svg",
+      "primaryColor": "#C3CBA1",
+      "liningColor": "#d0d5b2",
+      "sha256": "4a3a30656a9c2ea63ee0daefcf4a83140aa6e50c462567887c25beac1b422282"
+    },
+    {
+      "avatarId": "beam-coral",
+      "role": "project-lead",
+      "sourceAvatarId": "beam-coral",
+      "asset": "svg/beam-coral.svg",
+      "primaryColor": "#DFA495",
+      "liningColor": "#e6b7a9",
+      "sha256": "78ac8ac7e6ac5716feb8c4ed8fb0fffdbf6a91403daedec9728773ffd090f83b"
+    },
+    {
+      "avatarId": "chamfer-jade",
+      "role": "project-lead",
+      "sourceAvatarId": "chamfer-jade",
+      "asset": "svg/chamfer-jade.svg",
+      "primaryColor": "#9DBCA9",
+      "liningColor": "#b3cab9",
+      "sha256": "e8d369a4ac538d24eafe9ade5225dc111ddf3614002c8802eba1b0e17732f0b2"
+    },
+    {
+      "avatarId": "float-butter",
+      "role": "project-lead",
+      "sourceAvatarId": "float-butter",
+      "asset": "svg/float-butter.svg",
+      "primaryColor": "#E9D49A",
+      "liningColor": "#eedcad",
+      "sha256": "47be21a4bd81cde347cdc96dab7789b5772d100a5c44dab3ac0fb1f30c6c0440"
+    }
+  ]
+}

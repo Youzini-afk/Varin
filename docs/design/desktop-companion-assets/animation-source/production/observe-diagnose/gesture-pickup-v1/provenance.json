@@ -1,0 +1,26 @@
+{
+  "stage": "motion-candidate",
+  "reviewStatus": "pending-finite-peer",
+  "newArtwork": {
+    "near-support-source.png": "Generated from canonical-chin-v2/pose-005: change near hand from keyboard to under-base support, preserve far chin hand and laptop geometry.",
+    "far-screen-grip-source.png": "Generated from chin-near-supported: far hand releases chin and grips top-left screen corner without changing computer.",
+    "far-pregrip-source.png": "Generated from chin-near-supported: far hand hovering above screen corner before contact.",
+    "far-early-source.png": "Generated from chin-near-supported: far hand just off chin hovering above middle screen bezel, near-vertical forearm.",
+    "closed-near-support-source.png": "Generated from rest canonical-stretch-v1/pose-007: near hand supports closed computer underside, raised far arm unchanged."
+  },
+  "method": "Fixed whole-viewport normalization then protected local hand/sleeve composites. RGB far-grip white border cleanup by connected background flood only. Original screen face restored. Same lower stool-replacement drawing supplied by relocation; no cutout bone warp.",
+  "crossDependencies": [
+    "observe-diagnose/canonical-chin-v2",
+    "observe-diagnose/canonical-recovery-v1",
+    "observe-diagnose/canonical-wait-cycle-v1",
+    "rest/canonical-stretch-v1",
+    "rest/canonical-eye-rub-v1",
+    "relocation/departure-bridge-v1/detach-protected.png",
+    "relocation/departure-bridge-v1/stool-replacement-mask.png"
+  ],
+  "rebuild": [
+    "python build.py",
+    "python derive_sequences.py"
+  ],
+  "knownBoundary": "Final original-projection support must connect through real closure/tilt departure bridge; do not jump to curled rapid-open laptop."
+}

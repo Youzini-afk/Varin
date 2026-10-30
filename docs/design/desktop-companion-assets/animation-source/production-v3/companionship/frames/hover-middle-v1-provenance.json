@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "references/closed-rest-rigid-v2.png",
+  "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+  "raw": "raw/hover-middle-v1.png",
+  "rawSHA256": "cd2461e2daef3095364f0ae6daa5fe18d718d46712b781389bbe55c9b606ce3e",
+  "prompt": "prompts/hover-middle-v1.txt",
+  "output": "frames/hover-middle-v1.png",
+  "sha256": "96c965d989bf1bae4d9bedd742722a1e19cee7fbb9cb0a3e74418e95cadca42f",
+  "mask": "masks/hover-middle-v1.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

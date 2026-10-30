@@ -1,0 +1,9 @@
+{
+  "rawSha256": "17512186b317df49638181c1bb1e85ecb815533c5489f59c31ba1318d3d36ab4",
+  "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+  "mask": "open-screen-gaze-edit-mask.png",
+  "outsideMaskExact": true,
+  "changedPixels": 4376,
+  "classification": "active down-left reading gaze; parent review pending",
+  "previousGaze": "open-screen-gaze-v1.png classified as side-glance only"
+}

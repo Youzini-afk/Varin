@@ -1,0 +1,77 @@
+{
+  "sources": [
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-closed-eye-rub-v1/sequence.json",
+      "sha256": "b875bcc7ea2602ca23928a114def8adbf032ac264785a4f0dd84eeb482b12ffb",
+      "finalNeutralAddedMs": 6000
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+      "sha256": "9d6852be48d4d6cda372db8797bf5371653ff5395905e726a7bb2c5d2f4a5329",
+      "finalNeutralAddedMs": 1800
+    },
+    {
+      "source": "accepted-runtime/v2/rest-closed-stretch-v1/sequence.json",
+      "sha256": "5e8afcb2a734e5c71c148ef6a4865d7088e4e19cf979c449c622183413c011c8",
+      "finalNeutralAddedMs": 6000
+    }
+  ],
+  "newDrawingCount": 0,
+  "safeExits": "Only exact common neutral source pixels; all other original exits retained",
+  "normalSpeedCompositeReview": "pending"
+}

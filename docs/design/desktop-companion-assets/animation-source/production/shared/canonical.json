@@ -1,0 +1,17 @@
+{
+  "id": "seated-open-canonical-v1",
+  "file": "seated-open-canonical-v1.png",
+  "sha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "canvas": [
+    512,
+    512
+  ],
+  "source": "user-attention/registered/attention-lift-v1/pose-000.png",
+  "status": "production geometry baseline selected internally from approved character and first storyboard style; not a user-accepted final animation",
+  "constraints": [
+    "Use exact fixed viewport and head/body/laptop proportions",
+    "Protect static pixels when motion does not change them",
+    "Generate actual needed drawing changes and intermediate poses",
+    "Do not use old-v3 anatomy as an alternate baseline"
+  ]
+}

@@ -212,3 +212,39 @@ fn an_unconsumed_permission_cannot_be_revived_after_kernel_reopen() {
     drop(db);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn attention_tracks_real_permission_without_hydrating_or_publishing() {
+    for decision in [Some("allow_once"), Some("deny"), None] {
+        let mut f = Fixture::new();
+        assert_eq!(f.db.capture_attention_read().load(&|| false).unwrap().counts.action_required, 0);
+        f.db.open_permission(&f.op, "attention-permission", f.call.clone(), f.scope.clone()).unwrap();
+        let cursor = f.db.event_cursor().unwrap();
+        // Make immutable bodies unavailable: compact attention must use only Catalog metadata.
+        let content = f.root.join("content");
+        let offline = f.root.join("attention-content-offline");
+        std::fs::rename(&content, &offline).unwrap();
+        let read = f.db.capture_attention_read().load(&|| false);
+        std::fs::rename(&offline, &content).unwrap();
+        let snapshot = read.unwrap();
+        assert_eq!(snapshot.event_cursor, cursor);
+        assert_eq!(f.db.event_cursor().unwrap(), cursor, "read must not publish or reconcile");
+        assert_eq!(snapshot.counts.action_required, 1);
+        assert_eq!(snapshot.counts.affected_branches, 1);
+        let item = snapshot.items.iter().find(|item| item.kind == "permission").unwrap();
+        assert_eq!(item.permission_id.as_deref(), Some("attention-permission"));
+        assert_eq!(item.operation_id.as_deref(), Some(f.op.as_str()));
+        assert_eq!(item.run_id, f.run);
+        let wire = serde_json::to_string(&snapshot).unwrap();
+        for secret in ["approved content", "chosen", "owner-1", "selected-account", "call_ref", "scope_ref"] {
+            assert!(!wire.contains(secret), "attention leaked {secret}");
+        }
+        if let Some(decision) = decision {
+            f.db.decide_permission(&f.op, "attention-permission", decision).unwrap();
+        } else { f.db.request_cancel_run(&f.run).unwrap(); }
+        let after = f.db.capture_attention_read().load(&|| false).unwrap();
+        assert_eq!(after.counts.action_required, 0);
+        assert!(!after.items.iter().any(|item| item.kind == "permission"));
+        let root = f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
+    }
+}

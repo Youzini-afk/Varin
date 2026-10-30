@@ -1,0 +1,60 @@
+{
+  "method": "Exact source-cel copy, no scaling/deformation/fade or new image generation",
+  "sources": [
+    {
+      "frame": "frame-000.png",
+      "source": "registered/completion-wave-v2/pose-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "frame": "frame-001.png",
+      "source": "registered/completion-wave-v2/pose-001.png",
+      "sha256": "29b55065f6613a9ab687568cbeef48a58d4c30113faf6eb41197c08abb1e7948"
+    },
+    {
+      "frame": "frame-002.png",
+      "source": "registered/completion-wave-v2/pose-002.png",
+      "sha256": "97f5f7adbaf8f112b3ec73d2eac5992445b505aea645dc23f273b1c9c1425441"
+    },
+    {
+      "frame": "frame-003.png",
+      "source": "registered/completion-wave-v2/pose-003.png",
+      "sha256": "a7fe8e7b98a36a834047b2012d6afd1ed2c2c3e4c8b23cdf7d352468f86a1e07"
+    },
+    {
+      "frame": "frame-004.png",
+      "source": "registered/completion-wave-v2/pose-004.png",
+      "sha256": "cc00515a55b9c6e8cc9a493ab5169adeb4029311d367c57221404ced4532f939"
+    },
+    {
+      "frame": "frame-005.png",
+      "source": "registered/completion-wave-v2/pose-005.png",
+      "sha256": "ad13c1ebf5db4b4f555f4ae8f3b538729d5df1e5d5c0be2a6aae6f21d4bee21e"
+    },
+    {
+      "frame": "frame-006.png",
+      "source": "registered/completion-wave-v2/pose-006.png",
+      "sha256": "bb8cc4c02822e008bd7969e7d464a131c33173f738ca28f71dcd9e19e26a6842"
+    },
+    {
+      "frame": "frame-007.png",
+      "source": "registered/completion-wave-v2/pose-007.png",
+      "sha256": "ad13c1ebf5db4b4f555f4ae8f3b538729d5df1e5d5c0be2a6aae6f21d4bee21e"
+    },
+    {
+      "frame": "frame-008.png",
+      "source": "registered/completion-wave-v2/pose-008.png",
+      "sha256": "0f22b577e5234cf8da4cf611c1f99f806ddd7bcf9e9acbd880a628220625b34c"
+    },
+    {
+      "frame": "frame-009.png",
+      "source": "registered/completion-wave-v2/pose-009.png",
+      "sha256": "97f5f7adbaf8f112b3ec73d2eac5992445b505aea645dc23f273b1c9c1425441"
+    },
+    {
+      "frame": "frame-010.png",
+      "source": "registered/completion-wave-v2/pose-010.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    }
+  ]
+}

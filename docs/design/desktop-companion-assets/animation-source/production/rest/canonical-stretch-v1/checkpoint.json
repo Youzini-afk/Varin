@@ -1,0 +1,113 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "rest/canonical-stretch-v1/pose-006.png",
+      "sha256": "7d9897deb4e13e0a15002b281e6f64a2ff255abeb7398fd010f09448b57ccacd",
+      "bytes": 326556
+    },
+    {
+      "path": "rest/canonical-stretch-v1/stretch-redraw-mask.png",
+      "sha256": "c6de9bee3d9854e577e6755306de3fd2ce989e82e46817223cac845dcf800da1",
+      "bytes": 2881
+    },
+    {
+      "path": "rest/canonical-stretch-v1/half-reference.png",
+      "sha256": "f748ddc482d98ae86b08c5f510d642f9ac06d4ab9665dda43f48ff68f379feb1",
+      "bytes": 340870
+    },
+    {
+      "path": "rest/canonical-stretch-v1/pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "bytes": 316216
+    },
+    {
+      "path": "rest/canonical-stretch-v1/overshoot-source.png",
+      "sha256": "7daace7b5e0b103b6f3606e6c399e4c3285349a66507f3fdc10f26fea5871dd8",
+      "bytes": 1693938
+    },
+    {
+      "path": "rest/canonical-stretch-v1/build.py",
+      "sha256": "b42cb8c12a87da00b0f1ca56f6f978d9ffff291fedf37ee608ac481beaf356cb",
+      "bytes": 2218
+    },
+    {
+      "path": "rest/canonical-stretch-v1/strip-320.jpg",
+      "sha256": "ed870ac40296266b0ddc0850c4c8d494aeb95952cd92146427ccd1671f3f495e",
+      "bytes": 94590
+    },
+    {
+      "path": "rest/canonical-stretch-v1/pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "bytes": 316865
+    },
+    {
+      "path": "rest/canonical-stretch-v1/pose-007.png",
+      "sha256": "511cb52602068b691562161a69cf80af2c82141a781c727ba86c9315cdaaef90",
+      "bytes": 330066
+    },
+    {
+      "path": "rest/canonical-stretch-v1/pose-004.png",
+      "sha256": "3e8510d61b4fba530ba26c0d1a248a394dd18ecf8bc542ed2ad311f3f97acefa",
+      "bytes": 324239
+    },
+    {
+      "path": "rest/canonical-stretch-v1/sequence.source.json",
+      "sha256": "e81682a980fe971ddb4b336b07fa729d40c495a3d62759c1bfa6e749130ff1bb",
+      "bytes": 4015
+    },
+    {
+      "path": "rest/canonical-stretch-v1/pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "rest/canonical-stretch-v1/mid-source.png",
+      "sha256": "8fd4fcb804810f02e93dc370c855f97833ae342e461734a5885dca1a9c30a188",
+      "bytes": 1633747
+    },
+    {
+      "path": "rest/canonical-stretch-v1/extended-reference.png",
+      "sha256": "23640a7eb4c85e53c60e5b01d3f16a4dff68b0e7123c277cc485602942a63e5a",
+      "bytes": 348133
+    },
+    {
+      "path": "rest/canonical-stretch-v1/prompts.json",
+      "sha256": "43ed38d2bf78c7a6e61728b5bb3451aa9d3a19c1a4c1e0b066dae77e0718b8dc",
+      "bytes": 3052
+    },
+    {
+      "path": "rest/canonical-stretch-v1/pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "bytes": 317379
+    },
+    {
+      "path": "rest/canonical-stretch-v1/pose-008.png",
+      "sha256": "a178622139811eeb1a4f1c17c78430028c5026cf55351e11b216fec0f3e755e8",
+      "bytes": 331249
+    },
+    {
+      "path": "rest/canonical-stretch-v1/pose-005.png",
+      "sha256": "83cf11a74ce177e7d10326aa2c4ab9be5c05dc6ab863a9b64f8fcb0e31fde8e7",
+      "bytes": 321367
+    },
+    {
+      "path": "rest/canonical-stretch-v1/extended-source.png",
+      "sha256": "28b6ea02cdc979e8989703dd781d0425ec4398e6e5ab6055d349931186297e98",
+      "bytes": 1666439
+    },
+    {
+      "path": "rest/canonical-stretch-v1/half-source.png",
+      "sha256": "d0f7c0668cb7db99f64c6da770c3e7930c110013e6db4a41cd959adc1d07caf3",
+      "bytes": 1648440
+    },
+    {
+      "path": "rest/canonical-stretch-v1/bent-source.png",
+      "sha256": "034d7b2e834d6aa4ca5e9f5663ff4aff1838bc83ed2a83d7c490ed0bbffd50b9",
+      "bytes": 1655853
+    }
+  ],
+  "pathBase": "production-root",
+  "originalManifestSha256": "b9396987d97dd6d4c6e86ad8966898d28a36ed1dc4be0a1ba90041c83661f8e5",
+  "publicationNote": "Paths are relative to production/; source bytes and hashes are unchanged."
+}

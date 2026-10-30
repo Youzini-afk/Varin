@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "frames/rest-settled-v2.png",
+  "sourceSHA256": "39aea3c9f5fdc53d34ef3328caac4bf3fc2f92e3d21dcd82f265ee01285353f6",
+  "raw": "raw/doze-v1.png",
+  "rawSHA256": "8789240df4bc5476f50391cc05a53cc3ebdeae31245dd6655e7159d6d41cfc59",
+  "prompt": "prompts/doze-v1.txt",
+  "output": "frames/doze-v1.png",
+  "sha256": "b7d9e7bfa097a9c13d6fa689592033c1545672691eb730f4d770271d706b7260",
+  "mask": "masks/doze-v1.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

@@ -1,0 +1,107 @@
+{
+  "status": "additional-head-pitch-inbetween-candidate-not-motion-final",
+  "dependsOn": "publish-addition-20261028-2204.json",
+  "files": [
+    {
+      "path": "clean_click_closed_alpha_v5.py",
+      "sha256": "a51d0c936d15c475c302dfba6dbe31dd83c147ff6c7a765fcacf245ec36b0152",
+      "bytes": 2135
+    },
+    {
+      "path": "metadata/prompt-click-closed-middle-v2.txt",
+      "sha256": "46220d4dc2da2baaecaa893f21281225d004556db8943109ba5e8bd50b99f587",
+      "bytes": 668
+    },
+    {
+      "path": "register_click_closed_v4.py",
+      "sha256": "30ce89c35c7ef7c0a7785a27237e6fbda07a13f26dd8ee75adc4e1c443e819d7",
+      "bytes": 4872
+    },
+    {
+      "path": "registered/click-closed-v5/alpha-cleanup.json",
+      "sha256": "d611ad9df551a93ff736742cdf0455403f9e06208929464eafb65a5fcd2c4f2e",
+      "bytes": 1237
+    },
+    {
+      "path": "registered/click-closed-v5/pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "registered/click-closed-v5/pose-001.png",
+      "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+      "bytes": 317331
+    },
+    {
+      "path": "registered/click-closed-v5/pose-002.png",
+      "sha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+      "bytes": 341447
+    },
+    {
+      "path": "registered/click-closed-v5/pose-003.png",
+      "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+      "bytes": 334385
+    },
+    {
+      "path": "registered/click-closed-v5/pose-004.png",
+      "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+      "bytes": 333931
+    },
+    {
+      "path": "registered/click-closed-v5/pose-005.png",
+      "sha256": "d3a75fbc6057bbe1b9e88eb341911074d99d5fd2b1fbed2c4bb17c11fe87228e",
+      "bytes": 333628
+    },
+    {
+      "path": "registered/click-closed-v5/pose-006.png",
+      "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+      "bytes": 333931
+    },
+    {
+      "path": "registered/click-closed-v5/pose-007.png",
+      "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+      "bytes": 334385
+    },
+    {
+      "path": "registered/click-closed-v5/pose-008.png",
+      "sha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+      "bytes": 341447
+    },
+    {
+      "path": "registered/click-closed-v5/pose-009.png",
+      "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+      "bytes": 317331
+    },
+    {
+      "path": "registered/click-closed-v5/pose-010.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "registered/click-closed-v5/provenance.json",
+      "sha256": "3c7357d3627b3c04a99f3b554ba1d88eb87518e99ccaf457747df1cbfec502c3",
+      "bytes": 1669
+    },
+    {
+      "path": "registered/click-closed-v5/reviewed-hair-background-region.png",
+      "sha256": "b0993ab200e132ad636a736792d3d4dca36a3ea5322f39c5f6c63c03848f0e2d",
+      "bytes": 696
+    },
+    {
+      "path": "registered/click-closed-v5/sequence.json",
+      "sha256": "de287f9d5857cd3ae19dece66aa99413d15a20cf2e20ce01ab723b36c7a302c7",
+      "bytes": 1857
+    },
+    {
+      "path": "sources/click-closed-middle-single-v2.png",
+      "sha256": "708014bb0e7e929d2914a3149f26d6b0c2b2d83dd9102d22a84b7e0663f6685e",
+      "bytes": 1919354
+    }
+  ],
+  "rebuild": [
+    "python register_click_closed_v4.py",
+    "python clean_click_closed_alpha_v5.py"
+  ],
+  "rejectedSource": "click-closed-middle-single-v1.png changed whole pose and overraised head, excluded from sequence and publish selection",
+  "totalBytes": 5554868
+}

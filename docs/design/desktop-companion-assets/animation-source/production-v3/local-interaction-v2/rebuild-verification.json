@@ -1,0 +1,6 @@
+{
+  "result": "pass",
+  "checkedFileCount": 8,
+  "mismatches": [],
+  "method": "independent workspace-disk copy; rebuild actual PNGs/masks and timing/source-input manifests byte-identical"
+}

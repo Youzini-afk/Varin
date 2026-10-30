@@ -1,0 +1,142 @@
+{
+  "id": "seated-work.canonical-scroll-v1",
+  "family": "SEATED_WORK",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "seated-open-canonical-v1",
+  "exitPose": "seated-open-canonical-v1",
+  "loop": null,
+  "stage": "motion-candidate",
+  "reviewStatus": "needs-hand-seam-and-temporal-review",
+  "warning": "Protected common full-body pixels; generated actual six hand drawings registered locally. Keyboard contact and patch edge need review. Not final accepted.",
+  "frames": [
+    {
+      "source": "frame-001.png",
+      "durationMs": 250,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "scroll",
+      "pose": "rest",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 150,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "scroll",
+      "pose": "reach-palmrest",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 200,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "scroll",
+      "pose": "two-finger-contact",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 160,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "scroll",
+      "pose": "scroll",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-005.png",
+      "durationMs": 160,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "scroll",
+      "pose": "release",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-006.png",
+      "durationMs": 300,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "scroll",
+      "pose": "rest-return",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    }
+  ]
+}

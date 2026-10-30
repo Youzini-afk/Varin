@@ -1,0 +1,57 @@
+{
+  "id": "relocation.canonical.close-to-hug",
+  "stage": "keyposes",
+  "warning": "Actual single-frame edits with static pixel protection. Timing candidate, no motion acceptance.",
+  "family": "CARRY_AIRBORNE",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "shared.seated-open",
+  "exitPose": "relocation.seated-hug",
+  "loop": null,
+  "frames": [
+    {
+      "source": "close-start.png",
+      "durationMs": 65,
+      "phase": "lid-contact",
+      "pose": "close-start"
+    },
+    {
+      "source": "close70-white.png",
+      "durationMs": 55,
+      "phase": "lid-descending",
+      "pose": "close70-white"
+    },
+    {
+      "source": "close-half.png",
+      "durationMs": 60,
+      "phase": "lid-descending",
+      "pose": "close-half"
+    },
+    {
+      "source": "closed.png",
+      "durationMs": 65,
+      "phase": "lap-closed",
+      "pose": "closed"
+    },
+    {
+      "source": "grip-lift-white.png",
+      "durationMs": 70,
+      "phase": "transfer-low",
+      "pose": "grip-lift-white"
+    },
+    {
+      "source": "turn.png",
+      "durationMs": 75,
+      "phase": "transfer-diagonal",
+      "pose": "turn"
+    },
+    {
+      "source": "hug.png",
+      "durationMs": 95,
+      "phase": "seated-hug",
+      "pose": "hug"
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "id": "v5-w01-working-phrase",
+  "action": "director-intake",
+  "recipe": "../seated-preparation.json",
+  "sourceKind": "prepared-drawing-ids",
+  "loop": false,
+  "frames": [
+    {
+      "sourceId": "neutral",
+      "durationMs": 130
+    },
+    {
+      "sourceId": "w01-b",
+      "durationMs": 170,
+      "cue": "ACCEPT_INWARD",
+      "interruptionExitIds": [
+        "w01-b",
+        "w01-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "w01-c",
+      "durationMs": 140,
+      "cue": "ACCEPT_INWARD",
+      "interruptionExitIds": [
+        "w01-c",
+        "w01-r",
+        "w01-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "w01-h",
+      "durationMs": 210,
+      "cue": "ACCEPT_SETTLE",
+      "interruptionExitIds": [
+        "w01-h",
+        "w01-r",
+        "w01-s",
+        "neutral"
+      ]
+    },
+    {
+      "sourceId": "w01-r",
+      "durationMs": 180,
+      "cue": "ACCEPT_SETTLE",
+      "interruptionExitIds": [
+        "w01-r",
+        "w01-s",
+        "neutral"
+      ],
+      "phase": "lowering"
+    },
+    {
+      "sourceId": "w01-s",
+      "durationMs": 190,
+      "cue": "ACCEPT_SETTLE",
+      "interruptionExitIds": [
+        "w01-s",
+        "neutral"
+      ],
+      "phase": "return"
+    },
+    {
+      "sourceId": "neutral",
+      "durationMs": 130
+    }
+  ],
+  "runtimeApproval": false,
+  "role": "Bot-only",
+  "semantic": "Fresh accepted delegation",
+  "routes": "director-routes.json",
+  "scenePolicy": {
+    "sameCueInstanceAcrossConsecutiveFrames": true,
+    "noNewSubjectCueOnRecovery": true,
+    "w01AcceptSettleDurationMs": 580,
+    "bodyPhaseOverrides": {
+      "w01-r": "lowering",
+      "w01-s": "return"
+    }
+  }
+}

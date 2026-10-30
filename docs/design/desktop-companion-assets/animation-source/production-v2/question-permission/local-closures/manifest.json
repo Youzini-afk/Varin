@@ -1,0 +1,100 @@
+{
+  "closedQuiet": {
+    "attention": "Upright direct attention; sparse blink only. Deliberately no fake response or idle-triggered welcome.",
+    "entry": "upright-v2:closed-rest",
+    "entrySource": "references/closed-rest-rigid-v2.png",
+    "exit": "upright-v2:closed-rest",
+    "exitSource": "references/closed-rest-rigid-v2.png",
+    "integrationStatus": "handoff reference only: closed-idle owned by enrich_character_performance; do not integrate this duplicate loop independently",
+    "loop": true,
+    "loopFrames": [
+      {
+        "cue": "QUIET_ATTEND",
+        "durationMs": 4400,
+        "path": "references/closed-rest-rigid-v2.png"
+      },
+      {
+        "cue": "BLINK_HALF",
+        "durationMs": 45,
+        "path": "local-closures/closed-quiet-blink-half.png"
+      },
+      {
+        "cue": "BLINK_CLOSED",
+        "durationMs": 75,
+        "path": "local-closures/closed-quiet-blink-closed.png"
+      },
+      {
+        "cue": "BLINK_OPEN",
+        "durationMs": 45,
+        "path": "local-closures/closed-quiet-blink-half.png"
+      },
+      {
+        "cue": "QUIET_ATTEND",
+        "durationMs": 1200,
+        "path": "references/closed-rest-rigid-v2.png"
+      }
+    ],
+    "safeExit": "On real new activity/event interrupt eye-only blink and restore exact closed-rest; never reopen lid from timer. No whole body transform, nod, breathing rub/stretch or success cue."
+  },
+  "openTap": {
+    "entry": "upright-v2:open-user",
+    "exit": "upright-v2:open-user",
+    "frames": [
+      {
+        "cue": "ADDRESS",
+        "durationMs": 80,
+        "path": "references/upright-open-neutral-v2.png"
+      },
+      {
+        "cue": "LIFT",
+        "durationMs": 80,
+        "path": "wave/open-mid.png"
+      },
+      {
+        "cue": "LOCAL_WAVE",
+        "durationMs": 130,
+        "path": "wave/open-peak.png"
+      },
+      {
+        "cue": "LOWER",
+        "durationMs": 90,
+        "path": "wave/open-mid.png"
+      },
+      {
+        "cue": "SOFT_SMILE",
+        "durationMs": 100,
+        "path": "wave/open-smile.png"
+      },
+      {
+        "cue": "REST",
+        "durationMs": 80,
+        "path": "references/upright-open-neutral-v2.png"
+      }
+    ],
+    "loop": false,
+    "safeExit": "Finish lower-mid to exact open-user, or priority-event exit through existing matching open bridge; never switch closed endpoint.",
+    "trigger": "actual user tap only; NOT successful completion receipt; do not close laptop"
+  },
+  "pathBase": "question-permission bundle root (parent of this manifest directory)",
+  "sources": {
+    "blink/eye-mask.png": "fb2a9fbc12aa8d063a996da99c6ce748e00fbd98e374aaec08d67ed0fcc25462",
+    "raw/blink-closed.png": "e0a76e2e0e460186fb2d6b8dc79da67c1580d45bb88c24a405e425b3db07bb7d",
+    "raw/blink-half.png": "1a0480c2d32f491ca837e9a59c2f7ff0c7be66866c2f524c3dbe40d0fdd0d1d7",
+    "references/closed-rest-rigid-v2.png": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+    "references/upright-open-neutral-v2.png": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+    "wave/open-mid.png": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+    "wave/open-peak.png": "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15",
+    "wave/open-smile.png": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc"
+  },
+  "status": "existing reviewed artwork derivation; controller integration pending",
+  "verification": {
+    "closed": {
+      "outsideEyeMaskChangedPixels": 0,
+      "sha256": "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6"
+    },
+    "half": {
+      "outsideEyeMaskChangedPixels": 0,
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b"
+    }
+  }
+}

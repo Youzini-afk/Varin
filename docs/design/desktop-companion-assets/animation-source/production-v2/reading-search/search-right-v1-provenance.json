@@ -1,0 +1,24 @@
+{
+  "status": "internal candidate; not runtime accepted",
+  "cue": "SCAN_SIDE_B",
+  "source": "shared/upright-open-neutral-v2.png",
+  "sourceSha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+  "raw": "search-right-v1-raw.png",
+  "rawSha256": "2a8769aaef1371c8815a9d19303a758023022336ab0faada9edb33ca05581b61",
+  "prompt": "search-right-v1-exactprompt.txt",
+  "candidate": "search-right-v1-candidate.png",
+  "candidateSha256": "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852",
+  "canvas": [
+    512,
+    512
+  ],
+  "normalization": "full raw square viewport resized; no bbox fit, head rotation, body warp or interpolated drawings",
+  "mask": "search-right-v1-edit-mask.png",
+  "outsideMaskExact": true,
+  "alphaCleanup": {
+    "islandPixels": 164,
+    "chromaEdgePixels": 177,
+    "whiteEdgePixels": 287,
+    "opaqueInteriorRGBUnchanged": true
+  }
+}

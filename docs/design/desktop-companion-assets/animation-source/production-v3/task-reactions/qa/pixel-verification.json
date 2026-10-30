@@ -1,0 +1,59 @@
+{
+  "arrival-chest": {
+    "canvas": [
+      512,
+      512
+    ],
+    "outsideEditMaskChangedPixels": 0
+  },
+  "error-locate": {
+    "canvas": [
+      512,
+      512
+    ],
+    "outsideEditMaskChangedPixels": 0
+  },
+  "error-observe": {
+    "canvas": [
+      512,
+      512
+    ],
+    "outsideEditMaskChangedPixels": 0
+  },
+  "explain-content": {
+    "canvas": [
+      512,
+      512
+    ],
+    "outsideEditMaskChangedPixels": 0
+  },
+  "explain-rise": {
+    "canvas": [
+      512,
+      512
+    ],
+    "outsideEditMaskChangedPixels": 0
+  },
+  "thought-blink": {
+    "canvas": [
+      512,
+      512
+    ],
+    "exactBase": "poses/thought-chin.png",
+    "outsideEyeMaskChangedPixels": 0
+  },
+  "thought-chin": {
+    "canvas": [
+      512,
+      512
+    ],
+    "outsideEditMaskChangedPixels": 0
+  },
+  "thought-rise": {
+    "canvas": [
+      512,
+      512
+    ],
+    "outsideEditMaskChangedPixels": 0
+  }
+}

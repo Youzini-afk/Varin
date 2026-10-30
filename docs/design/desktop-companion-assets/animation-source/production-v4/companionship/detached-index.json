@@ -1,0 +1,456 @@
+{
+  "geometryReference": "varin-upright-v2",
+  "pathBase": "production-v4",
+  "entries": [
+    {
+      "source": "companionship/frames/yawn-enter-1.png",
+      "sourceSHA256": "39f32613fc5f81600acfd82b2ae9a545f5dfdb8170b1cbbd514f07e72de4a756",
+      "detachedSource": "companionship/detached/yawn-enter-1.png",
+      "detachedSHA256": "716b64c3d64b4f31495626634098c4cf4f96a627c5857a62f4320950eeb0a1e6",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-enter-2.png",
+      "sourceSHA256": "12f83f5bae667150750a446c2e52528758409ae6ca65eaacc1c2436024dcbf08",
+      "detachedSource": "companionship/detached/yawn-enter-2.png",
+      "detachedSHA256": "1aa16339a8e23ed8059e70a86b6d4ac75cba9a14d5b5255ce12cc7844697327a",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-enter-3.png",
+      "sourceSHA256": "a1798d9b14e5d9daa9c835f9ab2c22088337f7dcdbfb54072dc3de2c11666078",
+      "detachedSource": "companionship/detached/yawn-enter-3.png",
+      "detachedSHA256": "fd6a5cadef2c241f30e77e78923f5c8e0122f1c8b8b6581bf337c53a1755c1d2",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8703a11c1d428788213124673a9edd31557dce70423e29ae51d386ab564da1c0",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-crest.png",
+      "sourceSHA256": "2f7de840280ac3feee5ab4bf5784d8db8eefd69cea859126e06d9ee6b715d11b",
+      "detachedSource": "companionship/detached/yawn-crest.png",
+      "detachedSHA256": "8f9801af9884e1cd6fcfba3596fc9443afc6ffc8012b1b937c0a72eb0770d879",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "7d4630a583ef104f383b659670c5dd4bd1d30580c39ac5459c47fb0ba8245784",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-return-1.png",
+      "sourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+      "detachedSource": "companionship/detached/yawn-return-1.png",
+      "detachedSHA256": "6826330ae9ba060eb215f774668e160f4a83e6ff39e28d63a6d041bc795fcc02",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-return-2.png",
+      "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+      "detachedSource": "companionship/detached/yawn-return-2.png",
+      "detachedSHA256": "d332f6e3608bf6b7e13da9664bd2c7c4754b38ab11bd86a604de1a40a54ada85",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/yawn-return-3.png",
+      "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+      "detachedSource": "companionship/detached/yawn-return-3.png",
+      "detachedSHA256": "191d5fc6afb65041398faa3e777913f96cf6d5df914aafd142a6f86c2e402a73",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "6bcb0a2cfccc8d4c78621d325ca5a40eb6cb476d1d2bbd430e8658b703fb8022",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/doze-relax.png",
+      "sourceSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+      "detachedSource": "companionship/detached/doze-relax.png",
+      "detachedSHA256": "28268ac09132c37d1b0a0cb7eb6550dc3602c9b1ed0cbb36b19632155247bc00",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/doze.png",
+      "sourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+      "detachedSource": "companionship/detached/doze.png",
+      "detachedSHA256": "3dbb685bed128323064fbdddf5183f21141918becf04bfc6353a665a5b3b96ad",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "77bda9c9033a662f0396c86d25aa9c8db6cdebc5c3b9d5c23b729d56c949156a",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/wake-aware.png",
+      "sourceSHA256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+      "detachedSource": "companionship/detached/wake-aware.png",
+      "detachedSHA256": "c0575a525f9712da812ec8b35c2f585c109f947fab25cdece50cac0f2a0c3ee1",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "69af45f01d39d5e94950a5daf2cb9f78a54cea5a592973bdfe7a009d563aeefc",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/wake-load-half.png",
+      "sourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+      "detachedSource": "companionship/detached/wake-load-half.png",
+      "detachedSHA256": "aecb95722d09a251c7ddd91eb498963884415ebba9663a141a628154e5e8006e",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/wake-support.png",
+      "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+      "detachedSource": "companionship/detached/wake-support.png",
+      "detachedSHA256": "1ee4bcf2ef34f32165ff42691413bf457c5918ef11e2b275bd4f40c294d51634",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "718cc809d77e4f2dec8ebae0a13d05483556d5c96c1d23b58aed95eef806788e",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/wake-unload.png",
+      "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+      "detachedSource": "companionship/detached/wake-unload.png",
+      "detachedSHA256": "9f95e70ba0f2724e18666ca1c7dd4adb5f1c4ae892cd126a65a942b584eb98e7",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "745b496b67b739ed02941d27df625d117aa2c4459be3fad9f3626b288fe62063",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/rest-settle.png",
+      "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+      "detachedSource": "companionship/detached/rest-settle.png",
+      "detachedSHA256": "41b6a5fa3ec378dda5d92aedb37493d53888b1bc5da1b9dcf19a4eb58cf9667b",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "c8b1f8b1be9a11c9f1fc742d792ed2e359d5016ac94c721a0e2cd5144c43fbff",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-enter-1.png",
+      "sourceSHA256": "1491bba9579f80b3c6b3cb6545e36263b0722adb907168b3e56af956e0efdafc",
+      "detachedSource": "companionship/detached/stretch-enter-1.png",
+      "detachedSHA256": "dafc18e472898fbb9c06019422fa41bf144d6fed9582f037a8e3f25a7b1bf6f0",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-enter-2.png",
+      "sourceSHA256": "15c3e91d1a404c64ed1605816421185cbcb14ea1b0fe8780dda66858905d305d",
+      "detachedSource": "companionship/detached/stretch-enter-2.png",
+      "detachedSHA256": "75b1a05ceb76a0a2d87514ac5761f5338f9634b4c540fd93345e00f28223f5de",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-enter-3.png",
+      "sourceSHA256": "96b736eef127aa332b93be47f9e8b1e590d3dfbc6289cba9182caea67899ec7b",
+      "detachedSource": "companionship/detached/stretch-enter-3.png",
+      "detachedSHA256": "c4bea9955576e9fbcd491afa01fd6b946fe9c6a822594f556a093c0c626cd59b",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "a5b47d91330231759fa8cb54aa2d5f8f95b48ff91bf4e6b8bdaa7fd5b9a27662",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-crest.png",
+      "sourceSHA256": "768a3e206ced3ded9a723b7ce0d86d57684cff9a3c0ff9a6b0d5a6e11dcbab16",
+      "detachedSource": "companionship/detached/stretch-crest.png",
+      "detachedSHA256": "c7bae32554a19175b1a577b71d05a28873139b908e64e1f0fff1353acdb159bc",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "58ee29bc58d9c788fecfdb3e66148d7adf8a4f30d500c9391b9207c06cdae667",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-return-1.png",
+      "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+      "detachedSource": "companionship/detached/stretch-return-1.png",
+      "detachedSHA256": "f9c21fb5a50b43d71bfea5fe4e0b93f05d01b3ca0fd85da4883887ead66d27a1",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-return-2.png",
+      "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+      "detachedSource": "companionship/detached/stretch-return-2.png",
+      "detachedSHA256": "4609ef24f8d58caa6a9e8fb617d1a32688b291f79f743b9671f4e8d0bdb50d76",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-return-3.png",
+      "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+      "detachedSource": "companionship/detached/stretch-return-3.png",
+      "detachedSHA256": "783f815ca1e0d7937073c10931f85c650de2848277b9816f7018fe8a74239d37",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "882416bb9da3704c41d4bca94d158a806fb0324d1357bc35653f2bb3a1f7640e",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/stretch-unload.png",
+      "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+      "detachedSource": "companionship/detached/stretch-unload.png",
+      "detachedSHA256": "17c39000dc1bb1d113baa00205554a2bbd0540a7d8a1aaef13be4486dccc51a1",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "38a094f6c88a0bee7be29349233c53e3f314f5d5ac0aba7695c79e99fa631c44",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-enter-1.png",
+      "sourceSHA256": "763073ab2c571513ff1c78d97ff024889bbababf2c4a9edfa99f3934314e75a7",
+      "detachedSource": "companionship/detached/hair-enter-1.png",
+      "detachedSHA256": "07d4b6a1528fe13479c3df49779bda0ded9530dec1312a72199bf3bfdac35a11",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-enter-2.png",
+      "sourceSHA256": "1d6b1c5c712ee1016de9c2db9d6626fab39a74c435d9b5f6ad8280ca910857c4",
+      "detachedSource": "companionship/detached/hair-enter-2.png",
+      "detachedSHA256": "062731851f38bfbefc7de7575708bb13439dfed6c1b61139e36dcf584e7eafd1",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-enter-3.png",
+      "sourceSHA256": "343550a2ebfbd3dbace43f991987d840cc86129db4a64edd247340b69aae51ab",
+      "detachedSource": "companionship/detached/hair-enter-3.png",
+      "detachedSHA256": "8a57afc588577edc45cfce1d00489f766ea67af90521ecd27d1630d0785edfd2",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "fc3af46b70234c13d682245d9f8343040c81d5291524f354ad1ce949b03c417f",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-contact-1.png",
+      "sourceSHA256": "cd27319fe19e9905a9f315f5e903eeac0882e369a7ed9a246cf9901b20ceaf6b",
+      "detachedSource": "companionship/detached/hair-contact-1.png",
+      "detachedSHA256": "1b22a1fe1721916ad8b22c9fc156e5f6d17e3ebfd81b54818eff0ad5735587a5",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-contact-2.png",
+      "sourceSHA256": "6fc5d6559b29421f174bfc3960ce93e11a9ebac0caea81050e7480efd89547f7",
+      "detachedSource": "companionship/detached/hair-contact-2.png",
+      "detachedSHA256": "d48dec14a276faa6cbcd562333d4254452b476229fb8b1e20679d987657d4025",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-contact-3.png",
+      "sourceSHA256": "4ed27dd08efdcfea379670b2ddcb244aa866b336108b0c6c3ef0910ac47d3f9f",
+      "detachedSource": "companionship/detached/hair-contact-3.png",
+      "detachedSHA256": "6b0924c12a4ceadc90d0335dc7e429058941497611d14d1b6797d53ba47a6446",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "f56c90efe9c9992173068541feee08d0a4aabb00e3aeb5ac19e9f8c9df525041",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-return-1.png",
+      "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+      "detachedSource": "companionship/detached/hair-return-1.png",
+      "detachedSHA256": "a890230998da4f69a70f8d9f76ac630831818c8fc7469e42a0113109a6d0bb8d",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-return-2.png",
+      "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+      "detachedSource": "companionship/detached/hair-return-2.png",
+      "detachedSHA256": "1184ba6a8224c5545614c81bb5229a0a61fb060e5931fb7ec709ac06d77608aa",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/hair-return-3.png",
+      "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+      "detachedSource": "companionship/detached/hair-return-3.png",
+      "detachedSHA256": "05e79a6c157fd4ca58e6194be79455d1645c482ab723b84aae3987c07f64cbff",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "15a86fb4224224eed2a57e1ce4d3cfcd96d9acd75d331f01b7449493767c862d",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-release.png",
+      "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+      "detachedSource": "companionship/detached/sleeve-release.png",
+      "detachedSHA256": "c7db2f05188b714a0e97755a559730c634d33bda358956adb971908230e63ec2",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-cross.png",
+      "sourceSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+      "detachedSource": "companionship/detached/sleeve-cross.png",
+      "detachedSHA256": "463ecc66776ca3a0d01663bdf19a8b47b6a483154f385f6157332f3745925a08",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-1.png",
+      "sourceSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+      "detachedSource": "companionship/detached/sleeve-brush-1.png",
+      "detachedSHA256": "66970420dab46f6b4acfd8737b579ae87a095ec33c3b812b4d04ff2a1f268453",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-2.png",
+      "sourceSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+      "detachedSource": "companionship/detached/sleeve-brush-2.png",
+      "detachedSHA256": "0c74305be651e986d2ecfa49388c9933db82801ea35a1d172b83cc5a44428877",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/sleeve-brush-3.png",
+      "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+      "detachedSource": "companionship/detached/sleeve-brush-3.png",
+      "detachedSHA256": "919ce309b29d3afaeda5e2b7461df47cffcf11924134d1065666d0461ffbd69d",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/comfort-1.png",
+      "sourceSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+      "detachedSource": "companionship/detached/comfort-1.png",
+      "detachedSHA256": "2dc099e5c410852110bce8ff65f507181d85849a74972d0623cfc80e02d3f39c",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/comfort-2.png",
+      "sourceSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+      "detachedSource": "companionship/detached/comfort-2.png",
+      "detachedSHA256": "d6407e684510ff055e9baafdfa7da89f4b46c590704f9e26d3270fe0576c4145",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/comfort-3.png",
+      "sourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+      "detachedSource": "companionship/detached/comfort-3.png",
+      "detachedSHA256": "114ac51e23c679e77941d2d7280c9e26efe6891a195b463b2ca484abe6cdc8c7",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/social-release.png",
+      "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+      "detachedSource": "companionship/detached/social-release.png",
+      "detachedSHA256": "21d472fb4f4b230c572acaab62957d41fb588f2f9f66e11431a14c8730be052d",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/social-wrist.png",
+      "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+      "detachedSource": "companionship/detached/social-wrist.png",
+      "detachedSHA256": "b40f4c9864c32a8bd7db916c475ce4c91fdf39b4504c2b8fcc6ca58030558209",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/social-lower.png",
+      "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+      "detachedSource": "companionship/detached/social-lower.png",
+      "detachedSHA256": "ac23a1936874625682a1155a4373cde417a8f05389402cb27bc64fba6fe7aaa5",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/blink-half.png",
+      "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+      "detachedSource": "companionship/detached/blink-half.png",
+      "detachedSHA256": "51c1930eb166e4bd585d092ae81a8a888109653f6e5f1b3e41dda7dd0cc2effe",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/blink-closed.png",
+      "sourceSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+      "detachedSource": "companionship/detached/blink-closed.png",
+      "detachedSHA256": "e90f40c6fd5738d3f5b9109d3ce455c6f0de11fb55e24277a581f093ac8018ae",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    },
+    {
+      "source": "companionship/frames/social-palm.png",
+      "sourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+      "detachedSource": "companionship/detached/social-palm.png",
+      "detachedSHA256": "ae97382d7191b7cebee4baa4ff9edb0a0a4ff168d5526e424fa6075048f63f5d",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "generatedFromInputSHA256": "bd67382e4f21eb1e2ae94e5cf15612de3ebe1a9c8853488c9078b6322542f5c7",
+      "stage": "same-pose generation; source identity and visual contact review required"
+    }
+  ]
+}

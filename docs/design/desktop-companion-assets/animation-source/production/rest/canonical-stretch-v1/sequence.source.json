@@ -1,0 +1,204 @@
+{
+  "id": "rest.closed-stretch-v1",
+  "family": "REST",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "seated-closed-neutral",
+  "exitPose": "seated-closed-neutral",
+  "loop": null,
+  "warning": "Authored shoulder/arm/sleeve stretch candidate; needs normal-speed inspection and return sleeve lag polish. No continuous repeated stretch loop.",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 900,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "seated-closed-neutral"
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-007.png",
+      "durationMs": 130,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "rest-stretched"
+    },
+    {
+      "source": "pose-008.png",
+      "durationMs": 220,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "rest-stretched"
+    },
+    {
+      "source": "pose-007.png",
+      "durationMs": 600,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "rest-stretched"
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 95,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "rest-stretch-transition"
+    },
+    {
+      "source": "pose-000.png",
+      "durationMs": 1800,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "transition",
+      "pose": "seated-closed-neutral"
+    }
+  ]
+}

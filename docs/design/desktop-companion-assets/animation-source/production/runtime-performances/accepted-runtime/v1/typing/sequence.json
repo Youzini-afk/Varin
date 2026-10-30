@@ -1,0 +1,211 @@
+{
+  "version": 1,
+  "id": "seated-work.canonical-typing-v2-pose-v1",
+  "family": "SEATED_WORK",
+  "stage": "motion-candidate",
+  "warning": "Accepted as a bounded working gesture or gaze bridge at320px; not a complete long-duration working performance.",
+  "reviewStatus": "accepted",
+  "kind": "action",
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "action": "editing",
+  "canvas": [
+    512,
+    512
+  ],
+  "durationMs": 990,
+  "loop": null,
+  "uniqueImages": 5,
+  "entryPose": "seated-open-screen-keyboard",
+  "exitPose": "seated-open-screen-keyboard",
+  "pages": [
+    {
+      "file": "atlas-000.png",
+      "size": [
+        1816,
+        998
+      ]
+    }
+  ],
+  "frames": [
+    {
+      "source": "frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 0,
+      "durationMs": 240,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "rest",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "startMs": 240,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "index-lift",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        456,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "startMs": 340,
+      "durationMs": 130,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "index-press",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        910,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-004.png",
+      "sha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+      "startMs": 470,
+      "durationMs": 100,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "middle-lift",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        1364,
+        2,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-005.png",
+      "sha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+      "startMs": 570,
+      "durationMs": 140,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "middle-press",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        501,
+        450,
+        495
+      ]
+    },
+    {
+      "source": "frame-006.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "startMs": 710,
+      "durationMs": 280,
+      "offset": [
+        45,
+        8
+      ],
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "phase": "typing",
+      "pose": "rest-return",
+      "exitTo": [],
+      "page": 0,
+      "rect": [
+        2,
+        2,
+        450,
+        495
+      ]
+    }
+  ]
+}

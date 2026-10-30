@@ -502,6 +502,16 @@ export class ThreadAdapter {
     return this.models.listModels();
   }
 
+  /** Bot sessions, follows and relations come from the same Catalog cut; no Storage decoration. */
+  async attention(signal?: AbortSignal) {
+    let replaced: Error | undefined;
+    const detach = this.runtime.onExit(error => { replaced = error; });
+    try {
+      const snapshot = await this.runtime.attention(signal);
+      if (replaced) throw replaced;
+      return snapshot;
+    } finally { detach?.(); }
+  }
   list(options: import('@varin/application-client').ThreadListOptions = {}, signal?: AbortSignal) {
     return this.runtime.threadCatalog(options, signal);
   }

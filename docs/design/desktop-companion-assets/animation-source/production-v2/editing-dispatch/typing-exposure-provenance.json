@@ -1,0 +1,12 @@
+{
+  "pose": "type-forward-hands-b",
+  "rawSHA256": "87e0a41196a0c216c2473da18801477dc7fc3cd465c7c5a01b03d6a5b719eeee",
+  "reference": "frames/type-forward.png",
+  "referenceSHA256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+  "sourceSHA256": "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d",
+  "exactPrompt": "exactprompts/type-forward-hands-b.txt",
+  "outsideHandsMaskExact": true,
+  "entireHeadNeckShouldersTorsoAboveY259Exact": true,
+  "changedPixels": 2474,
+  "status": "parent normal-speed review pending"
+}
