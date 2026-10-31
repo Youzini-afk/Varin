@@ -1,4 +1,4 @@
-import { requestFrame, type FrameHandle } from '@/lib/motion/frame';
+import { requestFrame, requestAfterFrame, type FrameHandle } from '@/lib/motion/frame';
 import { documentMotionLevel, type MotionLevel } from '@/lib/motion/preference';
 import type { BotFigureState } from './botPresentation';
 import { VARIN_FIGURE_BLUSH, VARIN_FIGURE_LAYERS, type VarinFigureLayer } from './varinFigureArt';
@@ -46,6 +46,15 @@ const el = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Attrs = {}, par
   for (const key in attrs) node.setAttribute(key, String(attrs[key]));
   parent?.appendChild(node);
   return node;
+};
+// Attribute reads do not measure layout. Avoid invalidating the SVG paint tree for unchanged ink,
+// paths and opacity; moving transforms keep their original precision and timing.
+const attr = (node: Element, name: string, value: string | number): void => {
+  const next = String(value);
+  if (node.getAttribute(name) !== next) node.setAttribute(name, next);
+};
+const display = (node: SVGElement, value: string): void => {
+  if (node.style.display !== value) node.style.display = value;
 };
 const clamp = (v: number, a = 0, b = 1): number => Math.min(b, Math.max(a, v));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -216,11 +225,19 @@ const MICRO: readonly (Move | 'flick')[] = ['wink', 'nod', 'tilt', 'flick', 'tap
 
 // ---------------------------------------------------------------- shared pointer and environment
 let pointer: { x: number; y: number; at: number } | null = null;
-let pointerTracked = false;
-const trackPointer = (): void => {
-  if (pointerTracked || typeof window === 'undefined') return;
-  pointerTracked = true;
-  window.addEventListener('pointermove', event => { pointer = { x: event.clientX, y: event.clientY, at: performance.now() }; }, { passive: true });
+const pointerSubscribers = new Set<() => void>();
+const onPointerMove = (event: PointerEvent): void => {
+  pointer = { x: event.clientX, y: event.clientY, at: performance.now() };
+  for (const notify of pointerSubscribers) notify();
+};
+const trackPointer = (notify: () => void): (() => void) => {
+  const owner = window;
+  if (!pointerSubscribers.size) owner.addEventListener('pointermove', onPointerMove, { passive: true });
+  pointerSubscribers.add(notify);
+  return () => {
+    pointerSubscribers.delete(notify);
+    if (!pointerSubscribers.size) { owner.removeEventListener('pointermove', onPointerMove); pointer = null; }
+  };
 };
 const canAnimate = (): boolean => typeof globalThis.requestAnimationFrame === 'function';
 let seq = 0;
@@ -254,6 +271,7 @@ export class VarinFigureRig {
   private readonly uid = `vf${++seq}`;
   private svg!: SVGSVGElement;
   private state: BotFigureState;
+  private poseState: BotFigureState | null = null;
   private t = 0;
   private stateAt = 0;
   private p: Params = { ...P0 };
@@ -279,6 +297,8 @@ export class VarinFigureRig {
   private snapping = false;
   private level: MotionLevel = 'full';
   private frame: FrameHandle | null = null;
+  private geometryFrame: FrameHandle | null = null;
+  private pointerBounds: DOMRect | null = null;
   private lastTime: number | null = null;
   private onscreen = true;
   private disposed = false;
@@ -330,7 +350,13 @@ export class VarinFigureRig {
   setAccent(accent: FigureAccent): void {
     if (this.disposed || accent.key === this.accent.key) return;
     this.accent = accent;
-    for (const part of this.accented) part.node.setAttribute(part.attr, accent.tint(part.source));
+    for (const part of this.accented) attr(part.node, part.attr, accent.tint(part.source));
+    // Static figures have no subsequent simulation frame to update their aura.
+    if (!this.animated) {
+      const [r, g, b] = this.glowColor();
+      this.p.gr = this.goal.gr = r; this.p.gg = this.goal.gg = g; this.p.gb = this.goal.gb = b;
+      this.v.gr = this.v.gg = this.v.gb = 0;
+    }
     this.render();
   }
 
@@ -338,6 +364,8 @@ export class VarinFigureRig {
     this.disposed = true;
     this.frame?.cancel();
     this.frame = null;
+    this.geometryFrame?.cancel();
+    this.geometryFrame = null;
     for (const cleanup of this.cleanups.splice(0)) cleanup();
     this.svg.remove();
   }
@@ -406,6 +434,7 @@ export class VarinFigureRig {
       this.svg.setAttribute('viewBox', this.view.join(' '));
       this.ledge?.setAttribute('x', String(this.view[0] - 40));
       this.ledge?.setAttribute('width', String(span + 80));
+      this.measurePointer();
     };
     resize();
     if (typeof ResizeObserver !== 'function') return;
@@ -424,6 +453,8 @@ export class VarinFigureRig {
     this.stateAt = this.t;
     this.mem = { nextKey: 0 };
     this.action = null;
+    // Delayed gestures belong to the state that scheduled them, never to its successor.
+    this.timers = [];
     this.host.dataset.state = state;
     if (this.animated) {
       // A figure appears already in its pose; later changes move into the new one.
@@ -452,13 +483,24 @@ export class VarinFigureRig {
   }
 
   private watch(): void {
-    trackPointer();
+    this.cleanups.push(trackPointer(this.measurePointer));
+    window.addEventListener('scroll', this.measurePointer, { capture: true, passive: true });
+    window.addEventListener('resize', this.measurePointer, { passive: true });
+    this.cleanups.push(() => {
+      window.removeEventListener('scroll', this.measurePointer, true);
+      window.removeEventListener('resize', this.measurePointer);
+    });
+    if (!this.wide && typeof ResizeObserver === 'function') {
+      const ro = new ResizeObserver(this.measurePointer);
+      ro.observe(this.host);
+      this.cleanups.push(() => ro.disconnect());
+    }
     const onVisibility = (): void => this.run();
     document.addEventListener('visibilitychange', onVisibility);
     this.cleanups.push(() => document.removeEventListener('visibilitychange', onVisibility));
     if (typeof IntersectionObserver === 'function') {
       const io = new IntersectionObserver(entries => {
-        for (const entry of entries) this.onscreen = entry.isIntersecting;
+        for (const entry of entries) this.onscreen = entry.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
         this.run();
       }, { rootMargin: '64px 0px' });
       io.observe(this.host);
@@ -470,7 +512,7 @@ export class VarinFigureRig {
         if (level === this.level) return;
         this.level = level;
         if (level === 'full') this.run();
-        else { this.clearFx(); this.settle(STATES[this.state].stillAt ?? 2.2); }
+        else { this.clearFx(); this.settle(STATES[this.state].stillAt ?? 2.2); this.run(); }
       });
       mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-motion'] });
       this.cleanups.push(() => mo.disconnect());
@@ -485,7 +527,13 @@ export class VarinFigureRig {
   }
 
   private run(): void {
-    if (!this.running || this.frame) return;
+    if (!this.running) {
+      this.frame?.cancel(); this.frame = null; this.lastTime = null;
+      this.geometryFrame?.cancel(); this.geometryFrame = null; this.pointerBounds = null;
+      return;
+    }
+    this.measurePointer();
+    if (this.frame || STATES[this.state].noLoops && this.atRest()) return;
     this.lastTime = null;
     this.frame = requestFrame(this.tick);
   }
@@ -498,8 +546,20 @@ export class VarinFigureRig {
     this.step(dt);
     this.stepFx(dt);
     this.render();
-    this.frame = requestFrame(this.tick);
+    if (!STATES[this.state].noLoops || !this.atRest()) this.frame = requestFrame(this.tick);
   };
+
+  /** Stop a non-looping pose only once its transition and already emitted effects have settled.
+   * 0.001 in the 1254-unit drawing is far below a rendered pixel, including angular transforms. */
+  private atRest(): boolean {
+    const near = (a: number, b = 0): boolean => Math.abs(a - b) < .001;
+    return this.poseState === this.state && !this.action && !this.timers.length && !this.parts.length && !this.pops.length
+      && PARAMS.every(key => near(this.p[key], this.goal[key]) && near(this.v[key] ?? 0))
+      && near(this.sec.a, -6 * this.p.droop) && near(this.sec.va) && near(this.sec.r) && near(this.sec.vr)
+      && [this.eyes.L, this.eyes.R, this.mouth].every(shape => near(shape.amt, 1) && near(shape.va))
+      && this.eyes.L.cur === this.eyeGoal.L && this.eyes.R.cur === this.eyeGoal.R && this.mouth.cur === this.mouthGoal
+      && (['alert', 'zz', 'dots'] as const).every(key => near(this.fxAmt[key], this.fxGoal[key] ? 1 : 0));
+  }
 
   private clearFx(): void {
     for (const q of this.parts) q.node.remove();
@@ -542,10 +602,11 @@ export class VarinFigureRig {
         if (w > .35) { if (o.eyes) eyeL = eyeR = o.eyes; if (o.eyeL) eyeL = o.eyeL; if (o.eyeR) eyeR = o.eyeR; if (o.mouth) mouth = o.mouth; }
       }
     }
-    const [r, g, b] = hex(TINTED_GLOW.has(this.state) ? this.accent.tint(GLOW[this.state]) : GLOW[this.state]);
+    const [r, g, b] = this.glowColor();
     goal.gr = r; goal.gg = g; goal.gb = b;
     goal.glow = st.glow * (st.pulse && L ? .78 + .22 * Math.sin(2 * Math.PI * lt / 2.2) : 1);
     this.goal = goal;
+    this.poseState = this.state;
     this.eyeGoal = { L: eyeL === 'squeeze' ? 'squeezeL' : eyeL, R: eyeR === 'squeeze' ? 'squeezeR' : eyeR };
     this.mouthGoal = mouth;
     this.fxGoal = { ...st.fx, ...q.fx };
@@ -591,9 +652,23 @@ export class VarinFigureRig {
     m.amt = clamp(m.amt, 0, 1.2);
   }
 
+  private glowColor(): [number, number, number] {
+    return hex(TINTED_GLOW.has(this.state) ? this.accent.tint(GLOW[this.state]) : GLOW[this.state]);
+  }
+
+  // Read geometry once after this frame's layout writers, and reuse it during spring integration.
+  // Pointer, scroll and resize invalidate it; animation frames themselves do not force reflow.
+  private measurePointer = (): void => {
+    if (this.geometryFrame || !this.running || !STATES[this.state].follow || !pointer) return;
+    this.geometryFrame = requestAfterFrame(() => {
+      this.geometryFrame = null;
+      if (this.running) this.pointerBounds = this.host.getBoundingClientRect();
+    });
+  };
+
   private pointerLook(): [number, number] {
-    if (!pointer || typeof this.host.getBoundingClientRect !== 'function') return [0, 0];
-    const r = this.host.getBoundingClientRect(), [x0, y0, span] = this.view, s = r.width / span;
+    if (!pointer || !this.pointerBounds) return [0, 0];
+    const r = this.pointerBounds, [x0, y0, span] = this.view, s = r.width / span;
     const dx = pointer.x - (r.left + (628 - x0) * s), dy = pointer.y - (r.top + (690 - y0) * s);
     const d = Math.hypot(dx, dy) || 1, k = Math.min(1, d / (r.width * .55 || 1));
     return [dx / d * k, dy / d * k];
@@ -607,8 +682,8 @@ export class VarinFigureRig {
       if (q.drag) { q.vx *= 1 - q.drag * dt; q.vy *= 1 - q.drag * .4 * dt; }
       q.x += q.vx * dt; q.y += q.vy * dt; q.r += q.vr * dt;
       const fade = 1 - ramp(q.life / q.max, .6, 1), grow = Math.min(1, q.life / .12);
-      q.node.setAttribute('transform', `translate(${q.x.toFixed(1)} ${q.y.toFixed(1)}) rotate(${q.r.toFixed(0)}) scale(${(q.s * grow).toFixed(3)})`);
-      q.node.setAttribute('opacity', fade.toFixed(3));
+      attr(q.node, 'transform', `translate(${q.x.toFixed(1)} ${q.y.toFixed(1)}) rotate(${q.r.toFixed(0)}) scale(${(q.s * grow).toFixed(3)})`);
+      attr(q.node, 'opacity', fade.toFixed(3));
       return true;
     });
     this.pops = this.pops.filter(q => {
@@ -617,8 +692,8 @@ export class VarinFigureRig {
       if (x >= 1) { q.node.remove(); return false; }
       const pop = x < .25 ? 1 + .35 * Math.sin(x / .25 * Math.PI) * (1 - x / .25) : 1;
       const s = Math.min(1, x / .14) * pop, spin = q.kind === 'question' ? 8 * Math.sin(q.life * 7) : q.kind === 'sparkle' ? q.life * 140 : 0;
-      q.node.setAttribute('transform', `translate(${q.x + q.vx * q.life} ${q.y + q.vy * q.life}) rotate(${spin}) scale(${s})`);
-      q.node.setAttribute('opacity', (1 - ramp(x, .7, 1)).toFixed(3));
+      attr(q.node, 'transform', `translate(${q.x + q.vx * q.life} ${q.y + q.vy * q.life}) rotate(${spin}) scale(${s})`);
+      attr(q.node, 'opacity', (1 - ramp(x, .7, 1)).toFixed(3));
       return true;
     });
   }
@@ -627,66 +702,66 @@ export class VarinFigureRig {
   private render(): void {
     const p = this.p, t = this.t, c = this.compact, L = this.L;
     const fy = c ? p.fy * .12 : p.fy, frot = c ? p.frot * .5 : p.frot, fsx = p.fsx * (1 + (1 - p.fsy) * .55);
-    this.fig.setAttribute('transform', `translate(${PIVOT[0]} ${PIVOT[1] + fy}) rotate(${frot}) scale(${fsx} ${p.fsy}) translate(${-PIVOT[0]} ${-PIVOT[1]})`);
-    this.feat.setAttribute('transform', `translate(${p.featX + p.lookX * 4} ${p.featY + p.lookY * 3})`);
+    attr(this.fig, 'transform', `translate(${PIVOT[0]} ${PIVOT[1] + fy}) rotate(${frot}) scale(${fsx} ${p.fsy}) translate(${-PIVOT[0]} ${-PIVOT[1]})`);
+    attr(this.feat, 'transform', `translate(${p.featX + p.lookX * 4} ${p.featY + p.lookY * 3})`);
     const blink = Math.max(bump(t - this.blinkAt, 0, .17), bump(t - this.blinkAt2, 0, .17));
     for (const k of ['L', 'R'] as const) {
       const e = this.eyes[k], [cx, cy] = EYE[k], amt = Math.max(.001, e.amt), lx = p.lookX * 13, ly = p.lookY * 9;
       if (e.cur === 'open') {
         const sy = amt * p.eyeY * (1 - .95 * blink);
-        e.open.setAttribute('transform', `translate(${cx + lx} ${cy + ly}) scale(${p.eyeS} ${p.eyeS * sy}) translate(${-cx} ${-cy})`);
-        e.open.setAttribute('opacity', String(1 - .45 * p.eyeDim));
+        attr(e.open, 'transform', `translate(${cx + lx} ${cy + ly}) scale(${p.eyeS} ${p.eyeS * sy}) translate(${-cx} ${-cy})`);
+        attr(e.open, 'opacity', String(1 - .45 * p.eyeDim));
         const twinkle = 1 + .14 * Math.sin(t * 2.6 + (k === 'L' ? 0 : 1.3)) * L;
-        e.hl.setAttribute('transform', `translate(${HL[k][0] + p.lookX * 5} ${HL[k][1] + p.lookY * 4}) scale(${twinkle}) translate(${-HL[k][0]} ${-HL[k][1]})`);
-        e.hl.setAttribute('opacity', String(1 - p.eyeDim));
-        e.hl2.setAttribute('opacity', String(clamp(p.spark) * (1 - p.eyeDim)));
-        e.open.style.display = ''; e.alt.style.display = 'none';
+        attr(e.hl, 'transform', `translate(${HL[k][0] + p.lookX * 5} ${HL[k][1] + p.lookY * 4}) scale(${twinkle}) translate(${-HL[k][0]} ${-HL[k][1]})`);
+        attr(e.hl, 'opacity', String(1 - p.eyeDim));
+        attr(e.hl2, 'opacity', String(clamp(p.spark) * (1 - p.eyeDim)));
+        display(e.open, ''); display(e.alt, 'none');
       } else {
-        e.open.style.display = 'none'; e.alt.style.display = '';
-        e.alt.setAttribute('d', ALT[e.cur](cx));
-        e.alt.setAttribute('transform', `translate(${cx + lx * .4} ${cy}) scale(1 ${amt}) translate(${-cx} ${-cy})`);
+        display(e.open, 'none'); display(e.alt, '');
+        attr(e.alt, 'd', ALT[e.cur](cx));
+        attr(e.alt, 'transform', `translate(${cx + lx * .4} ${cy}) scale(1 ${amt}) translate(${-cx} ${-cy})`);
       }
     }
     const current = this.mouth.cur as Mouth;
-    for (const key of Object.keys(this.mouths) as Mouth[]) this.mouths[key].style.display = key === current ? '' : 'none';
+    for (const key of Object.keys(this.mouths) as Mouth[]) display(this.mouths[key], key === current ? '' : 'none');
     const ma = Math.max(.001, this.mouth.amt), breathe = current === 'sleep' ? 1 + .18 * Math.sin(t * 1.35) * L : 1;
     this.mouths[current].setAttribute('transform', `translate(627 762) scale(${Math.min(1, ma * 1.15) * breathe} ${ma * breathe}) translate(-627 -762)`);
     this.brows.forEach((g, i) => {
       const k = i ? 'R' : 'L', [bx, by] = BROW[k];
-      g.setAttribute('transform', `translate(0 ${p[k === 'L' ? 'browL' : 'browR'] + p.lookY * 3}) rotate(${p[k === 'L' ? 'browLr' : 'browRr']} ${bx} ${by})`);
+      attr(g, 'transform', `translate(0 ${p[k === 'L' ? 'browL' : 'browR'] + p.lookY * 3}) rotate(${p[k === 'L' ? 'browLr' : 'browRr']} ${bx} ${by})`);
     });
     for (const b of this.blushes) {
       const s = 1 + .12 * clamp(p.blush - 1);
-      b.g.setAttribute('transform', `translate(${b.cx} ${b.cy}) scale(${s}) translate(${-b.cx} ${-b.cy})`);
-      b.e.setAttribute('opacity', String(clamp(p.blush)));
-      b.e.setAttribute('fill', p.blush > 1 ? '#f2b3a9' : '#f3c4ba');
-      b.lines.setAttribute('opacity', String(clamp(p.shy)));
+      attr(b.g, 'transform', `translate(${b.cx} ${b.cy}) scale(${s}) translate(${-b.cx} ${-b.cy})`);
+      attr(b.e, 'opacity', String(clamp(p.blush)));
+      attr(b.e, 'fill', p.blush > 1 ? '#f2b3a9' : '#f3c4ba');
+      attr(b.lines, 'opacity', String(clamp(p.shy)));
     }
-    this.ahoge.setAttribute('transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
-    this.bowTail.setAttribute('transform', `rotate(${this.sec.r} 1030 540)`);
-    this.bowLoop.setAttribute('transform', `rotate(${-.7 * this.sec.r + 1.3 * Math.sin(t * 1.7) * L} 1066 528)`);
+    attr(this.ahoge, 'transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
+    attr(this.bowTail, 'transform', `rotate(${this.sec.r} 1030 540)`);
+    attr(this.bowLoop, 'transform', `rotate(${-.7 * this.sec.r + 1.3 * Math.sin(t * 1.7) * L} 1066 528)`);
     const sweep = (t - this.sheenAt) / .95;
     if (sweep >= 0 && sweep < 1) {
-      this.sheenRect.setAttribute('opacity', '1');
-      this.sheenRect.setAttribute('transform', `rotate(-18 628 600) translate(${lerp(-200, 1500, smooth(sweep))} 0)`);
-    } else this.sheenRect.setAttribute('opacity', '0');
+      attr(this.sheenRect, 'opacity', '1');
+      attr(this.sheenRect, 'transform', `rotate(-18 628 600) translate(${lerp(-200, 1500, smooth(sweep))} 0)`);
+    } else attr(this.sheenRect, 'opacity', '0');
     const hand = (h: { g: SVGGElement; sh: SVGEllipseElement }, x: number, y: number, s: number): void => {
-      h.g.setAttribute('transform', `translate(${x} ${y}) scale(${s})`);
-      h.g.style.display = c ? 'none' : '';
-      h.sh.setAttribute('opacity', String(lerp(.12, .22, clamp(1 - (HAND.L[1] - y) / 90))));
+      attr(h.g, 'transform', `translate(${x} ${y}) scale(${s})`);
+      display(h.g, c ? 'none' : '');
+      attr(h.sh, 'opacity', String(lerp(.12, .22, clamp(1 - (HAND.L[1] - y) / 90))));
     };
     hand(this.hands[0], p.hLx, p.hLy, p.hLs);
     hand(this.hands[1], p.hRx, p.hRy, p.hRs);
     const color = `rgb(${p.gr | 0},${p.gg | 0},${p.gb | 0})`;
-    for (const stop of this.glowStops) stop.setAttribute('stop-color', color);
-    this.glowStops[0].setAttribute('stop-opacity', String(clamp(p.glow)));
-    this.glowStops[1].setAttribute('stop-opacity', String(clamp(p.glow) * .35));
+    for (const stop of this.glowStops) attr(stop, 'stop-color', color);
+    attr(this.glowStops[0], 'stop-opacity', String(clamp(p.glow)));
+    attr(this.glowStops[1], 'stop-opacity', String(clamp(p.glow) * .35));
     const grey = clamp(p.grey);
     if (grey > .01) {
       const s = 1 - .88 * grey, light = 1 - .22 * grey, lr = .2126 * (1 - s), lg = .7152 * (1 - s), lb = .0722 * (1 - s);
       const values = [lr + s, lg, lb, 0, 0, lr, lg + s, lb, 0, 0, lr, lg, lb + s, 0, 0, 0, 0, 0, 1, 0];
-      this.matrix.setAttribute('values', values.map((v, i) => (i % 5 < 3 && i < 15 ? v * light : v).toFixed(4)).join(' '));
-      if (!this.matrixOn) { this.fig.setAttribute('filter', `url(#${this.uid}f)`); this.matrixOn = true; }
+      attr(this.matrix, 'values', values.map((v, i) => (i % 5 < 3 && i < 15 ? v * light : v).toFixed(4)).join(' '));
+      if (!this.matrixOn) { attr(this.fig, 'filter', `url(#${this.uid}f)`); this.matrixOn = true; }
     } else if (this.matrixOn) { this.fig.removeAttribute('filter'); this.matrixOn = false; }
     this.renderFx();
   }
@@ -695,23 +770,23 @@ export class VarinFigureRig {
     const t = this.t, a = this.fxAmt, c = this.compact, L = this.L;
     const bw = a.alert;
     if (bw > .01) {
-      const [x, y] = c ? [1020, 300] : [1132, 142];
+      const [x, y] = c ? [985, 330] : [1132, 142];
       const scale = (c ? 1.7 : 1) * (bw < .999 ? 1 + .25 * Math.sin(bw * Math.PI) : 1) * bw;
-      this.badge.setAttribute('transform', `translate(${x} ${y}) scale(${scale})`);
-      this.badge.setAttribute('opacity', String(clamp(bw * 1.3)));
+      attr(this.badge, 'transform', `translate(${x} ${y}) scale(${scale})`);
+      attr(this.badge, 'opacity', String(clamp(bw * 1.3)));
       const ph = (t % 1.6) / 1.6;
-      this.badgeRing.setAttribute('r', String(44 + ph * 36));
-      this.badgeRing.setAttribute('opacity', String(L ? .6 * (1 - ph) : 0));
-    } else this.badge.setAttribute('opacity', '0');
+      attr(this.badgeRing, 'r', String(44 + ph * 36));
+      attr(this.badgeRing, 'opacity', String(L ? .6 * (1 - ph) : 0));
+    } else attr(this.badge, 'opacity', '0');
     this.zz.forEach((z, i) => {
-      const ph = L ? ((t * .3) + i / 3) % 1 : [.35, .62, .9][i], [x, y] = c ? [1000, 260] : [1000, 300];
-      z.setAttribute('transform', `translate(${x + ph * 120 + i * 8} ${y - ph * 210}) scale(${(c ? 1.6 : 1) * (.65 + ph * .8)})`);
-      z.setAttribute('opacity', String(a.zz * Math.sin(Math.PI * ph)));
+      const ph = L ? ((t * .3) + i / 3) % 1 : [.35, .62, .9][i], [x, y] = c ? [850, 500] : [1000, 300];
+      attr(z, 'transform', `translate(${x + ph * 120 + i * 8} ${y - ph * 210}) scale(${(c ? 1.6 : 1) * (.65 + ph * .8)})`);
+      attr(z, 'opacity', String(a.zz * Math.sin(Math.PI * ph)));
     });
     this.dots.forEach((d, i) => {
       const pulse = L ? Math.max(0, Math.sin(2 * Math.PI * (t * .9 - i * .2))) : .5, show = clamp(a.dots * 3 - i * .8);
-      d.n.setAttribute('opacity', String(show * (.55 + .4 * pulse)));
-      d.n.setAttribute('transform', `translate(${d.x} ${d.y}) scale(${(c ? 1.4 : 1) * (1 + .16 * pulse) * (.4 + .6 * show)}) translate(${-d.x} ${-d.y})`);
+      attr(d.n, 'opacity', String(show * (.55 + .4 * pulse)));
+      attr(d.n, 'transform', `translate(${d.x} ${d.y}) scale(${(c ? 1.4 : 1) * (1 + .16 * pulse) * (.4 + .6 * show)}) translate(${-d.x} ${-d.y})`);
     });
   }
 
@@ -870,6 +945,7 @@ export class VarinFigureRig {
     el('rect', { x: -7, y: -26, width: 14, height: 32, rx: 7, fill: '#3a2a12' }, this.badge);
     el('circle', { cx: 0, cy: 19, r: 7.5, fill: '#3a2a12' }, this.badge);
     this.zz = [0, 1, 2].map(() => el('path', { d: 'M-17 -15 H17 L-17 15 H17', fill: 'none', style: MARK_STROKE, 'stroke-width': 7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0 }, this.fxFront));
-    this.dots = [[236, 238, 15], [172, 176, 21], [102, 106, 28]].map(([x, y, r]) => ({ x, y, n: el('circle', { cx: x, cy: y, r, style: MARK_FILL, opacity: 0 }, this.fxFront) }));
+    const dots = this.compact ? [[460, 440, 15], [420, 385, 21], [385, 312, 28]] : [[236, 238, 15], [172, 176, 21], [102, 106, 28]];
+    this.dots = dots.map(([x, y, r]) => ({ x, y, n: el('circle', { cx: x, cy: y, r, style: MARK_FILL, opacity: 0 }, this.fxFront) }));
   }
 }
