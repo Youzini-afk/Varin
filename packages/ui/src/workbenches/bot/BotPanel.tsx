@@ -61,7 +61,7 @@ function BotStage() {
       </DropdownMenu>
     </div>
     <div className="bot-stage-figure">
-      <BotFigure key={bot.id} className="bot-figure-arrive" state={model.figure} size={112} label={bot.name} />
+      <BotFigure key={bot.id} className="bot-figure-arrive" state={model.figure} size={216} wide label={bot.name} />
       <button type="button" className="bot-stage-edit" aria-label={t('bot.stage.editProfile')} title={t('bot.stage.editProfile')} onClick={model.openProfile}>
         <Icon name="pencil" className="size-4" />
       </button>

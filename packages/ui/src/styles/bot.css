@@ -97,7 +97,7 @@
 
 /* Stage: fixed above the tabs; only another Bot changes it (§5.1). */
 .bot-stage {
-  position: relative; flex: none; height: 232px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  position: relative; flex: none; height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
   padding: 0 18px 14px; overflow: hidden;
   transition: height var(--motion-dur-glide) var(--motion-ease-glide), padding var(--motion-dur-glide) var(--motion-ease-glide);
 }
@@ -105,15 +105,16 @@
   position: absolute; inset: 0; pointer-events: none; opacity: .9;
   background-image: linear-gradient(to right, var(--border) 1px, transparent 1px), linear-gradient(to bottom, var(--border) 1px, transparent 1px);
   background-size: 22px 22px; background-position: center 14px;
-  -webkit-mask-image: radial-gradient(ellipse 58% 62% at 50% 44%, #000 0%, transparent 78%);
-  mask-image: radial-gradient(ellipse 58% 62% at 50% 44%, #000 0%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 72% 70% at 50% 40%, #000 0%, transparent 80%);
+  mask-image: radial-gradient(ellipse 72% 70% at 50% 40%, #000 0%, transparent 80%);
   transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 .bot-stage-menu { position: absolute; top: 8px; right: 8px; z-index: 2; }
-.bot-stage-figure { position: relative; z-index: 1; margin-bottom: 12px; }
-/* A round edit badge sits on the figure's lower right corner, cut out of the stage by a ring of its colour. */
+/* The figure spans the stage; her ledge runs from edge to edge like a window sill. */
+.bot-stage-figure { position: relative; z-index: 1; align-self: stretch; margin: 0 -18px 10px; }
+/* A round edit badge sits on the ledge at her lower right, cut out of the stage by a ring of its colour. */
 .bot-stage-edit {
-  position: absolute; right: -10px; bottom: -6px; display: flex; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 50%;
+  position: absolute; left: calc(50% + 100px); bottom: -2px; display: flex; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 50%;
   color: var(--foreground); background: color-mix(in srgb, var(--foreground) 12%, var(--background)); box-shadow: 0 0 0 3px var(--background);
   transition: background-color var(--motion-dur-snap) var(--motion-ease-snap), scale var(--motion-dur-snap) var(--motion-ease-snap);
 }
@@ -134,7 +135,7 @@
 }
 @media (max-height: 719px) {
   .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
-  .bot-stage-figure { margin: 0; }
+  .bot-stage-figure { align-self: auto; margin: 0; }
   .bot-stage-figure .bot-figure { width: 40px !important; height: 40px !important; }
   .bot-stage-text { align-items: flex-start; }
   .bot-stage-name { padding: 0; font-size: 14px; line-height: 1.35; }
@@ -144,7 +145,7 @@
 }
 /* In the phone sheet the stage is always the compact row, so the tabs get the room (§8). */
 .mobile-bottom-sheet .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
-.mobile-bottom-sheet .bot-stage-figure { margin: 0; }
+.mobile-bottom-sheet .bot-stage-figure { align-self: auto; margin: 0; }
 .mobile-bottom-sheet .bot-stage-figure .bot-figure { width: 40px !important; height: 40px !important; }
 .mobile-bottom-sheet .bot-stage-text { align-items: flex-start; }
 .mobile-bottom-sheet .bot-stage-name { padding: 0; font-size: 14px; line-height: 1.35; }

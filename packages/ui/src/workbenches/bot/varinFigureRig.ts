@@ -16,9 +16,10 @@ import { VARIN_FIGURE_BLUSH, VARIN_FIGURE_LAYERS, type VarinFigureLayer } from '
  */
 
 const NS = 'http://www.w3.org/2000/svg';
-const VIEW_FULL = '34 -24 1192 1192';
-const VIEW_ORIGIN = [34, -24, 1192] as const;
-const VIEW_HEAD = '330 236 750 750';
+type View = readonly [x: number, y: number, width: number, height: number];
+const VIEW_FULL: View = [34, -24, 1192, 1192];
+const VIEW_HEAD: View = [330, 236, 750, 750];
+const CENTER_X = 628;
 const PIVOT = [628, 1100] as const;
 const SILL = 1100;
 const EYE = { L: [489, 706], R: [763, 706] } as const;
@@ -230,12 +231,17 @@ export interface VarinFigureOptions {
   compact: boolean;
   /** Pose only, no loops. */
   still: boolean;
+  /** Fill the host's width: the scene widens around her and the ledge runs edge to edge. */
+  wide?: boolean;
 }
 
 export class VarinFigureRig {
   private readonly host: HTMLElement;
   private readonly compact: boolean;
+  private readonly wide: boolean;
   private readonly posed: boolean;
+  private view: View;
+  private ledge: SVGRectElement | null = null;
   private readonly uid = `vf${++seq}`;
   private svg!: SVGSVGElement;
   private state: BotFigureState;
@@ -293,9 +299,12 @@ export class VarinFigureRig {
   constructor(host: HTMLElement, options: VarinFigureOptions) {
     this.host = host;
     this.compact = options.compact;
+    this.wide = Boolean(options.wide) && !options.compact;
+    this.view = options.compact ? VIEW_HEAD : VIEW_FULL;
     this.posed = options.still || options.compact || !canAnimate();
     this.state = options.state;
     this.build();
+    if (this.wide) this.fitWidth();
     this.level = documentMotionLevel();
     if (!this.posed) this.watch();
     this.enterState(options.state, true);
@@ -369,6 +378,24 @@ export class VarinFigureRig {
   }
 
   // ------------------------------------------------------------ lifecycle
+  /** Widen the scene to the host's aspect ratio, keeping her centred and the ledge full width. */
+  private fitWidth(): void {
+    const resize = (): void => {
+      const width = this.host.clientWidth, height = this.host.clientHeight;
+      if (!width || !height) return;
+      const span = Math.max(VIEW_FULL[2], VIEW_FULL[3] * width / height);
+      this.view = [CENTER_X - span / 2, VIEW_FULL[1], span, VIEW_FULL[3]];
+      this.svg.setAttribute('viewBox', this.view.join(' '));
+      this.ledge?.setAttribute('x', String(this.view[0] - 40));
+      this.ledge?.setAttribute('width', String(span + 80));
+    };
+    resize();
+    if (typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver(resize);
+    ro.observe(this.host);
+    this.cleanups.push(() => ro.disconnect());
+  }
+
   private get animated(): boolean { return !this.posed && !this.snapping && this.level === 'full'; }
   /** 1 when loops may play. */
   private get L(): number { return this.animated && !STATES[this.state].noLoops ? 1 : 0; }
@@ -548,7 +575,7 @@ export class VarinFigureRig {
 
   private pointerLook(): [number, number] {
     if (!pointer || typeof this.host.getBoundingClientRect !== 'function') return [0, 0];
-    const r = this.host.getBoundingClientRect(), [x0, y0, span] = VIEW_ORIGIN, s = r.width / span;
+    const r = this.host.getBoundingClientRect(), [x0, y0, span] = this.view, s = r.width / span;
     const dx = pointer.x - (r.left + (628 - x0) * s), dy = pointer.y - (r.top + (690 - y0) * s);
     const d = Math.hypot(dx, dy) || 1, k = Math.min(1, d / (r.width * .55 || 1));
     return [dx / d * k, dy / d * k];
@@ -673,7 +700,7 @@ export class VarinFigureRig {
   // ------------------------------------------------------------ construction
   private build(): void {
     const u = this.uid;
-    const svg = el('svg', { viewBox: this.compact ? VIEW_HEAD : VIEW_FULL, 'aria-hidden': 'true', focusable: 'false', 'data-agent-avatar': 'bot-figure' });
+    const svg = el('svg', { viewBox: this.view.join(' '), preserveAspectRatio: 'xMidYMax meet', 'aria-hidden': 'true', focusable: 'false', 'data-agent-avatar': 'bot-figure' });
     this.svg = svg;
     this.host.appendChild(svg);
     const defs = el('defs', {}, svg);
@@ -796,7 +823,7 @@ export class VarinFigureRig {
     el('path', { fill: '#7f9fe4', d: 'M889 325 L946 323 L966 343 L930 423 L845 423 L872 370 L880 364 L899 378 L912 355 L908 347 L887 331 Z' }, clipGroup);
 
     // The ledge she leans on, in the theme's surface colour, and the two ball hands resting on it.
-    if (!this.compact) el('rect', { x: 30, y: SILL, width: 1194, height: 40, rx: 20, style: 'fill: var(--bot-figure-ledge, #e3e5eb)' }, svg);
+    if (!this.compact) this.ledge = el('rect', { x: 30, y: SILL, width: 1194, height: 40, rx: 20, style: 'fill: var(--bot-figure-ledge, #e3e5eb)' }, svg);
     const hands = el('g', { 'clip-path': lower }, svg);
     this.hands = [-1, 1].map(side => {
       const g = el('g', {}, hands);

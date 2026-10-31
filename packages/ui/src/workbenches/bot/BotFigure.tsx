@@ -11,10 +11,12 @@ const COMPACT_BELOW = 40;
  * window sill. It receives one state and owns the poses and the motion between them (varinFigureRig).
  * Small sizes only take the pose and never loop; loops stop while the figure is out of sight.
  */
-export function BotFigure({ state, size, still = false, className, label }: {
+export function BotFigure({ state, size, still = false, wide = false, className, label }: {
   state: BotFigureState;
-  /** Width and height in px. */
+  /** Width and height in px; with `wide`, the height. */
   size: number;
+  /** Fill the container's width, the ledge running edge to edge (the Bot panel's stage). */
+  wide?: boolean;
   /** Pose only, without looping motion, for the sidebar and title bar. */
   still?: boolean;
   className?: string;
@@ -28,11 +30,11 @@ export function BotFigure({ state, size, still = false, className, label }: {
   React.useLayoutEffect(() => {
     const element = host.current;
     if (!element) return undefined;
-    const figure = new VarinFigureRig(element, { state: latest.current, compact, still: posed });
+    const figure = new VarinFigureRig(element, { state: latest.current, compact, still: posed, wide });
     rig.current = figure;
     return () => { figure.dispose(); rig.current = null; };
-  }, [compact, posed]);
+  }, [compact, posed, wide]);
   React.useLayoutEffect(() => { latest.current = state; rig.current?.setState(state); }, [state]);
   return <span ref={host} className={cn('bot-figure', className)} data-state={state} data-still={posed || undefined}
-    style={{ width: size, height: size }} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} />;
+    style={{ width: wide ? '100%' : size, height: size }} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} />;
 }
