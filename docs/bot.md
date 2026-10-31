@@ -10,7 +10,8 @@ Bot 是与用户持续交流的助手，执行仍由原生 Agent runtime、外�
 ## 会话
 
 一个 Bot 可以有多个会话，每个会话都是 Bot 名下独立的原生 Thread，可以再分支。所有会话共用同一身份、
-档案、家目录、记忆和日程。档案入口是第一个会话（界面称“日常”），其余会话由
+档案、家目录、记忆和日程。档案入口是第一个会话；未命名会话在侧栏、顶部和返回入口统一使用 Bot 名称，
+默认总助手显示“Varin”，已有的会话标题照常显示。其余会话由
 `POST /api/harness/bots/:botId/sessions` 在 Bot 醒着时创建，标识为 `thread:bot:<botId>:<uuid>`。
 `GET` 同一路径按创建顺序列出会话，与 Catalog `bot_scope.sessions` 一致。
 

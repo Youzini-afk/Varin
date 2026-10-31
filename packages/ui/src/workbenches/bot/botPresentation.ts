@@ -11,6 +11,12 @@ import type { I18nKey } from '@/lib/i18n';
 
 export type BotFigureState = 'offline' | 'sleeping' | 'waking' | 'waiting' | 'result' | 'thinking' | 'working' | 'listening' | 'idle';
 
+/** The Catalog's initial title is a placeholder; unnamed Bot conversations use their Bot's name. */
+export function botSessionTitle(title: string | null | undefined, botName: string): string {
+  const name = title?.trim();
+  return name && name !== 'New thread' ? name : botName.trim() || 'Varin';
+}
+
 /** What a piece of active work is doing. Stopping keeps "asked to stop" apart from "stopped". */
 export type BotWorkStatus = 'waiting-permission' | 'waiting-question' | 'running' | 'preparing' | 'queued' | 'paused' | 'stopping';
 

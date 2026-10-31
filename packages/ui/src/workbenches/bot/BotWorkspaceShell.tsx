@@ -31,7 +31,7 @@ import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useBotLayout, type BotPanelTab } from './botLayout';
 import type { BotPanelFocus, BotPanelModel } from './botPanelModel';
 import {
-  buildTimeline, figureState, isActiveRun, isWaitingStatus, liveRun, needsOf, presenceNeeds, runStatus, sessionViews, stateLine, workViews,
+  botSessionTitle, buildTimeline, figureState, isActiveRun, isWaitingStatus, liveRun, needsOf, presenceNeeds, runStatus, sessionViews, stateLine, workViews,
   type BotFigureState, type BotSessionView,
 } from './botPresentation';
 import { useBotFacts, useBotPresence } from './useBotFacts';
@@ -327,12 +327,13 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const figure = selected ? figureOf(selected) : 'idle';
   const timeline = React.useMemo(() => buildTimeline(activity, facts.memory.value), [activity, facts.memory.value]);
 
-  const sessionTitleOf = React.useCallback((view: BotSessionView) => view.primary && !view.thread.title ? t('bot.session.primary') : view.thread.title || t('bot.session.untitled'), [t]);
+  const sessionTitleOf = React.useCallback((view: BotSessionView) => botSessionTitle(view.thread.title, selected?.name ?? 'Varin'), [selected?.name]);
   const sessionTitle = React.useCallback((threadId: string) => {
     const view = sessionsWithWork?.find(session => session.identity.threadId === threadId);
     if (view) return sessionTitleOf(view);
-    return catalog.find(thread => thread.thread_id === threadId)?.title || threadId;
-  }, [sessionsWithWork, sessionTitleOf, catalog]);
+    const thread = catalog.find(thread => thread.thread_id === threadId);
+    return thread ? botSessionTitle(thread.title, selected?.name ?? 'Varin') : threadId;
+  }, [sessionsWithWork, sessionTitleOf, catalog, selected?.name]);
 
   // Coming back from the workbench lights the row the user left from.
   const returned = useBotReturn(state => state.returned);

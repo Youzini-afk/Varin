@@ -128,7 +128,7 @@ describe('Bot workbench', () => {
     state.profileId = 'varin.bot';
     state.list.mockReset().mockResolvedValue([bot('a'), bot('b')]);
     state.ensure.mockReset().mockImplementation(async (id: string) => ({ bot: bot(id), model: null, entry: { runtime: 'agent', threadId: `entry-${id}`, branchId: `branch-${id}` } }));
-    state.primary.mockReset().mockResolvedValue(bot('primary'));
+    state.primary.mockReset().mockResolvedValue({ ...bot('primary'), name: 'Varin' });
     state.work.mockReset().mockResolvedValue([]);
     state.sessions.mockReset().mockImplementation(async (id: string) => [sessionOf(id, `entry-${id}`, `branch-${id}`, {}, true)]);
     state.createSession.mockReset();
@@ -177,10 +177,13 @@ describe('Bot workbench', () => {
 
   it('asks the Host for the primary Bot when none is active and creates others only on request', async () => {
     state.list.mockResolvedValue([]);
+    state.ensure.mockResolvedValue({ bot: { ...bot('primary'), name: 'Varin' }, model: null, entry: bot('primary').entry });
     await render();
     expect(state.primary).toHaveBeenCalledTimes(1);
     expect(centre()?.getAttribute('data-agent')).toBe('entry-primary');
+    expect(container.querySelector('header')?.getAttribute('data-title')).toBe('Varin');
     expect(state.create).not.toHaveBeenCalled();
+    state.ensure.mockImplementation(async (id: string) => ({ bot: bot(id), model: null, entry: bot(id).entry }));
     await click('settings.bots.create');
     await click('set-name');
     await act(async () => { document.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
@@ -190,21 +193,25 @@ describe('Bot workbench', () => {
 
   it('lists the Bot’s own conversations, opens them in place and starts new ones', async () => {
     const trip = sessionOf('a', 'thread:bot:a:trip', 'branch:bot:a:trip', { title: 'Trip planning', unread: true });
-    state.sessions.mockResolvedValue([sessionOf('a', 'entry-a', 'branch-a', {}, true), trip]);
+    state.sessions.mockResolvedValue([sessionOf('a', 'entry-a', 'branch-a', { title: 'New thread' }, true), trip]);
     await render();
-    expect(container.querySelector('header')?.getAttribute('data-title')).toBe('bot.session.primary');
+    expect(container.querySelector('header')?.getAttribute('data-title')).toBe('Bot a');
+    expect(container.querySelector('[data-sidebar-row="session:entry-a:branch-a"]')?.textContent).toContain('Bot a');
+    expect(container.textContent).not.toContain('New thread');
     expect(container.querySelector('header')?.getAttribute('data-subtitle')).toBe('Bot a');
     expect(container.querySelector('[aria-label="bot.session.unread"]')).not.toBeNull();
     await click('Trip planning');
     expect(centre()?.getAttribute('data-agent')).toBe('thread:bot:a:trip');
     expect(container.querySelector('header')?.getAttribute('data-title')).toBe('Trip planning');
-    const fresh = sessionOf('a', 'thread:bot:a:fresh', 'branch:bot:a:fresh');
+    const fresh = sessionOf('a', 'thread:bot:a:fresh', 'branch:bot:a:fresh', { title: 'New thread' });
     state.createSession.mockResolvedValue(fresh);
     state.sessions.mockResolvedValue([sessionOf('a', 'entry-a', 'branch-a', {}, true), trip, fresh]);
     await click('bot.session.new');
     await settle();
     expect(state.createSession).toHaveBeenCalledExactlyOnceWith('a');
     expect(useBotNavigation.getState().entry).toEqual(fresh.identity);
+    expect(container.querySelector('header')?.getAttribute('data-title')).toBe('Bot a');
+    expect(container.textContent).not.toContain('New thread');
     expect([...container.querySelectorAll('[data-sidebar-row]')].map(row => row.getAttribute('data-sidebar-row'))).toContain('session:thread:bot:a:fresh:branch:bot:a:fresh');
   });
 
