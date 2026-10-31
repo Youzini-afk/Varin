@@ -55,10 +55,10 @@
         <label><input type="checkbox" id="light"> 浅色页面</label>
       </div>
       <div class="group"><h2>尺寸（小尺寸只显示姿态）</h2><div class="sizes" id="sizes"></div></div>
-      <div class="group"><h2>原图</h2><div class="ref"><img src="reference.webp" alt="参考原图"><span>矢量按原图描出，眼睛、嘴、眉、腮红、双手、呆毛和缎带拆成独立的层，用来做表情和动作。</span></div></div>
+      <div class="group"><h2>原图</h2><div class="ref"><img src="reference.webp" alt="参考原图"><span>矢量按原图描出，眼睛、嘴、眉、腮红、双手和呆毛拆成独立的层，用来做表情和动作。</span></div></div>
       <div class="group"><h2>说明</h2>
         <ul class="notes">
-          <li>全身随弹簧轻微回弹；呆毛和缎带晚一拍跟着摆。</li>
+          <li>全身随弹簧轻微回弹；呆毛晚一拍跟着摆。</li>
           <li>眼睛在睁眼、闭眼、笑眼、&gt;&lt; 之间先合上再换形，不做交叉淡化。</li>
           <li>休息、离线时沉到窗台下面；唤醒时冒上来、揉眼、伸懒腰。</li>
           <li>窗口不可见时暂停；“减少动态”只保留姿态之间的过渡。</li>
@@ -281,8 +281,6 @@ class Figure {
     }
     this.brows = ['L', 'R'].map(k => { const g = el('g', {}, this.feat); paint('brow' + k, g); return g; });
 
-    // The tie's loop sits behind the lock, as in the original, and sways a little.
-    this.ribbon = el('g', {}, this.fig); paint('ribbonLoop', this.ribbon);
     // Hair: one traced drawing, used twice so the flyaway lock can sway on its own.
     const hair = el('g', { id:`${u}hair` }, defs); paint('hair', hair);
     hair.firstChild.setAttribute('id', `${u}hairBase`);
@@ -290,7 +288,7 @@ class Figure {
     this.ahoge = el('g', {}, this.fig); el('use', { href:`#${u}hair`, 'clip-path':ahogeIn }, this.ahoge);
     const hc = el('clipPath', { id:`${u}hc` }, defs); el('use', { href:`#${u}hairBase` }, hc);
     this.sheenRect = el('rect', { x:-300, y:60, width:260, height:1200, fill:`url(#${u}s)`, opacity:0 }, el('g', { 'clip-path':`url(#${u}hc)` }, this.fig));
-    // Hair tie copied from the original: band and tail in front of the hair.
+    // Hair tie: one bow shape copied from the original, in front of the hair.
     paint('ribbon', el('g', {}, this.fig));
     const clipG = el('g', {}, this.fig);
     el('path', { fill:'#2b2c33', d:'M858 283 L932 285 L940 297 L924 322 L897 323 L862 384 L820 368 Z' }, clipG);
@@ -495,7 +493,6 @@ class Figure {
     }
     // Hair accents.
     this.ahoge.setAttribute('transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
-    this.ribbon.setAttribute('transform', `rotate(${this.sec.r} ${KNOT[0]} ${KNOT[1]})`);
     const sx = (t - this.sheenAt) / .95;
     if (sx >= 0 && sx < 1) { this.sheenRect.setAttribute('opacity', 1); this.sheenRect.setAttribute('transform', `rotate(-18 628 600) translate(${lerp(-200, 1500, smooth(sx))} 0)`); }
     else this.sheenRect.setAttribute('opacity', 0);
