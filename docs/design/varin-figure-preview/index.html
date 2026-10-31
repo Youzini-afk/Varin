@@ -58,7 +58,7 @@
       <div class="group"><h2>原图</h2><div class="ref"><img src="reference.webp" alt="参考原图"><span>矢量按原图描出，眼睛、嘴、眉、腮红、双手和呆毛拆成独立的层，用来做表情和动作。</span></div></div>
       <div class="group"><h2>说明</h2>
         <ul class="notes">
-          <li>全身随弹簧轻微回弹；呆毛晚一拍跟着摆。</li>
+          <li>全身随弹簧轻微回弹；呆毛、扎发结的飘带和结耳晚一拍跟着摆。</li>
           <li>眼睛在睁眼、闭眼、笑眼、&gt;&lt; 之间先合上再换形，不做交叉淡化。</li>
           <li>休息、离线时沉到窗台下面；唤醒时冒上来、揉眼、伸懒腰。</li>
           <li>窗口不可见时暂停；“减少动态”只保留姿态之间的过渡。</li>
@@ -281,6 +281,9 @@ class Figure {
     }
     this.brows = ['L', 'R'].map(k => { const g = el('g', {}, this.feat); paint('brow' + k, g); return g; });
 
+    // Hair tie, copied from the original. Its loop sits behind the lock; tail and loop tuck under
+    // the band (same colour), so they can swing without a visible join.
+    this.bowLoop = el('g', {}, this.fig); paint('ribbonLoop', this.bowLoop);
     // Hair: one traced drawing, used twice so the flyaway lock can sway on its own.
     const hair = el('g', { id:`${u}hair` }, defs); paint('hair', hair);
     hair.firstChild.setAttribute('id', `${u}hairBase`);
@@ -288,7 +291,7 @@ class Figure {
     this.ahoge = el('g', {}, this.fig); el('use', { href:`#${u}hair`, 'clip-path':ahogeIn }, this.ahoge);
     const hc = el('clipPath', { id:`${u}hc` }, defs); el('use', { href:`#${u}hairBase` }, hc);
     this.sheenRect = el('rect', { x:-300, y:60, width:260, height:1200, fill:`url(#${u}s)`, opacity:0 }, el('g', { 'clip-path':`url(#${u}hc)` }, this.fig));
-    // Hair tie: one bow shape copied from the original, in front of the hair.
+    this.bowTail = el('g', {}, this.fig); paint('ribbonTail', this.bowTail);
     paint('ribbon', el('g', {}, this.fig));
     const clipG = el('g', {}, this.fig);
     el('path', { fill:'#2b2c33', d:'M858 283 L932 285 L940 297 L924 322 L897 323 L862 384 L820 368 Z' }, clipG);
@@ -404,7 +407,7 @@ class Figure {
       const sec = this.sec, vy = this.v.fy || 0, vr = this.v.frot || 0, L = this.L;
       const aim = L ? .012 * vy - .9 * vr + 2.2 * Math.sin(this.t * 1.9) : 0;
       sec.va += (140 * (aim - 16 * p.droop - sec.a) - 7 * sec.va) * h; sec.a += sec.va * h;
-      const rim = L ? -.5 * vr + .8 * Math.sin(this.t * 1.3 + 1) : 0;
+      const rim = L ? -1.1 * vr + 1.8 * Math.sin(this.t * 1.3 + 1) : 0;
       sec.vr += (90 * (rim - sec.r) - 6 * sec.vr) * h; sec.r += sec.vr * h;
       for (const k in this.fxAmt) { const want = this.fxGoal[k] ? 1 : 0; this.fxAmt[k] += (want - this.fxAmt[k]) * clamp(h * (want ? 6 : 9)); }
     }
@@ -493,6 +496,8 @@ class Figure {
     }
     // Hair accents.
     this.ahoge.setAttribute('transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
+    this.bowTail.setAttribute('transform', `rotate(${this.sec.r} 1030 540)`);
+    this.bowLoop.setAttribute('transform', `rotate(${-.7 * this.sec.r + 1.3 * Math.sin(this.t * 1.7) * this.L} 1066 528)`);
     const sx = (t - this.sheenAt) / .95;
     if (sx >= 0 && sx < 1) { this.sheenRect.setAttribute('opacity', 1); this.sheenRect.setAttribute('transform', `rotate(-18 628 600) translate(${lerp(-200, 1500, smooth(sx))} 0)`); }
     else this.sheenRect.setAttribute('opacity', 0);
