@@ -37,11 +37,6 @@ description: A short description of what the reader can do.
 | --- | --- | --- |
 | English | root | `label` |
 | Simplified Chinese | `zh-cn` | `zh-CN` |
-| Ukrainian | `uk` | `uk` |
-| Spanish | `es` | `es` |
-| Brazilian Portuguese | `pt-br` | `pt-BR` |
-| Korean | `ko` | `ko` |
-| Polish | `pl` | `pl` |
 | French | `fr` | `fr` |
 | Japanese | `ja` | `ja` |
 

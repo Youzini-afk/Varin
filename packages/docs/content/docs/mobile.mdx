@@ -5,12 +5,12 @@ description: Install the Varin app on iOS or Android and connect it to your serv
 
 # Mobile Apps & PWA
 
-Varin has native apps for iPhone and Android, so you can watch sessions, reply to agents, and manage work from your phone — at home over Wi-Fi or from anywhere over the [Private Relay](/private-relay/).
+Use Varin from your phone: watch sessions, reply to agents and manage work. The app connects to a Varin Host you already run, and agents keep running on that Host. At home it connects over Wi-Fi; away from home it needs a [relay you configure](/private-relay/) or your own secured route.
 
 ## Install the app
 
-- **iPhone/iPad** — a current Varin TestFlight distribution is not verified here; use the PWA or [build the native app from source](https://github.com/Youzini-afk/Varin/blob/main/packages/mobile/README.md).
-- **Android** — the Varin APK is not published yet; use the PWA or build it from source.
+- **iPhone/iPad** — no build is published yet. Use the PWA below, or [build the native app from source](https://github.com/Youzini-afk/Varin/blob/main/packages/mobile/README.md).
+- **Android** — download `Varin-<version>-android.apk` from the [latest release](https://github.com/Youzini-afk/Varin/releases/latest) and install it. A `.sha256` file next to it lets you check the download. Push notifications are not available yet.
 
 ## Connect it to your server
 
@@ -30,7 +30,7 @@ Prefer no app store at all? The web app installs straight from the browser:
 - **iPhone/iPad (Safari)** — Share → **Add to Home Screen**
 - **Android (Chrome)** — menu → **Install app** / **Add to Home Screen**
 
-To reach the PWA from outside your network you'll need a [tunnel](/tunnels/) and a strong [UI password](/security/) — the native apps handle this for you via the relay.
+To reach the PWA from outside your network you'll need a [tunnel](/tunnels/) and a strong [UI password](/security/) — the Android app can use the relay instead once your Host has one configured.
 
 ## Mobile settings
 

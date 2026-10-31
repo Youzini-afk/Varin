@@ -1,8 +1,7 @@
 /**
  * recall tool — search workspace + user memory of past sessions and decisions.
  *
- * Design: design/harness-knowledge.md §7.2
- * Plan: plan/agent-harness-plan.md §2.10
+ * Current contract: lib/knowledge/DOCUMENTATION.md.
  *
  * recall(query, k=5): text `${n} memories for "${query}"\n` + each
  * `- [${scope}] ${title or first line} (${via}, #${id})`

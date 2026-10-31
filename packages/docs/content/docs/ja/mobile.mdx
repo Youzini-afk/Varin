@@ -5,12 +5,12 @@ description: iOS または Android に Varin アプリをインストールし�
 
 # モバイルアプリと PWA
 
-Varin には iPhone と Android のネイティブアプリがあり、セッションの確認、エージェントへの返信、作業の管理をスマートフォンから行えます。自宅では Wi-Fi 経由、外出先では [Private Relay](/ja/private-relay/) 経由でどこからでも使えます。
+スマートフォンから Varin を使えます。セッションの確認、エージェントへの返信、作業の管理ができます。アプリはすでに動かしている Varin Host に接続し、エージェントはその Host 上で動き続けます。自宅では Wi-Fi で、外出先では[自分で設定したリレー](/ja/private-relay/)または独自の安全なリモート経路で接続します。
 
 ## アプリをインストールする
 
-- **iPhone/iPad** — 現在の Varin の TestFlight 配布はここでは確認されていません。PWA を使用するか、[ソースからネイティブアプリをビルド](https://github.com/Youzini-afk/Varin/blob/main/packages/mobile/README.md)してください。
-- **Android** — Varin の APK はまだ公開されていません。PWA を使うか、ソースからビルドしてください。
+- **iPhone/iPad** — 公開されたビルドはまだありません。下の PWA を使うか、[ソースからネイティブアプリをビルド](https://github.com/Youzini-afk/Varin/blob/main/packages/mobile/README.md)してください。
+- **Android** — [最新リリース](https://github.com/Youzini-afk/Varin/releases/latest)から `Varin-<バージョン>-android.apk` をダウンロードしてインストールします。隣の `.sha256` ファイルでダウンロードを検証できます。プッシュ通知はまだ使えません。
 
 ## サーバーに接続する
 
@@ -30,7 +30,7 @@ Varin には iPhone と Android のネイティブアプリがあり、セッシ
 - **iPhone/iPad (Safari)** — 共有 → **ホーム画面に追加**
 - **Android (Chrome)** — メニュー → **アプリをインストール** / **ホーム画面に追加**
 
-ネットワークの外から PWA に到達するには、[トンネル](/ja/tunnels/) と強力な [UI パスワード](/ja/security/) が必要です。ネイティブアプリならリレー経由でこれらを自動的に処理します。
+ネットワークの外から PWA に到達するには、[トンネル](/ja/tunnels/) と強力な [UI パスワード](/ja/security/) が必要です。Host にリレーを設定すれば、Android アプリはリレー経由でも接続できます。
 
 ## モバイル設定
 

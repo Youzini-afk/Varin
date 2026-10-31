@@ -8,8 +8,8 @@ and manifest. The exact package closure is `CLOUD_RUNTIME_PACKAGE_DIRS` in
 
 The builder stages a dedicated production `bun.lock`; native dependencies are installed for the
 target OS and CPU rather than copied from a developer machine. The Rust executable is copied with
-its SHA-256/build/wire/architecture manifest and exercised by `verify-kernel.mjs`. There is no Pi
-worker or SDK dependency closure to install, and no second Node Storage or PTY authority.
+its SHA-256/build/wire/architecture manifest and exercised by `verify-kernel.mjs`. No separate
+agent worker, SDK dependency closure, Node Storage or PTY authority is installed.
 
 ## Container images
 

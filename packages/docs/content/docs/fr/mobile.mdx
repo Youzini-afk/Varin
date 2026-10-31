@@ -5,12 +5,12 @@ description: Installez l’application Varin sur iOS ou Android et connectez-la 
 
 # Applications mobiles et PWA
 
-Varin a des applications natives pour iPhone et Android : suivez les sessions, répondez aux agents et gérez votre travail depuis votre téléphone — à la maison en Wi-Fi ou depuis n’importe où via le [Relais privé](/fr/private-relay/).
+Utilisez Varin depuis votre téléphone : suivez les sessions, répondez aux agents et gérez votre travail. L’application se connecte à un Host Varin que vous faites déjà tourner, et les agents continuent de s’exécuter sur ce Host. À la maison, la connexion passe par le Wi-Fi ; ailleurs, il faut un [relais que vous configurez](/fr/private-relay/) ou votre propre accès distant sécurisé.
 
 ## Installer l’application
 
-- **iPhone/iPad** — aucune distribution Varin actuelle sur TestFlight n’est vérifiée ici ; utilisez la PWA ou [compilez l’app native depuis les sources](https://github.com/Youzini-afk/Varin/blob/main/packages/mobile/README.md).
-- **Android** — l’APK Varin n’est pas encore publié ; utilisez la PWA ou compilez depuis les sources.
+- **iPhone/iPad** — aucune version n’est encore publiée. Utilisez la PWA ci-dessous ou [compilez l’app native depuis les sources](https://github.com/Youzini-afk/Varin/blob/main/packages/mobile/README.md).
+- **Android** — téléchargez `Varin-<version>-android.apk` depuis la [dernière version](https://github.com/Youzini-afk/Varin/releases/latest) et installez-le. Le fichier `.sha256` à côté permet de vérifier le téléchargement. Les notifications push ne sont pas encore disponibles.
 
 ## La connecter à votre serveur
 
@@ -30,7 +30,7 @@ Vous préférez éviter les app stores ? L’application web s’installe direct
 - **iPhone/iPad (Safari)** — Partager → **Sur l’écran d’accueil**
 - **Android (Chrome)** — menu → **Installer l’application** / **Ajouter à l’écran d’accueil**
 
-Pour joindre la PWA depuis l’extérieur de votre réseau, il vous faudra un [tunnel](/fr/tunnels/) et un [mot de passe UI](/fr/security/) solide — les applications natives s’en occupent pour vous via le relais.
+Pour joindre la PWA depuis l’extérieur de votre réseau, il vous faudra un [tunnel](/fr/tunnels/) et un [mot de passe UI](/fr/security/) solide — l’application Android peut passer par le relais une fois qu’il est configuré sur votre Host.
 
 ## Paramètres mobiles
 

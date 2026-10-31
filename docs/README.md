@@ -34,19 +34,26 @@
 
 具体 API、参数和命令以代码、schema 与 package scripts 为准。文档说明当前机制及取舍，历史设计保留在 Git 中。
 
-## 本轮实现依据
+## 已实施、待并入当前文档的设计
 
-- [长期总助手、连续上下文与记忆](design/bot-assistant.md)：主体及记忆维护链路已接入；主动/自动整理、联合变更、按需续读、概述依赖、上下文更新和资源回收，当前合同见[长期总助手](bot.md)。
-- [工具契约与执行环境优化](design/tool-contracts-and-execution-environment.md)：Windows Shell、PATH 与原生 rg、进程输入回执、完整工具目录、文件与文档默认读取及错误反馈；已实现，当前契约见上面的领域文档。
-- [Varin 形象：趴窗台](design/varin-figure.md)、[交互设计稿](design/varin-figure-preview/index.html)：Bot 形象是正面 Q 版的 Varin 趴在窗台上，含分层、状态合同对照、一次性动作和动效规则；已实现为 `BotFigure`。
+下面的设计已经实施，当前合同以领域文档为准；其中仍有用的取舍理由会并入领域文档，之后删除原稿。
 
-## 正在评审的设计
-- [Q 版桌宠与主题差分](design/desktop-companion.md)：32 类表现规划、坐姿电脑工作、默认色[母版与8张分镜](design/desktop-companion-assets/README.md)、真实状态映射及换位置交互；已合入 main 并接入多会话 Bot 归属，美术逐帧验收与 Windows/macOS 原生验证仍待进行。
-- [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：按需隔离、实际 Host 依赖准入与清晰失败、各平台安装交付、稳定来源和增量分叉；已有引擎与挂载适配器继续完善，新准入合同和性能改造的实施状态见原文。
-- [外部 Harness 接入与跨 Agent 协作](design/external-harness-integration.md)：直接会话、外部预设、派发、消息与文件交换已接入；CLI / Skills / MCP 共享按产品决定暂缓。当前支持边界见[外部 Agent](external-agents.md)。
-- [快速检索、按需隔离与工具可靠性](design/retrieval-isolation-and-tool-reliability.md)：检索真实启动、默认共享与按次隔离、基线复用／延迟物化及资源回收已实施，边界见原文第 17 节；隔离的后续架构由上面的版本化工作区设计接续。
-- [通用模式与工具披露](design/general-agent-harness.md)：常驻与按需工具、MCP 直接入口、共享 Agent 配置，以及全模式的发现和结果质量改进；不涉及界面设计，尚未实施。
-- [科研模式与 Agent 协作](design/research-agent-harness.md)：科研搭档、共享 Worker 与调研，工具披露、预制用途及可选历史继承；不注入模式提示词，设计稿尚未实施。
-- [办公模式与浏览器、电脑协作](design/office-agent-harness.md)：文档与数据处理、浏览器和电脑操作、文件流转及连续修改；复用现有工作台与协作能力，设计稿尚未实施。
-- [聊天与设置的整体体验](design/chat-settings-experience.md)、[独立 HTML 设计稿](design/chat-settings-preview.html)：基于现有界面、实际工具字段与三种聊天模式的设计提案，尚未实施。
-- [动效与交互：丝滑到底](design/motion-and-interaction.md)、[可交互原型](design/motion-preview/index.html)：以现有外壳和对话优先阅读规则为基础，统一弹簧 token，覆盖发送飞入与输入框停靠、墨迹流式、过程行原位换字、文件修改流式差异与就地预览托盘、派发与任务回复、尾部 FLIP、导轨与面板、设置窗口、晶格波工作台切换与降低动效分级；设计已确认，正在分期实施。
+- [长期总助手、连续上下文与记忆](design/bot-assistant.md)：当前合同见[长期总助手](bot.md)。
+- [工具契约与执行环境优化](design/tool-contracts-and-execution-environment.md)：已折入[资源](resources.md)、[运行时](runtime.md)和[检索与上下文](retrieval.md)。
+- [通用模式与工具披露](design/general-agent-harness.md)、[科研模式与 Agent 协作](design/research-agent-harness.md)、[办公模式与浏览器、电脑协作](design/office-agent-harness.md)：当前行为见[运行时](runtime.md)的模式工具披露与协作，以及 [Office](../packages/web/application-host/lib/office/DOCUMENTATION.md)。
+- [设置体验](design/chat-settings-experience.md)、[设置设计稿](design/settings-redesign.html)：已接入生产设置页；[聊天与设置的早期设计稿](design/chat-settings-preview.html)中的设置部分已被取代。
+- [快速检索、按需隔离与工具可靠性](design/retrieval-isolation-and-tool-reliability.md)：边界见原文第 17 节；隔离的后续架构由下面的版本化工作区设计接续。
+- [外部 Harness 接入与跨 Agent 协作](design/external-harness-integration.md)：当前支持边界见[外部 Agent](external-agents.md)；CLI / Skills / MCP 共享按产品决定暂缓。
+- [Varin 形象：趴窗台](design/varin-figure.md)、[交互设计稿](design/varin-figure-preview/index.html)、[舞台设计稿](design/varin-figure-preview/stage.html)：已实现为 `BotFigure` 和 Bot 区舞台。
+
+## 正在进行的设计
+
+- [Bot 工作台：界面、交互与动效](design/bot-ui.md)、[交互稿](design/bot-preview/index.html)：桌面主体、形象和舞台已实施（第 12 节），其余部分见原文。
+- [动效与交互：丝滑到底](design/motion-and-interaction.md)、[可交互原型](design/motion-preview/index.html)：P0–P4 已在 main 上实施；真机、Electron 和读屏验收（第 7 节）仍待进行。
+- [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：引擎和 WinFsp / macFUSE / FUSE 适配器已接入，三个平台的实际安装与挂载尚未验收；目标合同见第 16 节。
+- [Q 版桌宠与主题差分](design/desktop-companion.md)：桌宠设计的总入口，已合入 main 并接入多会话 Bot 归属，美术逐帧验收与 Windows/macOS 原生验证仍待进行。同一系列的当前稿：
+  - [主管式桌宠](design/desktop-companion-director.md)、[主管演出](design/desktop-companion-director-performance.md)
+  - [动作语言 v5](design/desktop-companion-motion-language-v5.md)、[虚拟案卷与身体接触](design/desktop-companion-prop-contact-v5.md)
+  - [多任务注意力](design/desktop-companion-multitask-attention.md)：只读注意力和面板底座已实施，主管演出仍是候选。
+  - 已被取代、待并入后删除：[动画制作](design/desktop-companion-animation-production.md)、[动画路线调研](design/desktop-companion-animation-research.md)、[交互扩展](design/desktop-companion-interaction-expansion.md)。
+  - 视觉资料与进度见[桌宠素材索引](design/desktop-companion-assets/README.md)。

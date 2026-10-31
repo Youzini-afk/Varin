@@ -1,8 +1,7 @@
 /**
  * Knowledge store v1 — TriviumDB-backed workspace knowledge base.
  *
- * Design: design/harness-knowledge.md §7.1, §7.2, §7.2.1
- * Plan: plan/agent-harness-plan.md §2.1
+ * Current contract: DOCUMENTATION.md in this directory.
  *
  * Node types: event, knowledge, organizer, plan records, file, symbol, link.
  * Edges: supersedes (knowledge → knowledge), defines (file → symbol),

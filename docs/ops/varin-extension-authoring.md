@@ -670,7 +670,7 @@ The existing routing API can select a project or native Thread with a revision-c
 ```
 
 Pass the routing document's current `expectedRevision` with the update. A Thread override uses its
-real native Thread ID in the existing routing `sessionId` dimension; it does not create a Pi session.
+real native Thread ID in the existing routing `sessionId` dimension.
 The UI's workspace dimension is the canonical directory, distinct from a native workspace ID.
 Project scope comes from the Run's accepted context. Installing an unrelated provider does not select it.
 

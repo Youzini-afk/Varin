@@ -17,7 +17,6 @@ on:
       - scripts/fix-deprecation.js
       - packages/**
       - '!packages/docs/**'
-      - packages/docs/package.json
       - scripts/build-cloud-runtime.mjs
       - scripts/cloud-runtime-layout.test.js
       - scripts/cloud-runtime.bun.lock
@@ -38,7 +37,6 @@ on:
       - scripts/fix-deprecation.js
       - packages/**
       - '!packages/docs/**'
-      - packages/docs/package.json
       - scripts/build-cloud-runtime.mjs
       - scripts/cloud-runtime-layout.test.js
       - scripts/cloud-runtime.bun.lock

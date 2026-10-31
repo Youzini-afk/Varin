@@ -1,18 +1,20 @@
 ---
 title: Installation
-description: Installez Varin pour le desktop ou le web depuis les sources ou Docker.
+description: Installez l’application de bureau Varin, hébergez-la avec Docker ou compilez-la depuis les sources.
 ---
 
 # Installation
+La plupart des gens installent l’application de bureau. Vous pouvez aussi héberger Varin avec Docker et l’utiliser dans un navigateur, ou le compiler depuis les sources.
 
-Compilez Varin depuis les sources ou utilisez Docker avec les étapes ci-dessous. Consultez [GitHub Releases](https://github.com/Youzini-afk/Varin/releases) pour les paquets et plateformes disponibles.
+## Application de bureau
 
-Il existe deux surfaces produit principales :
+Téléchargez l’installateur de votre système depuis la [dernière version](https://github.com/Youzini-afk/Varin/releases/latest) : `.exe` pour Windows x64 ou ARM64, `.dmg` pour macOS sur puce Apple, `.AppImage` pour Linux x64 ou ARM64. L’application embarque son propre Host, rien d’autre n’est nécessaire. Elle vérifie elle-même les nouvelles versions ; voir [Mises à jour](/fr/updates/).
 
-- l’application desktop (Electron)
-- l’application web hébergée par le serveur local, que vous pouvez installer comme une appli téléphone (une PWA)
+Les installateurs Windows et les paquets macOS ne sont pas encore signés : votre système peut demander une confirmation au premier lancement.
 
-## Prérequis
+Pour un téléphone, voir [Applications mobiles et PWA](/fr/mobile/).
+
+## Prérequis pour compiler depuis les sources
 
 - Node.js 22.19 ou plus récent (Node.js 24 est la base de développement)
 - [Bun](https://bun.sh) 1.3.14

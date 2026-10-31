@@ -9,7 +9,7 @@ Connect a model, start a conversation, and work with files and tools. You can re
 | You want to | Guide |
 | --- | --- |
 | Install and open Varin | [Installation](content/docs/install.mdx), [quickstart](content/docs/quickstart.mdx) |
-| Connect a model or local service | [Providers and models](content/docs/providers.mdx) |
+| Connect a model or local service | [Model channels](content/docs/providers.mdx) |
 | Work with a project | [Projects](content/docs/projects.mdx), [Git](content/docs/git.mdx), [worktrees](content/docs/worktrees.mdx) |
 | Give an agent context and tools | [Context](content/docs/context.mdx), [skills](content/docs/skills.mdx), [MCP](content/docs/mcp.mdx) |
 | Schedule work | [Scheduled tasks](content/docs/scheduled-tasks.mdx) |
@@ -18,7 +18,7 @@ Connect a model, start a conversation, and work with files and tools. You can re
 
 ## Languages
 
-[English](content/docs/index.mdx) · [简体中文](content/docs/zh-cn/index.mdx) · [Українська](content/docs/uk/index.mdx) · [Español](content/docs/es/index.mdx) · [Português (Brasil)](content/docs/pt-br/index.mdx) · [한국어](content/docs/ko/index.mdx) · [Polski](content/docs/pl/index.mdx) · [Français](content/docs/fr/index.mdx) · [日本語](content/docs/ja/index.mdx)
+[English](content/docs/index.mdx) · [简体中文](content/docs/zh-cn/index.mdx) · [Français](content/docs/fr/index.mdx) · [日本語](content/docs/ja/index.mdx)
 
 ## Maintain these guides
 

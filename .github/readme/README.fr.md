@@ -37,7 +37,7 @@ Le modèle réfléchit. Le harness, c'est tout ce qui l'entoure : outils, contex
 - Questions sans blocage : le reste avance pendant que l'agent attend votre réponse, et les objectifs budgétés reprennent quand leurs conditions sont remplies.
 - Outils à la demande : les outils courants restent sous la main, les autres se chargent au besoin. Les serveurs MCP peuvent être exposés directement ou découverts à la demande.
 
-**Prêt à l'emploi.** Environ 80 outils natifs, 4 modes de travail, 4 espaces de travail officiels, 6 serveurs de langage intégrés et 8 protocoles de modèle natifs, avec une interface en 10 langues.
+**Prêt à l'emploi.** Environ 90 outils natifs, 4 modes de travail, 4 espaces de travail officiels, 7 serveurs de langage intégrés et 9 protocoles de modèle natifs, avec une interface en 10 langues.
 
 **Personnalisation en profondeur, sans écrire de code.** Changez le modèle, les instructions ou les outils de n'importe quel agent prédéfini, ou créez le vôtre. Choisissez des modèles distincts pour les titres, le contexte, la planification, les images et les embeddings. Modifiez les instructions système et la mémoire, utilisez les Skills des dossiers `.claude` et `.agents` ou installez-les depuis un dépôt Git, et choisissez, outil par outil, d'autoriser, de demander ou de refuser.
 
@@ -76,10 +76,10 @@ Le mode détermine les outils dont l'agent dispose d'emblée et les coéquipiers
    | --- | --- |
    | Windows, macOS ou Linux | [Téléchargez le programme d'installation](https://github.com/Youzini-afk/Varin/releases/latest) adapté à votre système et à votre architecture CPU. |
    | Votre propre serveur, utilisé depuis un navigateur | [Auto-héberger avec Docker](../../docs/ops/cloud-deployment.md), avec stockage persistant, mots de passe et accès distant. |
-   | Votre téléphone | Associez-le à votre Host depuis les Paramètres. En attendant la publication des applications natives, installez l'application web (PWA). [Guide mobile](../../packages/docs/content/docs/fr/mobile.mdx) |
+   | Votre téléphone | Sur Android, installez l'APK de la [dernière version](https://github.com/Youzini-afk/Varin/releases/latest) ; sur iPhone, installez l'application web (PWA). Associez-le ensuite à votre Host depuis les Paramètres. [Guide mobile](../../packages/docs/content/docs/fr/mobile.mdx) |
    | Depuis les sources | Voir [Exécuter depuis les sources](#exécuter-depuis-les-sources). |
 
-2. Ouvrez les Paramètres et ajoutez une clé d'API pour un fournisseur de modèles, ou connectez un service local. [Fournisseurs et modèles](../../packages/docs/content/docs/fr/providers.mdx)
+2. Ouvrez les Paramètres et ajoutez une clé d'API pour un fournisseur de modèles, ou connectez un service local. [Canaux de modèles](../../packages/docs/content/docs/fr/providers.mdx)
 3. Choisissez un mode de travail, sélectionnez un dossier de projet si la tâche en a besoin, puis lancez votre première tâche.
 
 Varin est en développement actif avant la version 1.0. Cette page décrit les sources actuelles ; les [notes de version](https://github.com/Youzini-afk/Varin/releases) décrivent chaque build publié. Sauvegardez les données importantes de l'application avant une mise à niveau.

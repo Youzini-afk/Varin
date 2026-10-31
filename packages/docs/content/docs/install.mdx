@@ -1,18 +1,20 @@
 ---
 title: Install
-description: Install Varin for desktop or web from source or Docker.
+description: Install the Varin desktop app, self-host it with Docker, or build it from source.
 ---
 
 # Install
+Most people install the desktop app. You can also self-host Varin with Docker and use it from a browser, or build it from source.
 
-Build Varin from source or use Docker with the steps below. Check [GitHub Releases](https://github.com/Youzini-afk/Varin/releases) for packaged builds and supported platforms.
+## Desktop app
 
-There are two primary product surfaces:
+Download the installer for your system from the [latest release](https://github.com/Youzini-afk/Varin/releases/latest): `.exe` for Windows x64 or ARM64, `.dmg` for macOS on Apple silicon, `.AppImage` for Linux x64 or ARM64. The app runs its own Host, so nothing else needs to be installed. It checks for new versions by itself; see [Updates](/updates/).
 
-- desktop app (Electron)
-- web app hosted by the local server, which you can install like a phone app (a PWA)
+Windows installers and macOS packages are not signed yet, so your system may ask you to confirm the first launch.
 
-## Prerequisites
+For a phone, see [Mobile apps & PWA](/mobile/).
+
+## Prerequisites for building from source
 
 - Node.js 22.19 or newer (Node.js 24 is the development baseline)
 - [Bun](https://bun.sh) 1.3.14

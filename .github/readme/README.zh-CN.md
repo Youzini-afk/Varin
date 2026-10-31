@@ -37,7 +37,7 @@
 - 提问不阻塞：等你回复时，其他工作照常进行；带预算的目标在条件满足时自动接续。
 - 工具按需：常用工具常驻，其余按需加载；MCP 服务可以直接暴露，也可以按需发现。
 
-**开箱即用。** 近 80 个原生工具、4 种工作模式、4 个官方工作台、6 个内置语言服务器、8 种原生模型协议，界面支持 10 种语言。
+**开箱即用。** 约 90 个原生工具、4 种工作模式、4 个官方工作台、7 个内置语言服务器、9 种原生模型协议，界面支持 10 种语言。
 
 **深度定制，不写代码。** 每个预置 Agent 都能换模型、改指令、调工具，也能自建 Agent；标题生成、上下文整理、规划、生图、嵌入可以分别指定模型。系统指令与记忆可编辑；Skills 兼容 `.claude` 与 `.agents` 目录，也能从 Git 仓库安装；每个工具都能设为允许、询问或拒绝。
 
@@ -76,10 +76,10 @@
    | --- | --- |
    | Windows、macOS 或 Linux | [下载安装包](https://github.com/Youzini-afk/Varin/releases/latest)，选择与系统和 CPU 架构对应的版本。 |
    | 在自己的服务器上运行，用浏览器访问 | [Docker 自托管](../../docs/ops/cloud-deployment.md)，包含持久化目录、密码和远程访问配置。 |
-   | 手机 | 在设置中把手机与 Host 配对。原生应用发布前，可以安装网页应用（PWA）。[移动端指南](../../packages/docs/content/docs/zh-cn/mobile.mdx) |
+   | 手机 | Android 从[最新版本](https://github.com/Youzini-afk/Varin/releases/latest)下载 APK 安装，iPhone 安装网页应用（PWA），然后在设置中与 Host 配对。[移动端指南](../../packages/docs/content/docs/zh-cn/mobile.mdx) |
    | 从源码运行 | 见[从源码运行](#从源码运行)。 |
 
-2. 打开设置，填入模型服务商的 API Key，或连接本地服务。[服务商与模型](../../packages/docs/content/docs/zh-cn/providers.mdx)
+2. 打开设置，填入模型服务商的 API Key，或连接本地服务。[模型渠道](../../packages/docs/content/docs/zh-cn/providers.mdx)
 3. 选择工作模式，任务需要时选一个项目文件夹，开始第一个任务。
 
 Varin 处于 1.0 之前的活跃开发阶段。本页介绍当前源码，[发布说明](https://github.com/Youzini-afk/Varin/releases)记录各发行版的内容。升级前请备份重要的应用数据。

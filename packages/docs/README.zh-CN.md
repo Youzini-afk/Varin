@@ -9,7 +9,7 @@
 | 想做什么 | 对应指南 |
 | --- | --- |
 | 安装并打开 Varin | [安装](content/docs/zh-cn/install.mdx)、[快速开始](content/docs/zh-cn/quickstart.mdx) |
-| 连接模型或本地服务 | [提供商与模型](content/docs/zh-cn/providers.mdx) |
+| 连接模型或本地服务 | [模型渠道](content/docs/zh-cn/providers.mdx) |
 | 处理项目 | [项目](content/docs/zh-cn/projects.mdx)、[Git](content/docs/zh-cn/git.mdx)、[worktree](content/docs/zh-cn/worktrees.mdx) |
 | 为 Agent 提供上下文和工具 | [上下文](content/docs/zh-cn/context.mdx)、[skills](content/docs/zh-cn/skills.mdx)、[MCP](content/docs/zh-cn/mcp.mdx) |
 | 安排后续工作 | [定时任务](content/docs/zh-cn/scheduled-tasks.mdx) |
@@ -18,7 +18,7 @@
 
 ## 语言
 
-[English](content/docs/index.mdx) · [简体中文](content/docs/zh-cn/index.mdx) · [Українська](content/docs/uk/index.mdx) · [Español](content/docs/es/index.mdx) · [Português (Brasil)](content/docs/pt-br/index.mdx) · [한국어](content/docs/ko/index.mdx) · [Polski](content/docs/pl/index.mdx) · [Français](content/docs/fr/index.mdx) · [日本語](content/docs/ja/index.mdx)
+[English](content/docs/index.mdx) · [简体中文](content/docs/zh-cn/index.mdx) · [Français](content/docs/fr/index.mdx) · [日本語](content/docs/ja/index.mdx)
 
 ## 维护这些指南
 

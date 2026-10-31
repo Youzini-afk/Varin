@@ -4,11 +4,6 @@
       "label": "Start here",
       "translations": {
         "zh-CN": "从这里开始",
-        "uk": "Почніть тут",
-        "es": "Empieza aquí",
-        "pt-BR": "Comece aqui",
-        "ko": "여기서 시작",
-        "pl": "Zacznij tutaj",
         "fr": "Commencer ici",
         "ja": "ここから開始"
       },
@@ -18,11 +13,6 @@
           "link": "/",
           "translations": {
             "zh-CN": "Varin 文档",
-            "uk": "Документація Varin",
-            "es": "Documentación de Varin",
-            "pt-BR": "Documentação do Varin",
-            "ko": "Varin 문서",
-            "pl": "Dokumentacja Varin",
             "fr": "Documentation Varin",
             "ja": "Varin ドキュメント"
           }
@@ -32,11 +22,6 @@
           "link": "/install/",
           "translations": {
             "zh-CN": "安装",
-            "uk": "Встановлення",
-            "es": "Instalación",
-            "pt-BR": "Instalação",
-            "ko": "설치",
-            "pl": "Instalacja",
             "fr": "Installation",
             "ja": "インストール"
           }
@@ -46,11 +31,6 @@
           "link": "/quickstart/",
           "translations": {
             "zh-CN": "快速开始",
-            "uk": "Швидкий старт",
-            "es": "Inicio rápido",
-            "pt-BR": "Início rápido",
-            "ko": "빠른 시작",
-            "pl": "Szybki start",
             "fr": "Démarrage rapide",
             "ja": "クイックスタート"
           }
@@ -60,11 +40,6 @@
           "link": "/environment/",
           "translations": {
             "zh-CN": "环境变量",
-            "uk": "Змінні середовища",
-            "es": "Variables de entorno",
-            "pt-BR": "Variáveis de ambiente",
-            "ko": "환경 변수",
-            "pl": "Zmienne środowiskowe",
             "fr": "Variables d’environnement",
             "ja": "環境変数"
           }
@@ -75,11 +50,6 @@
       "label": "Workflows",
       "translations": {
         "zh-CN": "工作流",
-        "uk": "Робочі процеси",
-        "es": "Flujos de trabajo",
-        "pt-BR": "Fluxos de trabalho",
-        "ko": "워크플로",
-        "pl": "Przepływy pracy",
         "fr": "Workflows",
         "ja": "ワークフロー"
       },
@@ -89,11 +59,6 @@
           "link": "/projects/",
           "translations": {
             "zh-CN": "项目",
-            "uk": "Проєкти",
-            "es": "Proyectos",
-            "pt-BR": "Projetos",
-            "ko": "프로젝트",
-            "pl": "Projekty",
             "fr": "Projets",
             "ja": "プロジェクト"
           }
@@ -103,11 +68,6 @@
           "link": "/context/",
           "translations": {
             "zh-CN": "上下文",
-            "uk": "Контекст",
-            "es": "Contexto",
-            "pt-BR": "Contexto",
-            "ko": "컨텍스트",
-            "pl": "Kontekst",
             "fr": "Contexte",
             "ja": "コンテキスト"
           }
@@ -117,11 +77,6 @@
           "link": "/attachments/",
           "translations": {
             "zh-CN": "图片与 PDF",
-            "uk": "Зображення та PDF",
-            "es": "Imágenes y PDF",
-            "pt-BR": "Imagens e PDFs",
-            "ko": "이미지와 PDF",
-            "pl": "Obrazy i PDF",
             "fr": "Images et PDF",
             "ja": "画像と PDF"
           }
@@ -131,11 +86,6 @@
           "link": "/notes-todos-plans/",
           "translations": {
             "zh-CN": "项目笔记、待办与计划",
-            "uk": "Нотатки, завдання та плани проєкту",
-            "es": "Notas, tareas y planes de proyecto",
-            "pt-BR": "Notas, Tarefas e Planos do Projeto",
-            "ko": "프로젝트 메모, 할 일, 계획",
-            "pl": "Notatki, listy zadań i plany projektu",
             "fr": "Notes, todos et plans de projet",
             "ja": "プロジェクトのメモ、Todo、計画"
           }
@@ -145,11 +95,6 @@
           "link": "/scheduled-tasks/",
           "translations": {
             "zh-CN": "计划任务与后续任务",
-            "uk": "Заплановані й подальші завдання",
-            "es": "Tareas programadas y seguimientos",
-            "pt-BR": "Tarefas agendadas e acompanhamentos",
-            "ko": "예약 작업과 후속 작업",
-            "pl": "Zadania zaplanowane i kontynuacje",
             "fr": "Tâches planifiées et suivis",
             "ja": "予定タスクとフォローアップ"
           }
@@ -159,11 +104,6 @@
           "link": "/agent-control-tool/",
           "translations": {
             "zh-CN": "Agent 工具",
-            "uk": "Інструменти Agent",
-            "es": "Herramientas del agente",
-            "pt-BR": "Ferramentas do Agent",
-            "ko": "Agent 도구",
-            "pl": "Narzędzia Agenta",
             "fr": "Outils de l’agent",
             "ja": "Agent ツール"
           }
@@ -173,11 +113,6 @@
           "link": "/session-goals/",
           "translations": {
             "zh-CN": "持续目标",
-            "uk": "Тривалі цілі",
-            "es": "Objetivos continuos",
-            "pt-BR": "Objetivos contínuos",
-            "ko": "지속 목표",
-            "pl": "Cele ciągłe",
             "fr": "Objectifs continus",
             "ja": "継続目標"
           }
@@ -187,11 +122,6 @@
           "link": "/project-actions/",
           "translations": {
             "zh-CN": "项目操作",
-            "uk": "Дії проєкту",
-            "es": "Acciones de proyecto",
-            "pt-BR": "Ações de Projeto",
-            "ko": "프로젝트 작업",
-            "pl": "Akcje projektu",
             "fr": "Actions de projet",
             "ja": "プロジェクトアクション"
           }
@@ -201,11 +131,6 @@
           "link": "/worktrees/",
           "translations": {
             "zh-CN": "Worktree 会话",
-            "uk": "Сесії worktree",
-            "es": "Sesiones de worktree",
-            "pt-BR": "Sessões de Worktree",
-            "ko": "Worktree 세션",
-            "pl": "Sesje worktree",
             "fr": "Sessions worktree",
             "ja": "Worktree セッション"
           }
@@ -215,11 +140,6 @@
           "link": "/multi-run/",
           "translations": {
             "zh-CN": "Multi-run",
-            "uk": "Multi-run",
-            "es": "Multi-run",
-            "pt-BR": "Multi-run",
-            "ko": "Multi-run",
-            "pl": "Multi-run",
             "fr": "Multi-run",
             "ja": "Multi-run"
           }
@@ -229,11 +149,6 @@
           "link": "/git/",
           "translations": {
             "zh-CN": "Git 与 GitHub 工作流",
-            "uk": "Робочі процеси Git і GitHub",
-            "es": "Flujos de trabajo de Git y GitHub",
-            "pt-BR": "Fluxos de Git e GitHub",
-            "ko": "Git 및 GitHub 워크플로",
-            "pl": "Przepływy Git i GitHub",
             "fr": "Workflows Git et GitHub",
             "ja": "Git と GitHub ワークフロー"
           }
@@ -243,11 +158,6 @@
           "link": "/github/",
           "translations": {
             "zh-CN": "GitHub Issue 与 PR",
-            "uk": "GitHub Issues та PR",
-            "es": "Issues y PRs de GitHub",
-            "pt-BR": "Issues e PRs do GitHub",
-            "ko": "GitHub 이슈 및 PR",
-            "pl": "Issues i PR na GitHub",
             "fr": "Issues et PR GitHub",
             "ja": "GitHub Issues と PR"
           }
@@ -257,11 +167,6 @@
           "link": "/agent-personalization/",
           "translations": {
             "zh-CN": "Agent 记忆与系统提示词",
-            "uk": "Пам’ять та інструкції Agent",
-            "es": "Memoria e instrucciones del agente",
-            "pt-BR": "Memória e instruções do Agent",
-            "ko": "Agent 메모리와 지침",
-            "pl": "Pamięć i instrukcje Agenta",
             "fr": "Mémoire et instructions de l’agent",
             "ja": "Agent のメモリと指示"
           }
@@ -271,11 +176,6 @@
           "link": "/git-identities/",
           "translations": {
             "zh-CN": "Git 身份",
-            "uk": "Git-ідентичності",
-            "es": "Identidades de Git",
-            "pt-BR": "Identidades Git",
-            "ko": "Git 아이덴티티",
-            "pl": "Tożsamości Git",
             "fr": "Identités Git",
             "ja": "Git ID"
           }
@@ -286,11 +186,6 @@
       "label": "Agent setup",
       "translations": {
         "zh-CN": "Agent 设置",
-        "uk": "Налаштування агента",
-        "es": "Configuración del agente",
-        "pt-BR": "Configuração do agente",
-        "ko": "에이전트 설정",
-        "pl": "Konfiguracja agenta",
         "fr": "Configuration de l’agent",
         "ja": "エージェント設定"
       },
@@ -300,11 +195,6 @@
           "link": "/providers/",
           "translations": {
             "zh-CN": "模型渠道",
-            "uk": "Канали моделей",
-            "es": "Canales de modelos",
-            "pt-BR": "Canais de modelos",
-            "ko": "모델 채널",
-            "pl": "Kanały modeli",
             "fr": "Canaux de modèles",
             "ja": "モデルチャネル"
           }
@@ -314,11 +204,6 @@
           "link": "/mcp/",
           "translations": {
             "zh-CN": "MCP Servers",
-            "uk": "MCP-сервери",
-            "es": "Servidores MCP",
-            "pt-BR": "Servidores MCP",
-            "ko": "MCP 서버",
-            "pl": "Serwery MCP",
             "fr": "Serveurs MCP",
             "ja": "MCP サーバー"
           }
@@ -328,11 +213,6 @@
           "link": "/skills/",
           "translations": {
             "zh-CN": "技能",
-            "uk": "Навички",
-            "es": "Habilidades",
-            "pt-BR": "Skills",
-            "ko": "스킬",
-            "pl": "Skille",
             "fr": "Skills",
             "ja": "スキル"
           }
@@ -342,11 +222,6 @@
           "link": "/skills-catalog/",
           "translations": {
             "zh-CN": "技能资源库",
-            "uk": "Бібліотека навичок",
-            "es": "Biblioteca de habilidades",
-            "pt-BR": "Biblioteca de skills",
-            "ko": "스킬 라이브러리",
-            "pl": "Biblioteka skilli",
             "fr": "Bibliothèque de skills",
             "ja": "スキルライブラリ"
           }
@@ -356,11 +231,6 @@
           "link": "/commands/",
           "translations": {
             "zh-CN": "命令",
-            "uk": "Команди",
-            "es": "Comandos",
-            "pt-BR": "Comandos",
-            "ko": "명령",
-            "pl": "Polecenia",
             "fr": "Commandes",
             "ja": "コマンド"
           }
@@ -370,11 +240,6 @@
           "link": "/usage/",
           "translations": {
             "zh-CN": "分支 token 用量",
-            "uk": "Використання токенів гілки",
-            "es": "Uso de tokens por rama",
-            "pt-BR": "Uso de tokens da branch",
-            "ko": "브랜치 토큰 사용량",
-            "pl": "Zużycie tokenów gałęzi",
             "fr": "Tokens utilisés par branche",
             "ja": "ブランチのトークン使用量"
           }
@@ -385,11 +250,6 @@
       "label": "Remote access",
       "translations": {
         "zh-CN": "远程访问",
-        "uk": "Віддалений доступ",
-        "es": "Acceso remoto",
-        "pt-BR": "Acesso remoto",
-        "ko": "원격 접속",
-        "pl": "Dostęp zdalny",
         "fr": "Accès distant",
         "ja": "リモートアクセス"
       },
@@ -399,11 +259,6 @@
           "link": "/connect-devices/",
           "translations": {
             "zh-CN": "连接设备",
-            "uk": "Підключення пристрою",
-            "es": "Conectar un dispositivo",
-            "pt-BR": "Conectar um Dispositivo",
-            "ko": "기기 연결",
-            "pl": "Połącz urządzenie",
             "fr": "Connecter un appareil",
             "ja": "デバイスを接続する"
           }
@@ -413,11 +268,6 @@
           "link": "/private-relay/",
           "translations": {
             "zh-CN": "Private Relay",
-            "uk": "Private Relay",
-            "es": "Private Relay",
-            "pt-BR": "Private Relay",
-            "ko": "Private Relay",
-            "pl": "Private Relay",
             "fr": "Relais privé",
             "ja": "Private Relay"
           }
@@ -427,11 +277,6 @@
           "link": "/tunnels/",
           "translations": {
             "zh-CN": "隧道",
-            "uk": "Тунелі",
-            "es": "Túneles",
-            "pt-BR": "Túneis",
-            "ko": "터널",
-            "pl": "Tunele",
             "fr": "Tunnels",
             "ja": "トンネル"
           }
@@ -441,11 +286,6 @@
           "link": "/reverse-proxy/",
           "translations": {
             "zh-CN": "反向代理",
-            "uk": "Зворотний проксі",
-            "es": "Proxy inverso",
-            "pt-BR": "Proxy reverso",
-            "ko": "리버스 프록시",
-            "pl": "Reverse proxy",
             "fr": "Reverse proxy",
             "ja": "リバースプロキシ"
           }
@@ -455,11 +295,6 @@
           "link": "/mobile/",
           "translations": {
             "zh-CN": "移动应用与 PWA",
-            "uk": "Мобільні застосунки та PWA",
-            "es": "Apps móviles y PWA",
-            "pt-BR": "Apps Móveis e PWA",
-            "ko": "모바일 앱 & PWA",
-            "pl": "Aplikacje mobilne i PWA",
             "fr": "Applications mobiles et PWA",
             "ja": "モバイルアプリと PWA"
           }
@@ -469,11 +304,6 @@
           "link": "/security/",
           "translations": {
             "zh-CN": "安全",
-            "uk": "Безпека",
-            "es": "Seguridad",
-            "pt-BR": "Segurança",
-            "ko": "보안",
-            "pl": "Bezpieczeństwo",
             "fr": "Sécurité",
             "ja": "セキュリティ"
           }
@@ -484,11 +314,6 @@
       "label": "Customize",
       "translations": {
         "zh-CN": "自定义",
-        "uk": "Налаштування",
-        "es": "Personalizar",
-        "pt-BR": "Personalizar",
-        "ko": "맞춤 설정",
-        "pl": "Dostosuj",
         "fr": "Personnaliser",
         "ja": "カスタマイズ"
       },
@@ -498,11 +323,6 @@
           "link": "/themes/",
           "translations": {
             "zh-CN": "主题",
-            "uk": "Теми",
-            "es": "Temas",
-            "pt-BR": "Temas",
-            "ko": "테마",
-            "pl": "Motywy",
             "fr": "Thèmes",
             "ja": "テーマ"
           }
@@ -512,11 +332,6 @@
           "link": "/notifications/",
           "translations": {
             "zh-CN": "通知",
-            "uk": "Сповіщення",
-            "es": "Notificaciones",
-            "pt-BR": "Notificações",
-            "ko": "알림",
-            "pl": "Powiadomienia",
             "fr": "Notifications",
             "ja": "通知"
           }
@@ -526,11 +341,6 @@
           "link": "/voice/",
           "translations": {
             "zh-CN": "语音模式",
-            "uk": "Голосовий режим",
-            "es": "Modo de voz",
-            "pt-BR": "Modo de Voz",
-            "ko": "음성 모드",
-            "pl": "Tryb głosowy",
             "fr": "Mode vocal",
             "ja": "音声モード"
           }
@@ -540,11 +350,6 @@
           "link": "/project-icons/",
           "translations": {
             "zh-CN": "项目图标",
-            "uk": "Іконки проєктів",
-            "es": "Iconos de proyecto",
-            "pt-BR": "Ícones de Projeto",
-            "ko": "프로젝트 아이콘",
-            "pl": "Ikony projektów",
             "fr": "Icônes de projet",
             "ja": "プロジェクトアイコン"
           }
@@ -555,11 +360,6 @@
       "label": "Desktop",
       "translations": {
         "zh-CN": "桌面端",
-        "uk": "Десктоп",
-        "es": "Escritorio",
-        "pt-BR": "Desktop",
-        "ko": "데스크톱",
-        "pl": "Pulpit",
         "fr": "Desktop",
         "ja": "デスクトップ"
       },
@@ -569,11 +369,6 @@
           "link": "/remote-instances/",
           "translations": {
             "zh-CN": "远程实例",
-            "uk": "Віддалені інстанси",
-            "es": "Instancias remotas",
-            "pt-BR": "Instâncias Remotas",
-            "ko": "원격 인스턴스",
-            "pl": "Zdalne instancje",
             "fr": "Instances distantes",
             "ja": "リモートインスタンス"
           }
@@ -583,11 +378,6 @@
           "link": "/desktop-browser/",
           "translations": {
             "zh-CN": "桌面浏览器",
-            "uk": "Десктопний браузер",
-            "es": "Navegador de escritorio",
-            "pt-BR": "Navegador no Desktop",
-            "ko": "데스크톱 브라우저",
-            "pl": "Przeglądarka na komputerze",
             "fr": "Navigateur desktop",
             "ja": "デスクトップブラウザ"
           }
@@ -597,11 +387,6 @@
           "link": "/desktop-tunnels/",
           "translations": {
             "zh-CN": "桌面端隧道",
-            "uk": "Десктопні тунелі",
-            "es": "Túneles de escritorio",
-            "pt-BR": "Túneis no desktop",
-            "ko": "데스크톱 터널",
-            "pl": "Tunele w aplikacji desktopowej",
             "fr": "Tunnels desktop",
             "ja": "デスクトップトンネル"
           }
@@ -611,11 +396,6 @@
           "link": "/ssh-hosts-proxying/",
           "translations": {
             "zh-CN": "SSH 主机与代理",
-            "uk": "SSH-хости та проксі",
-            "es": "Hosts SSH y proxy",
-            "pt-BR": "Hosts SSH e proxy",
-            "ko": "SSH 호스트 및 프록시",
-            "pl": "Hosty SSH i proxy",
             "fr": "Hosts SSH et proxy",
             "ja": "SSH ホストとプロキシ"
           }
@@ -625,11 +405,6 @@
           "link": "/updates/",
           "translations": {
             "zh-CN": "更新",
-            "uk": "Оновлення",
-            "es": "Actualizaciones",
-            "pt-BR": "Atualizações",
-            "ko": "업데이트",
-            "pl": "Aktualizacje",
             "fr": "Mises à jour",
             "ja": "更新"
           }
@@ -640,11 +415,6 @@
       "label": "Help",
       "translations": {
         "zh-CN": "帮助",
-        "uk": "Допомога",
-        "es": "Ayuda",
-        "pt-BR": "Ajuda",
-        "ko": "도움말",
-        "pl": "Pomoc",
         "fr": "Aide",
         "ja": "ヘルプ"
       },
@@ -654,11 +424,6 @@
           "link": "/troubleshooting/",
           "translations": {
             "zh-CN": "问题排查",
-            "uk": "Усунення несправностей",
-            "es": "Resolución de problemas",
-            "pt-BR": "Solução de problemas",
-            "ko": "문제 해결",
-            "pl": "Rozwiązywanie problemów",
             "fr": "Dépannage",
             "ja": "トラブルシューティング"
           }
@@ -668,11 +433,6 @@
           "link": "/troubleshooting/worktrees-git/",
           "translations": {
             "zh-CN": "Worktree 与 Git",
-            "uk": "Worktree та Git",
-            "es": "Worktrees y Git",
-            "pt-BR": "Worktrees e Git",
-            "ko": "Worktree 및 Git",
-            "pl": "Worktree i Git",
             "fr": "Worktrees et Git",
             "ja": "Worktrees と Git"
           }
@@ -682,11 +442,6 @@
           "link": "/troubleshooting/remote-access/",
           "translations": {
             "zh-CN": "远程访问",
-            "uk": "Віддалений доступ",
-            "es": "Acceso remoto",
-            "pt-BR": "Acesso Remoto",
-            "ko": "원격 접속",
-            "pl": "Dostęp zdalny",
             "fr": "Accès distant",
             "ja": "リモートアクセス"
           }

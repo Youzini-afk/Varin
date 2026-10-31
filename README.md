@@ -37,7 +37,7 @@ The model does the thinking. The harness is everything around it: tools, context
 - Questions don't block: other work goes on while the agent waits for you, and budgeted goals resume when their conditions are met.
 - Tools on demand: common tools are always at hand and the rest load when needed. MCP servers can be exposed directly or discovered on demand.
 
-**Ready out of the box.** About 80 native tools, 4 work modes, 4 official workbenches, 6 bundled language servers and 8 native model protocols, with the interface in 10 languages.
+**Ready out of the box.** About 90 native tools, 4 work modes, 4 official workbenches, 7 bundled language servers and 9 native model protocols, with the interface in 10 languages.
 
 **Deep customization, no code required.** Give any preset agent a new model, instructions or tools, or create your own. Choose separate models for titles, context curation, planning, images and embeddings. Edit system instructions and memory, use Skills from `.claude` and `.agents` folders or install them from a Git repository, and allow, ask or deny each tool.
 
@@ -76,10 +76,10 @@ The mode decides which tools the agent starts with and which teammates help out.
    | --- | --- |
    | Windows, macOS or Linux | [Download the installer](https://github.com/Youzini-afk/Varin/releases/latest) for your system and CPU architecture. |
    | Your own server, used from a browser | [Self-host with Docker](docs/ops/cloud-deployment.md), with persistent storage, passwords and remote access. |
-   | Your phone | Pair it with your Host from Settings. Until the native apps are released, install the web app (PWA). [Mobile guide](packages/docs/content/docs/mobile.mdx) |
+   | Your phone | On Android, install the APK from the [latest release](https://github.com/Youzini-afk/Varin/releases/latest); on iPhone, install the web app (PWA). Then pair it with your Host from Settings. [Mobile guide](packages/docs/content/docs/mobile.mdx) |
    | From source | See [Run from source](#run-from-source). |
 
-2. Open Settings and add an API key for a model provider, or connect a local service. [Providers and models](packages/docs/content/docs/providers.mdx)
+2. Open Settings and add an API key for a model provider, or connect a local service. [Model channels](packages/docs/content/docs/providers.mdx)
 3. Pick a work mode, choose a project folder if the task needs one, and start your first task.
 
 Varin is in active development before 1.0. This README describes the current source; [release notes](https://github.com/Youzini-afk/Varin/releases) describe each published build. Back up important application data before upgrading.
