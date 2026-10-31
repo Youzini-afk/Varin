@@ -2,6 +2,7 @@ import { requestFrame, type FrameHandle } from '@/lib/motion/frame';
 import { documentMotionLevel, type MotionLevel } from '@/lib/motion/preference';
 import type { BotFigureState } from './botPresentation';
 import { VARIN_FIGURE_BLUSH, VARIN_FIGURE_LAYERS, type VarinFigureLayer } from './varinFigureArt';
+import { DEFAULT_FIGURE_ACCENT, type FigureAccent } from './varinFigurePalette';
 
 /**
  * The Bot figure's rig (docs/design/varin-figure.md): Varin leaning on a window sill, drawn from the
@@ -29,6 +30,10 @@ const BROW = { L: [486, 548], R: [757, 542] } as const;
 const HAND = { L: [473, 1097], R: [767, 1097] } as const;
 const AHOGE = [240, 466] as const;
 const SKIN = '#fae5dd';
+// The drawn mist-blue accent parts: knit, collar, sleeves, sleeve motifs and the clip's light piece.
+// They follow the theme's accent; eyes, brows, hair, skin, coat and the black parts never change.
+const ACCENT_PARTS = new Set(['#82a3e6', '#7495dc', '#6b8bd5', '#6f90d8', '#9cb6ec', '#6c8dd5', '#7f9fe4']);
+const TINTED_GLOW = new Set<BotFigureState>(['idle', 'listening', 'offline']);
 // Sleep z's, thinking bubbles and the question mark use the theme's muted ink.
 const MARK_FILL = 'fill: var(--bot-figure-mark, #9aa0ad)';
 const MARK_STROKE = 'stroke: var(--bot-figure-mark, #9aa0ad)';
@@ -233,6 +238,8 @@ export interface VarinFigureOptions {
   still: boolean;
   /** Fill the host's width: the scene widens around her and the ledge runs edge to edge. */
   wide?: boolean;
+  /** Theme colours for the accent parts (varinFigurePalette). */
+  accent?: FigureAccent;
 }
 
 export class VarinFigureRig {
@@ -242,6 +249,8 @@ export class VarinFigureRig {
   private readonly posed: boolean;
   private view: View;
   private ledge: SVGRectElement | null = null;
+  private accent: FigureAccent = DEFAULT_FIGURE_ACCENT;
+  private readonly accented: { node: Element; attr: 'fill' | 'stroke'; source: string }[] = [];
   private readonly uid = `vf${++seq}`;
   private svg!: SVGSVGElement;
   private state: BotFigureState;
@@ -304,6 +313,7 @@ export class VarinFigureRig {
     this.posed = options.still || options.compact || !canAnimate();
     this.state = options.state;
     this.build();
+    if (options.accent) this.setAccent(options.accent);
     if (this.wide) this.fitWidth();
     this.level = documentMotionLevel();
     if (!this.posed) this.watch();
@@ -314,6 +324,14 @@ export class VarinFigureRig {
   setState(state: BotFigureState): void {
     if (this.disposed || state === this.state) return;
     this.enterState(state, false);
+  }
+
+  /** Recolour the accent parts for the current theme; poses and motion carry on. */
+  setAccent(accent: FigureAccent): void {
+    if (this.disposed || accent.key === this.accent.key) return;
+    this.accent = accent;
+    for (const part of this.accented) part.node.setAttribute(part.attr, accent.tint(part.source));
+    this.render();
   }
 
   dispose(): void {
@@ -341,14 +359,14 @@ export class VarinFigureRig {
   bit(side: Side): void {
     if (!this.animated) return;
     const x = (side === 'L' ? this.p.hLx : this.p.hRx) + (Math.random() - .5) * 60;
-    const colors = ['#8fb0ea', '#c9d6f5', '#f3c690', '#a9c2f2'];
+    const colors = [this.accent.tint('#8fb0ea'), this.accent.tint('#c9d6f5'), '#f3c690', this.accent.tint('#a9c2f2')];
     const node = el('rect', { x: -9, y: -9, width: 18, height: 18, rx: 3, fill: colors[Math.floor(Math.random() * colors.length)] }, this.fxFront);
     this.parts.push({ node, x, y: 1030, vx: (Math.random() - .5) * 90, vy: -260 - Math.random() * 160, g: 120, r: 45, vr: (Math.random() - .5) * 200, s: .7 + Math.random() * .6, life: 0, max: .95 });
   }
 
   burst(count: number): void {
     if (!this.animated) return;
-    const colors = ['#ffd36e', '#8fb0ea', '#f4a9c0', '#c9d6f5', '#b8c9f5'];
+    const colors = ['#ffd36e', this.accent.tint('#8fb0ea'), '#f4a9c0', this.accent.tint('#c9d6f5'), this.accent.tint('#b8c9f5')];
     for (let i = 0; i < count; i += 1) {
       const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.5, speed = 520 + Math.random() * 520, fill = colors[i % colors.length];
       const node = i % 2 === 0
@@ -524,7 +542,7 @@ export class VarinFigureRig {
         if (w > .35) { if (o.eyes) eyeL = eyeR = o.eyes; if (o.eyeL) eyeL = o.eyeL; if (o.eyeR) eyeR = o.eyeR; if (o.mouth) mouth = o.mouth; }
       }
     }
-    const [r, g, b] = hex(GLOW[this.state]);
+    const [r, g, b] = hex(TINTED_GLOW.has(this.state) ? this.accent.tint(GLOW[this.state]) : GLOW[this.state]);
     goal.gr = r; goal.gg = g; goal.gb = b;
     goal.glow = st.glow * (st.pulse && L ? .78 + .22 * Math.sin(2 * Math.PI * lt / 2.2) : 1);
     this.goal = goal;
@@ -698,6 +716,15 @@ export class VarinFigureRig {
   }
 
   // ------------------------------------------------------------ construction
+  private collectAccent(root: Element): void {
+    for (const node of [root, ...root.querySelectorAll('*')]) {
+      for (const attr of ['fill', 'stroke'] as const) {
+        const source = node.getAttribute(attr)?.toLowerCase();
+        if (source && ACCENT_PARTS.has(source)) this.accented.push({ node, attr, source });
+      }
+    }
+  }
+
   private build(): void {
     const u = this.uid;
     const svg = el('svg', { viewBox: this.view.join(' '), preserveAspectRatio: 'xMidYMax meet', 'aria-hidden': 'true', focusable: 'false', 'data-agent-avatar': 'bot-figure' });
@@ -770,6 +797,7 @@ export class VarinFigureRig {
       for (const [rx, ry] of [[-28, -18.5], [0, -18.5], [-28, 0], [0, 0]]) el('rect', { x: rx, y: ry, width: 28, height: 18.5, rx: 2 }, group);
     }
 
+    for (const group of [under, body]) this.collectAccent(group);
     paint(VARIN_FIGURE_LAYERS.face, el('g', {}, this.fig));
     // Face features slide a little under the bangs when the head "turns".
     this.feat = el('g', {}, this.fig);
@@ -821,6 +849,7 @@ export class VarinFigureRig {
     const clipGroup = el('g', {}, this.fig);
     el('path', { fill: '#2b2c33', d: 'M858 283 L932 285 L940 297 L924 322 L897 323 L862 384 L820 368 Z' }, clipGroup);
     el('path', { fill: '#7f9fe4', d: 'M889 325 L946 323 L966 343 L930 423 L845 423 L872 370 L880 364 L899 378 L912 355 L908 347 L887 331 Z' }, clipGroup);
+    this.collectAccent(clipGroup);
 
     // The ledge she leans on, in the theme's surface colour, and the two ball hands resting on it.
     if (!this.compact) this.ledge = el('rect', { x: 30, y: SILL, width: 1194, height: 40, rx: 20, style: 'fill: var(--bot-figure-ledge, #e3e5eb)' }, svg);

@@ -9,6 +9,7 @@ vi.mock('@/lib/motion/frame', () => ({
   },
 }));
 
+import { VARIN_FIGURE_LAYERS } from './varinFigureArt';
 import { VarinFigureRig } from './varinFigureRig';
 
 describe('Bot figure', () => {
@@ -41,6 +42,22 @@ describe('Bot figure', () => {
     expect(frames.queue).toHaveLength(0);
     figure.dispose();
     expect(host.querySelector('svg')).toBeNull();
+  });
+
+  it('recolours the accent parts for the theme and leaves the eyes alone', () => {
+    const figure = new VarinFigureRig(host, { state: 'idle', compact: false, still: true });
+    const fills = (): string[] => [...host.querySelectorAll('[fill]')].map(node => node.getAttribute('fill') ?? '');
+    const before = fills();
+    expect(before).toContain('#82a3e6');
+    figure.setAccent({ key: 'test', tint: () => '#123456' });
+    const after = fills();
+    const count = (list: string[], fill: string): number => list.filter(value => value === fill).length;
+    expect(after).toContain('#123456');
+    // The traced brows share the knit's mist blue but stay, as do the eyes.
+    const brows = [...VARIN_FIGURE_LAYERS.browL, ...VARIN_FIGURE_LAYERS.browR].filter(([fill]) => fill === '#82a3e6').length;
+    expect(count(after, '#82a3e6')).toBe(brows);
+    expect(count(after, '#576487')).toBe(count(before, '#576487'));
+    figure.dispose();
   });
 
   it('animates only while the page is visible', () => {
