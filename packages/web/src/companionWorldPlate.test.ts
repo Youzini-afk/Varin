@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, test } from 'vitest';
 import { readCompanionWorldPlate, verifyCompanionWorldPlate } from './companionWorldPlate';
@@ -30,13 +31,16 @@ describe('installed decorative world plate', () => {
     expect(() => readCompanionWorldPlate({ ...bundle(), worldStool })).toThrow('epoch');
   });
 
-  test('admits the installed bundle and verifies actual local PNG bytes, rejecting tampering', async () => {
-    const base = new URL('../public/companion-assets/', import.meta.url);
-    const installed = JSON.parse(await readFile(new URL('bundle.json', base), 'utf8'));
+  test('admits the installed bundle, whose plate is the locked download, and rejects tampered bytes', async () => {
+    const installed = JSON.parse(await readFile(new URL('../public/companion-assets/bundle.json', import.meta.url), 'utf8'));
+    const lock = JSON.parse(await readFile(new URL('../companion-assets.lock.json', import.meta.url), 'utf8')) as
+      { files: { path: string; sha256: string }[] };
     const selected = readCompanionWorldPlate(installed);
-    const bytes = new Uint8Array(await readFile(new URL(selected.file, base)));
-    await expect(verifyCompanionWorldPlate(bytes.buffer, selected.sha256)).resolves.toBeUndefined();
+    expect(lock.files).toContainEqual(expect.objectContaining({ path: selected.file, sha256: selected.sha256 }));
+    const bytes = new TextEncoder().encode('decorative world plate');
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    await expect(verifyCompanionWorldPlate(bytes.buffer, digest)).resolves.toBeUndefined();
     bytes[0] ^= 1;
-    await expect(verifyCompanionWorldPlate(bytes.buffer, selected.sha256)).rejects.toThrow('hash mismatch');
+    await expect(verifyCompanionWorldPlate(bytes.buffer, digest)).rejects.toThrow('hash mismatch');
   });
 });

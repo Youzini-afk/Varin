@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "repository": "Youzini-afk/Varin-companion-assets",
+  "commit": "ebfbcd3383b120b4427ce7820e5eda21e63e6b60",
+  "path": "pack/varin",
+  "files": [
+    {
+      "path": "atlas-000.png",
+      "bytes": 5439302,
+      "sha256": "b148628e7990cf3f537e9fcbc56e45a25bd69ec2da4419e526fde8db1a0a75d8"
+    },
+    {
+      "path": "atlas-001.png",
+      "bytes": 5456877,
+      "sha256": "c94717819c52331303cec4f02f0dbb8dd79aae71cedf5804d2c280178cc337b6"
+    },
+    {
+      "path": "atlas-002.png",
+      "bytes": 5395820,
+      "sha256": "034d9773fa07ad186be74d8e30b83de94c4b2d150893a40c716345bfb16a2202"
+    },
+    {
+      "path": "atlas-003.png",
+      "bytes": 5457942,
+      "sha256": "8d9a6962dcab8f05b75c0d5d7b9fcb86055a1a987d2932625c6e0ff59d9ea1f8"
+    },
+    {
+      "path": "atlas-004.png",
+      "bytes": 5439659,
+      "sha256": "24549c19241a7de9c690feabebb7519507aae028725239d30f4900027505e209"
+    },
+    {
+      "path": "atlas-005.png",
+      "bytes": 5511271,
+      "sha256": "4241fed17df1e57fdffea240c6bc214c69deaff844dc71435d0083142bd139fa"
+    },
+    {
+      "path": "atlas-006.png",
+      "bytes": 5517608,
+      "sha256": "8575e3ad3230994a561c7b27398835d92ef6fb921f025ceb98cda8af610dc047"
+    },
+    {
+      "path": "atlas-007.png",
+      "bytes": 5528487,
+      "sha256": "e82bf3d061f5588e5236a01633af59fab88488e00994b4236aa9e450bd20cf44"
+    },
+    {
+      "path": "atlas-008.png",
+      "bytes": 5494587,
+      "sha256": "7258b07106127349adf983b04bd10fe7353c8ee9cf8577e14e320eb466a8dfd1"
+    },
+    {
+      "path": "atlas-009.png",
+      "bytes": 5539785,
+      "sha256": "3018d348734dd6bfde42bcd6e858c641a7cf26ad52338613a2612f9d1fe0d067"
+    },
+    {
+      "path": "atlas-010.png",
+      "bytes": 5515150,
+      "sha256": "48380fbe48c4d858036ed80828b76d1012722b35476364f503a8cee472397866"
+    },
+    {
+      "path": "atlas-011.png",
+      "bytes": 5439701,
+      "sha256": "478336fa925a089ab4eb26c59cc56a094e14787f23a253230d34c4ca5cd39f65"
+    },
+    {
+      "path": "atlas-012.png",
+      "bytes": 5360788,
+      "sha256": "bda20515b2b8067e667e5f66bf903255c5d6f33d86b22f6d27245f56150222f3"
+    },
+    {
+      "path": "atlas-013.png",
+      "bytes": 5436343,
+      "sha256": "e8546bb980cece0444c549149902c1a0338fca92dde4be698597e11a7abd3ceb"
+    },
+    {
+      "path": "atlas-014.png",
+      "bytes": 5485151,
+      "sha256": "f0a43a7b1c8df107d8a43fb2e4f7e99bbf101371747574c81a01ff9b01ecafec"
+    },
+    {
+      "path": "atlas-015.png",
+      "bytes": 5460366,
+      "sha256": "54e5a375610e78f0f550e010ba27ea2fb51460b5e9c92e58d133715bd592de08"
+    },
+    {
+      "path": "atlas-016.png",
+      "bytes": 5438236,
+      "sha256": "b934ff4f2d9f3808be7298c6d79aed92cc28884d359f07a04860760ed5bff31c"
+    },
+    {
+      "path": "atlas-017.png",
+      "bytes": 5455103,
+      "sha256": "52c34f87bfce01d71e5d7a210a8e5292778123511e57ef199050f36470b1237d"
+    },
+    {
+      "path": "atlas-018.png",
+      "bytes": 5409874,
+      "sha256": "45607f1fc007481ceb7309676d8f3330f5781083fd98a836491b8ef5bb302703"
+    },
+    {
+      "path": "atlas-019.png",
+      "bytes": 5395105,
+      "sha256": "45f3484e90d1876e5fb7fa8238126547bf694250c7cac89228723019ce15ec2d"
+    },
+    {
+      "path": "atlas-020.png",
+      "bytes": 2420056,
+      "sha256": "0053150df13c78396ca26f835a44ba565f2a841ad6feb93d983f68519a05c615"
+    },
+    {
+      "path": "bundle.json",
+      "bytes": 1565495,
+      "sha256": "e69fb1bedfaaa16ed4b04483929a59b305561bbb3898595d07095bf135df0d97"
+    },
+    {
+      "path": "occlusion-atlas-000.png",
+      "bytes": 414822,
+      "sha256": "44186597b38b152b23e64d07df49704aa48ce6b349a7df52a0e0f889c0c256e8"
+    },
+    {
+      "path": "occlusion-atlas-001.png",
+      "bytes": 400299,
+      "sha256": "901aaf7da6ced53ca723a651f6389d0755aac08abe41dbd8226bf9589db03e59"
+    },
+    {
+      "path": "occlusion-atlas-002.png",
+      "bytes": 399344,
+      "sha256": "137ed796408fdb7e00829c0e01567474f2f941e138f80b833a26e303b84547e0"
+    },
+    {
+      "path": "occlusion-atlas-003.png",
+      "bytes": 407697,
+      "sha256": "1e639b7ee558ef03810e5db27799f533cedb1f65594e1dd2cb7accfe444d1b03"
+    },
+    {
+      "path": "occlusion-atlas-004.png",
+      "bytes": 402792,
+      "sha256": "679e3790f2aa9d614c59ec52362d69ef67985f8028d0c1e1e326278bbb554229"
+    },
+    {
+      "path": "occlusion-atlas-005.png",
+      "bytes": 397279,
+      "sha256": "66247c39a64551a58928508ffbb307186164c986ea077f03ad4bb0ed565d76ab"
+    },
+    {
+      "path": "occlusion-atlas-006.png",
+      "bytes": 402076,
+      "sha256": "36aeda507c3e2675698ab3ed943299b33e7960abc69980d177a0bdc5cb950b42"
+    },
+    {
+      "path": "occlusion-atlas-007.png",
+      "bytes": 392199,
+      "sha256": "05b710c3b959a5b6d0c73d5b1b2edb49bfbfbbf19cd5247050da01fc9aa92efd"
+    },
+    {
+      "path": "occlusion-atlas-008.png",
+      "bytes": 392956,
+      "sha256": "a22cec88e64beb55b39ccc17fd37381b0b7efa58e97f87337465c957e69333e1"
+    },
+    {
+      "path": "occlusion-atlas-009.png",
+      "bytes": 395591,
+      "sha256": "0ce8f51bad918fb0373230606fc5305c7b7cbd751f2f0d73118fa80a87dd1abe"
+    },
+    {
+      "path": "occlusion-atlas-010.png",
+      "bytes": 390232,
+      "sha256": "5eff5c643d10b2db919443a0de71e45186b2a02bfe4fb54941ddefd0b00a88fb"
+    },
+    {
+      "path": "occlusion-atlas-011.png",
+      "bytes": 397377,
+      "sha256": "3287a803ac9d142dc430214dd7fe2cf4f9ba0d1b7906da07d2f7dd6fa12f31aa"
+    },
+    {
+      "path": "occlusion-atlas-012.png",
+      "bytes": 399611,
+      "sha256": "45ea330328390bc0395309caf7663a0b5967984c30c2642e117ef06f59331f66"
+    },
+    {
+      "path": "occlusion-atlas-013.png",
+      "bytes": 409833,
+      "sha256": "49d2d823b0c894fce8cf3c78464be63f21b9f94022101a1d5b1d4d32ad8e386a"
+    },
+    {
+      "path": "occlusion-atlas-014.png",
+      "bytes": 409512,
+      "sha256": "734bc22408a08d29787d463e33ade06350a13d18b7532516180637b80b38deba"
+    },
+    {
+      "path": "occlusion-atlas-015.png",
+      "bytes": 405799,
+      "sha256": "0635c39d3b03ce9ef15da6c7af9a8689adb7d7c37db1e8052acb7b3ee1db6891"
+    },
+    {
+      "path": "occlusion-atlas-016.png",
+      "bytes": 410613,
+      "sha256": "e09d0fa94f44b126e20fc7e5482e9223c6d71babe47a9c08c6d8d80b720f71d2"
+    },
+    {
+      "path": "occlusion-atlas-017.png",
+      "bytes": 414312,
+      "sha256": "b59e177dfee9377cc03d227203abe307711073730a922761652246ef239e4726"
+    },
+    {
+      "path": "occlusion-atlas-018.png",
+      "bytes": 408155,
+      "sha256": "a4cbf1097cc2e1ca3c6b2ba75b545a9c247fbf9c9b52eab1ab3678928ec53232"
+    },
+    {
+      "path": "occlusion-atlas-019.png",
+      "bytes": 399323,
+      "sha256": "627cf62ba3d2efb461fefe6fead6e415abcd61105e66e9a56b2129468f5ac12a"
+    },
+    {
+      "path": "occlusion-atlas-020.png",
+      "bytes": 181619,
+      "sha256": "abdfcddc5905a3decf20890667cc2605e55d7bca44574e77383e34e6ac2ae321"
+    },
+    {
+      "path": "occlusion.json",
+      "bytes": 4448,
+      "sha256": "995e16fb360a508be787acc95857e897c2fe8ee75b0215af52bd4a8cff94b8f3"
+    },
+    {
+      "path": "world-stool-b16b339dd67bbbdc.png",
+      "bytes": 32447,
+      "sha256": "b16b339dd67bbbdc90c45a4171fbe10fe8ab5e1b4ec67914fa6e65a28cfadfa7"
+    }
+  ]
+}

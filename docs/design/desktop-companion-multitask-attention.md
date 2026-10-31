@@ -239,6 +239,6 @@ computer/MCP 类别沿原 owner metadata 查询；`pending_mcp_interactions` 会
 
 ## 已验证的基础范围
 
-Linux 原生窗口使用 `cb4f9350` attention/面板基础、`7fa96e77` 协议 71 QA kernel 和未改变的 upright-v2 资源，实际验证了当前 Host 原生任务覆盖提示、健康空待办、刷新/展开、Esc 关闭与入口焦点恢复、360×480 可达布局及主窗退出后的附属窗口清理。设置已逐字节恢复。精确产物与日志身份见 [foundation 验证记录](desktop-companion-assets/attention-foundation/native-validation.json)。
+Linux 原生窗口使用 `cb4f9350` attention/面板基础、`7fa96e77` 协议 71 QA kernel 和未改变的 upright-v2 资源，实际验证了当前 Host 原生任务覆盖提示、健康空待办、刷新/展开、Esc 关闭与入口焦点恢复、360×480 可达布局及主窗退出后的附属窗口清理。设置已逐字节恢复。精确产物与日志身份见 [foundation 验证记录](https://github.com/Youzini-afk/Varin-companion-assets/blob/main/source/attention-foundation/native-validation.json)。
 
 这次没有制造付费模型任务；并发请求归属由实际运行的 Catalog fixtures 覆盖，不冒称 GUI 多任务实测。它不构成主管新身体语句、项目负责人角色库、portfolio 联动或 Windows/macOS 的最终验收。

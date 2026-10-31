@@ -26,12 +26,12 @@ test('desktop payload keeps the player and preview but excludes full artwork eve
   } } finally { await rm(source, { recursive: true, force: true }); }
 });
 
-test('catalog pins the actual bundle, all referenced art and alpha pages to a reproducible source tree', async () => {
+test('catalog pins the actual bundle, all referenced art and alpha pages to one published artwork commit', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'varin-companion-catalog-'));
   try {
-    const catalog = await prepareCompanionCatalog({ output: path.join(root, 'catalog.json'), sourceRevision: 'a'.repeat(40) });
+    const catalog = await prepareCompanionCatalog({ output: path.join(root, 'catalog.json') });
     const pack = catalog.packs[0];
-    assert.match(pack.baseUrl, /\/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\/packages\/web\/public\/companion-assets\/$/u);
+    assert.match(pack.baseUrl, /^https:\/\/raw\.githubusercontent\.com\/Youzini-afk\/Varin-companion-assets\/[a-f0-9]{40}\/pack\/varin\/$/u);
     assert.ok(pack.files.some(file => file.path === 'bundle.json'));
     assert.ok(pack.files.some(file => file.path === 'occlusion.json'));
     assert.ok(pack.files.some(file => file.path.startsWith('occlusion-atlas-')));

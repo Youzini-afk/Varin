@@ -1,5 +1,10 @@
 server/prompt-templates.js
 /kernel/
+# Companion artwork comes from Varin-companion-assets at the commit in companion-assets.lock.json
+# (`bun run companion:fetch`). Only the descriptors the player is tested against stay tracked.
+/public/companion-assets/*
+!/public/companion-assets/bundle.json
+!/public/companion-assets/occlusion.json
 prompt-enhancer-config.json
 test-results/
 # Generated Application Host runtime output (built from application-host/)

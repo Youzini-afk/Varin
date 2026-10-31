@@ -2,7 +2,7 @@
 
 状态：2026-10-29，当前生成资源虽已接入单播放器，但整体动作与一致性未获用户认可。本页的制作原则不能当作这些原则已经被资源满足的证据。最新重设计见[动作表演方案](desktop-companion-director-performance.md)：先完成可独立观看的完整身体动作，再接业务与抓放；停止用独立头脸替换、跨动作族桥接充当全身连续表演。当前运行包与技术复建仍见[状态与产品蓝图](desktop-companion.md)及[打包工具说明](../../tools/desktop-companion-animation/README.md)。
 
-本稿接续[状态与产品蓝图](desktop-companion.md)、[默认色分镜](desktop-companion-assets/SHOT_PLAN.md)及[桌宠制作调研](desktop-companion-animation-research.md)。目标是先设计完整体验、资源依赖和制作方法，再按明确的整体方案分批生产。**分批提交是保存进度，不是把目标缩为一个示范动作，也不是做完一段再临时决定余下内容。**用户已授权自主推进，完整体验与制作路线经内部评审后即可实施，不再把每个制作阶段变成等待用户确认的关卡；新付费工具、额外许可等仍单独处理。
+本稿接续[状态与产品蓝图](desktop-companion.md)、[默认色分镜](https://github.com/Youzini-afk/Varin-companion-assets/blob/main/source/SHOT_PLAN.md)及[桌宠制作调研](desktop-companion-animation-research.md)。目标是先设计完整体验、资源依赖和制作方法，再按明确的整体方案分批生产。**分批提交是保存进度，不是把目标缩为一个示范动作，也不是做完一段再临时决定余下内容。**用户已授权自主推进，完整体验与制作路线经内部评审后即可实施，不再把每个制作阶段变成等待用户确认的关卡；新付费工具、额外许可等仍单独处理。
 
 ## 1. 完整体验与全帧原画制作路线
 
@@ -21,7 +21,7 @@
 
 ### 2.1 固定身份与镜头
 
-以已选[Q版身份参考](desktop-companion-assets/masters/Varin-chibi-original-reference.png)保留人物设计；当前几何和直颈常态以`production-v2/shared`及机械闭盖端点为准。早期[工作分镜](desktop-companion-assets/storyboards/01-work-cycle.png)提供行为参考，不再锁死旧倾头几何；不得混入不同身份代际的动作。银白长发、蓝眼、人物自身左侧唯一圈丸与发饰、黑蝴蝶结、奶白外衫、炭灰外裙、浅蓝内裙、菱形吊坠及腰牌保持一致。禁止整图镜像来伪造另一方向。
+以已选[Q版身份参考](https://github.com/Youzini-afk/Varin-companion-assets/blob/main/source/masters/Varin-chibi-original-reference.png)保留人物设计；当前几何和直颈常态以`production-v2/shared`及机械闭盖端点为准。早期[工作分镜](https://github.com/Youzini-afk/Varin-companion-assets/blob/main/source/storyboards/01-work-cycle.png)提供行为参考，不再锁死旧倾头几何；不得混入不同身份代际的动作。银白长发、蓝眼、人物自身左侧唯一圈丸与发饰、黑蝴蝶结、奶白外衫、炭灰外裙、浅蓝内裙、菱形吊坠及腰牌保持一致。禁止整图镜像来伪造另一方向。
 
 镜头保持三分之四视角与一致透视。工作时电脑背壳面向用户，不能为显示手指或屏幕内容任意翻转电脑。角色较大动作仍在这一镜头下重新绘制透视，不靠把平面图旋转来冒充俯仰。
 
@@ -147,7 +147,7 @@ SEATED_WORK–REST 的相近姿态可以复用已验证一致的头部原画与�
 
 ## 6. 提起、移动与落座的完整设计
 
-沿用[第08组](desktop-companion-assets/storyboards/08-reposition-lift-and-sit.png)，不复活整套凳子跟着飞的旧方案。
+沿用[第08组](https://github.com/Youzini-afk/Varin-companion-assets/blob/main/source/storyboards/08-reposition-lift-and-sit.png)，不复活整套凳子跟着飞的旧方案。
 
 1. **拖动成立**：轻点和有效拖动先区分。位置反馈不能等合盖动画完毕才响应；抓取点与指针保持连续，角色身体的准备动作并行展开。短点击不触发抱机。
 2. **收手稳机**：从键盘、触控板、摊掌、挥手、托腮、揉眼分别有收手路径；已有闭盖直接进入握持，已有抱机不重复放回膝上。盖未合时底座由膝/稳机手承托。
@@ -229,7 +229,7 @@ SEATED_WORK–REST 的相近姿态可以复用已验证一致的头部原画与�
 
 ### 8.4 目录、所有权与可恢复交付
 
-生产目录在实施时建立，现有历史试样不改写。`docs/design/desktop-companion-assets/animation-source/production/` 保存可编辑源与经批准的资源清单；`tools/desktop-companion-animation/` 保存离线工程生成、导出、配准/图集工具与可重现预览入口。生产播放资源待角色窗消费者落实后放入其相邻资源目录，不能把文档实验目录当正式加载 API。
+生产目录在实施时建立，现有历史试样不改写。素材仓库 Varin-companion-assets 的 `source/animation-source/production/` 保存可编辑源与经批准的资源清单；`tools/desktop-companion-animation/` 保存离线工程生成、导出、配准/图集工具与可重现预览入口。生产播放资源待角色窗消费者落实后放入其相邻资源目录，不能把文档实验目录当正式加载 API。
 
 生产源按 `shared`（角色比例、脸部、道具、颜色槽）、`seated-work`（SEATED_CLOSED/SEATED_WORK）、`attention-observe`（USER_ATTENTION/OBSERVE_DIAGNOSE）、`rest`（REST）、`relocation`（CARRY_AIRBORNE/LAND_SETTLE）分工，每组有原始来源、有效图层、工程、导出清单与代表预览。每个图层集和工程同一时刻只有一个写入负责人；公共锚点/道具变更由公共资源负责人发布版本，其他组主动对齐，禁止各组静默制造不同电脑或不同头部尺度。
 
@@ -332,7 +332,7 @@ U0的公共源、各组动作卡及连接关系完整登记后，U1/U2/U4可并�
 
 `check_completion_routes.mjs` 使用真实 `CompanionPlayback` 逐曝光检查普通退出、即时匹配去凳、最新意图、早放/重抓、稳定循环与减少动态暂停点；另外检查共享谨慎身体、单次下拍、安静cue一致性和180ms侧握例外。源/atlas SHA、原画保护、palette pixel audit、实际有序播放审片各有独立证据。
 
-离屏像素和播放器测试不等于所有平台的native输入/世界凳跟随或常驻性能验收。审阅轨迹使用实际播放器的5ms采样，没有生成中间画；图集接触表只能证明所列姿态，不能冒充完整连续观影。最终选定包及限制见随包 `acceptance.json`，原画来源与准备参数见 `production-v5/completion-provenance.json`。
+离屏像素和播放器测试不等于所有平台的native输入/世界凳跟随或常驻性能验收。审阅轨迹使用实际播放器的5ms采样，没有生成中间画；图集接触表只能证明所列姿态，不能冒充完整连续观影。最终选定包及限制见素材仓库随包的 `pack/varin/acceptance.json`，原画来源与准备参数见 `production-v5/completion-provenance.json`。
 
 ### 最终集成检查（2026-10-30）
 

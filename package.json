@@ -27,6 +27,8 @@
     "varin-dev": "node scripts/varin-dev.mjs",
     "build": "bun run build:type-dependencies && bun run --cwd packages/extension-cli build:raw && bun run --cwd packages/extension-react build:raw && bun run --cwd packages/web build:raw && bun run --cwd packages/ui build && bun run --cwd packages/electron build && bun run --cwd packages/mobile build:assets",
     "build:web": "bun run --cwd packages/web build",
+    "companion:fetch": "node packages/electron/scripts/companion-assets.mjs fetch",
+    "companion:lock": "node packages/electron/scripts/companion-assets.mjs lock",
     "build:cloud-runtime": "node scripts/build-cloud-runtime.mjs",
     "update:cloud-runtime-lock": "node scripts/build-cloud-runtime.mjs --skip-build --no-archive --update-lock",
     "build:ui": "bun run --cwd packages/ui build",

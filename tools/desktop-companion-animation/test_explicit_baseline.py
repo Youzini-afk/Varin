@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -10,9 +11,13 @@ from PIL import Image
 from compile_upright_pickup import atlas_source_order, compile_explicit_baseline
 
 ROOT = Path(__file__).resolve().parents[2]
+# Source art lives in a Varin-companion-assets checkout, by default beside this repository.
+ASSETS = Path(os.environ.get('VARIN_COMPANION_ASSETS') or ROOT.parent / 'Varin-companion-assets')
+PLATE = ASSETS / 'source/animation-source/production-v2/relocation/frames/world-stool-grounded-v4.png'
 sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+@unittest.skipUnless(PLATE.is_file(), f'needs the source art in a Varin-companion-assets checkout ({PLATE})')
 class ExplicitBaselineTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -23,7 +28,7 @@ class ExplicitBaselineTests(unittest.TestCase):
         Image.new('RGBA', (512, 512), (30, 80, 140, 255)).save(self.s)
         Image.new('RGBA', (512, 512), (60, 90, 170, 255)).save(self.d)
         self.sh, self.dh = sha(self.s), sha(self.d)
-        plate = ROOT / 'docs/design/desktop-companion-assets/animation-source/production-v2/relocation/frames/world-stool-grounded-v4.png'
+        plate = PLATE
         self.data = {'version': 1, 'canvas': [512, 512], 'geometryReference': 'test-only',
                      'canonicalSources': {self.sh: 'test:rest'},
                      'worldStool': {'source': str(plate), 'sourceSHA256': sha(plate)},

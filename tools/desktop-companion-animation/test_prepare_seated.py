@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 from pathlib import Path
 import tempfile
@@ -12,10 +13,13 @@ from PIL import Image
 spec = importlib.util.spec_from_file_location('pack_sequence', Path(__file__).with_name('pack_sequence.py'))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-PLATE = Path(__file__).resolve().parents[2] / 'docs/design/desktop-companion-assets/animation-source/production-v2/relocation/frames/world-stool-grounded-v4.png'
+# Source art lives in a Varin-companion-assets checkout, by default beside this repository.
+ASSETS = Path(os.environ.get('VARIN_COMPANION_ASSETS') or Path(__file__).resolve().parents[3] / 'Varin-companion-assets')
+PLATE = ASSETS / 'source/animation-source/production-v2/relocation/frames/world-stool-grounded-v4.png'
 sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@unittest.skipUnless(PLATE.is_file(), f'needs the source art in a Varin-companion-assets checkout ({PLATE})')
 class PrepareSeatedTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

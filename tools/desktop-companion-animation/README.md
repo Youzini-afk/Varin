@@ -2,6 +2,8 @@
 
 本目录只整理已经制作的连续原画，不生成中间动作、不绑定骨骼、不做全身淡化，也不修改业务状态。质量依据是正常速度下的整个人物表演，不是图集成功导出。
 
+原画、制作源与审阅资料在独立仓库 [Varin-companion-assets](https://github.com/Youzini-afk/Varin-companion-assets)：`source/` 是本目录工具的输入，`pack/varin/` 是安装包下载的选定包。下文命令假定它检出在本仓库旁边（`../Varin-companion-assets`）；其他位置用 `VARIN_COMPANION_ASSETS` 指定。工具仍把选定包写到 `packages/web/public/companion-assets/`；发布到素材仓库并更新锁定的步骤见 [Electron 资源交付](../../packages/electron/README.md#optional-desktop-companions)。
+
 ## 原画与时间轴
 
 动作目录建议使用 `user-attention/<action>/` 等描述性名字，避免跨方案的 P 编号歧义。原画用 `enter-001.png`、`hold-001.png`、`exit-001.png` 等名称；编号是绘画顺序，不代表固定帧时长。相邻动作共享明确命名的起止姿态。
@@ -97,16 +99,16 @@ Focused validation: `cd packages/ui && bunx vitest run src/components/companion/
 
 The result remains candidate-only. `select_upright_bundle.py <candidate/bundle.json> <selected-directory> --expected-sha <reviewed-candidate-sha256>` selects only that exact reviewed artifact and records its source/atlas hashes and finite acceptance basis. It does not automatically accept a rebuilt or later candidate. Install the selected directory as one generation, including its hash-named world stool; do not mix identity epochs or overwrite only the character pages.
 
-Repository-only reproduction (no original workspace required):
+Reproduction from a Varin-companion-assets checkout (no original workspace required):
 
 ```sh
-SOURCE=docs/design/desktop-companion-assets/animation-source/production-v2
+SOURCE=../Varin-companion-assets/source/animation-source/production-v2
 python tools/desktop-companion-animation/prepare_upright_inventory.py --root "$SOURCE"
 python tools/desktop-companion-animation/prepare_upright_recovery.py --root "$SOURCE"
 python tools/desktop-companion-animation/build_upright_bundle.py --root "$SOURCE" --output /tmp/varin-upright-candidate
 ```
 
-Preparation writes only reproducible inventory/recovery JSON below the source root's `integration` directory. The source-specific authored recovery mapping and local-event manifest are included in the repository. `integration/portable-runtime-verification.json` records the independent rebuild: candidate and selected runtime artifact bytes match, with no external source dependency. The original acceptance ledger's JSON key ordering differs from the first independent reconstruction but its parsed contents are identical; subsequent selections sort filenames deterministically. Final native QA fields are appended afterward and are intentionally separate from the reproducible source-art selection.
+Preparation writes only reproducible inventory/recovery JSON below the source root's `integration` directory. The source-specific authored recovery mapping and local-event manifest are included in the artwork repository. `integration/portable-runtime-verification.json` records the independent rebuild: candidate and selected runtime artifact bytes match, with no external source dependency. The original acceptance ledger's JSON key ordering differs from the first independent reconstruction but its parsed contents are identical; subsequent selections sort filenames deterministically. Final native QA fields are appended afterward and are intentionally separate from the reproducible source-art selection.
 
 ### Authored performance replacement
 
@@ -205,7 +207,7 @@ relative generated recipe IDs, not previous candidate pools or local studies:
 
 ```sh
 python tools/desktop-companion-animation/build_interaction_expansion.py \
-  --baseline-manifest docs/design/desktop-companion-assets/animation-source/production-v5/runtime-baseline.json \
+  --baseline-manifest ../Varin-companion-assets/source/animation-source/production-v5/runtime-baseline.json \
   --output /tmp/varin-v5-candidate
 ```
 
@@ -238,7 +240,7 @@ Output stays
 ```sh
 python tools/desktop-companion-animation/select_interaction_bundle.py \
   /tmp/candidate/bundle.json /tmp/selected-proposal \
-  --explicit-baseline docs/design/desktop-companion-assets/animation-source/production-v5/runtime-baseline.json \
+  --explicit-baseline ../Varin-companion-assets/source/animation-source/production-v5/runtime-baseline.json \
   --build-receipt /tmp/candidate/build-receipt.json \
   --rebuild-receipt /tmp/candidate-prepared/rebuild-receipt.json \
   --review-record /tmp/exact-artifact-review.json

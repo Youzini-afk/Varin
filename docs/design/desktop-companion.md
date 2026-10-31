@@ -13,7 +13,7 @@
 - **窗口与设置**：角色窗口与主窗生命周期、位置分别管理；拖动使用原生 DIP 和按下点锚，凳子使用独立非交互世界层。位置保存显示器标识和工作区偏移，并实现可见区域约束。菜单提供项目检查/返回总览、名称隐私、置顶及平台支持范围内的穿透；语言复用现有保存设置并跨窗口实时同步。主题通过既有 `ThemeSystemProvider` 的 `passiveTransparent` 模式跟随设置、系统明暗和已验证自定义主题；不另存桌宠皮肤，不回写主题偏好、不改变原生全局主题、不涂窗口背景，也不触发墨迹转场。
 - **历史基础阶段 Linux 原生范围**：当前源码构建的 protocol 71 Host 与完整应用启动；透明显示、精确跟手拖动、连续拖放、置顶、开关销毁/重建、主窗关闭清理；主窗位置不受角色移动影响。正常关闭后重启，桌宠自动恢复先前的 (527,246)、360×480 DIP，且不抢焦点；主窗仍为独立的 (88,88)、1188×848 DIP。现有桌宠随主设置中文→英文→中文立即更新，无需重建。Linux 的鼠标转发不支持时明确提示并恢复交互，不冒称支持穿透。
 - **历史直颈版本原生验证**：冷启动阅读与滚动恢复、页扇/连接线透明显示；点击可见纸页落到后方输入框（测试文字已清空未发送），装饰不抢焦点；置顶、两次真实指针搬移、落座时场景抑制与恢复、左边缘页扇换边及向电脑内收的连接线均已在Linux实看。六类场景已逐一实看，授权保持锁/门槛、问答保持问题；关闭主窗后辅助窗口全部清理。两条旧辅助导航日志未保留错误原因，保留为原因未定记录；修正凳图ready后才显示与主动关闭日志识别后，已复验闭盖快速拖放、开盖连续两次拖动、恢复阅读与正常关闭，新日志无辅助导航/readiness/timeout/hash告警。此范围不等于逐像素验证所有悬空中间帧。
-- **资源交付**：源码素材保留在 `packages/web/public/companion-assets`，Electron 基础安装包只带播放器、下载目录和轻量形象预览，完整图集、轮廓页和凳图不随包分发。偏好里的「桌宠」页负责下载/取消/继续、选择、删除与唤醒/沉睡；素材按构建时固定的 Git 提交和逐文件 SHA-256 下载到本机，校验完整后才发布，已安装形象离线可用。切换主题共用一份素材。更新时保留旧有效形象，成功后回收旧目录；删除同时清理下载缓存。移动端排除桌宠入口、素材、审阅资源和预览。原画、制作脚本与审阅材料仍留在设计与工具目录；来源和授权说明不变。遮挡页由 `tools/desktop-companion-animation/build_occlusion_pages.py` 生成并可 `--check`，替换 bundle 时须一并重建。当前实现见 [Electron 资源交付](../../packages/electron/README.md#optional-desktop-companions)。
+- **资源交付**：图集、轮廓页、凳图和原画在独立仓库 [Varin-companion-assets](https://github.com/Youzini-afk/Varin-companion-assets)。本仓库只保留播放器读取的 `bundle.json`、`occlusion.json`，以及锁定该仓库提交与逐文件 SHA-256 的 `packages/web/companion-assets.lock.json`；开发时用 `bun run companion:fetch` 取回图集。Electron 基础安装包只带播放器、下载目录和轻量形象预览，完整图集、轮廓页和凳图不随包分发。偏好里的「桌宠」页负责下载/取消/继续、选择、删除与唤醒/沉睡；素材按锁定的提交和逐文件 SHA-256 下载到本机，校验完整后才发布，已安装形象离线可用。切换主题共用一份素材。更新时保留旧有效形象，成功后回收旧目录；删除同时清理下载缓存。移动端排除桌宠入口、素材、审阅资源和预览。制作脚本留在 `tools/desktop-companion-animation/`，原画与审阅材料在素材仓库的 `source/`；来源和授权说明不变。遮挡页由 `tools/desktop-companion-animation/build_occlusion_pages.py` 生成并可 `--check`，替换 bundle 时须一并重建。当前实现见 [Electron 资源交付](../../packages/electron/README.md#optional-desktop-companions)。
 - **验证边界**：独立位置保存与正常重启恢复已实测；显示器变化约束已有聚焦行为测试，但未进行物理多屏热拔插。Windows/macOS 未实测；冷加载凳子淡出/淡入的完整中间帧、所有运动节奏不因一次落座截图而宣称通过。资源、控制器与类型检查有分层记录，不能替代这些平台/视觉检查。
 
 
@@ -191,7 +191,7 @@ CompanionAsset {
 
 ### 连续动画技术检查点
 
-[独立motion lab](../../tools/desktop-companion-motion-lab/README.md)保存连续时间、C2重定向、两段IK、拖放衔接与接触约束的debug rig、19项Node测试和关键离屏证据。它不接入Host或根CI，不引入生产依赖，也不是最终人物动画；raw PNG profile仅覆盖8秒坐姿研究。MP4为一次播放的离屏预览，不能当作无缝循环资产或浏览器60fps性能证据。真实分层美术、绑定/遮挡与浏览器/Electron验收继续独立推进。
+[独立motion lab](https://github.com/Youzini-afk/Varin-companion-assets/blob/main/motion-lab/README.md)（已随素材迁到 Varin-companion-assets）保存连续时间、C2重定向、两段IK、拖放衔接与接触约束的debug rig、19项Node测试和关键离屏证据。它不接入Host或根CI，不引入生产依赖，也不是最终人物动画；raw PNG profile仅覆盖8秒坐姿研究。MP4为一次播放的离屏预览，不能当作无缝循环资产或浏览器60fps性能证据。真实分层美术、绑定/遮挡与浏览器/Electron验收继续独立推进。
 
 ## 11. 桌面入口、多窗口与生命周期
 

@@ -159,8 +159,18 @@ of the Bot the companion speaks for. Accent colors still follow the application 
 The base installer includes the player, a small preview and `companion-catalog.json`, not the full atlases,
 alpha pages or developer review bundles. Both Web-resource staging and electron-builder exclude those
 directories; after-pack rejects an accidental full-art payload. Mobile also excludes the preview and player.
-`scripts/companion-assets.mjs` derives the download catalog from the source bundle and matching occlusion
-index, with an immutable GitHub source revision, exact file lengths and SHA-256 hashes.
+The artwork lives in [Varin-companion-assets](https://github.com/Youzini-afk/Varin-companion-assets).
+`packages/web/companion-assets.lock.json` pins one pushed commit of that repository and the length and
+SHA-256 of every pack file. The bundle and occlusion index that the player reads stay in
+`packages/web/public/companion-assets/` and must match the lock. `scripts/companion-assets.mjs` derives the
+download catalog from the lock and rejects a bundle whose required files or hashes disagree with it;
+installed apps download from `raw.githubusercontent.com` at the locked commit. Releases built before the
+move keep downloading from their own Varin commit.
+For development, `bun run companion:fetch` writes the ignored atlases into `packages/web/public/companion-assets/`
+from the published repository, or from a local checkout named by `VARIN_COMPANION_ASSETS`. Files that differ
+from the lock are reported and left untouched. To publish a new pack, commit and push it under `pack/varin/`
+in the artwork repository, run `bun run companion:lock <artwork checkout>`, and commit the refreshed lock and
+descriptors.
 
 Electron downloads inert JSON/PNG assets through its system-proxy-aware network stack into
 `userData/companions/downloads`. Verified complete files survive cancellation and restart, while incomplete

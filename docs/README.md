@@ -56,4 +56,4 @@
   - [动作语言 v5](design/desktop-companion-motion-language-v5.md)、[虚拟案卷与身体接触](design/desktop-companion-prop-contact-v5.md)
   - [多任务注意力](design/desktop-companion-multitask-attention.md)：只读注意力和面板底座已实施，主管演出仍是候选。
   - 已被取代、待并入后删除：[动画制作](design/desktop-companion-animation-production.md)、[动画路线调研](design/desktop-companion-animation-research.md)、[交互扩展](design/desktop-companion-interaction-expansion.md)。
-  - 视觉资料与进度见[桌宠素材索引](design/desktop-companion-assets/README.md)。
+  - 视觉资料与进度见独立仓库 Varin-companion-assets 的[桌宠素材索引](https://github.com/Youzini-afk/Varin-companion-assets/blob/main/source/README.md)。
