@@ -55,6 +55,9 @@ palette, so the application loading animation starts from the same composition.
 | `resources/` | Packaged web assets, icons, and macOS entitlements |
 
 The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/preload.mjs` by `scripts/bundle-main.mjs`. Packaging stages those entries and `bootstrap.mjs` into a standalone production app; source checkouts, tests and development loaders stay outside that tree.
+Workspace packages retain their declared `files` payload, including the extension broker and contract
+schemas outside `dist`. The Web Host retains its separately compiled production boundary. The packaged
+extension broker must complete a real IPC handshake and clean shutdown before an installer is produced.
 
 Ordinary app/tray quit confirms background-work risk, then lets Electron close its windows and run
 `beforeunload` while the embedded Host is still available. `quit-lifecycle.ts` drains services at

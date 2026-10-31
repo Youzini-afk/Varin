@@ -58,7 +58,13 @@ export async function stageRuntime({ repository, destination, hostDirectory, pla
     let files = await helper.collectNodeModules({ dir: source, name }, ignored, path.relative(destination, target));
     if (name.startsWith('@varin/')) files = files.filter(file => {
       const relative = path.relative(source, file).replaceAll('\\', '/');
-      return metadata.has(relative) || (name !== '@varin/web' && relative.startsWith('dist/'));
+      // Workspace packages declare their runtime payload: some own broker entries or schemas
+      // alongside dist. The Web Host alone uses the separately compiled production boundary.
+      const declared = manifest.files ?? ['dist'];
+      return metadata.has(relative) || name !== '@varin/web' && declared.some(entry => {
+        const pattern = entry.replace(/^\.\//, '').replace(/\/$/, '');
+        return path.matchesGlob(relative, pattern) || path.matchesGlob(relative, `${pattern}/**/*`);
+      });
     });
     if (!files.length) { nodes.delete(target); return null; }
     const directories = new Set(files.map(file => path.dirname(path.join(target, path.relative(source, file)))));

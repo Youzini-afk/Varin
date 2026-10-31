@@ -213,8 +213,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
           : error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'thread-request-failed';
         const code = threadSourceFailureMessage(suppliedCode) ? 'thread-request-failed' : suppliedCode;
         const status = code.includes('conflict') ? 409 : code === 'denied' || code === 'forbidden' ? 403
-          : code === 'not-found' ? 404 : code === 'unavailable' || code === 'timeout' ? 503 : 400;
-        response.status(status).json({ code, error: code === 'agent-profile-unavailable' ? 'The selected Agent is unavailable. Choose an enabled Agent for this work focus.' : 'Thread request could not be completed',
+          : code === 'not-found' ? 404 : code === 'unavailable' || code === 'timeout' || code === 'extension-host-unavailable' ? 503 : 400;
+        response.status(status).json({ code, error: code === 'extension-host-unavailable' ? 'The local extension process is unavailable. Restart Varin; if it persists, reinstall the application.'
+          : code === 'agent-profile-unavailable' ? 'The selected Agent is unavailable. Choose an enabled Agent for this work focus.' : 'Thread request could not be completed',
           ...admission });
       } finally { response.removeListener('close', closed); }
     });

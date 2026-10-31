@@ -124,6 +124,7 @@ module.exports = (context) => {
     path.join('node_modules', '@varin', 'script-runtime', 'dist', 'worker.js'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'scripts', 'host.cjs'),
     path.join('node_modules', '@varin', 'extension-host', 'dist', 'index.js'),
+    path.join('node_modules', '@varin', 'extension-host', 'broker', 'broker-child.mjs'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin-builtin-fingerprint.txt'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin.extension.json'),
     path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'host.cjs'),
@@ -169,6 +170,12 @@ module.exports = (context) => {
 
   execFileSync(packagedExecutable, [path.join(__dirname, 'verify-knowledge-runtime.mjs'),
     path.join(resourcesPath, 'app.asar', 'node_modules', '@varin', 'web')], {
+    cwd: context.appOutDir, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'inherit', windowsHide: true,
+  });
+
+  // Exercise the same broker entry the embedded Host starts before accepting conversation input.
+  execFileSync(packagedExecutable, [path.join(__dirname, 'verify-extension-broker.mjs'),
+    path.join(resourcesPath, 'app.asar', 'node_modules', '@varin', 'extension-host')], {
     cwd: context.appOutDir, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'inherit', windowsHide: true,
   });
 

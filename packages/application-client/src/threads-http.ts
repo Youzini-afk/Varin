@@ -5,7 +5,8 @@ import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from
 
 export class ThreadRequestError extends Error {
   constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started', detail?: string) {
-    super(code === 'workspace_backend_unavailable' && detail ? detail : threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
+    super(code === 'extension-host-unavailable' ? 'The local extension process is unavailable. Restart Varin; if it persists, reinstall the application.'
+      : code === 'workspace_backend_unavailable' && detail ? detail : threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
     this.name = 'ThreadRequestError';
   }
 }

@@ -80,6 +80,10 @@ type BrokerMessage = BrokerRequestMessage | BrokerResponseMessage | BrokerEventM
 
 export interface BrokeredHostStopResult { processExited: true; cleanup: "confirmed" | "unconfirmed" }
 
+export class BrokeredHostUnavailableError extends Error {
+  readonly code = 'extension-host-unavailable';
+}
+
 export interface BrokeredHostTransport {
   forceTerminate(): void;
   request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown>;
@@ -238,7 +242,7 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
     this.#child.on("message", (value) => { void this.#onMessage(value as BrokerMessage); });
     this.#child.once("exit", (code, signal) => {
       resolveExited();
-      const error = new Error(`Brokered Host process exited (${code ?? signal ?? "unknown"})`);
+      const error = new BrokeredHostUnavailableError(`Brokered Host process exited (${code ?? signal ?? "unknown"})`);
       rejectReadyRequest(error);
       for (const pending of this.#pending.values()) pending.reject(error);
       this.#pending.clear();
@@ -256,7 +260,7 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
       } else this.#failChannel(error);
     });
     this.#child.on("disconnect", () => {
-      if (!this.#intentional) this.#failChannel(new Error("Brokered Host IPC disconnected"));
+      if (!this.#intentional) this.#failChannel(new BrokeredHostUnavailableError("Brokered Host IPC disconnected"));
     });
   }
 

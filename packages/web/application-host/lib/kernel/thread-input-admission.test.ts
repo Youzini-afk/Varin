@@ -8,6 +8,7 @@ import { registerThreadRoutes } from './thread-routes.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { KernelClientError, KernelRequestError } from './kernel-error.js';
 import { SourceAdmissionError } from './source-admission-error.js';
+import { BrokeredHostUnavailableError } from '@varin/extension-host';
 const identity = { runtime: 'agent' as const, threadId: 'thread:fixture', branchId: 'branch:fixture' };
 const input: ThreadSubmit = { ...identity, key: 'input', expectedHead: null, text: 'Original', images: [{ mimeType: 'image/png', data: 'AQID' }], model: { providerId: 'provider', modelId: 'model' } };
 function fixture() {
@@ -36,6 +37,15 @@ function fixture() {
   return { api: createThreadsHttpAPI(), adapter, runtime, queued, models, source, configuration };
 }
 afterEach(() => vi.unstubAllGlobals());
+it('reports an unavailable extension process as a service failure before admission', async () => {
+  const f = fixture();
+  f.models.resolveModel.mockRejectedValueOnce(new BrokeredHostUnavailableError('private process diagnostic'));
+  await expect(f.api.submit(input)).rejects.toMatchObject({
+    status: 503, code: 'extension-host-unavailable', admission: 'not_started',
+    message: 'The local extension process is unavailable. Restart Varin; if it persists, reinstall the application.',
+  });
+  expect(f.runtime.submit).not.toHaveBeenCalled();
+});
 it('attaches sending-device or selected-zone time only when enabled, across submit, queue and continuation', async () => {
   const f = fixture();
   const settings = { enabled: false, timeZone: null as string | null };

@@ -13,7 +13,7 @@ test('the production tree excludes checkout artifacts, keeps versioned Node reso
     await write(`${directory}/package.json`, JSON.stringify({ name, version: '1.0.0', dependencies, ...extra }));
     await write(`${directory}/index.js`, 'module.exports = 1;');
   };
-  await pkg('packages/electron', '@varin/electron', { '@varin/web': 'workspace:*', '@varin/script-runtime': 'workspace:*', plain: '1.0.0', native: '1.0.0' });
+  await pkg('packages/electron', '@varin/electron', { '@varin/web': 'workspace:*', '@varin/script-runtime': 'workspace:*', '@varin/extension-host': 'workspace:*', plain: '1.0.0', native: '1.0.0' });
   await write('packages/electron/bootstrap.mjs', ''); await write('packages/electron/dist-bundle/main.mjs', '');
   const modules = 'packages/electron/node_modules';
   await pkg(`${modules}/@varin/web`, '@varin/web', { plain: '2.0.0' });
@@ -22,6 +22,12 @@ test('the production tree excludes checkout artifacts, keeps versioned Node reso
   await write(`${modules}/@varin/web/public/companion-assets/atlas.png`, 'art');
   await pkg(`${modules}/@varin/script-runtime`, '@varin/script-runtime', { string_decoder: '1.0.0' });
   await write(`${modules}/@varin/script-runtime/dist/worker.js`, '');
+  await pkg(`${modules}/@varin/extension-host`, '@varin/extension-host', { '@varin/extension-contract': 'workspace:*' }, { files: ['dist', 'broker'] });
+  await write(`${modules}/@varin/extension-host/dist/index.js`, 'export {};');
+  await write(`${modules}/@varin/extension-host/broker/broker-child.mjs`, 'process.send({kind:"event",event:"ready"});');
+  await write(`${modules}/@varin/extension-host/src/unpublished.js`, 'source');
+  await pkg(`${modules}/@varin/extension-contract`, '@varin/extension-contract', {}, { files: ['dist', 'schema'] });
+  await write(`${modules}/@varin/extension-contract/schema/extension.json`, '{}');
   await pkg(`${modules}/string_decoder`, 'string_decoder');
   await pkg(`${modules}/plain`, 'plain');
   await pkg(`${modules}/native`, 'native', { helper: '1.0.0' }, { peerDependencies: { peer: '1.0.0', absent: '*' }, peerDependenciesMeta: { absent: { optional: true } } });
@@ -39,5 +45,10 @@ test('the production tree excludes checkout artifacts, keeps versioned Node reso
   assert.ok(result.unpackPatterns.includes('node_modules/helper/**/*'));
   assert.ok(result.unpackPatterns.includes('node_modules/peer/**/*'));
   assert.ok(!result.unpackPatterns.includes('node_modules/plain/**/*'));
+  assert.equal(await fs.readFile(path.join(destination, 'node_modules/@varin/extension-host/broker/broker-child.mjs'), 'utf8'), 'process.send({kind:"event",event:"ready"});');
+  assert.equal(await fs.readFile(path.join(destination, 'node_modules/@varin/extension-contract/schema/extension.json'), 'utf8'), '{}');
+  await assert.rejects(fs.access(path.join(destination, 'node_modules/@varin/extension-host/src/unpublished.js')));
+  assert.ok(result.unpackPatterns.includes('node_modules/@varin/extension-host/**/*'));
+  assert.ok(result.unpackPatterns.includes('node_modules/@varin/extension-contract/**/*'));
   assert.equal(JSON.parse(await fs.readFile(path.join(destination, 'package.json'), 'utf8')).dependencies['@varin/web'], '1.0.0');
 });
