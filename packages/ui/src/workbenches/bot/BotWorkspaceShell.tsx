@@ -31,10 +31,13 @@ import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useBotLayout, type BotPanelTab } from './botLayout';
 import type { BotPanelFocus, BotPanelModel } from './botPanelModel';
 import {
-  botSessionTitle, buildTimeline, figureState, isActiveRun, isWaitingStatus, liveRun, needsOf, presenceNeeds, runStatus, sessionViews, stateLine, workViews,
-  type BotFigureState, type BotSessionView,
+  botSessionTitle, buildTimeline, figureState, isActiveRun, isWaitingStatus, liveRun, needsOf, presenceNeeds, runStatus, sessionViews, showsTeamMoments, stagePose, stateLine,
+  teamMomentLine, workViews, type BotFigureState, type BotSessionView, type BotStateLine, type BotTeamMoment,
 } from './botPresentation';
+import type { BotStageEvent } from './botStageDirector';
+import type { BotStageFeed } from './botStageRenderer';
 import { useBotFacts, useBotPresence } from './useBotFacts';
+import { useBotStage } from './useBotStage';
 import { BotFigure } from './BotFigure';
 import { BotMobileTitle } from './BotMobileTitle';
 import { BotNavigator } from './BotNavigator';
@@ -43,8 +46,15 @@ import { BotPanel, BotPanelBody } from './BotPanel';
 const BotDetailsDialog = React.lazy(() => import('@/components/sections/bots/BotDetailsDialog').then((module) => ({ default: module.BotDetailsDialog })));
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-const RESULT_MS = 3000;
+/** How long the state line names a team moment (§5.7.3). */
+const MOMENT_MS = 2600;
 const LISTENING_MS = 2500;
+const momentOf = (event: BotStageEvent, nameOf: (key: string) => string): BotTeamMoment | null => {
+  if (event.kind === 'dispatch' || event.kind === 'continue') return { kind: event.kind, name: nameOf(event.lead) };
+  if (event.kind === 'lead-report') return { kind: 'report', name: nameOf(event.lead), failed: event.outcome === 'fail' };
+  if (event.kind === 'gather') return { kind: 'gather', count: event.count };
+  return null;
+};
 
 const openBotSettings = () => {
   useUIStore.getState().setSettingsPage('harness-bots');
@@ -133,7 +143,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [focus, setFocus] = React.useState<BotPanelFocus | null>(null);
   const [narrowPanelOpen, setNarrowPanelOpen] = React.useState(false);
-  const [result, setResult] = React.useState<{ name: string; until: number } | null>(null);
+  const [moment, setMoment] = React.useState<{ line: BotStateLine; until: number } | null>(null);
   const [listening, setListening] = React.useState(false);
   const opening = React.useRef<AbortController | null>(null);
   const selected = bots?.find((bot) => bot.id === selectedId);
@@ -291,22 +301,29 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     return () => clearTimeout(timer);
   }, [draftText]);
 
-  // A piece of work that was running and has now finished shows "has a result" for three seconds.
-  const activeWork = React.useRef<Map<string, string> | null>(null);
+  // The stage: her own round, her team on the ledge and the moments between them (§5.7.2).
+  const stage = useBotStage({ threads, botId: selectedId, enabled: committed && !settingsOpen && Boolean(selected) && !offline, preferThreadId: selectedEntry?.threadId ?? null });
+  const memberNames = React.useRef(new Map<string, string>());
+  for (const lead of stage.view.leads) {
+    const named = work.find(item => item.identity.threadId === lead.threadId && item.identity.branchId === lead.branchId)?.name;
+    memberNames.current.set(lead.key, named || lead.title || lead.threadId);
+  }
+  // A dispatch, a report or reports taken in are named on the state line for a moment.
+  const seenMoment = React.useRef(0);
   React.useEffect(() => {
-    const now = new Map(work.filter(item => item.status !== null).map(item => [item.key, item.name]));
-    const before = activeWork.current;
-    activeWork.current = now;
-    if (!before) return;
-    const finished = [...before].find(([key]) => !now.has(key) && work.some(item => item.key === key));
-    if (finished) setResult({ name: finished[1], until: Date.now() + RESULT_MS });
-  }, [work]);
-  React.useEffect(() => { activeWork.current = null; setResult(null); }, [selectedId]);
+    const fresh = stage.moments.filter(entry => entry.id > seenMoment.current);
+    if (!fresh.length) return;
+    seenMoment.current = fresh[fresh.length - 1]!.id;
+    const nameOf = (key: string) => memberNames.current.get(key) ?? '';
+    const latest = fresh.map(entry => momentOf(entry.event, nameOf)).filter((value): value is BotTeamMoment => value !== null).pop();
+    if (latest && (latest.kind === 'gather' || latest.name)) setMoment({ line: teamMomentLine(latest), until: Date.now() + MOMENT_MS });
+  }, [stage.moments]);
+  React.useEffect(() => { setMoment(null); }, [selectedId]);
   React.useEffect(() => {
-    if (!result) return undefined;
-    const timer = setTimeout(() => setResult(null), Math.max(0, result.until - Date.now()));
+    if (!moment) return undefined;
+    const timer = setTimeout(() => setMoment(null), Math.max(0, moment.until - Date.now()));
     return () => clearTimeout(timer);
-  }, [result]);
+  }, [moment]);
 
   const needs = React.useMemo(() => selectedPresence ? presenceNeeds(selectedPresence, catalog) : selected && sessionsWithWork ? needsOf(selected, sessionsWithWork, work) : [], [selectedPresence, catalog, selected, sessionsWithWork, work]);
   const working = React.useMemo<readonly { name: string }[]>(() => selectedPresence?.working ?? work.filter(item => item.status !== null && !isWaitingStatus(item.status)), [selectedPresence, work]);
@@ -318,13 +335,15 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     const other = current ? null : presence.get(bot.id)?.value ?? null;
     return figureState({
       offline, activity: bot.activity?.state, inactive: Boolean(bot.archived || bot.deletion),
-      needs: current ? needs.length : other?.needs.length ?? 0, result: current && result !== null,
+      needs: current ? needs.length : other?.needs.length ?? 0,
       thinking: current ? thinking : Boolean(other?.replying.length), working: current ? working.length : other?.working.length ?? 0,
       listening: current && listening,
     });
-  }, [offline, selectedId, presence, needs.length, result, thinking, working.length, listening]);
+  }, [offline, selectedId, presence, needs.length, thinking, working.length, listening]);
   const figures = React.useMemo(() => new Map((bots ?? []).map(bot => [bot.id, figureOf(bot)])), [bots, figureOf]);
   const figure = selected ? figureOf(selected) : 'idle';
+  const pose = stagePose(figure, stage.view.own, stage.view.leads.length > 0);
+  const stageFeed = React.useMemo<BotStageFeed>(() => ({ leads: stage.view.leads, events: stage.moments, typing: listening }), [stage.view.leads, stage.moments, listening]);
   const timeline = React.useMemo(() => buildTimeline(activity, facts.memory.value), [activity, facts.memory.value]);
 
   const sessionTitleOf = React.useCallback((view: BotSessionView) => botSessionTitle(view.thread.title, selected?.name ?? 'Varin'), [selected?.name]);
@@ -458,9 +477,11 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   };
 
   const mattersForBot = matters?.botId === selectedId ? matters.items : null;
-  const line = React.useMemo(() => selected ? stateLine(selected, figure, { needs, working, resultName: result?.name ?? null }) : null, [selected, figure, needs, working, result]);
+  const own = stage.view.own;
+  const line = React.useMemo(() => !selected ? null : moment && showsTeamMoments(pose) ? moment.line
+    : stateLine(selected, pose, { needs, working, own }), [selected, pose, moment, needs, working, own]);
   const panelModel = React.useMemo<BotPanelModel | null>(() => selected && sessionsWithWork && line ? {
-    bot: selected, figure, line,
+    bot: selected, figure: pose, stage: stageFeed, line,
     sessions: sessionsWithWork, session: currentSession, work, needs, timeline, facts, matters: mattersForBot, threads,
     readOnly: readOnly || offline, busy: actionBusy !== null, focus, profileOpen,
     sessionTitle, focusTab,
@@ -475,7 +496,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     onBotChanged: bot => { if (bot) setBots(list => list?.map(item => item.id === bot.id ? bot : item) ?? [bot]); refresh(); },
     requestDelete: () => setDeleting(selected),
     archive: () => { void mutateBot(selected, 'archive'); },
-  } : null, [selected, figure, line, needs, sessionsWithWork, currentSession, work, timeline, facts, mattersForBot, threads, readOnly, offline, actionBusy, focus, profileOpen,
+  } : null, [selected, pose, stageFeed, line, needs, sessionsWithWork, currentSession, work, timeline, facts, mattersForBot, threads, readOnly, offline, actionBusy, focus, profileOpen,
     sessionTitle, focusTab, openWork, openSession, mutateBot, archiveMatter, newSession]);
 
   const childNavigation = React.useMemo<ChildNavigation>(() => ({ label: t('bot.work.openInWorkbench'), open: identity => openWork(identity) }), [t, openWork]);
@@ -518,7 +539,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     {sessionsError ? <p role="alert" className="border-b border-border px-4 py-2 typography-meta text-destructive">{sessionsError}</p> : null}
     {ownsConversation && !busy && active ? <div className="min-h-0 flex-1">{selectedEntry && threads
       ? <ChildNavigationContext.Provider value={childNavigation}><MemoryNavigationContext.Provider value={memoryNavigation}>
-        <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} surface="bot" api={threads} identity={selectedEntry} onWorkChanged={refreshWork}
+        <ThreadConversation key={`${selectedEntry.threadId}:${selectedEntry.branchId}`} surface="bot" api={threads} identity={selectedEntry} onWorkChanged={refreshWork} onActivity={stage.onActivity}
           preferredModel={selected && entryModel?.botId === selected.id && entryModel.profileModelKey === profileModelKey ? entryModel.model : null} readOnly={readOnly}
           emptyHero={selected ? { visual: <BotFigure state={figure} size={64} />, title: t('bot.hero.title', { name: selected.name }) } : undefined}
           onBranchCreated={entry => { if (selected) void openBotConversation(selected.id, entry); refreshWork(); }} />

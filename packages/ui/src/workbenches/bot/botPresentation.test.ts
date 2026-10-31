@@ -2,21 +2,21 @@ import { describe, expect, it } from 'vitest';
 import type { BotSummary, BotWorkItem } from '@varin/application-client';
 import type { BotActivityEvent, BotActivityPage, Run } from '@varin/protocol';
 import { threadSummary } from '@/test/threadFixtures';
-import { buildTimeline, figureState, groupByDay, needsOf, runStatus, sessionViews, stateLine, workViews, type BotFigureFacts } from './botPresentation';
+import { buildTimeline, figureState, groupByDay, needsOf, runStatus, sessionViews, stagePose, stateLine, teamMomentLine, workViews, type BotFigureFacts, type BotOwnPose } from './botPresentation';
 import { withEarlierPage, withNewestPage } from './useBotFacts';
 
-const facts = (patch: Partial<BotFigureFacts> = {}): BotFigureFacts => ({ offline: false, activity: 'awake', inactive: false, needs: 0, result: false, thinking: false, working: 0, listening: false, ...patch });
+const facts = (patch: Partial<BotFigureFacts> = {}): BotFigureFacts => ({ offline: false, activity: 'awake', inactive: false, needs: 0, thinking: false, working: 0, listening: false, ...patch });
+const own = (patch: Partial<BotOwnPose>): BotOwnPose => ({ phase: 'thinking', tool: null, subject: null, count: 0, ...patch });
 const run = (patch: Partial<Run>): Run => ({ id: 'run', thread_id: 't', branch_id: 'b', state: 'executing', waiting_on: null, revision: 1, epoch: 1, configuration: null, cancel_requested: false, ...patch });
 const bot: BotSummary = { id: 'a', name: 'Varin', entry: { runtime: 'agent', threadId: 'entry', branchId: 'main' }, archived: false, homeDir: '/a', coordinatorHostId: 'h', instructions: null, model: null, createdAt: '', updatedAt: '' };
 
 describe('Bot presentation', () => {
   it('takes the figure state in the documented priority order', () => {
-    const everything = facts({ offline: true, activity: 'waking', needs: 1, result: true, thinking: true, working: 2, listening: true });
+    const everything = facts({ offline: true, activity: 'waking', needs: 1, thinking: true, working: 2, listening: true });
     expect(figureState(everything)).toBe('offline');
     expect(figureState({ ...everything, offline: false })).toBe('waking');
     expect(figureState({ ...everything, offline: false, activity: 'asleep' })).toBe('sleeping');
     expect(figureState({ ...everything, offline: false, activity: 'awake' })).toBe('waiting');
-    expect(figureState(facts({ result: true, thinking: true, working: 1 }))).toBe('result');
     expect(figureState(facts({ thinking: true, working: 1, listening: true }))).toBe('thinking');
     expect(figureState(facts({ working: 1, listening: true }))).toBe('working');
     expect(figureState(facts({ listening: true }))).toBe('listening');
@@ -41,7 +41,33 @@ describe('Bot presentation', () => {
     expect(sessions[0]!.waiting).toBe(true);
     const needs = needsOf(bot, sessions, work);
     expect(needs).toEqual([expect.objectContaining({ name: 'Writer', kind: 'question', session: false })]);
-    expect(stateLine(bot, 'waiting', { needs, working: [], resultName: null })).toEqual(expect.objectContaining({ key: 'bot.state.waitingQuestion', params: { name: 'Writer' }, tone: 'warn' }));
+    expect(stateLine(bot, 'waiting', { needs, working: [] })).toEqual(expect.objectContaining({ key: 'bot.state.waitingQuestion', params: { name: 'Writer' }, tone: 'warn' }));
+  });
+
+  it('refines the state with her own round and her team, never over rest, offline or needs', () => {
+    expect(stagePose('waiting', own({ phase: 'tool', tool: 'read' }), true)).toBe('waiting');
+    expect(stagePose('sleeping', own({ phase: 'replying' }), false)).toBe('sleeping');
+    expect(stagePose('thinking', own({ phase: 'tool', tool: 'web' }), true)).toBe('tool-web');
+    expect(stagePose('thinking', own({ phase: 'tool' }), false)).toBe('tool-other');
+    expect(stagePose('thinking', own({ phase: 'replying' }), false)).toBe('replying');
+    // Coordinating shows as watching the team when it is on the ledge.
+    expect(stagePose('thinking', own({ phase: 'team' }), true)).toBe('supervising');
+    expect(stagePose('thinking', own({ phase: 'team' }), false)).toBe('thinking');
+    // Typing beats watching the team; her own round beats typing.
+    expect(stagePose('listening', null, true)).toBe('listening');
+    expect(stagePose('listening', own({ phase: 'preparing' }), true)).toBe('preparing');
+    expect(stagePose('working', null, true)).toBe('supervising');
+    expect(stagePose('working', null, false)).toBe('working');
+  });
+
+  it('names what a tool works on, and how many when there are several', () => {
+    const details = (pose: BotOwnPose) => ({ needs: [], working: [], own: pose });
+    expect(stateLine(bot, 'tool-edit', details(own({ phase: 'tool', tool: 'edit', subject: 'notes.md', count: 1 })))).toMatchObject({ key: 'bot.state.toolEditOne', params: { name: 'notes.md' } });
+    expect(stateLine(bot, 'tool-read', details(own({ phase: 'tool', tool: 'read', count: 3 })))).toMatchObject({ key: 'bot.state.toolReadMany', params: { count: 3 } });
+    expect(stateLine(bot, 'tool-other', details(own({ phase: 'tool', tool: 'other', subject: 'figma', count: 1 })))).toMatchObject({ key: 'bot.state.toolOtherOne', params: { name: 'figma' } });
+    expect(stateLine(bot, 'tool-shell', details(own({ phase: 'tool', tool: 'shell', subject: null, count: 2 })))).toMatchObject({ key: 'bot.state.toolShell' });
+    expect(stateLine(bot, 'supervising', { needs: [], working: [{ name: 'Writer' }] })).toMatchObject({ key: 'bot.state.workingOne', params: { name: 'Writer' } });
+    expect(teamMomentLine({ kind: 'report', name: 'Writer', failed: true })).toMatchObject({ key: 'bot.state.resultFailed', announce: true });
   });
 
   describe('timeline', () => {

@@ -10,11 +10,18 @@
   --bot-figure-ledge: color-mix(in srgb, var(--surface-elevated, var(--background)) 82%, var(--foreground));
   --bot-figure-shadow: #141828;
   --bot-figure-mark: var(--muted-foreground);
+  /* Speech bubbles and the stage's "+n" chips. */
+  --bot-figure-bubble: #ffffff;
+  --bot-figure-chip: var(--background);
+  --bot-figure-chip-text: var(--foreground);
   position: relative;
   display: inline-block;
   flex: none;
 }
-.dark .bot-figure { --bot-figure-ledge: color-mix(in srgb, var(--surface-elevated, var(--background)) 86%, var(--foreground)); --bot-figure-shadow: #000000; }
+.dark .bot-figure {
+  --bot-figure-ledge: color-mix(in srgb, var(--surface-elevated, var(--background)) 86%, var(--foreground)); --bot-figure-shadow: #000000;
+  --bot-figure-bubble: color-mix(in srgb, var(--foreground) 14%, var(--background)); --bot-figure-chip: color-mix(in srgb, var(--foreground) 12%, var(--background));
+}
 /* Effects may drift past the box; the head crop of the small sizes stays inside it. */
 .bot-figure svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .bot-figure[data-still] svg { overflow: hidden; }
@@ -112,13 +119,14 @@
 .bot-stage-menu { position: absolute; top: 8px; right: 8px; z-index: 2; }
 /* The figure spans the stage; her ledge runs from edge to edge like a window sill. */
 .bot-stage-figure { position: relative; z-index: 1; align-self: stretch; margin: 0 -18px 10px; }
-/* A round edit badge sits on the ledge at her lower right, cut out of the stage by a ring of its colour. */
+/* A small round edit badge beside her name; the ledge belongs to her team (§5.7.2). */
+.bot-stage-title { display: flex; min-width: 0; max-width: 100%; align-items: center; gap: 4px; }
 .bot-stage-edit {
-  position: absolute; left: calc(50% + 100px); bottom: -2px; display: flex; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 50%;
-  color: var(--foreground); background: color-mix(in srgb, var(--foreground) 12%, var(--background)); box-shadow: 0 0 0 3px var(--background);
-  transition: background-color var(--motion-dur-snap) var(--motion-ease-snap), scale var(--motion-dur-snap) var(--motion-ease-snap);
+  display: flex; width: 26px; height: 26px; flex: none; align-items: center; justify-content: center; border-radius: 50%;
+  color: var(--muted-foreground); box-shadow: inset 0 0 0 1px var(--interactive-border);
+  transition: background-color var(--motion-dur-snap) var(--motion-ease-snap), color var(--motion-dur-snap) var(--motion-ease-snap), scale var(--motion-dur-snap) var(--motion-ease-snap);
 }
-.bot-stage-edit:hover { background: color-mix(in srgb, var(--foreground) 18%, var(--background)); }
+.bot-stage-edit:hover { color: var(--foreground); background: var(--interactive-hover); }
 .bot-stage-edit:active { scale: .94; }
 .bot-stage-edit:focus-visible { outline: 2px solid var(--interactive-focus, var(--ring)); outline-offset: 2px; }
 .bot-stage-text { position: relative; z-index: 1; display: flex; min-width: 0; max-width: 100%; flex-direction: column; align-items: center; gap: 2px; }
@@ -142,6 +150,8 @@
   .bot-stage-state { min-height: 18px; font-size: 12.5px; }
   .bot-stage-edit { display: none; }
   .bot-stage-floor { opacity: 0; }
+  /* The 40px figure has no room for a team; the overview lists it. */
+  .bot-stage-figure .bot-figure-team { display: none; }
 }
 /* In the phone sheet the stage is always the compact row, so the tabs get the room (§8). */
 .mobile-bottom-sheet .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
@@ -152,6 +162,7 @@
 .mobile-bottom-sheet .bot-stage-state { min-height: 18px; font-size: 12.5px; }
 .mobile-bottom-sheet .bot-stage-edit { display: none; }
 .mobile-bottom-sheet .bot-stage-floor { opacity: 0; }
+.mobile-bottom-sheet .bot-stage-figure .bot-figure-team { display: none; }
 
 /* Tabs (§5.2): one rounded bar of icon segments; a single knob glides to the chosen one and the
    hairlines beside it step aside. Names show as tooltips and are the segments' accessible names. */

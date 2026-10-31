@@ -61,13 +61,16 @@ function BotStage() {
       </DropdownMenu>
     </div>
     <div className="bot-stage-figure">
-      <BotFigure key={bot.id} className="bot-figure-arrive" state={model.figure} size={216} wide label={bot.name} />
-      <button type="button" className="bot-stage-edit" aria-label={t('bot.stage.editProfile')} title={t('bot.stage.editProfile')} onClick={model.openProfile}>
-        <Icon name="pencil" className="size-4" />
-      </button>
+      <BotFigure key={bot.id} className="bot-figure-arrive" state={model.figure} stage={model.stage} size={216} wide label={bot.name} />
     </div>
     <div className="bot-stage-text">
-      <button type="button" className="bot-stage-name truncate" onClick={model.openProfile}><SwapText text={bot.name} hold={0} /></button>
+      {/* The edit badge sits by the name, leaving the ledge to her team (§5.7.2). */}
+      <div className="bot-stage-title">
+        <button type="button" className="bot-stage-name truncate" onClick={model.openProfile}><SwapText text={bot.name} hold={0} /></button>
+        <button type="button" className="bot-stage-edit" aria-label={t('bot.stage.editProfile')} title={t('bot.stage.editProfile')} onClick={model.openProfile}>
+          <Icon name="pencil" className="size-3.5" />
+        </button>
+      </div>
       <div className="bot-stage-state" data-tone={line.tone === 'warn' ? 'warn' : undefined}>
         <span className="bot-stage-state-mark" aria-hidden="true"><Icon name={mark.icon} className={cn('size-2.5', mark.spin && 'animate-spin')} /></span>
         <SwapText text={text} className="min-w-0" />

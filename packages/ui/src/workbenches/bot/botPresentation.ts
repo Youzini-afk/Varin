@@ -9,7 +9,14 @@ import type { I18nKey } from '@/lib/i18n';
  * the Host's presence projection, the Bot's activity pages and memory. Nothing here is stored.
  */
 
-export type BotFigureState = 'offline' | 'sleeping' | 'waking' | 'waiting' | 'result' | 'thinking' | 'working' | 'listening' | 'idle';
+export type BotFigureState = 'offline' | 'sleeping' | 'waking' | 'waiting' | 'thinking' | 'working' | 'listening' | 'idle';
+/** The prop she holds for the kind of tool her own round is running (docs/design/varin-figure.md). */
+export type BotToolProp = 'read' | 'search' | 'web' | 'edit' | 'shell' | 'memory' | 'plan' | 'other';
+/**
+ * The panel figure's pose: the coarse state, refined by the stage with what her own round is doing
+ * (preparing, replying, a tool) and whether she is watching her team on the ledge.
+ */
+export type BotFigurePose = BotFigureState | 'preparing' | 'replying' | 'supervising' | `tool-${BotToolProp}`;
 
 /** The Catalog's initial title is a placeholder; unnamed Bot conversations use their Bot's name. */
 export function botSessionTitle(title: string | null | undefined, botName: string): string {
@@ -176,23 +183,47 @@ export interface BotFigureFacts {
   activity: BotActivity['state'] | undefined;
   inactive: boolean;
   needs: number;
-  result: boolean;
   thinking: boolean;
   working: number;
   listening: boolean;
 }
 
-/** §5.7, highest priority first. */
+/** §5.7, highest priority first. Results are reactions on top of a state, never a state (§5.7.3). */
 export function figureState(facts: BotFigureFacts): BotFigureState {
   if (facts.offline) return 'offline';
   if (facts.activity === 'waking') return 'waking';
   if ((facts.activity && facts.activity !== 'awake') || facts.inactive) return 'sleeping';
   if (facts.needs > 0) return 'waiting';
-  if (facts.result) return 'result';
   if (facts.thinking) return 'thinking';
   if (facts.working > 0) return 'working';
   if (facts.listening) return 'listening';
   return 'idle';
+}
+
+/** What the stage knows about her own round: its phase and, for a tool, which prop and what it works on. */
+export interface BotOwnPose {
+  phase: 'preparing' | 'thinking' | 'replying' | 'tool' | 'team';
+  tool: BotToolProp | null;
+  /** A file's base name or a tool's name when exactly one thing is being worked on. */
+  subject: string | null;
+  /** How many calls of that tool are running together. */
+  count: number;
+}
+
+/**
+ * §5.7.1: the stage's refinement of the coarse state. Rest, offline and needs keep the coarse pose;
+ * otherwise her own round wins over typing, and typing over watching the team.
+ */
+export function stagePose(coarse: BotFigureState, own: BotOwnPose | null, team: boolean): BotFigurePose {
+  if (coarse === 'offline' || coarse === 'waking' || coarse === 'sleeping' || coarse === 'waiting') return coarse;
+  if (own) {
+    if (own.phase === 'tool') return `tool-${own.tool ?? 'other'}`;
+    if (own.phase === 'team') return team ? 'supervising' : 'thinking';
+    return own.phase;
+  }
+  if (coarse === 'listening') return coarse;
+  if (team) return 'supervising';
+  return coarse;
 }
 
 export interface BotStateLine {
@@ -205,8 +236,25 @@ export interface BotStateLine {
   announce?: boolean;
 }
 
+const TOOL_LINE: Record<BotToolProp, { key: I18nKey; one?: I18nKey; many?: I18nKey }> = {
+  read: { key: 'bot.state.toolRead', one: 'bot.state.toolReadOne', many: 'bot.state.toolReadMany' },
+  search: { key: 'bot.state.toolSearch' },
+  web: { key: 'bot.state.toolWeb' },
+  edit: { key: 'bot.state.toolEdit', one: 'bot.state.toolEditOne', many: 'bot.state.toolEditMany' },
+  shell: { key: 'bot.state.toolShell' },
+  memory: { key: 'bot.state.toolMemory' },
+  plan: { key: 'bot.state.toolPlan' },
+  other: { key: 'bot.state.toolOther', one: 'bot.state.toolOtherOne' },
+};
+
 /** A neutral statement of the real state. It never speaks as the model. */
-export function stateLine(bot: BotSummary, state: BotFigureState, details: { needs: readonly BotNeed[]; working: readonly { name: string }[]; resultName: string | null }): BotStateLine {
+export function stateLine(bot: BotSummary, state: BotFigurePose, details: { needs: readonly BotNeed[]; working: readonly { name: string }[]; own?: BotOwnPose | null }): BotStateLine {
+  if (state.startsWith('tool-')) {
+    const tool = TOOL_LINE[state.slice(5) as BotToolProp], own = details.own;
+    if (own && own.count > 1 && tool.many) return { key: tool.many, params: { count: own.count }, tone: 'none' };
+    if (own?.subject && tool.one) return { key: tool.one, params: { name: own.subject }, tone: 'none' };
+    return { key: tool.key, tone: 'none' };
+  }
   switch (state) {
     case 'offline': return { key: 'bot.state.offline', tone: 'none', announce: true };
     case 'waking': return { key: 'bot.state.waking', tone: 'none' };
@@ -224,8 +272,10 @@ export function stateLine(bot: BotSummary, state: BotFigureState, details: { nee
       if (details.needs.length > 1 || !first) return { key: 'bot.state.waitingMany', params: { count: details.needs.length }, tone: 'warn', announce: true };
       return { key: first.kind === 'permission' ? 'bot.state.waitingPermission' : 'bot.state.waitingQuestion', params: { name: first.name }, tone: 'warn', announce: true };
     }
-    case 'result': return { key: 'bot.state.result', params: { name: details.resultName ?? bot.name }, tone: 'none', announce: true };
+    case 'preparing': return { key: 'bot.state.preparing', tone: 'none' };
     case 'thinking': return { key: 'bot.state.thinking', tone: 'none' };
+    case 'replying': return { key: 'bot.state.replying', tone: 'none' };
+    case 'supervising':
     case 'working': {
       const [first] = details.working;
       return details.working.length === 1 && first
@@ -236,6 +286,22 @@ export function stateLine(bot: BotSummary, state: BotFigureState, details: { nee
     default: return { key: 'bot.state.idle', tone: 'none' };
   }
 }
+
+/** A team moment the state line names for a few seconds (§5.7.3). */
+export type BotTeamMoment =
+  | { kind: 'dispatch' | 'continue'; name: string }
+  | { kind: 'report'; name: string; failed: boolean }
+  | { kind: 'gather'; count: number };
+export function teamMomentLine(moment: BotTeamMoment): BotStateLine {
+  switch (moment.kind) {
+    case 'dispatch': return { key: 'bot.state.dispatched', params: { name: moment.name }, tone: 'none' };
+    case 'continue': return { key: 'bot.state.continued', params: { name: moment.name }, tone: 'none' };
+    case 'report': return { key: moment.failed ? 'bot.state.resultFailed' : 'bot.state.result', params: { name: moment.name }, tone: 'none', announce: true };
+    case 'gather': return { key: 'bot.state.gathered', params: { count: moment.count }, tone: 'none' };
+  }
+}
+/** Rest, offline and needs are never covered by a passing moment. */
+export const showsTeamMoments = (pose: BotFigurePose): boolean => pose !== 'offline' && pose !== 'waking' && pose !== 'sleeping' && pose !== 'waiting';
 
 const STATE_ICON: Partial<Record<I18nKey, IconName>> = {
   'bot.state.offline': 'cloud-off',
@@ -251,7 +317,26 @@ const STATE_ICON: Partial<Record<I18nKey, IconName>> = {
   'bot.state.waitingQuestion': 'question',
   'bot.state.waitingMany': 'notification-3',
   'bot.state.result': 'check',
+  'bot.state.resultFailed': 'error-warning',
+  'bot.state.gathered': 'check',
+  'bot.state.dispatched': 'send-plane',
+  'bot.state.continued': 'send-plane',
+  'bot.state.preparing': 'sparkling',
   'bot.state.thinking': 'sparkling',
+  'bot.state.replying': 'chat-3',
+  'bot.state.toolRead': 'file-text',
+  'bot.state.toolReadOne': 'file-text',
+  'bot.state.toolReadMany': 'file-text',
+  'bot.state.toolSearch': 'search',
+  'bot.state.toolWeb': 'global',
+  'bot.state.toolEdit': 'pencil',
+  'bot.state.toolEditOne': 'pencil',
+  'bot.state.toolEditMany': 'pencil',
+  'bot.state.toolShell': 'terminal',
+  'bot.state.toolMemory': 'bot-memory',
+  'bot.state.toolPlan': 'list-check-2',
+  'bot.state.toolOther': 'tools',
+  'bot.state.toolOtherOne': 'tools',
   'bot.state.workingOne': 'pulse',
   'bot.state.workingMany': 'pulse',
   'bot.state.listening': 'chat-3',

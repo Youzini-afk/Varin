@@ -69,6 +69,7 @@ import { cn, formatDirectoryName } from '@/lib/utils';
 import { ThreadProjection, type StreamingTextPart } from '@/lib/agent-runtime/thread-projection';
 import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ThreadInputQueue } from './ThreadQueuedInput';
+import { threadLiveActivity, type ThreadLiveActivity, type ThreadProgressActivity } from './threadLiveActivity';
 
 const resourceErrorMessages = new Map([
   ['resource-missing', 'This skill or resource is missing from the current snapshot. Refresh instructions and skills, then try again.'],
@@ -79,7 +80,10 @@ const resourceErrorMessages = new Map([
   ['resource-cancelled', 'Skill or resource preparation was cancelled. Try again when ready.'],
 ]);
 
-export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, readOnly = false, messageHandoff, emptyHero, surface = 'workbench' }: { surface?: 'workbench' | 'bot'; emptyHero?: { visual: React.ReactNode; title: string }; messageHandoff?: MessageHandoff; onWorkChanged?: () => void; preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
+export function ThreadConversation({ api, identity, onBranchCreated, initialWorkspacePath, preferredModel, onWorkChanged, onActivity, readOnly = false, messageHandoff, emptyHero, surface = 'workbench' }: { surface?: 'workbench' | 'bot'; emptyHero?: { visual: React.ReactNode; title: string }; messageHandoff?: MessageHandoff; onWorkChanged?: () => void;
+  /** Peripheral observers (the Bot figure) follow what the current Run visibly does; null once unmounted. */
+  onActivity?: (activity: ThreadLiveActivity | null) => void;
+  preferredModel?: ThreadModel | null; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const botSurface = surface === 'bot';
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -141,6 +145,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [progress, setProgress] = React.useState<StreamingTextPart[]>([]);
   const [streamingTools, setStreamingTools] = React.useState<import('@/lib/agent-runtime/thread-projection').StreamingToolCall[]>([]);
   const [toolProgress, setToolProgress] = React.useState<import('@/lib/agent-runtime/thread-projection').ToolExecutionProgress[]>([]);
+  const [progressActivity, setProgressActivity] = React.useState<ThreadProgressActivity | null>(null);
+  const publishProgress = React.useCallback((parts: StreamingTextPart[], context?: ThreadProgressActivity) => {
+    setProgress(parts);
+    setProgressActivity(current => !context ? null : current?.runId === context.runId && current.activity === context.activity ? current : { runId: context.runId, activity: context.activity });
+  }, []);
   const messageInput = React.useRef<ComposerEditorHandle | null>(null);
   const appliedModelPreference = React.useRef<string | undefined>(undefined);
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
@@ -176,13 +185,19 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     setPreparingSource(false);
     pendingAction.current = null; resourceFailure.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress([]); setToolProgress([]); setHistoryOpen(false); setReadingFiles(false); fileReadGeneration.current += 1;
+    setSnapshot(undefined); setProgress([]); setProgressActivity(null); setToolProgress([]); setHistoryOpen(false); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); setLoadFailure(undefined); }, value => setLoadFailure({ scope: viewScope, message: value instanceof Error ? value.message : 'Thread unavailable' }), setProgress, setStreamingTools, setToolProgress);
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); setLoadFailure(undefined); }, value => setLoadFailure({ scope: viewScope, message: value instanceof Error ? value.message : 'Thread unavailable' }), publishProgress, setStreamingTools, setToolProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
-  }, [api, identity, host, handoff, historyWindow, viewScope]);
+  }, [api, identity, host, handoff, historyWindow, viewScope, publishProgress]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
+  const activityObserver = React.useRef(onActivity);
+  activityObserver.current = onActivity;
+  const observed = Boolean(onActivity);
+  const liveActivity = React.useMemo(() => observed && snapshot ? threadLiveActivity(snapshot, streamingTools, progressActivity) : null, [observed, snapshot, streamingTools, progressActivity]);
+  React.useEffect(() => { activityObserver.current?.(liveActivity); }, [liveActivity]);
+  React.useEffect(() => () => activityObserver.current?.(null), []);
   React.useEffect(() => {
     const failure = resourceFailure.current, resourceId = snapshot?.context.checkpoint?.resources?.snapshot.id;
     if (failure && resourceId && resourceId !== failure.snapshotId) {

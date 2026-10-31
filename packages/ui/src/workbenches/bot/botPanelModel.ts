@@ -2,7 +2,8 @@ import React from 'react';
 import type { BotSummary, ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import type { BotMatter } from '@varin/protocol';
 import type { BotPanelTab } from './botLayout';
-import type { BotFigureState, BotNeed, BotSessionView, BotStateLine, BotTimelineEvent, BotWorkView } from './botPresentation';
+import type { BotFigurePose, BotNeed, BotSessionView, BotStateLine, BotTimelineEvent, BotWorkView } from './botPresentation';
+import type { BotStageFeed } from './botStageRenderer';
 import type { useBotFacts } from './useBotFacts';
 
 /** A row reached from somewhere else: its tab opens and the row flashes once (§5.3). */
@@ -11,7 +12,10 @@ export interface BotPanelFocus { tab: BotPanelTab; id: string; token: number }
 /** Everything the right panel shows for the selected Bot, and the actions it may take. */
 export interface BotPanelModel {
   bot: BotSummary;
-  figure: BotFigureState;
+  /** The stage figure's pose: the Bot's state refined by her own round and her team (§5.7.1). */
+  figure: BotFigurePose;
+  /** Her team on the ledge and its moments (§5.7.2). */
+  stage: BotStageFeed | null;
   line: BotStateLine;
   sessions: BotSessionView[];
   /** The conversation open in the centre; null while none of the Bot's own conversations is open. */

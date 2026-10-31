@@ -73,7 +73,7 @@ describe('Bot figure', () => {
     const figure = new VarinFigureRig(host, { state: 'idle', compact: false, still: false });
     expect(frames.queue).toHaveLength(1);
     flush(16);
-    figure.setState('result');
+    figure.setState('thinking');
     flush(32);
     expect(frames.queue).toHaveLength(1);
 
@@ -90,12 +90,13 @@ describe('Bot figure', () => {
     expect(frames.queue).toHaveLength(0);
   });
 
-  it('cancels a superseded result gesture and stops offline only after its pose has settled', () => {
+  it('cancels a pending gesture when she goes offline and stops only after her pose has settled', () => {
     const figure = new VarinFigureRig(host, { state: 'idle', compact: false, still: false });
     const burst = vi.spyOn(figure, 'burst');
-    figure.setState('result');
+    figure.play('cheerLite');
     flush(0);
     figure.setState('offline');
+    expect(figure.move).toBeNull();
     expect(frames.queue).toHaveLength(1);
     for (let n = 1; n <= 600 && frames.queue.length; n++) flush(n * 1000 / 60);
     expect(burst).not.toHaveBeenCalled();
@@ -103,6 +104,35 @@ describe('Bot figure', () => {
     expect(host.querySelector('g[filter]')).not.toBeNull();
     figure.setState('working');
     expect(frames.queue).toHaveLength(1);
+    figure.dispose();
+  });
+
+  it('keeps a reaction playing through a change of her round, but not into rest', () => {
+    const figure = new VarinFigureRig(host, { state: 'thinking', compact: false, still: false });
+    figure.play('ack');
+    flush(16);
+    figure.setState('tool-read');
+    expect(figure.move?.name).toBe('ack');
+    figure.play('nod');
+    figure.setState('replying');
+    expect(figure.move).toBeNull();
+    figure.play('present');
+    figure.setState('sleeping');
+    expect(figure.move).toBeNull();
+    figure.dispose();
+  });
+
+  it('holds the prop of the tool her round is running and nothing for other states', () => {
+    const figure = new VarinFigureRig(host, { state: 'tool-read', compact: false, still: true });
+    const sheet = host.querySelector('rect[width="300"]')!.parentElement!.parentElement as unknown as SVGGElement;
+    const pen = host.querySelector('line[stroke-width="15"]')!.parentElement as unknown as SVGGElement;
+    expect(sheet.style.display).toBe('');
+    expect(pen.style.display).toBe('none');
+    figure.setState('tool-edit');
+    expect(sheet.style.display).toBe('none');
+    expect(pen.style.display).toBe('');
+    figure.setState('idle');
+    expect(pen.style.display).toBe('none');
     figure.dispose();
   });
 
