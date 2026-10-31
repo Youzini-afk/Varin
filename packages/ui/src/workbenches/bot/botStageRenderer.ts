@@ -97,8 +97,8 @@ interface Seat {
   pip?: SVGCircleElement;
   count?: SVGTextElement;
 }
-interface Flight { node: SVGGElement; kind: 'card' | 'plane' | 'envelope'; from: [number, number]; to: () => [number, number]; t: number; dur: number; lift: number; scale: number; follow: boolean; arrive?: (flight: Flight) => void; keep?: boolean }
-interface Letter { node: SVGGElement; outcome: BotStageOutcome; x: number; y: number; r: number; gather: number | null; done: boolean }
+interface Flight { node: SVGGElement; kind: 'card' | 'plane' | 'envelope'; from: [number, number]; to: () => [number, number]; t: number; dur: number; lift: number; scale: number; follow: boolean; arrive?: (flight: Flight, animate: boolean) => void; keep?: boolean; report?: { session: string; gathered: boolean } }
+interface Letter { node: SVGGElement; session: string; outcome: BotStageOutcome; x: number; y: number; r: number; gather: number | null; done: boolean }
 
 export class BotStageRenderer {
   private readonly team: SVGGElement;
@@ -150,13 +150,15 @@ export class BotStageRenderer {
     rig.paintAccent(el('rect', { x: -80, y: -46, width: 110, height: 14, rx: 7, fill: ACCENT }, this.card), 'fill', ACCENT);
     for (const [y, width] of [[-14, 160], [12, 130], [38, 150]]) rig.paintAccent(el('rect', { x: -80, y, width, height: 12, rx: 6, fill: ACCENT_SOFT }, this.card), 'fill', ACCENT_SOFT);
     rig.onFrame = dt => this.frame(dt);
-    rig.onResize = () => { this.dirty = true; if (!this.rig.live) this.snap(); };
+    rig.onResize = () => { this.dirty = true; if (!this.rig.stageLive) this.snap(); };
+    rig.onStagePause = () => this.snap();
   }
 
   dispose(): void {
     this.disposed = true;
     this.rig.onFrame = null;
     this.rig.onResize = null;
+    this.rig.onStagePause = null;
     this.rig.focus = null;
     for (const group of [this.team, this.ledge, this.pileLayer, this.inboxG, this.fx, this.card]) group.remove();
     this.seats.clear();
@@ -172,17 +174,17 @@ export class BotStageRenderer {
     const fresh = feed.events.filter(entry => entry.id > this.lastEvent);
     if (fresh.length) this.lastEvent = fresh[fresh.length - 1]!.id;
     // Moments only play while she is visibly moving; otherwise the roster is simply placed.
-    const playing = this.started && this.rig.moving && this.rig.live;
+    const playing = this.started && this.rig.stageLive;
     const incoming = new Set<string>();
     if (playing) for (const { event } of fresh) {
       if (event.kind === 'dispatch') incoming.add(event.lead);
       if (event.kind === 'sub-dispatch') incoming.add(event.sub);
     }
-    this.roster(feed.leads, incoming, this.started);
+    this.roster(feed.leads, incoming, playing);
     this.started = true;
     if (playing) for (const { event } of fresh) this.play(event);
     this.dirty = true;
-    if (!this.rig.live) this.snap();
+    if (!this.rig.stageLive) this.snap();
     else this.rig.wake();
   }
 
@@ -336,15 +338,17 @@ export class BotStageRenderer {
       case 'lead-report': {
         if (!lead) return;
         lead.spot = this.t + SPOTLIGHT_S; this.dirty = true;
-        this.fly('envelope', this.catchPoint(lead), () => [CENTER, 1066], { dur: .8, lift: 240, outcome: event.outcome, arrive: flight => {
+        this.fly('envelope', this.catchPoint(lead), () => [CENTER, 1066], { dur: .8, lift: 240, outcome: event.outcome, reportSession: event.session, arrive: (flight, animate) => {
           flight.keep = true; this.inboxG.appendChild(flight.node);
-          this.letters.push({ node: flight.node, outcome: event.outcome, x: CENTER, y: 1066, r: -8 + Math.random() * 16, gather: null, done: false });
-          this.react({ kind: 'lead-report', outcome: event.outcome }, lead);
+          const gathered = flight.report?.gathered === true;
+          this.letters.push({ node: flight.node, session: event.session, outcome: event.outcome, x: CENTER, y: 1066, r: -8 + Math.random() * 16, gather: gathered ? 0 : null, done: false });
+          if (animate && !gathered) this.react({ kind: 'lead-report', outcome: event.outcome }, lead);
         } });
         return;
       }
       case 'gather': {
-        for (const letter of this.letters) if (letter.gather === null) letter.gather = 0;
+        for (const letter of this.letters) if (letter.session === event.session && letter.gather === null) letter.gather = 0;
+        for (const flight of this.flights) if (flight.report?.session === event.session) flight.report.gathered = true;
         this.react({ kind: 'gather', outcome: event.outcome });
         return;
       }
@@ -383,7 +387,7 @@ export class BotStageRenderer {
     else this.rig.play('cheerLite');
   }
 
-  private fly(kind: Flight['kind'], from: [number, number], to: () => [number, number], options: { dur: number; lift: number; scale?: number; follow?: boolean; outcome?: BotStageOutcome; arrive?: (flight: Flight) => void }): void {
+  private fly(kind: Flight['kind'], from: [number, number], to: () => [number, number], options: { dur: number; lift: number; scale?: number; follow?: boolean; outcome?: BotStageOutcome; reportSession?: string; arrive?: Flight['arrive'] }): void {
     const node = el('g', {}, this.fx);
     if (kind === 'card') {
       el('rect', { x: -46, y: -32, width: 92, height: 64, rx: 10, fill: this.rig.tint(ACCENT) }, node);
@@ -397,12 +401,13 @@ export class BotStageRenderer {
       if (options.outcome) el('circle', { cx: 40, cy: -26, r: 14, fill: options.outcome === 'fail' ? '#e3a04c' : '#7cc79a' }, node);
     }
     attr(node, 'opacity', 0);
-    this.flights.push({ node, kind, from, to, t: 0, dur: options.dur, lift: options.lift, scale: options.scale ?? 1, follow: Boolean(options.follow), arrive: options.arrive });
+    this.flights.push({ node, kind, from, to, t: 0, dur: options.dur, lift: options.lift, scale: options.scale ?? 1, follow: Boolean(options.follow), arrive: options.arrive,
+      report: options.reportSession === undefined ? undefined : { session: options.reportSession, gathered: false } });
   }
 
   // ------------------------------------------------------------ frames
   private frame(dt: number): void {
-    if (this.disposed) return;
+    if (this.disposed || !this.rig.stageLive) return;
     this.t += dt;
     for (const timer of this.timers.splice(0)) { if (timer.at <= this.t) timer.fn(); else this.timers.push(timer); }
     if (this.dirty || this.t - this.layoutAt > .5) { this.layout(); this.layoutAt = this.t; }
@@ -416,11 +421,10 @@ export class BotStageRenderer {
 
   /** Without frames (still, reduced motion, hidden): place everyone where they belong. */
   private snap(): void {
+    this.rig.cancelStageMove();
+    this.timers = [];
     for (const seat of [...this.seats.values()]) if (seat.leaving) this.remove(seat);
-    for (const flight of this.flights) { flight.arrive?.(flight); if (!flight.keep) flight.node.remove(); }
-    this.flights = [];
-    for (const timer of this.timers.splice(0)) timer.fn();
-    for (const flight of this.flights) { flight.arrive?.(flight); if (!flight.keep) flight.node.remove(); }
+    for (const flight of this.flights) { flight.arrive?.(flight, false); if (!flight.keep) flight.node.remove(); }
     this.flights = [];
     for (const seat of this.seats.values()) { seat.arrived = true; seat.enter = 1; seat.bump = 0; }
     this.layout();
@@ -522,7 +526,7 @@ export class BotStageRenderer {
       attr(flight.node, 'transform', `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${spin.toFixed(1)}) scale(${flight.kind === 'plane' && !right ? `${s.toFixed(3)} ${(-s).toFixed(3)}` : s.toFixed(3)})`);
       if (flight.follow) this.rig.lookAt(x, y, .25, .9);
       if (u < 1) return true;
-      flight.arrive?.(flight);
+      flight.arrive?.(flight, true);
       if (!flight.keep) flight.node.remove();
       return false;
     });

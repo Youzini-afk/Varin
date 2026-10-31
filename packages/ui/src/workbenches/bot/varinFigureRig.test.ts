@@ -41,6 +41,14 @@ describe('Bot figure', () => {
     for (const callback of frames.reads.splice(0)) callback(time);
   };
 
+  it('keeps terminal output scrolling after the authored row pool has been reused', () => {
+    const figure = new VarinFigureRig(host, { state: 'tool-shell', compact: false, still: false });
+    for (let n = 0; n < 24 * 60; n++) flush(n * 1000 / 60);
+    const rows = [...host.querySelectorAll('g[clip-path*="term"] > g > g')];
+    expect(rows.filter(row => row.getAttribute('opacity') === '1')).toHaveLength(7);
+    figure.dispose();
+  });
+
   it('holds a still pose without running frames', () => {
     const figure = new VarinFigureRig(host, { state: 'sleeping', compact: true, still: true });
     expect(host.querySelector('svg')).not.toBeNull();

@@ -51,12 +51,12 @@ describe('Bot stage facts', () => {
     const reported = [delegation('chat', 'research', { acceptedCursor: 5, reportCursor: 11, reportOutcome: 'succeeded' }), delegation('research', 'notes', { acceptedCursor: 7, reportCursor: 9, reportOutcome: 'succeeded' })];
     expect(observe(director, snapshot(12, { branches: [chat(), research, notes], delegations: reported, teamExecutions: [] })).events).toEqual([
       { kind: 'sub-report', lead: key('research'), sub: key('notes'), outcome: 'ok' },
-      { kind: 'lead-report', lead: key('research'), outcome: 'ok' },
+      { kind: 'lead-report', lead: key('research'), session: key('chat'), outcome: 'ok' },
       { kind: 'leave', lead: key('research') },
     ]);
     const delivered = [{ parentThreadId: 'chat', parentBranchId: 'main', parentRunId: 'r1', receivingRunId: 'r1', childOperationId: 'op-research', executionId: 'ex-research', childThreadId: 'research', childBranchId: 'main', deliveredCursor: 13 }];
     expect(observe(director, snapshot(14, { branches: [chat(), research, notes], delegations: reported, deliveredReports: delivered })).events)
-      .toEqual([{ kind: 'gather', count: 1, outcome: 'ok' }]);
+      .toEqual([{ kind: 'gather', session: key('chat'), count: 1, outcome: 'ok' }]);
     // The round ends with a reply and nobody is still working: complete, and large because a helper was involved.
     const done = chat(null, run('r1', 'completed', { visibleOutput: true }));
     expect(observe(director, snapshot(16, { branches: [done, research, notes], delegations: reported, deliveredReports: delivered })).events)
@@ -104,5 +104,25 @@ describe('Bot stage facts', () => {
     const accepted = { delegations: [delegation('chat', 'research', { acceptedCursor: 5 })], teamExecutions: [execution('chat', 'research')] };
     expect(observe(director, { ...snapshot(8, { branches: [chat(), research], ...accepted }), epoch: 2 }).events).toEqual([]);
     expect(director.observe({ snapshot: snapshot(9, { branches: [chat(), research], ...accepted }), botId: 'b2', live: null, preferThreadId: null, now: 0 }).view.leads).toEqual([]);
+  });
+
+  it('orders batched receipts before later reports and keeps the later report pending', () => {
+    const director = new BotStageDirector();
+    const second = branch('second', { parentThreadId: 'chat' });
+    const branches = [chat(), research, second];
+    const relations = [delegation('chat', 'research'), delegation('chat', 'second')];
+    observe(director, snapshot(10, { branches, delegations: relations }));
+    const reports = [
+      { ...relations[0]!, reportCursor: 11, reportOutcome: 'succeeded' },
+      { ...relations[1]!, reportCursor: 13, reportOutcome: 'failed' },
+    ];
+    const delivered = { parentThreadId: 'chat', parentBranchId: 'main', parentRunId: 'r1', receivingRunId: 'r1', childOperationId: 'op-research', executionId: 'ex-research', childThreadId: 'research', childBranchId: 'main', deliveredCursor: 12 };
+    expect(observe(director, snapshot(14, { branches, delegations: reports, deliveredReports: [delivered] })).events).toEqual([
+      { kind: 'lead-report', lead: key('research'), session: key('chat'), outcome: 'ok' },
+      { kind: 'gather', session: key('chat'), count: 1, outcome: 'ok' },
+      { kind: 'lead-report', lead: key('second'), session: key('chat'), outcome: 'fail' },
+    ]);
+    expect(observe(director, snapshot(16, { branches, delegations: reports, deliveredReports: [{ ...delivered, deliveredCursor: 15 }] })).events)
+      .toEqual([{ kind: 'gather', session: key('chat'), count: 1, outcome: 'fail' }]);
   });
 });

@@ -27,12 +27,14 @@ const lead = (n: number, status: BotMemberStatus = 'thinking', subs = 0): BotSta
 describe('Bot stage', () => {
   let host: HTMLElement;
   let time = 0;
+  let visibility: DocumentVisibilityState;
   beforeEach(() => {
     const { window, document } = parseHTML('<!doctype html><html><body></body></html>');
     vi.stubGlobal('window', window);
     vi.stubGlobal('document', document);
     vi.stubGlobal('requestAnimationFrame', () => 0);
-    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', { get: () => visibility, configurable: true });
     frames.queue.length = 0;
     frames.reads.length = 0;
     time = 0;
@@ -64,6 +66,49 @@ describe('Bot stage', () => {
   const seated = () => layer(0).firstElementChild?.children.length ?? 0;
   const flying = () => layer(3).firstElementChild?.children.length ?? 0;
   const chips = () => [...host.querySelectorAll('text')].map(node => node.textContent).filter(text => text?.startsWith('+'));
+  const letters = () => layer(1).children[2]!.children.length - 1;
+
+  it('owns one frame even when a stage callback starts a gesture during that frame', () => {
+    const { rig, renderer, feed } = stage();
+    renderer.update(feed([lead(1)]));
+    renderer.update(feed([lead(1, 'needs')], [{ kind: 'needs', member: 'lead-1' }]));
+    run(.1);
+    expect(frames.queue).toHaveLength(1);
+    renderer.dispose(); rig.dispose();
+    expect(frames.queue).toHaveLength(0);
+  });
+
+  it('takes in a report even when its receipt arrives before the envelope lands', () => {
+    const { rig, renderer, feed } = stage();
+    renderer.update(feed([lead(1)]));
+    run(.1);
+    renderer.update(feed([lead(1)], [{ kind: 'lead-report', lead: 'lead-1', session: 'chat', outcome: 'ok' }, { kind: 'gather', session: 'chat', count: 1, outcome: 'ok' }]));
+    run(2);
+    expect(flying()).toBe(0);
+    expect(letters()).toBe(0);
+    renderer.update(feed([lead(1), lead(2)], [
+      { kind: 'lead-report', lead: 'lead-1', session: 'chat', outcome: 'ok' },
+      { kind: 'lead-report', lead: 'lead-2', session: 'other-chat', outcome: 'ok' },
+      { kind: 'gather', session: 'chat', count: 1, outcome: 'ok' },
+    ]));
+    run(2);
+    expect(letters()).toBe(1);
+    renderer.dispose(); rig.dispose();
+  });
+
+  it('settles a hidden stage without replaying its pending dispatch on return', () => {
+    const { rig, renderer, feed } = stage();
+    renderer.update(feed([]));
+    renderer.update(feed([lead(1)], [{ kind: 'dispatch', lead: 'lead-1' }]));
+    run(.1);
+    visibility = 'hidden'; document.dispatchEvent(new window.Event('visibilitychange'));
+    visibility = 'visible'; document.dispatchEvent(new window.Event('visibilitychange'));
+    run(.5);
+    expect(flying()).toBe(0);
+    expect(rig.move).toBeNull();
+    expect(seated()).toBe(1);
+    renderer.dispose(); rig.dispose();
+  });
 
   it('seats who fits beside her and piles the rest, keeping whoever needs you out of the pile', () => {
     const { rig, renderer, feed } = stage();

@@ -28,9 +28,9 @@ export type BotStageEvent =
   | { kind: 'dispatch' | 'continue' | 'leave'; lead: string }
   | { kind: 'sub-dispatch'; lead: string; sub: string }
   | { kind: 'sub-report'; lead: string; sub: string; outcome: BotStageOutcome }
-  | { kind: 'lead-report'; lead: string; outcome: BotStageOutcome }
+  | { kind: 'lead-report'; lead: string; session: string; outcome: BotStageOutcome }
   /** Her conversation committed receipt of the reports waiting on the ledge. */
-  | { kind: 'gather'; count: number; outcome: BotStageOutcome }
+  | { kind: 'gather'; session: string; count: number; outcome: BotStageOutcome }
   /** Something needs the user; `member` is null for her own conversation. */
   | { kind: 'needs' | 'resolved'; member: string | null }
   /** Her round ended with a reply while members still work. */
@@ -214,7 +214,7 @@ export class BotStageDirector {
     let phase = runPhase(run, cursor)!;
     const base = { threadId: root.threadId, tool: null, subject: null, count: 0 };
     if (phase === 'waiting') return { ...base, phase: team ? 'team' : 'thinking' };
-    const seen = live && live.threadId === root.threadId && live.branchId === root.branchId && (!live.runId || live.runId === run.id) ? live : null;
+    const seen = live && live.threadId === root.threadId && live.branchId === root.branchId && live.runId === run.id ? live : null;
     if (seen) {
       const tools = seen.tools.flatMap(tool => { const kind = botToolKind(tool.name); return kind ? [{ ...tool, kind }] : []; });
       const last = tools.at(-1);
@@ -254,21 +254,30 @@ export class BotStageDirector {
         const outcome = outcomeOf(row.reportOutcome);
         if (outcome === 'fail') { const current = episode(lead); if (current) current.failed = true; }
         if (isLead) {
-          const root = now.rootOf.get(lead)!, pending = this.inbox.get(root) ?? { count: 0, failed: false };
-          this.inbox.set(root, { count: pending.count + 1, failed: pending.failed || outcome === 'fail' });
-          happened.push({ at: row.reportCursor!, event: { kind: 'lead-report', lead, outcome } });
+          const root = now.rootOf.get(lead)!;
+          happened.push({ at: row.reportCursor!, event: { kind: 'lead-report', lead, session: root, outcome } });
         } else happened.push({ at: row.reportCursor!, event: { kind: 'sub-report', lead, sub: child, outcome } });
       }
     }
-    happened.sort((a, b) => a.at - b.at);
-    events.push(...happened.map(entry => entry.event));
-    // Taking in reports: a committed receipt by one of her conversations' Runs, once per conversation.
+    // Reports and receipts may arrive in one snapshot. Apply their durable order so a receipt
+    // cannot collect a later report, including when several conversations share the stage.
     for (const root of now.roots) {
       const key = branchKey(root.threadId, root.branchId);
-      if (!now.deliveries.some(row => row.parent === key && inside(row.cursor))) continue;
-      const pending = this.inbox.get(key) ?? { count: 0, failed: false };
-      this.inbox.delete(key);
-      events.push({ kind: 'gather', count: Math.max(1, pending.count), outcome: pending.failed ? 'fail' : 'ok' });
+      const cursors = new Set(now.deliveries.filter(row => row.parent === key && inside(row.cursor)).map(row => row.cursor));
+      for (const at of cursors) happened.push({ at, event: { kind: 'gather', session: key, count: 1, outcome: 'ok' } });
+    }
+    happened.sort((a, b) => a.at - b.at);
+    for (const { event } of happened) {
+      if (event.kind === 'lead-report') {
+        const pending = this.inbox.get(event.session) ?? { count: 0, failed: false };
+        this.inbox.set(event.session, { count: pending.count + 1, failed: pending.failed || event.outcome === 'fail' });
+      } else if (event.kind === 'gather') {
+        const pending = this.inbox.get(event.session);
+        event.count = Math.max(1, pending?.count ?? 0);
+        event.outcome = pending?.failed ? 'fail' : 'ok';
+        this.inbox.delete(event.session);
+      }
+      events.push(event);
     }
     for (const [key, item] of now.items) if (!previous.items.has(key)) events.push({ kind: 'needs', member: item.member });
     for (const [key, item] of previous.items) if (!now.items.has(key) && item.actionable) events.push({ kind: 'resolved', member: item.member });

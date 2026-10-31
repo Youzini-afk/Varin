@@ -442,6 +442,8 @@ export class VarinFigureRig {
   private snapping = false;
   private level: MotionLevel = 'full';
   private frame: FrameHandle | null = null;
+  private ticking = false;
+  private stagePlaying = false;
   private geometryFrame: FrameHandle | null = null;
   private pointerBounds: DOMRect | null = null;
   private lastTime: number | null = null;
@@ -457,6 +459,8 @@ export class VarinFigureRig {
   onFrame: ((dt: number) => void) | null = null;
   /** Called when the wide scene's viewBox changes. */
   onResize: (() => void) | null = null;
+  /** Finish transient stage presentation when it becomes hidden or cannot perform. */
+  onStagePause: (() => void) | null = null;
   private stageGroups: VarinFigureStageLayers | null = null;
   private ellipsis!: SVGGElement;
   private ellipsisDots!: SVGCircleElement[];
@@ -506,6 +510,7 @@ export class VarinFigureRig {
   get live(): boolean { return this.running; }
   /** Whether motion plays at all (full motion, not a still figure). */
   get moving(): boolean { return this.animated; }
+  get stageLive(): boolean { return this.running && AWAKE(this.state); }
   get current(): BotFigurePose { return this.state; }
   /** The one-shot move playing now and how far through it is (0..1). */
   get move(): { name: string; progress: number } | null {
@@ -532,6 +537,10 @@ export class VarinFigureRig {
   }
   /** Resume frames after the stage starts something while a settled figure had stopped. */
   wake(): void { if (!this.disposed) this.run(); }
+  cancelStageMove(): void {
+    if (this.action?.def.keep) { this.action = null; this.timers = []; }
+    this.lookTarget = null;
+  }
 
   /** Recolour the accent parts for the current theme; poses and motion carry on. */
   setAccent(accent: FigureAccent): void {
@@ -570,6 +579,7 @@ export class VarinFigureRig {
     if (!this.animated || !AWAKE(this.state)) return;
     if (name === 'flick') { this.flick(-24); return; }
     const def = name in STAGE_ACTIONS ? STAGE_ACTIONS[name as StageMove] : ACTIONS[name as Move];
+    this.timers = [];
     this.action = { def, at: this.t, name };
     def.start?.(this);
     this.run();
@@ -723,13 +733,16 @@ export class VarinFigureRig {
   }
 
   private run(): void {
+    const stagePlaying = this.stageLive;
+    if (this.stagePlaying && !stagePlaying) this.onStagePause?.();
+    this.stagePlaying = stagePlaying;
     if (!this.running) {
       this.frame?.cancel(); this.frame = null; this.lastTime = null;
       this.geometryFrame?.cancel(); this.geometryFrame = null; this.pointerBounds = null;
       return;
     }
     this.measurePointer();
-    if (this.frame || STATES[this.state].noLoops && this.atRest()) return;
+    if (this.ticking || this.frame || STATES[this.state].noLoops && this.atRest()) return;
     this.lastTime = null;
     this.frame = requestFrame(this.tick);
   }
@@ -739,11 +752,16 @@ export class VarinFigureRig {
     if (!this.running) return;
     const dt = this.lastTime === null ? 1 / 60 : Math.min(.05, (time - this.lastTime) / 1000);
     this.lastTime = time;
-    this.step(dt);
-    this.stepFx(dt);
-    this.render();
-    this.onFrame?.(dt);
-    if (!STATES[this.state].noLoops || !this.atRest()) this.frame = requestFrame(this.tick);
+    this.ticking = true;
+    try {
+      this.step(dt);
+      this.stepFx(dt);
+      this.render();
+      this.onFrame?.(dt);
+    } finally {
+      this.ticking = false;
+    }
+    if (this.running && !this.frame && (!STATES[this.state].noLoops || !this.atRest())) this.frame = requestFrame(this.tick);
   };
 
   /** Stop a non-looping pose only once its transition and already emitted effects have settled.
@@ -1015,9 +1033,11 @@ export class VarinFigureRig {
     if (a.shell > .01) {
       const c = lt % 3.2, rows = L ? Math.floor(lt / 3.2) * 4 + Math.min(4, Math.max(0, Math.floor((c - .5) / .35) + 1)) : 5;
       P.shellRows.forEach((row, i) => {
-        const k = i - Math.max(0, rows - 7);
+        // Reuse the authored rows as a ring: a long command must not exhaust its output drawing.
+        const first = Math.max(0, rows - 7);
+        const k = (i - first % P.shellRows.length + P.shellRows.length) % P.shellRows.length;
         attr(row, 'transform', `translate(0 ${970 + k * 18})`);
-        attr(row, 'opacity', i < rows && k >= 0 ? 1 : 0);
+        attr(row, 'opacity', k < Math.min(rows, 7) ? 1 : 0);
       });
       attr(P.shellCursor, 'y', 968 + Math.min(rows, 7) * 18);
       attr(P.shellCursor, 'opacity', !L || Math.sin(this.t * 8) > 0 ? 1 : .2);

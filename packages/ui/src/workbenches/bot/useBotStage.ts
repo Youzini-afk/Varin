@@ -7,6 +7,7 @@ import { botToolSubject, botToolUnits } from './botStageTools';
 
 /** Enough recent moments for a figure that mounts late to skip them; each plays once by id. */
 const KEEP_MOMENTS = 24;
+const NO_MOMENTS: BotStageState['moments'] = [];
 
 /** The open conversation's round in the few words the stage needs; equal rounds compare equal. */
 export function liveRound(activity: ThreadLiveActivity | null): BotLiveRound | null {
@@ -35,20 +36,26 @@ export function useBotStage({ threads, botId, enabled, preferThreadId }: {
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const source = enabled && typeof threads?.attention === 'function' && typeof threads.observe === 'function' ? threads : undefined;
   const attention = useCompanionAttention(source, generation);
-  const [live, setLive] = React.useState<BotLiveRound | null>(null);
+  const [live, setLive] = React.useState<{ generation: number; round: BotLiveRound | null } | null>(null);
   const onActivity = React.useCallback((activity: ThreadLiveActivity | null) => {
-    const next = liveRound(activity);
+    const next = { generation, round: liveRound(activity) };
     setLive(current => same(current, next) ? current : next);
-  }, []);
+  }, [generation]);
   const director = React.useRef<BotStageDirector | null>(null);
   director.current ??= new BotStageDirector();
   const ids = React.useRef(0);
-  const [stage, setStage] = React.useState<{ view: BotStageView; moments: { id: number; event: BotStageEvent }[] }>({ view: EMPTY_STAGE, moments: [] });
+  const scope = enabled && botId ? JSON.stringify([generation, botId]) : null;
+  const observedScope = React.useRef<string | null>(null);
+  const [stage, setStage] = React.useState<{ scope: string | null; view: BotStageView; moments: { id: number; event: BotStageEvent }[] }>({ scope: null, view: EMPTY_STAGE, moments: [] });
   const snapshot = source ? attention.snapshot : null;
   React.useEffect(() => {
-    const { view, events } = director.current!.observe({ snapshot, botId: enabled ? botId : null, live, preferThreadId, now: Date.now() });
+    if (observedScope.current !== scope) { director.current!.reset(); observedScope.current = scope; }
+    const { view, events } = director.current!.observe({ snapshot, botId: enabled ? botId : null, live: live?.generation === generation ? live.round : null, preferThreadId, now: Date.now() });
     const added = events.map(event => ({ id: ++ids.current, event }));
-    setStage(current => !added.length && same(current.view, view) ? current : { view, moments: [...current.moments, ...added].slice(-KEEP_MOMENTS) });
-  }, [snapshot, botId, enabled, live, preferThreadId]);
-  return { view: stage.view, moments: stage.moments, onActivity };
+    setStage(current => current.scope === scope && !added.length && same(current.view, view) ? current : {
+      scope, view, moments: [...(current.scope === scope ? current.moments : []), ...added].slice(-KEEP_MOMENTS),
+    });
+  }, [snapshot, botId, enabled, live, preferThreadId, scope, generation]);
+  const current = scope !== null && stage.scope === scope;
+  return { view: current ? stage.view : EMPTY_STAGE, moments: current ? stage.moments : NO_MOMENTS, onActivity };
 }
