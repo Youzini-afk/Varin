@@ -5,49 +5,19 @@ import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensi
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useEffectiveDirectory } from './useEffectiveDirectory';
-
-const APP_TITLE = 'Varin';
-
-const formatProjectLabel = (label: string): string => {
-  return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-};
-
-const getProjectNameFromPath = (path: string): string => {
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const segments = normalized.split('/').filter(Boolean);
-  return segments[segments.length - 1] ?? '';
-};
-
-const buildWindowTitle = (projectLabel: string | null, instanceLabel: string | null): string => {
-  const parts = [projectLabel, instanceLabel, APP_TITLE].filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
-  return parts.join(' | ');
-};
+import { resolveWindowTitle } from '@/lib/window-title';
+import { useVarinExtensionCatalog } from '@/lib/extensions/catalog-store';
+import { VARIN_WORKBENCH_BOT_PROFILE_ID, resolveVarinWorkbenchLayout } from '@varin/extension-contract';
+import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 
 export const useWindowTitle = () => {
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useEffectiveDirectory();
-  const activeProject = React.useMemo(() => {
-    if (currentDirectory) return projects.filter(project => currentDirectory === project.path || currentDirectory.startsWith(`${project.path.replace(/[\\/]+$/, '')}/`)).sort((a, b) => b.path.length - a.path.length)[0] ?? null;
-    if (!activeProjectId) return null;
-    return projects.find((project) => project.id === activeProjectId) ?? null;
-  }, [activeProjectId, currentDirectory, projects]);
-
-  const projectLabel = React.useMemo(() => {
-    if (!activeProject) return currentDirectory ? formatProjectLabel(getProjectNameFromPath(currentDirectory)) : null;
-
-    const label = activeProject.label?.trim();
-    if (label) {
-      return formatProjectLabel(label);
-    }
-
-    const pathName = getProjectNameFromPath(activeProject.path);
-    if (pathName) {
-      return formatProjectLabel(pathName);
-    }
-
-    return null;
-  }, [activeProject, currentDirectory]);
+  const workbench = useVarinExtensionCatalog().snapshot?.workbench;
+  const bot = Boolean(workbench?.authoritative && resolveVarinWorkbenchLayout(workbench.document, {
+    surface: varinSurfaceRuntime.surface, userId: 'default',
+  }).profileId === VARIN_WORKBENCH_BOT_PROFILE_ID);
 
   const [instanceLabel, setInstanceLabel] = React.useState<string | null>(null);
 
@@ -108,7 +78,7 @@ export const useWindowTitle = () => {
     };
   }, []);
 
-  const title = React.useMemo(() => buildWindowTitle(projectLabel, instanceLabel), [projectLabel, instanceLabel]);
+  const title = resolveWindowTitle({ projects, activeProjectId, directory: currentDirectory, instanceLabel, bot });
 
   React.useEffect(() => {
     if (typeof document !== 'undefined') {

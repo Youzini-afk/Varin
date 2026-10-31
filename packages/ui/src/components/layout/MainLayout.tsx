@@ -32,6 +32,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { workspaceEvents } from '@/lib/workspaceEvents';
+import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 
 import { RegularChatView } from '@/components/views/RegularChatView';
 
@@ -69,6 +70,7 @@ interface MainLayoutProps {
 }
 
 export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention, floatingSidebar = false, renderMobileTitle }) => {
+    const shellActive = useWorkbenchShellActive();
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -96,6 +98,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
     const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || Boolean(worktreesPageProjectId) || isMultiRunLauncherOpen;
 
     React.useEffect(() => {
+        if (!shellActive) return;
         const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
         const unsubscribeSession = useThreadStore.subscribe((state, prev) => {
             const sessionSelected = Boolean(state.selectedIdentity) && state.selectedIdentity !== prev.selectedIdentity;
@@ -108,7 +111,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
             unsubscribeSession();
             unsubscribeTab();
         };
-    }, []);
+    }, [shellActive]);
     const { isMobile } = useDeviceInfo();
     const mobilePanelsResetRef = React.useRef(false);
 
@@ -200,7 +203,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
     }, [isSessionSwitcherOpen, isMobile, mobileLeftDrawerOpen, setMobileSessionPanelOpen]);
 
     useEffect(() => {
-        if (!isMobile) {
+        if (!shellActive || !isMobile) {
             mobilePanelsResetRef.current = false;
             return;
         }
@@ -212,30 +215,31 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
         mobilePanelsResetRef.current = true;
         setMobileSessionPanelOpen(false);
         setMobileRightSidebarOpen(false);
-    }, [isMobile, setMobileSessionPanelOpen]);
+    }, [shellActive, isMobile, setMobileSessionPanelOpen]);
 
     // Ensure mobile drawers are closed when opening full-screen settings
     useEffect(() => {
-        if (!isMobile || !isSettingsDialogOpen) {
+        if (!shellActive || !isMobile || !isSettingsDialogOpen) {
             return;
         }
 
         setMobileSessionPanelOpen(false);
         setMobileRightSidebarOpen(false);
-    }, [isMobile, isSettingsDialogOpen, setMobileSessionPanelOpen]);
+    }, [shellActive, isMobile, isSettingsDialogOpen, setMobileSessionPanelOpen]);
 
-    useUpdatePolling();
+    useUpdatePolling(shellActive);
 
-    React.useEffect(() => workspaceEvents.onDirectoryRequest(() => {
+    React.useEffect(() => shellActive ? workspaceEvents.onDirectoryRequest(() => {
         setDirectoryDialogOpen(true);
-    }), []);
+    }) : undefined, [shellActive]);
 
     React.useEffect(() => {
+        if (!shellActive) return;
         const previous = useUIStore.getState().isMobile;
         if (previous !== isMobile) {
             setIsMobile(isMobile);
         }
-    }, [isMobile, setIsMobile]);
+    }, [shellActive, isMobile, setIsMobile]);
 
     const handleToggleMobileRightDrawer = React.useCallback(() => {
         if (mobileLeftDrawerOpen) {
@@ -272,7 +276,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
     }, [activeMainTab, isMobile, mobileRightSidebarOpen]);
 
     const isChatActive = activeMainTab === 'chat';
-    const conversationActive = isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen;
+    const conversationActive = shellActive && isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen;
     const conversation = renderConversation
         ? renderConversation(conversationActive)
         : <RegularChatView active={conversationActive} />;

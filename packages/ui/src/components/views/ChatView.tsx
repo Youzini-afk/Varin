@@ -11,6 +11,7 @@ import { ThreadDraftConversation } from '@/components/thread/ThreadDraftConversa
 import { MessageHandoff } from '@/components/conversation/messageHandoff';
 import { ExternalConversationView } from '@/components/thread/ExternalConversation';
 import { useExternalAgentStore } from '@/stores/useExternalAgentStore';
+import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 
 type ChatViewProps = {
   active?: boolean;
@@ -21,6 +22,8 @@ type ChatViewProps = {
   threadPanelTitle?: string;
 };
 export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = false, autoOpenDraft = true, conversationHeader }) => {
+  const shellActive = useWorkbenchShellActive();
+  const conversationActive = active && shellActive;
   const { t } = useI18n();
   const [handoff] = React.useState(() => new MessageHandoff());
   React.useLayoutEffect(() => () => handoff.dispose(), [handoff]);
@@ -34,11 +37,14 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
   React.useEffect(() => { setError(undefined); }, [hostKey]);
   const { directory } = useSelectedThreadWorkspace();
   React.useEffect(() => {
-    if (active && autoOpenDraft && api && catalogLoaded && !identity && !externalId && !draftKey && !error && !readOnly) {
-      void startThreadFromNavigation().catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
+    if (conversationActive && autoOpenDraft && api && catalogLoaded && !identity && !externalId && !draftKey && !error && !readOnly) {
+      // This is local presentation initialization, not a user navigation request. A prepared
+      // Shell must not switch Profiles again while the enclosing switch is waiting for it.
+      const current = useThreadStore.getState();
+      if (!current.selectedIdentity && !current.selectedDraftKey) current.openDraft();
     }
-  }, [active, autoOpenDraft, api, identity, externalId, draftKey, catalogLoaded, error, readOnly, hostKey]);
-  if (!active) return null;
+  }, [conversationActive, autoOpenDraft, api, identity, externalId, draftKey, catalogLoaded, error, readOnly, hostKey]);
+  if (!conversationActive) return null;
   if (externalId) return <ChatErrorBoundary sessionId={externalId}><ExternalConversationView key={`${hostKey}:${externalId}`} id={externalId} readOnly={readOnly} /></ChatErrorBoundary>;
   if (!api) return <p role="alert">Conversation service unavailable</p>;
   if (!identity && draftKey && !readOnly) return <ChatErrorBoundary sessionId={draftKey}>
