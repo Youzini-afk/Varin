@@ -17,7 +17,7 @@
     "@aparajita/capacitor-secure-storage": "^8.0.1",
     "@base-ui/react": "^1.9.0",
     "@capacitor/app": "^8.1.2",
-    "@capacitor/core": "^8.5.3",
+    "@capacitor/core": "^8.6.0",
     "@capacitor/haptics": "8.0.2",
     "@capacitor/keyboard": "^8.0.6",
     "@capacitor/push-notifications": "^8.1.3",
