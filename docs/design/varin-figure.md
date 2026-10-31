@@ -2,6 +2,8 @@
 
 状态：已实现为 `BotFigure`（`packages/ui/src/workbenches/bot`）。可交互预览见 [varin-figure-preview/index.html](varin-figure-preview/index.html)，需要用浏览器打开，动作靠脚本运行；预览里能手动触发全部一次性动作，产品里只用其中几个。
 
+活动表现（她自己回合的工具道具、负责人和子 agent 上窗台、结果分级）还是设计稿，没有实现：[varin-figure-preview/stage.html](varin-figure-preview/stage.html)，数据是模拟的。
+
 ## 形象
 
 - **来源**：确认过的正面 Q 版参考图，预览目录里的 `reference.webp` 是缩小的对照图。Varin 的二次元角色按 Grokbot 那类 Q 版头像的思路重画：大头、平涂、无描边、细节少，同时保留 Varin 自己的眼睛、腮红和小嘴。

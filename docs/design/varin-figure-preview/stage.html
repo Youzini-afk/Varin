@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot 形象 · 舞台设计稿</title>
+<style>
+  :root { --page:#f2f3f6; --panel:#f7f7f9; --line:#e1e4ea; --text:#1c1f26; --muted:#6b717c; --grid:#e3e6ec; --ledge:#dfe2e9; --mark:#8a90a0; --bubble:#ffffff;
+    --chip:#ffffff; --chip-text:#3a3f4a; --accent:#8fb0ea; --warn:#c98a2b; }
+  body.dark { --page:#111317; --panel:#17191e; --line:#2a2e37; --text:#e7e9ee; --muted:#8b919c; --grid:#24272e; --ledge:#33363f; --mark:#9aa0ad; --bubble:#2a2d35;
+    --chip:#2a2d35; --chip-text:#d9dce4; --warn:#e3a24f; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); color:var(--text); font:14px/1.55 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; transition:background .3s, color .3s; }
+  main { max-width:1280px; margin:0 auto; padding:28px 24px 64px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .lead { margin:0 0 22px; color:var(--muted); max-width:900px; }
+  .layout { display:grid; grid-template-columns:auto 1fr; gap:28px; align-items:start; }
+  .panel-wrap { position:sticky; top:16px; }
+  .zoom { transform-origin:top left; }
+  body.zoomed .zoom { transform:scale(1.6); margin-bottom:calc(var(--panel-h, 640px) * .6); }
+  .panel { width:360px; background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden; transition:background .3s; }
+  .stage { position:relative; height:300px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; padding:0 0 12px; overflow:hidden; }
+  .floor { position:absolute; inset:0; pointer-events:none;
+    background-image:linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+    background-size:22px 22px; background-position:center 14px;
+    -webkit-mask-image:radial-gradient(ellipse 72% 70% at 50% 40%, #000 0%, transparent 80%); mask-image:radial-gradient(ellipse 72% 70% at 50% 40%, #000 0%, transparent 80%); }
+  .fig-host { position:relative; align-self:stretch; height:216px; margin-bottom:8px; }
+  .menu { position:absolute; top:8px; right:10px; color:var(--muted); font-size:18px; letter-spacing:1px; }
+  .name { position:relative; display:flex; gap:6px; align-items:center; font-size:20px; font-weight:700; line-height:1.3; }
+  .name .edit { font-size:13px; color:var(--muted); border:1px solid var(--line); border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; }
+  .state { position:relative; min-height:22px; font-size:13.5px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .state.warn { color:var(--warn); }
+  .state i { width:14px; height:14px; border-radius:50%; background:currentColor; display:inline-block; }
+  .list { border-top:1px solid var(--line); padding:10px 14px 14px; font-size:13px; }
+  .list h3 { margin:0 0 6px; font-size:12px; color:var(--muted); font-weight:600; }
+  .row { display:flex; align-items:center; gap:8px; padding:3px 0; }
+  .row svg { flex:none; }
+  .row .sub { color:var(--muted); font-size:12px; }
+  .row .where { margin-left:auto; font-size:11px; color:var(--muted); }
+  .row.needs { color:var(--warn); }
+  .controls { min-width:0; }
+  .group { margin-bottom:18px; }
+  .group h2 { font-size:12px; font-weight:600; color:var(--muted); margin:0 0 8px; letter-spacing:.05em; }
+  .group p { margin:0 0 8px; color:var(--muted); font-size:12.5px; }
+  .buttons { display:flex; flex-wrap:wrap; gap:7px; }
+  button { font:inherit; font-size:13px; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:5px 12px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.on { background:var(--accent); border-color:var(--accent); color:#10131a; }
+  button.primary { background:var(--text); color:var(--page); border-color:var(--text); }
+  label { color:var(--muted); font-size:13px; display:inline-flex; gap:6px; align-items:center; margin-right:14px; }
+  .meter { display:inline-flex; gap:3px; vertical-align:middle; margin-left:6px; }
+  .meter b { width:16px; height:8px; border-radius:3px; background:var(--line); }
+  .meter b.f { background:var(--accent); }
+  .log { max-height:300px; overflow:auto; border:1px solid var(--line); border-radius:10px; background:var(--panel); font-size:12.5px; }
+  .log div { padding:6px 10px; border-bottom:1px solid var(--line); display:grid; grid-template-columns:44px 1fr; gap:2px 8px; }
+  .log div:last-child { border-bottom:0; }
+  .log time { color:var(--muted); }
+  .log .why { grid-column:2; color:var(--muted); font-size:12px; }
+  .lv { display:inline-block; border-radius:6px; padding:0 6px; margin-left:6px; font-size:11.5px; background:var(--line); color:var(--text); }
+  .lv.urgent { background:#f6dcb4; color:#6b3f06; } body.dark .lv.urgent { background:#4f3612; color:#f7d9a8; }
+  .lv.l2 { background:#d7e4fb; color:#23406f; } .lv.l3 { background:#cfe9db; color:#1f5a3a; } .lv.l4 { background:#f6e3b8; color:#6b4a0c; }
+  body.dark .lv.l2 { background:#2b3b5a; color:#cfe0ff; } body.dark .lv.l3 { background:#24453a; color:#c8f0dc; } body.dark .lv.l4 { background:#4b3b18; color:#f7e2b2; }
+  table { border-collapse:collapse; font-size:12.5px; width:100%; }
+  td, th { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12.5px; margin-bottom:6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bot 形象 · 舞台设计稿</h1>
+  <p class="lead">右侧 Bot 区的实际尺寸（宽 360，可拖动右下方滑块改宽度）。她自己的回合用道具表现正在做什么；派发出去的负责人和子 agent 坐在窗沿上；结果按“跟你有多近、分量多大、刚才反应过几次”分级。全部是设计稿，数据是模拟的。</p>
+  <div class="layout">
+    <section class="panel-wrap">
+      <div class="zoom" id="zoom">
+        <div class="panel" id="panel">
+          <div class="stage">
+            <div class="floor"></div>
+            <span class="menu">⋯</span>
+            <div class="fig-host" id="figHost"></div>
+            <div class="name">Varin <span class="edit" title="编辑档案（从窗沿移到名字旁，让出窗沿给团队）">✎</span></div>
+            <div class="state" id="stateLine"><i></i><span></span></div>
+          </div>
+          <div class="list" id="workList"></div>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <label>面板宽度 <input type="range" id="width" min="320" max="600" value="360"> <span id="widthOut">360</span></label><br>
+        <label><input type="checkbox" id="zoomBox"> 放大 1.6 倍看细节</label>
+        <label><input type="checkbox" id="dark"> 深色</label>
+      </div>
+    </section>
+    <section class="controls">
+      <div class="group">
+        <h2>剧本</h2>
+        <p>一次完整请求：准备 → 思考 → 网页 → 检索 → 查看文件 → 派发两位负责人 → 负责人各派子 agent → 子 agent 回报 → 负责人回报 → 她收下 → 回复 → 完成。</p>
+        <div class="buttons">
+          <button class="primary" data-run="request">播放：一次完整请求</button>
+          <button data-run="storm">播放：30 秒里回来 12 份报告</button>
+          <button data-run="needs">播放：成员需要你</button>
+          <button data-run="reset">清空</button>
+        </div>
+        <div style="margin-top:8px"><label>速度
+          <select id="speed"><option value=".5">×0.5</option><option value="1" selected>×1</option><option value="2">×2</option></select></label></div>
+      </div>
+      <div class="group">
+        <h2>她自己的回合</h2>
+        <div class="buttons" id="own"></div>
+      </div>
+      <div class="group">
+        <h2>团队</h2>
+        <div class="buttons">
+          <button data-team="dispatch">派发负责人</button>
+          <button data-team="continue">再次交办</button>
+          <button data-team="subDispatch">负责人派发子 agent</button>
+          <button data-team="subReport">子 agent 回报负责人</button>
+          <button data-team="report">负责人回报</button>
+          <button data-team="reportFail">负责人回报（失败）</button>
+          <button data-team="gather">她收下回报</button>
+          <button data-team="needs">成员需要你</button>
+          <button data-team="resolve">处理掉</button>
+          <button data-team="leave">负责人离场</button>
+        </div>
+        <p style="margin-top:10px">拥挤程度（直接摆好，不播派发）：</p>
+        <div class="buttons">
+          <button data-crowd="1">1 位</button><button data-crowd="2">2 位</button><button data-crowd="4">4 位</button>
+          <button data-crowd="8">8 位</button><button data-crowd="16">16 位 · 每位多个子 agent</button>
+        </div>
+      </div>
+      <div class="group">
+        <h2>结果</h2>
+        <div class="buttons">
+          <button data-result="reply">公开回复你</button>
+          <button data-result="completeSmall">请求完成（小）</button>
+          <button data-result="completeLarge">请求完成（大，全部成功）</button>
+        </div>
+        <div style="margin-top:8px">
+          <label><input type="checkbox" id="typing"> 你正在打字</label>
+          <span style="color:var(--muted);font-size:13px">热情值<span class="meter" id="meter"></span></span>
+        </div>
+      </div>
+      <div class="group">
+        <h2>反应记录（新的在上）</h2>
+        <div class="log" id="log"></div>
+      </div>
+      <div class="group">
+        <details open><summary>分级规则</summary>
+          <table>
+            <tr><th>级别</th><th>她的反应</th><th>基础来源</th></tr>
+            <tr><td>0 只在成员处</td><td>她不动；只在成员那里飞小卡、小信封</td><td>负责人派发子 agent、子 agent 回报负责人</td></tr>
+            <tr><td>1 看一眼</td><td>只动眼睛，1.5 秒内合并</td><td>负责人的回报落到窗沿、负责人离场</td></tr>
+            <tr><td>2 点头</td><td>收下回报时双手一拢、点头；失败时皱眉</td><td>她的回合收下回报、你处理掉一件“等你”</td></tr>
+            <tr><td>3 呈现</td><td>转向你，双手托出一张卡；失败时表情认真</td><td>她公开回复你</td></tr>
+            <tr><td>4 完成</td><td>收敛的举手和少量星星</td><td>请求完成，而且大（2 位以上负责人、有子 agent 或超过 2 分钟）、全部成功</td></tr>
+          </table>
+          <p style="margin-top:8px">往下调：你正在打字最多到 1；有事等你、出错时只保留 0。热情值最多 4 格，每 15 秒恢复 1 格；点头花 1 格，呈现 2 格，完成 3 格，不够就降一级，但对你说的话（回复、完成）最低保留点头。同类事件间隔不到 1.2 秒就合并成一次。成员各自的进度只改它们头上的小符号，不牵动她。</p>
+          <p>不分级：成员需要你时她每次都指过去，不花热情值；在你处理掉之前，其他结果都只在成员处表现。</p>
+        </details>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="varin-art.js"></script>
+<script src="team-art.js"></script>
+<script src="figure.js"></script>
+<script src="figure-stage-poses.js"></script>
+<script src="stage.js"></script>
+</body>
+</html>
