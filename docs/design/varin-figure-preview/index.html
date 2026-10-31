@@ -89,7 +89,7 @@ const EYE = { L:[489, 706], R:[763, 706] };
 const HL = { L:[511, 651], R:[741, 651] }, HL2 = { L:[471, 716], R:[781, 716] };
 const BROW = { L:[486, 548], R:[757, 542] };
 const HAND = { L:[473, 1097], R:[767, 1097] };
-const AHOGE = [236, 462], KNOT = [1074, 532];
+const AHOGE = [240, 466], KNOT = [1074, 532];
 const SKIN = '#fae5dd', LASH = '#2f3555';
 
 // ---------------------------------------------------------------- parameters and springs
@@ -223,8 +223,9 @@ class Figure {
     const clip = (id, d, rule) => { const c = el('clipPath', { id:`${u}${id}` }, defs); el('path', { d, 'clip-rule':rule || 'nonzero' }, c); return `url(#${u}${id})`; };
     const above = clip('above', `M0 0H1254V${SILL + 6}H0Z`);
     const lower = clip('lower', 'M0 0H1254V1222H0Z');
-    const ahogeIn = clip('ai', 'M90 395 L242 395 L242 488 L200 506 L90 506 Z');
-    const ahogeOut = clip('ao', 'M0 0H1254V1254H0Z M90 395 L228 395 L228 490 L200 502 L90 502 Z', 'evenodd');
+    // The flyaway lock's own outline: grown for the moving copy, shrunk for the hole in the static hair.
+    const ahogeIn = clip('ai', ART.layers.ahogeIn[0][1]);
+    const ahogeOut = clip('ao', 'M0 0H1254V1254H0Z ' + ART.layers.ahogeHole[0][1], 'evenodd');
     const paint = (name, parent) => { for (const [fill, d] of ART.layers[name] || []) el('path', { fill, d, 'fill-rule':'evenodd' }, parent); };
 
     el('rect', { x:0, y:0, width:1254, height:1254, fill:'#1c202b' }, svg);
@@ -406,7 +407,7 @@ class Figure {
       // Secondary motion: the flyaway lock and the ribbon trail the body.
       const sec = this.sec, vy = this.v.fy || 0, vr = this.v.frot || 0, L = this.L;
       const aim = L ? .012 * vy - .9 * vr + 2.2 * Math.sin(this.t * 1.9) : 0;
-      sec.va += (140 * (aim - 16 * p.droop - sec.a) - 7 * sec.va) * h; sec.a += sec.va * h;
+      sec.va += (140 * (aim - 6 * p.droop - sec.a) - 7 * sec.va) * h; sec.a += sec.va * h;
       const rim = L ? -1.1 * vr + 1.8 * Math.sin(this.t * 1.3 + 1) : 0;
       sec.vr += (90 * (rim - sec.r) - 6 * sec.vr) * h; sec.r += sec.vr * h;
       for (const k in this.fxAmt) { const want = this.fxGoal[k] ? 1 : 0; this.fxAmt[k] += (want - this.fxAmt[k]) * clamp(h * (want ? 6 : 9)); }
