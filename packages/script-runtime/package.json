@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@varin/protocol": "workspace:*",
-    "acorn": "8.16.0"
+    "acorn": "8.19.0"
   },
   "engines": {
     "node": ">=22.19.0"
