@@ -1236,6 +1236,10 @@ pub(crate) type ThreadCatalogQuery = varin_runtime::catalog::threads::ThreadList
 
 pub(crate) type ThreadMetadataUpdateParams = varin_runtime::catalog::threads::ThreadUpdate;
 
+pub(crate) type ThreadTitlePrepareParams = varin_runtime::catalog::titles::TitlePrepare;
+
+pub(crate) type ThreadTitleFinishParams = varin_runtime::catalog::titles::TitleFinish;
+
 pub(crate) type ThreadDeleteParams = varin_runtime::catalog::threads::ThreadDelete;
 
 pub(crate) type ThreadReadPositionParams = varin_runtime::catalog::threads::ThreadRead;
@@ -4354,6 +4358,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "runtime.thread.update" => {
             serde_json::from_value::<ThreadMetadataUpdateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.thread.title.prepare" => {
+            serde_json::from_value::<ThreadTitlePrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.thread.title.finish" => {
+            serde_json::from_value::<ThreadTitleFinishParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

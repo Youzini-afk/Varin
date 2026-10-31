@@ -26,6 +26,8 @@ pub struct ThreadUpdate {
     pub title: Option<String>,
     pub pinned: Option<bool>,
     pub archived: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_mode: Option<titles::TitleMode>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -42,7 +44,7 @@ pub struct ThreadRead {
     pub through_cursor: u64,
 }
 
-fn now_ms() -> Result<u64> {
+pub(super) fn now_ms() -> Result<u64> {
     let elapsed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| RuntimeError::Invalid("system clock precedes Unix epoch".into()))?;
@@ -71,7 +73,9 @@ pub(super) fn branch(db: &Connection, thread_id: &str) -> Result<String> {
 pub(super) fn name(tx: &Transaction<'_>, thread_id: &str, name: &str) -> Result<()> {
     let name = name.trim();
     if name.is_empty() { return Err(RuntimeError::Invalid("Agent name is empty".into())); }
-    let changed = tx.execute("UPDATE threads SET title=?2,title_initialized=1,revision=revision+1,updated_at_ms=max(updated_at_ms,?3) WHERE id=?1 AND title!=?2", params![thread_id,name,sql_number(now_ms()?)?])?;
+    let changes_mode = titles::mode(tx,thread_id)? != titles::TitleMode::Manual;
+    titles::set_mode(tx,thread_id,titles::TitleMode::Manual)?;
+    let changed = tx.execute("UPDATE threads SET title=?2,title_initialized=1,revision=revision+1,updated_at_ms=max(updated_at_ms,?3) WHERE id=?1 AND (title!=?2 OR ?4)", params![thread_id,name,sql_number(now_ms()?)?,changes_mode])?;
     if changed > 0 {
         let revision = tx.query_row("SELECT revision FROM threads WHERE id=?1", [thread_id], |r| read_number(r,0))?;
         event(tx,thread_id,revision,"thread.updated",json!({"title":name}))?;
@@ -281,12 +285,15 @@ impl Catalog {
             return Ok(receipt);
         }
         require_revision(&tx, &command.thread_id, command.expected_revision)?;
-        if command.title.is_none() && command.pinned.is_none() && command.archived.is_none() {
+        if command.title.is_none() && command.pinned.is_none() && command.archived.is_none() && command.title_mode.is_none() {
             return Err(RuntimeError::Invalid("Thread update is empty".into()));
         }
         let title = command.title.as_deref().map(str::trim);
         if title.is_some_and(str::is_empty) {
             return Err(RuntimeError::Invalid("Thread title is empty".into()));
+        }
+        if let Some(mode) = command.title_mode.or(title.map(|_|titles::TitleMode::Manual)) {
+            titles::set_mode(&tx,&command.thread_id,mode)?;
         }
         tx.execute("UPDATE threads SET title=coalesce(?2,title),title_initialized=CASE WHEN ?2 IS NULL THEN title_initialized ELSE 1 END,pinned=coalesce(?3,pinned),archived=coalesce(?4,archived),revision=revision+1,updated_at_ms=max(updated_at_ms,?5) WHERE id=?1", params![command.thread_id,title,command.pinned,command.archived,sql_number(now_ms()?)?])?;
         event(
@@ -294,7 +301,7 @@ impl Catalog {
             &command.thread_id,
             command.expected_revision + 1,
             "thread.updated",
-            json!({"title":title,"pinned":command.pinned,"archived":command.archived}),
+            json!({"title":title,"pinned":command.pinned,"archived":command.archived,"titleMode":command.title_mode}),
         )?;
         let receipt = save_command(&tx, &command.key, &intent, &command.thread_id)?;
         tx.commit()?;
@@ -424,6 +431,7 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
     summary["parent_thread_id"] = json!(child.as_ref().map(|(parent, _)| parent));
     if let Some((_, Some(avatar))) = child { summary["avatar"] = json!(avatar); }
     summary["bot_id"] = json!(bot::thread_bot(db, thread_id)?);
+    summary["title_mode"] = serde_json::to_value(titles::mode(db,thread_id)?)?;
     summary["branches"] = json!(branches);
     summary["observer_project_ids"] = json!(observer_project_ids);
     Ok(summary)

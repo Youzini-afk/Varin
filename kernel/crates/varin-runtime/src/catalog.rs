@@ -160,6 +160,7 @@ fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     launches::check_format(db)?;
     collaboration::check_format(db)?;
     context::check_format(db)?;
+    titles::check_format(db)?;
     let content_format: i64 = db.query_row(
         "SELECT version FROM runtime_content_format WHERE id=1",
         [],
@@ -212,6 +213,7 @@ fn initialize_metadata(
         mcp_interactions::initialize_new(&tx)?;
         bot::initialize_new(&tx)?;
     }
+    titles::initialize(&tx)?;
     let epoch = tx.query_row(
         "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",
         [],
@@ -1793,6 +1795,8 @@ mod observe;
 pub mod usage;
 #[path = "catalog_threads.rs"]
 pub mod threads;
+#[path = "catalog_titles.rs"]
+pub mod titles;
 #[path = "catalog_retention.rs"]
 mod retention;
 #[path = "catalog_material_retention.rs"]

@@ -144,6 +144,7 @@ interface SessionRowProps {
   node: ConversationSessionNode;
   onArchive(node: ConversationSessionNode): void;
   onBeginRename(session: SessionSummary): void;
+  onResumeTitles(session: SessionSummary): void;
   onCancelRename(): void;
   onChangeEditingName(value: string): void;
   onCommitRename(session: SessionSummary): void;
@@ -234,6 +235,10 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
         <Icon name="pencil-ai" className="size-4" />
         {t('sessions.sidebar.session.menu.rename')}
       </Item>
+      {!session.harness && !session.parentId && session.titleMode === 'manual' && <Item onClick={() => props.onResumeTitles(session)}>
+        <Icon name="refresh" className="size-4" />
+        {t('sessions.sidebar.session.menu.resumeTitles')}
+      </Item>}
       <Item onClick={() => props.onTogglePinned(session)}>
         <Icon name={pinned ? 'unpin' : 'pushpin'} className="size-4" />
         {t(pinned ? 'sessions.sidebar.session.menu.unpin' : 'sessions.sidebar.session.menu.pin')}
@@ -753,7 +758,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     if (editingId !== session.id) return;
     const nextName = editingName.trim();
     setEditingId(null);
-    if (!nextName || nextName === conversationSessionTitle(session, untitled)) return;
+    if (!nextName || (nextName === conversationSessionTitle(session, untitled) && (session.harness || session.titleMode === 'manual'))) return;
     try {
       await renameSession(session.id, nextName);
     } catch (error) {
@@ -1133,6 +1138,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
                 else toast.error(result.error);
               });
             }}
+            onResumeTitles={(session) => { void updateNativeThread(session.id, { titleMode: 'automatic' }).catch(error => toast.error(error instanceof Error ? error.message : String(error))); }}
             onTogglePinned={(session) => togglePinned({
               directory: session.cwd,
               sessionId: session.id,

@@ -58,6 +58,7 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
   const actions = (thread: ThreadSummary) => [
     ...(isDesktopShell() ? [{ label: t('sessions.sidebar.session.menu.openMiniChatWindow'), run: () => void act(() => invokeDesktop('desktop_open_thread_mini_chat_window', { threadId: thread.thread_id, branchId: selected?.threadId === thread.thread_id ? selected.branchId : thread.main_branch_id })) }] : []),
     { label: t('sessions.sidebar.session.menu.rename'), run: () => { setRename(thread); setTitle(thread.title); } },
+    ...(!thread.parent_thread_id && thread.title_mode === 'manual' ? [{ label: t('sessions.sidebar.session.menu.resumeTitles'), run: () => void act(() => useThreadStore.getState().updateThread(thread.thread_id, { titleMode: 'automatic' })) }] : []),
     { label: t(thread.pinned ? 'sessions.sidebar.session.menu.unpin' : 'sessions.sidebar.session.menu.pin'), run: () => void act(() => useThreadStore.getState().updateThread(thread.thread_id, { pinned: !thread.pinned })) },
     { label: t(thread.archived ? 'sessions.sidebar.session.menu.restore' : 'sessions.sidebar.bulkActions.archive'), run: () => void act(() => retainTree(thread.thread_id, thread.archived ? 'restore' : 'archive')) },
     { label: t('sessions.sidebar.bulkActions.delete'), run: () => { if (confirmDelete) setDeleting(thread); else void act(() => retainTree(thread.thread_id, 'delete')); } },

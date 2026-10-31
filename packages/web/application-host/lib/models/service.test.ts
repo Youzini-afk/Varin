@@ -190,6 +190,9 @@ test('settings CAS keeps concurrent edits and validates before writing without a
   await expect(models.settings.update({ scope: 'global', expectedRevision: original.globalRevision, set: { harness: {} }, remove: [] })).rejects.toMatchObject({ code: 'config_conflict' });
   await expect(models.settings.update({ scope: 'global', expectedRevision: saved.globalRevision, set: { harness: { images: { generation: { modelId: 'missing-provider' } } } }, remove: [] })).rejects.toThrow();
   expect(await models.settings.snapshot()).toEqual(saved);
+  const titles = await models.settings.update({ scope: 'global', expectedRevision: saved.globalRevision, set: { titleUpdateInterval: 50 }, remove: [] });
+  expect(titles.global.titleUpdateInterval).toBe(50);
+  await expect(models.settings.update({ scope: 'global', expectedRevision: titles.globalRevision, set: { titleUpdateInterval: 1.5 }, remove: [] })).rejects.toThrow('titleUpdateInterval');
   await expect(readFile(models.credentialPath)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 

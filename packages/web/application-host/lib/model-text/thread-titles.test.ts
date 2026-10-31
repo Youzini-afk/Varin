@@ -1,71 +1,84 @@
 import { expect, it, vi } from 'vitest';
-import type { ThreadSummary } from '../kernel/protocol.generated.js';
-import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
+import type { AgentRuntimeStreamEvent, RuntimeEvent, ThreadSummary, ThreadTitleJob } from '../kernel/protocol.generated.js';
 import { createThreadTitleService } from './thread-titles.js';
 import type { ModelTextInput, ModelTextResult } from './service.js';
+type Runtime = Parameters<typeof createThreadTitleService>[0]['runtime'];
 
-it.each([false, true])('generates once in the background and preserves a manual rename (%s)', async renamed => {
-  const thread = { thread_id: 'conversation', title: 'New thread', branches: [], parent_thread_id: null, bot_id: null } as unknown as ThreadSummary;
-  const text = '帮我分析这个仓库的启动流程\n这里是相关背景';
-  let finish!: (result: ModelTextResult) => void;
-  const generate = vi.fn((_input: ModelTextInput) => new Promise<ModelTextResult>(resolve => { finish = resolve; }));
-  const read = vi.fn(async () => ({ ...thread, title: renamed ? '自己起的标题' : text.split('\n')[0]!, revision: 2, deleted_at_ms: null }));
-  const update = vi.fn(async () => thread);
+function fixture() {
+  const job: ThreadTitleJob = { key: 'title-check', threadId: 'thread:test', branchId: 'main', headId: 'user', checkpointId: null, activeRunId: null, rounds: 0, generation: 0, title: 'Initial request', initial: true };
+  const thread = { thread_id: job.threadId, title: job.title, title_mode: 'automatic', main_branch_id: 'main', deleted_at_ms: null, parent_thread_id: null, bot_id: null,
+    branches: [{ branch_id: 'main', head: 'user', active_run_id: null, latest_run: null }] } as ThreadSummary;
+  let prepared = false;
+  const runtime = {
+    thread: vi.fn(async () => thread), threads: vi.fn(async () => [] as ThreadSummary[]),
+    prepareThreadTitle: vi.fn<Runtime['prepareThreadTitle']>(async () => { if (prepared) return null; prepared = true; return job; }),
+    finishThreadTitle: vi.fn(async () => true),
+    historyPage: vi.fn(async () => ({ head: 'user', previous: null, items: [{ id: 'user', run_id: 'run', source: 'user', parent: null, thread_id: job.threadId, content_ref: 'content' }] })),
+    historyItem: vi.fn(async () => ({ id: 'user', source: 'user', content: { text: '分析启动流程' } })),
+    context: vi.fn(async () => null), run: vi.fn(async () => ({ state: 'completed' })),
+    status: vi.fn(async () => ({ eventCursor: 0 })), events: vi.fn<Runtime['events']>(async () => []),
+    onEvent: vi.fn<Runtime['onEvent']>(() => () => {}), onReady: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
+  };
+  const modelText = { generate: vi.fn(async (_input: ModelTextInput): Promise<ModelTextResult> => ({ text: '启动流程分析', requestId: 'request', providerId: 'auxiliary', modelId: 'configured' })),
+    original: vi.fn(async () => null as { purpose: string; prompt: string } | null),
+    resumeUnsent: vi.fn(async () => null as ModelTextResult | null) };
   const onError = vi.fn();
-  const owner = createThreadTitleService({ modelText: { generate, original: async () => null, resumeUnsent: async () => null },
-    runtime: { thread: read, updateThread: update, threads: async () => [], onReady: () => () => {} }, onError });
-  owner.schedule(thread, text);
-  owner.schedule(thread, text);
-  expect(generate).toHaveBeenCalledOnce();
-  expect(generate.mock.calls[0]?.[0]).toMatchObject({ purpose: 'title', prompt: text });
-  expect(read).not.toHaveBeenCalled();
-  finish({ text: '仓库启动流程分析', requestId: 'title-request', providerId: 'auxiliary', modelId: 'configured' });
-  await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
-  if (renamed) expect(update).not.toHaveBeenCalled();
-  else expect(update).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'conversation', title: '仓库启动流程分析', expectedRevision: 2 }), expect.any(AbortSignal));
-  expect(onError).not.toHaveBeenCalled();
+  const options = { runtime: runtime as unknown as Parameters<typeof createThreadTitleService>[0]['runtime'], modelText, readSettings: async () => ({ titleUpdateInterval: 50 }), onError };
+  return { job, thread, runtime, modelText, onError, options };
+}
+
+it('coalesces concurrent checks and uses the interval only in scheduling, not prompt assembly', async () => {
+  const f = fixture(), owner = createThreadTitleService(f.options);
+  owner.schedule(f.thread); owner.schedule(f.thread);
+  await vi.waitFor(() => expect(f.runtime.finishThreadTitle).toHaveBeenCalledOnce());
+  expect(f.runtime.prepareThreadTitle).toHaveBeenCalledWith(expect.objectContaining({ interval: 50, initial: true }), expect.any(AbortSignal));
+  expect(f.modelText.generate).toHaveBeenCalledOnce();
+  expect(f.modelText.generate.mock.calls[0]![0].prompt).toContain('USER\n分析启动流程');
+  expect(f.modelText.generate.mock.calls[0]![0].prompt).not.toContain('ignored input');
+  expect(f.runtime.finishThreadTitle).toHaveBeenCalledWith({ job: f.job, title: '启动流程分析' }, expect.any(AbortSignal));
+  await owner.close(); expect(f.onError).not.toHaveBeenCalled();
+});
+
+it('resumes the original auxiliary receipt at its stored cut after restart without rebuilding its input', async () => {
+  const f = fixture(); f.runtime.threads.mockResolvedValue([f.thread]);
+  f.modelText.original.mockResolvedValue({ purpose: 'title', prompt: 'Original frozen exchanges' });
+  f.modelText.resumeUnsent.mockResolvedValue({ text: f.job.title, requestId: 'original', providerId: 'auxiliary', modelId: 'configured' });
+  const owner = createThreadTitleService(f.options); await owner.recover();
+  await vi.waitFor(() => expect(f.runtime.finishThreadTitle).toHaveBeenCalled());
+  expect(f.modelText.generate).not.toHaveBeenCalled(); expect(f.runtime.historyPage).not.toHaveBeenCalled();
+  expect(f.runtime.finishThreadTitle).toHaveBeenCalledWith({ job: f.job, title: f.job.title }, expect.any(AbortSignal));
   await owner.close();
 });
 
-it('reuses the generated title when pinning changes the metadata revision during publication', async () => {
-  const thread = { thread_id: 'conversation', title: 'New thread', branches: [], parent_thread_id: null, bot_id: null } as unknown as ThreadSummary;
-  const text = '分析仓库启动流程';
-  let revision = 2;
-  const read = vi.fn(async () => ({ ...thread, title: text, revision, deleted_at_ms: null }));
-  const update = vi.fn<AgentRuntimeClient['updateThread']>(async () => {
-    if (revision === 2) { revision = 3; throw new Error('Metadata revision changed'); }
-    return thread;
-  });
-  const generate = vi.fn(async () => ({ text: '仓库启动流程分析', requestId: 'request', providerId: 'auxiliary', modelId: 'title' }));
-  const onError = vi.fn();
-  const owner = createThreadTitleService({ modelText: { generate, original: async () => null, resumeUnsent: async () => null },
-    runtime: { thread: read, updateThread: update, threads: async () => [], onReady: () => () => {} }, onError });
-  owner.schedule(thread, text);
-  await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2));
-  expect(update.mock.calls[1]?.[0]).toMatchObject({ expectedRevision: 3, title: '仓库启动流程分析' });
-  expect(generate).toHaveBeenCalledOnce();
-  expect(onError).not.toHaveBeenCalled();
-  await owner.close();
+it('leaves failed checks with the current title and advances the attempted cut', async () => {
+  const f = fixture(); f.modelText.generate.mockRejectedValue(new Error('Provider unavailable'));
+  const owner = createThreadTitleService(f.options); owner.schedule(f.thread);
+  await vi.waitFor(() => expect(f.runtime.finishThreadTitle).toHaveBeenCalledWith({ job: f.job, title: null }, expect.any(AbortSignal)));
+  expect(f.onError).toHaveBeenCalledOnce(); await owner.close();
 });
 
-it('titles additional Bot conversations but never the primary entry or Bots without a session check', async () => {
-  const session = { thread_id: 'bot-session', title: 'New thread', branches: [], parent_thread_id: null, bot_id: 'bot' } as unknown as ThreadSummary;
-  const entry = { ...session, thread_id: 'bot-entry' } as ThreadSummary;
-  const generate = vi.fn(async () => ({ text: '旅行安排', requestId: 'request', providerId: 'auxiliary', modelId: 'title' }));
-  const read = vi.fn(async (threadId: string) => ({ ...session, thread_id: threadId, title: '帮我排一下旅行', revision: 1, deleted_at_ms: null }));
-  const update = vi.fn(async () => session);
-  const botSession = vi.fn(async (thread: ThreadSummary) => thread.thread_id === 'bot-session');
-  const runtime = { thread: read, updateThread: update, threads: async () => [], onReady: () => () => {} };
-  const owner = createThreadTitleService({ modelText: { generate, original: async () => null, resumeUnsent: async () => null }, runtime, botSession, onError: vi.fn() });
-  owner.schedule(entry, '帮我排一下旅行');
-  owner.schedule(session, '帮我排一下旅行');
-  await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-  expect(update).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'bot-session', title: '旅行安排' }), expect.any(AbortSignal));
-  expect(generate).toHaveBeenCalledOnce();
+it('checks the durable completed user Run and ignores auxiliary Runs', async () => {
+  const f = fixture();
+  let notify: (event: AgentRuntimeStreamEvent) => void = () => {};
+  f.runtime.onEvent = vi.fn(listener => { notify = listener; return () => {}; });
+  const event: RuntimeEvent = { cursor: 1, subject: 'main-run', revision: 1, kind: 'run.changed', data: { state: 'completed', thread_id: f.thread.thread_id, branch_id: 'main' } };
+  f.runtime.events.mockImplementation(async () => [event, { ...event, cursor: 2, subject: 'auxiliary', data: { state: 'completed', thread_id: 'model-text:title', branch_id: null } }]);
+  const owner = createThreadTitleService(f.options);
+  await vi.waitFor(() => expect(f.runtime.threads).toHaveBeenCalled());
+  notify({ v: 73, kind: 'runtime-event', kernelEpoch: 'fixture', stream: 'durable', cursor: 2 });
+  await vi.waitFor(() => expect(f.runtime.finishThreadTitle).toHaveBeenCalledOnce());
+  expect(f.modelText.generate).toHaveBeenCalledOnce();
+  expect(f.runtime.prepareThreadTitle.mock.calls.every(([input]) => input.threadId === f.thread.thread_id)).toBe(true);
+  await owner.close(); expect(f.onError).not.toHaveBeenCalled();
+});
+
+it('keeps manual names, delegated Agent identities and the primary Bot entry outside automatic naming', async () => {
+  const f = fixture(), botSession = vi.fn(async () => false);
+  const owner = createThreadTitleService({ ...f.options, botSession });
+  f.thread.title_mode = 'manual'; owner.schedule(f.thread); await Promise.resolve(); await Promise.resolve();
+  expect(f.runtime.prepareThreadTitle).not.toHaveBeenCalled();
+  f.thread.title_mode = 'automatic'; f.thread.bot_id = 'bot'; owner.schedule(f.thread);
+  await vi.waitFor(() => expect(botSession).toHaveBeenCalled());
+  expect(f.runtime.prepareThreadTitle).not.toHaveBeenCalled();
   await owner.close();
-  const unchecked = createThreadTitleService({ modelText: { generate, original: async () => null, resumeUnsent: async () => null }, runtime, onError: vi.fn() });
-  unchecked.schedule({ ...session, thread_id: 'other-session' } as ThreadSummary, '另一件事');
-  await Promise.resolve();
-  expect(generate).toHaveBeenCalledOnce();
-  await unchecked.close();
 });

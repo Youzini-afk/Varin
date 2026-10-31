@@ -16,7 +16,7 @@ export const threadComposerKey = (host: string, identity: ThreadIdentity): strin
 export const selectedComposerKey = (state: Pick<ThreadNavigationState, 'hostKey' | 'selectedIdentity' | 'selectedDraftKey'>): string | null =>
   state.selectedIdentity ? threadComposerKey(state.hostKey, state.selectedIdentity) : state.selectedDraftKey;
 
-type ThreadMetadata = Pick<ThreadSummary, 'title' | 'pinned' | 'archived'>;
+type ThreadMetadata = Pick<ThreadSummary, 'title' | 'pinned' | 'archived'> & { titleMode?: 'automatic' | 'manual' };
 interface ThreadNavigationState {
   hostKey: string;
   selectedIdentity: ThreadIdentity | null;
@@ -64,6 +64,7 @@ function mergeSummary(previous: ThreadSummary | undefined, incoming: ThreadSumma
   const read_cursor = Math.max(previous.read_cursor, incoming.read_cursor);
   const newerMetadata = previous.revision > incoming.revision;
   return { ...incoming,
+    title_mode: newerMetadata ? previous.title_mode : incoming.title_mode ?? previous.title_mode,
     ...(newerMetadata ? { title: previous.title, pinned: previous.pinned, archived: previous.archived, revision: previous.revision } : {}),
     ...(previous.activity_cursor > incoming.activity_cursor ? { branches: previous.branches, observer_project_ids: previous.observer_project_ids } : {}),
     deleted_at_ms: previous.deleted_at_ms ?? incoming.deleted_at_ms,

@@ -57,7 +57,7 @@ async function fixture(failFirst = false) {
   });
   cleanups.push(() => modelText.close());
   const errors: unknown[] = [];
-  const titles = createThreadTitleService({ runtime, modelText, onError: error => errors.push(error) });
+  const titles = createThreadTitleService({ runtime, modelText, readSettings: async () => ({}), onError: error => errors.push(error) });
   cleanups.push(() => titles.close());
   await runtime.createThread('conversation', 'conversation-main');
   const before = await runtime.thread('conversation');
@@ -69,9 +69,8 @@ async function fixture(failFirst = false) {
 
 it('dispatches the configured auxiliary model and persists its title through real native IPC', async () => {
   const f = await fixture();
-  f.titles.schedule(f.before, f.text);
-  await expect.poll(async () => ({ requests: f.requests.length, failures: f.errors.map(String),
-    status: await f.modelText.inspect('model-text:thread-title:conversation').catch(() => null) }), { timeout: 3000 }).toMatchObject({ requests: 1, failures: [] });
+  f.titles.schedule(f.before);
+  await expect.poll(async () => ({ requests: f.requests.length, failures: f.errors.map(String) }), { timeout: 3000 }).toEqual({ requests: 1, failures: [] });
   await expect.poll(async () => (await f.runtime.thread('conversation')).title).toBe('仓库启动流程分析');
   expect(f.requests[0]?.model).toBe('auxiliary-title-model');
   expect(f.errors).toEqual([]);
@@ -93,14 +92,16 @@ it('automatically retries an auxiliary title within its original operation and k
 
 it.each([false, true])('recovers an originally unsent title without overwriting a manual rename (%s)', async renamed => {
   const f = await fixture();
+  const job = await f.runtime.prepareThreadTitle({ threadId: 'conversation', branchId: 'conversation-main', interval: 5, initial: true });
+  if (!job) throw new Error('Missing pending title cut');
   const model = await f.models.resolveModel({ providerId: 'auxiliary', modelId: 'original-auxiliary' });
   try {
-    await f.kernel.agentRuntimeRequest('runtime.model_text.admit', { key: 'thread-title:conversation', requestFingerprint: 'original-unsent-title', retryOf: null,
-      generation: { parentOperationId: 'model-text:thread-title:conversation', callerOwner: { kind: 'external', identity: 'model.text.v1', epoch: 'old-host' },
+    await f.kernel.agentRuntimeRequest('runtime.model_text.admit', { key: job.key, requestFingerprint: 'original-unsent-title', retryOf: null,
+      generation: { parentOperationId: `model-text:${job.key}`, callerOwner: { kind: 'external', identity: 'model.text.v1', epoch: 'old-host' },
         ordinal: 1, configuration: model.configuration, credentialScope: await model.credentialOwner.scope(), purpose: 'title',
         systemPrompt: 'Return a concise title.', user: f.text } });
   } finally { model.credentialOwner.release(); }
-  await f.kernel.agentRuntimeRequest('runtime.model_text.cancel', { requestId: 'model-text:thread-title:conversation' });
+  await f.kernel.agentRuntimeRequest('runtime.model_text.cancel', { requestId: `model-text:${job.key}` });
   if (renamed) {
     const current = await f.runtime.thread('conversation');
     await f.runtime.updateThread({ threadId: current.thread_id, expectedRevision: current.revision, key: 'manual-title', title: '我自己的标题' });

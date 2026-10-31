@@ -214,6 +214,14 @@ it.each(['context', 'dropdown'] as const)('keeps the %s rename editor focused, s
   expect(document.activeElement).not.toBe(document.body);
 });
 
+it('restores automatic titles from a manually named root conversation', async () => {
+  await act(async () => { useThreadStore.setState(state => ({ threads: state.threads.map(thread => ({ ...thread, title_mode: 'manual' as const })) })); });
+  await openMenu('Parent conversation', 'context');
+  const resume = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(button => button.textContent === 'sessions.sidebar.session.menu.resumeTitles');
+  expect(resume).toBeDefined(); await act(async () => resume!.click());
+  expect(mocks.update).toHaveBeenLastCalledWith('parent', { titleMode: 'automatic' });
+});
+
 it('saves a parent title on blur without changing its child', async () => {
   const input = await openRename('Parent conversation', 'context');
   await act(async () => { input.value = 'Renamed parent'; input.dispatchEvent(new window.Event('input', { bubbles: true })); });

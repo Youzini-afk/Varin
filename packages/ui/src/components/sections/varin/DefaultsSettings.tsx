@@ -13,6 +13,7 @@ import { ModelThinkingSelect } from '@/components/sections/shared/ModelThinkingS
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export const DefaultsSettings: React.FC = () => {
@@ -76,6 +77,22 @@ export const DefaultsSettings: React.FC = () => {
       <ModelThinkingSelect value={string(settings.utilityThinkingLevel)} levels={utilityLevels} defaultLevel={utilityDefault}
         disabled={!snapshot || saving} label={`${t('thread.settings.utilityModel')} · ${t('settings.varin.agents.detail.thinking')}`}
         onChange={value => void save(value ? { utilityThinkingLevel: value } : {}, value ? [] : ['utilityThinkingLevel'])} />
+    </SettingsFieldRow>
+    <SettingsFieldRow label={t('settings.titleUpdates.label')} info={t('settings.titleUpdates.description')} settingsItem="sessions.title-updates">
+      <div className="flex items-center gap-2">
+        <Input key={`${host}:${String(settings.titleUpdateInterval)}`} type="number" min={0} step={1}
+          defaultValue={typeof settings.titleUpdateInterval === 'number' ? settings.titleUpdateInterval : 5}
+          disabled={!snapshot || saving} className="w-24 tabular-nums" aria-label={t('settings.titleUpdates.label')}
+          onChange={event => event.currentTarget.setCustomValidity('')}
+          onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }}
+          onBlur={event => {
+            if (!event.currentTarget.value) { void save({}, ['titleUpdateInterval']); return; }
+            const value = event.currentTarget.valueAsNumber;
+            if (!Number.isSafeInteger(value) || value < 0) { event.currentTarget.setCustomValidity(t('settings.titleUpdates.invalid')); event.currentTarget.reportValidity(); return; }
+            if (value !== (settings.titleUpdateInterval ?? 5)) void save({ titleUpdateInterval: value });
+          }} />
+        <span className="typography-meta text-muted-foreground">{t('settings.titleUpdates.unit')}</span>
+      </div>
     </SettingsFieldRow>
     <SettingsPageLink page="projects" description={t('settings.defaults.projectLinkHint')} onNavigate={() => { const id = useProjectsStore.getState().activeProjectId; if (id) useUIStore.getState().setSettingsProjectsSelectedId(id); }}>{t('settings.page.projects.title')}</SettingsPageLink>
   </SettingsSection>

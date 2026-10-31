@@ -1581,7 +1581,7 @@ export interface ThreadBranch {
 
 export interface ThreadCatalogQuery { query?: string; archived?: 'exclude' | 'include' | 'only'; }
 
-export interface ThreadMetadataUpdateParams { threadId: string; key: string; expectedRevision: number; title?: string; pinned?: boolean; archived?: boolean; }
+export interface ThreadMetadataUpdateParams { threadId: string; key: string; expectedRevision: number; title?: string; pinned?: boolean; archived?: boolean; titleMode?: 'automatic' | 'manual'; }
 
 export interface ThreadDeleteParams { threadId: string; key: string; expectedRevision: number; }
 
@@ -1592,6 +1592,7 @@ export interface ThreadSummary {
   parent_thread_id: string | null;
   main_branch_id: string;
   title: string;
+  title_mode?: 'automatic' | 'manual';
   revision: number;
   created_at_ms: number;
   updated_at_ms: number;

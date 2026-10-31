@@ -32,6 +32,7 @@ fn patch(key: &str, revision: u64) -> ThreadUpdate {
         key: key.into(),
         expected_revision: revision,
         title: None,
+        title_mode: None,
         pinned: None,
         archived: None,
     }

@@ -447,7 +447,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   });
   post('update', body => {
     for (const field of ['pinned', 'archived']) if (body[field] !== undefined && typeof body[field] !== 'boolean') throw new Error('Thread flag must be boolean');
+    if (body.titleMode !== undefined && body.titleMode !== 'automatic' && body.titleMode !== 'manual') throw new Error('Invalid title mode');
     return adapter.update({ ...catalogIdentity(body), key: text(body.key), expectedRevision: revision(body.expectedRevision),
+      ...(body.titleMode === undefined ? {} : { titleMode: body.titleMode }),
       ...(body.title === undefined ? {} : { title: text(body.title) }),
       ...(body.pinned === undefined ? {} : { pinned: body.pinned as boolean }),
       ...(body.archived === undefined ? {} : { archived: body.archived as boolean }) });

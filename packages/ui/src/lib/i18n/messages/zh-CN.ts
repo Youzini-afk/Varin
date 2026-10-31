@@ -1576,6 +1576,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.dialogs.removeProject.description': '“{projectTitle}”将从侧边栏移除。会话和文件都会保留。',
   'sessions.sidebar.project.actions.newDraftSession': '新建草稿会话',
   'sessions.sidebar.session.menu.rename': '重命名',
+  'sessions.sidebar.session.menu.resumeTitles': '恢复自动标题',
   'sessions.sidebar.session.menu.restore': '恢复会话',
   'sessions.sidebar.session.menu.copyId': '复制会话 ID',
   'sessions.sidebar.session.copyId.success': '会话 ID 已复制',

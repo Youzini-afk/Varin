@@ -801,7 +801,7 @@ export class ThreadAdapter {
           const existing = await this.runtime.inputReceipt(command);
           if (existing) {
             admissionStarted = true;
-            this.titles?.schedule(thread, input.text);
+            this.titles?.schedule(thread, input.branchId);
             void this.continueLaunch(existing.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
             return existing;
           }
@@ -854,7 +854,7 @@ export class ThreadAdapter {
             const accepted = await this.runtime.inputReceipt(command);
             if (!accepted) throw error;
             admissionStarted = true;
-            this.titles?.schedule(thread, input.text);
+            this.titles?.schedule(thread, input.branchId);
             void this.continueLaunch(accepted.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
             return accepted;
           }
@@ -863,7 +863,7 @@ export class ThreadAdapter {
         // explicit source/credential/tool selection. A competing checkpoint leaves all of them unchanged.
         admissionStarted = true;
         const receipt = await this.runtime.submit({ ...command, ...(initialContext ? { initialContext } : {}), ...(inputPreparation ? { inputPreparation } : {}) });
-        this.titles?.schedule(thread, input.text);
+        this.titles?.schedule(thread, input.branchId);
         // The shared launch owner closes the initial context-refresh gap before preparation.
         void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
         return receipt;

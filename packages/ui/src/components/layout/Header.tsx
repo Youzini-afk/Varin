@@ -272,14 +272,14 @@ export const Header: React.FC<HeaderProps> = ({
     if (!currentSessionId) return;
     const title = headerSessionTitleDraft.trim();
     try {
-      if (title && title !== currentSessionTitle) {
+      if (title && (title !== currentSessionTitle || currentSessionSummary?.title_mode !== 'manual')) {
         await renameSession(currentSessionId, title);
       }
       setIsRenamingHeaderSession(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [currentSessionId, currentSessionTitle, headerSessionTitleDraft, renameSession]);
+  }, [currentSessionId, currentSessionTitle, currentSessionSummary?.title_mode, headerSessionTitleDraft, renameSession]);
 
   React.useEffect(() => {
     if (!isRenamingHeaderSession) return;
@@ -943,6 +943,9 @@ export const Header: React.FC<HeaderProps> = ({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[190px]">
                     <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = true; }}><Icon name="pencil-ai" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem>
+                    {currentSessionSummary?.title_mode === 'manual' && !currentSessionSummary.parent_thread_id && <DropdownMenuItem onClick={() => {
+                      if (currentSessionId) void useThreadStore.getState().updateThread(currentSessionId, { titleMode: 'automatic' }).catch(error => toast.error(error instanceof Error ? error.message : String(error)));
+                    }}><Icon name="refresh" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.resumeTitles')}</DropdownMenuItem>}
                     <DropdownMenuItem onClick={copyCurrentSessionId}><Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem>

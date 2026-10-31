@@ -2774,6 +2774,14 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         let command: ThreadMetadataUpdateParams = serde_json::from_value(params)?;
         return catalog.update_thread(&command).map_err(domain);
     }
+    if method == "runtime.thread.title.prepare" {
+        let command: ThreadTitlePrepareParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.prepare_thread_title(&command).map_err(domain)?)?);
+    }
+    if method == "runtime.thread.title.finish" {
+        let command: ThreadTitleFinishParams = serde_json::from_value(params)?;
+        return Ok(json!(catalog.finish_thread_title(&command).map_err(domain)?));
+    }
     if method == "runtime.thread.delete" {
         let command: ThreadDeleteParams = serde_json::from_value(params)?;
         return catalog.delete_thread(&command).map_err(domain);

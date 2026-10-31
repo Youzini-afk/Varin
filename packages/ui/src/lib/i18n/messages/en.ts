@@ -1572,6 +1572,7 @@ export const dict = {
   'sessions.sidebar.project.actions.closeProject': 'Close project',
   'sessions.sidebar.project.actions.newDraftSession': 'New draft session',
   'sessions.sidebar.session.menu.rename': 'Rename',
+  'sessions.sidebar.session.menu.resumeTitles': 'Resume automatic titles',
   'sessions.sidebar.session.menu.restore': 'Restore session',
   'sessions.sidebar.session.menu.copyId': 'Copy session ID',
   'sessions.sidebar.session.copyId.success': 'Session ID copied',

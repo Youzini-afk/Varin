@@ -158,6 +158,8 @@ export type KernelMethod =
   | "runtime.thread.catalog.list"
   | "runtime.thread.attention.read"
   | "runtime.thread.update"
+  | "runtime.thread.title.prepare"
+  | "runtime.thread.title.finish"
   | "runtime.thread.delete"
   | "runtime.thread.read"
   | "runtime.launch.select"
@@ -2626,7 +2628,13 @@ export interface ThreadBranch {
 
 export interface ThreadCatalogQuery { query?: string; archived?: 'exclude' | 'include' | 'only'; }
 
-export interface ThreadMetadataUpdateParams { threadId: string; key: string; expectedRevision: number; title?: string; pinned?: boolean; archived?: boolean; }
+export interface ThreadTitleJob { key: string; threadId: string; branchId: string; headId: string; checkpointId: string | null; activeRunId: string | null; rounds: number; generation: number; title: string; initial: boolean; }
+
+export interface ThreadTitlePrepareParams { threadId: string; branchId: string; interval: number; initial?: boolean; }
+
+export interface ThreadTitleFinishParams { job: ThreadTitleJob; title: string | null; }
+
+export interface ThreadMetadataUpdateParams { threadId: string; key: string; expectedRevision: number; title?: string; pinned?: boolean; archived?: boolean; titleMode?: 'automatic' | 'manual'; }
 
 export interface ThreadDeleteParams { threadId: string; key: string; expectedRevision: number; }
 
@@ -2637,6 +2645,7 @@ export interface ThreadSummary {
   parent_thread_id: string | null;
   main_branch_id: string;
   title: string;
+  title_mode?: 'automatic' | 'manual';
   revision: number;
   created_at_ms: number;
   updated_at_ms: number;
@@ -6594,6 +6603,8 @@ export type KernelMethodParams = {
   "runtime.thread.catalog.list": ThreadCatalogQuery;
   "runtime.thread.attention.read": KernelEmptyParams;
   "runtime.thread.update": ThreadMetadataUpdateParams;
+  "runtime.thread.title.prepare": ThreadTitlePrepareParams;
+  "runtime.thread.title.finish": ThreadTitleFinishParams;
   "runtime.thread.delete": ThreadDeleteParams;
   "runtime.thread.read": ThreadReadPositionParams;
   "runtime.input.enqueue": InputEnqueueParams;
@@ -8282,6 +8293,24 @@ export type KernelRequest =
       id: string;
       method: "runtime.thread.update";
       params: ThreadMetadataUpdateParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.thread.title.prepare";
+      params: ThreadTitlePrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.thread.title.finish";
+      params: ThreadTitleFinishParams;
       epoch?: string;
       grantId?: string;
     }

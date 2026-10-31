@@ -2055,6 +2055,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readSettings: async () => (await modelsService.settings.read()).document,
   });
   const threadTitles = createThreadTitleService({ runtime: agentRuntime, modelText,
+    readSettings: () => modelsService.readGlobalInferenceSettings(),
     botSession: async (thread, signal) => {
       const bot = thread.bot_id ? await botService.get(thread.bot_id) : null;
       if (!bot || bot.entry.threadId === thread.thread_id) return false;
@@ -2062,7 +2063,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onError: error => {
       const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'title-generation-failed';
-      console.error('[ThreadTitle] Auxiliary title generation failed; the input title is retained:', code);
+      console.error('[ThreadTitle] Auxiliary title generation failed; the current title is retained:', code);
     },
   });
   registerModelTestRoute(app, modelsService, modelAuthority, modelText, uiAuthController.requireAuth);
@@ -2195,12 +2196,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return model ? { homeDir: bot.homeDir, model } : null;
   });
   threads.bindTitles(threadTitles);
-  void threadTitles.recover();
   const nextSteps = createNextStepService({ runtime: agentRuntime, modelText,
     readSettings: () => modelsService.readGlobalInferenceSettings(),
     onError: code => console.error('[NextStep] Auxiliary suggestion unavailable:', code),
   });
-  const unsubscribeNextStepSettings = modelsService.settings.subscribe(scope => { if (scope === 'global') void nextSteps.settingsChanged(); });
+  const unsubscribeNextStepSettings = modelsService.settings.subscribe(scope => { if (scope === 'global') { void nextSteps.settingsChanged(); void threadTitles.settingsChanged(); } });
   threads.bindNextSteps(nextSteps);
   threads.bindContextPolicy((run, signal) => contextService.presentation(run, signal));
   threads.bindSourceDirectory(sourceDirectory);

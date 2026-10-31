@@ -1509,6 +1509,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.dialogs.removeProject.description': '「{projectTitle}」將從側邊欄移除。聊天和檔案都會保留。',
   'sessions.sidebar.project.actions.newDraftSession': '新增草稿會話',
   'sessions.sidebar.session.menu.rename': '重新命名',
+  'sessions.sidebar.session.menu.resumeTitles': '恢復自動標題',
   'sessions.sidebar.session.menu.restore': '恢復會話',
   'sessions.sidebar.session.menu.copyId': '複製工作階段 ID',
   'sessions.sidebar.session.copyId.success': '已複製工作階段 ID',

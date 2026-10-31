@@ -212,7 +212,7 @@ fn cancelled_report_leaves_current_directory_only_after_the_parent_receives_the_
     assert!(f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().is_none());
     let child=f.accept();f.settle_exchange();f.db.cancel_child(&child.operation_id).unwrap();
     let revision=f.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
-    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"archive-settling-child".into(),expected_revision:revision,title:None,pinned:None,archived:Some(true)}).unwrap();
+    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"archive-settling-child".into(),expected_revision:revision,title:None,title_mode:None,pinned:None,archived:Some(true)}).unwrap();
     let attention=f.db.capture_attention_read().load(&||false).unwrap();
     assert!(attention.branches.iter().any(|b|b.thread_id==child.child_thread_id&&b.archived&&b.has_unsettled_work));
     let relation=attention.team_executions.iter().find(|r|r.child_thread_id==child.child_thread_id).unwrap();
@@ -242,7 +242,7 @@ fn cancelled_report_leaves_current_directory_only_after_the_parent_receives_the_
     assert!(!hidden.team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
     assert!(!hidden.delegations.iter().any(|r|r.child_thread_id==child.child_thread_id));
     let revision=f.db.inspect_thread(&child.child_thread_id).unwrap()["revision"].as_u64().unwrap();
-    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"show-completed-child".into(),expected_revision:revision,title:None,pinned:None,archived:Some(false)}).unwrap();
+    f.db.update_thread(&varin_runtime::catalog::threads::ThreadUpdate {thread_id:child.child_thread_id.clone(),key:"show-completed-child".into(),expected_revision:revision,title:None,title_mode:None,pinned:None,archived:Some(false)}).unwrap();
     let visible = f.db.capture_attention_read().load(&||false).unwrap();
     assert!(!visible.team_executions.iter().any(|r|r.child_thread_id==child.child_thread_id));
     let relation=visible.delegations.iter().find(|r|r.child_thread_id==child.child_thread_id).unwrap();

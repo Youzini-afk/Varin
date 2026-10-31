@@ -1,103 +1,142 @@
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { ThreadSummary } from '../kernel/protocol.generated.js';
 import type { ModelTextService } from './service.js';
+import { buildThreadTitleContext, THREAD_TITLE_SYSTEM } from './thread-title-context.js';
 
-/** Titles are auxiliary text requests; Catalog remains the metadata writer. */
+type Runtime = Pick<AgentRuntimeClient, 'thread' | 'threads' | 'prepareThreadTitle' | 'finishThreadTitle' | 'historyPage' | 'historyItem' | 'context' | 'run' | 'onEvent' | 'onReady' | 'onExit' | 'status' | 'events'>;
+const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
+export const DEFAULT_TITLE_UPDATE_INTERVAL = 5;
+
+/** Catalog owns title identity and the frozen cut. These maps only coalesce observers. */
 export function createThreadTitleService(options: {
-  runtime: Pick<AgentRuntimeClient, 'thread' | 'threads' | 'updateThread' | 'onReady'>;
+  runtime: Runtime;
   modelText: Pick<ModelTextService, 'generate' | 'original' | 'resumeUnsent'>;
-  /** Bot conversations other than the long-lived primary entry are titled like ordinary sessions. */
+  readSettings(): Promise<unknown>;
   botSession?(thread: ThreadSummary, signal: AbortSignal): Promise<boolean>;
   onError(error: unknown): void;
 }) {
-  const titled = async (thread: ThreadSummary, signal: AbortSignal) => !thread.bot_id
-    || (options.botSession ? await options.botSession(thread, signal) : false);
-  const pending = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   const lifetime = new AbortController();
-  const firstLine = (text: string) => text.split(/\r?\n/u).map(line => line.trim()).find(Boolean);
-  let closed = false;
+  const pending = new Map<string, { controller: AbortController; promise: Promise<void>; again: boolean; initial: boolean }>();
+  const inflight = new Set<Promise<void>>();
+  let closed = false, epoch = 0;
   let recovering: Promise<void> = Promise.resolve();
-  const start = (threadId: string, work: (signal: AbortSignal) => Promise<void>) => {
-    const existing = pending.get(threadId);
-    if (existing) return existing.promise;
+  const eligible = async (thread: ThreadSummary, signal: AbortSignal) => !thread.parent_thread_id && thread.deleted_at_ms === null
+    && thread.title_mode !== 'manual' && (!thread.bot_id || Boolean(options.botSession && await options.botSession(thread, signal)));
+  async function interval() {
+    const value = record(await options.readSettings()).titleUpdateInterval;
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_TITLE_UPDATE_INTERVAL;
+  }
+  function scheduleBranch(threadId: string, branchId: string, initial = false): Promise<void> {
+    const existing = pending.get(branchId);
+    if (existing) { existing.again = true; existing.initial ||= initial; return existing.promise; }
     if (closed) return Promise.resolve();
     const controller = new AbortController();
-    const promise = work(controller.signal).catch(error => { if (!controller.signal.aborted) options.onError(error); })
-      .finally(() => { pending.delete(threadId); });
-    pending.set(threadId, { controller, promise });
-    return promise;
-  };
-  const apply = async (threadId: string, fallback: string, text: string, signal: AbortSignal) => {
-    const title = firstLine(text);
-    if (!title || title === fallback) return;
-    let current = await options.runtime.thread(threadId, signal);
-    while (true) {
-      signal.throwIfAborted();
-      if (current.deleted_at_ms !== null || current.title !== fallback) return;
-      try {
-        await options.runtime.updateThread({ threadId, key: `thread-title:${threadId}:${current.revision}`,
-          expectedRevision: current.revision, title }, signal);
-        return;
-      } catch (error) {
-        signal.throwIfAborted();
-        const refreshed = await options.runtime.thread(threadId, signal);
-        // Pin/archive changes can race with the title CAS. Reuse the generated
-        // result after that metadata change; a manual title always wins.
-        if (refreshed.title !== fallback || refreshed.deleted_at_ms !== null) return;
-        if (refreshed.revision === current.revision) throw error;
-        current = refreshed;
-      }
-    }
-  };
-  const recover = () => {
+    const work = { controller, promise: Promise.resolve(), again: false, initial };
+    work.promise = (async () => {
+      do {
+        work.again = false;
+        const thread = await options.runtime.thread(threadId, controller.signal);
+        if (!await eligible(thread, controller.signal)) return;
+        const job = await options.runtime.prepareThreadTitle({ threadId, branchId, interval: await interval(), initial: work.initial }, controller.signal);
+        work.initial = false;
+        if (!job) continue;
+        let settled = false;
+        try {
+          const original = await options.modelText.original(job.key, controller.signal);
+          const result = original ? await options.modelText.resumeUnsent(job.key, controller.signal)
+            : await options.modelText.generate({ key: job.key, purpose: 'title', system: THREAD_TITLE_SYSTEM,
+              prompt: await buildThreadTitleContext(options.runtime, job, controller.signal), signal: controller.signal });
+          const title = result?.text.split(/\r?\n/u).map(line => line.trim()).find(Boolean) ?? null;
+          settled = await options.runtime.finishThreadTitle({ job, title }, controller.signal);
+        } catch (error) {
+          if (controller.signal.aborted) throw error;
+          await options.runtime.finishThreadTitle({ job, title: null }, controller.signal);
+          options.onError(error);
+        }
+        if (settled) work.again = true;
+      } while (!closed && !controller.signal.aborted && work.again);
+    })().catch(error => { if (!controller.signal.aborted && !closed) options.onError(error); })
+      .finally(() => {
+        inflight.delete(work.promise);
+        if (pending.get(branchId) === work) pending.delete(branchId);
+        if (work.again && !closed && !controller.signal.aborted) void scheduleBranch(threadId, branchId, work.initial);
+      });
+    pending.set(branchId, work);
+    inflight.add(work.promise);
+    return work.promise;
+  }
+  function recover() {
+    const generation = epoch;
     recovering = recovering.then(async () => {
-      if (closed) return;
+      const checks: Promise<void>[] = [];
       for (const thread of await options.runtime.threads(lifetime.signal)) {
-        if (closed) return;
-        if (thread.parent_thread_id || thread.deleted_at_ms !== null) continue;
-        try { if (!await titled(thread, lifetime.signal)) continue; }
-        catch (error) { if (!closed) options.onError(error); continue; }
-        // A metadata lookup must not reserve a new Thread and suppress the
-        // first real schedule() arriving while startup discovery is running.
-        const key = `thread-title:${thread.thread_id}`;
-        let original;
-        try { original = await options.modelText.original(key, lifetime.signal); }
-        catch (error) { if (!closed) options.onError(error); continue; }
-        if (original?.purpose !== 'title') continue;
-        const fallback = firstLine(original.prompt);
-        if (!fallback || thread.title !== fallback) continue;
-        await start(thread.thread_id, async signal => {
-          const current = await options.runtime.thread(thread.thread_id, signal);
-          if (current.title !== fallback || current.deleted_at_ms !== null) return;
-          const result = await options.modelText.resumeUnsent(key, signal);
-          if (result) await apply(thread.thread_id, fallback, result.text, signal);
-        });
+        if (closed || generation !== epoch) return;
+        if (!await eligible(thread, lifetime.signal)) continue;
+        for (const branch of thread.branches) if (branch.head) checks.push(scheduleBranch(thread.thread_id, branch.branch_id, true));
       }
+      await Promise.allSettled(checks);
     }).catch(error => { if (!closed) options.onError(error); });
     return recovering;
-  };
-  const removeReady = options.runtime.onReady(() => { void recover(); });
+  }
+
+  let cursor: number | undefined, notified = 0, firstNotification: number | undefined;
+  let pumping = false, initializing: Promise<void> | undefined;
+  async function pump() {
+    if (closed || pumping || cursor === undefined) return;
+    pumping = true;
+    const generation = epoch;
+    try {
+      while (!closed && generation === epoch && cursor !== undefined && cursor < notified) {
+        const events = await options.runtime.events(cursor, 256, lifetime.signal);
+        if (generation !== epoch || !events.length) break;
+        for (const event of events) {
+          cursor = event.cursor;
+          const data = record(event.data);
+          if (event.kind === 'run.changed' && data.state === 'completed' && typeof data.thread_id === 'string' && typeof data.branch_id === 'string' && data.branch_id) {
+            void scheduleBranch(data.thread_id, data.branch_id);
+          } else if (event.kind === 'thread.updated' && (typeof data.title === 'string' || data.titleMode === 'automatic' || data.titleMode === 'manual')) {
+            const thread = await options.runtime.thread(event.subject, lifetime.signal);
+            for (const branch of thread.branches) {
+              if (thread.title_mode === 'manual') {
+                pending.get(branch.branch_id)?.controller.abort(); pending.delete(branch.branch_id);
+              } else if (data.titleMode === 'automatic' && branch.head) void scheduleBranch(thread.thread_id, branch.branch_id, true);
+            }
+          }
+        }
+      }
+    } catch (error) { if (!closed) options.onError(error); }
+    finally { pumping = false; }
+  }
+  function initialize() {
+    if (closed || initializing || cursor !== undefined) return;
+    const generation = epoch;
+    initializing = options.runtime.status(lifetime.signal).then(status => {
+      if (generation !== epoch || closed) return;
+      cursor = Math.min(status.eventCursor, firstNotification === undefined ? status.eventCursor : firstNotification - 1);
+      notified = Math.max(notified, status.eventCursor); void pump(); void recover();
+    }).catch(error => { if (!closed) options.onError(error); }).finally(() => { initializing = undefined; });
+  }
+  const remove = [options.runtime.onEvent(event => {
+    if (event.stream !== 'durable') return;
+    firstNotification ??= event.cursor; notified = Math.max(notified, event.cursor);
+    if (cursor === undefined) initialize(); else void pump();
+  }), options.runtime.onReady(initialize), options.runtime.onExit(() => {
+    epoch++; cursor = undefined; notified = 0; firstNotification = undefined;
+    for (const work of pending.values()) work.controller.abort();
+    pending.clear();
+  })];
+  initialize();
   return {
     recover,
-    schedule(thread: ThreadSummary, text: string): void {
-      if (closed || pending.has(thread.thread_id) || thread.parent_thread_id || (thread.bot_id && !options.botSession)
-        || thread.title !== 'New thread' || thread.branches.some(branch => branch.latest_run)
-        || !text.trim()) return;
-      const fallback = firstLine(text)!;
-      void start(thread.thread_id, async signal => {
-        if (thread.bot_id && !await titled(thread, signal)) return;
-        const result = await options.modelText.generate({ key: `thread-title:${thread.thread_id}`, purpose: 'title', prompt: text,
-          system: "Write a concise conversation title for the user's request in the user's language. Return only the title.",
-          signal });
-        await apply(thread.thread_id, fallback, result.text, signal);
-      });
+    schedule(thread: ThreadSummary, branchId = thread.main_branch_id): void {
+      if (!thread.parent_thread_id && branchId) void scheduleBranch(thread.thread_id, branchId, true);
     },
+    settingsChanged: recover,
     async close(): Promise<void> {
-      closed = true;
-      removeReady(); lifetime.abort();
-      for (const task of pending.values()) task.controller.abort();
-      await Promise.allSettled([...pending.values()].map(task => task.promise));
-      await recovering;
+      closed = true; lifetime.abort(); remove.forEach(unsubscribe => unsubscribe());
+      for (const work of pending.values()) work.controller.abort();
+      await Promise.allSettled([...inflight]);
+      await Promise.allSettled([recovering, initializing]);
     },
   };
 }

@@ -1,4 +1,8 @@
 export const settingsDict = {
+  'settings.titleUpdates.label': '標題自動更新',
+  'settings.titleUpdates.description': '首次產生標題，此後每完成指定輪數的使用者與 Agent 交流，檢查是否需要更新。0 表示僅首次產生。手動命名的會話會保留標題。',
+  'settings.titleUpdates.unit': '輪',
+  'settings.titleUpdates.invalid': '請輸入大於或等於 0 的整數。',
   'bot.work.background': '參考會話 · {count} 處原文',
   'bot.follow.title': '交給總助手跟進',
   'bot.follow.description': '保留原會話與工作區。總助手可以讀取這個分支；你可以分別選擇是否允許傳送訊息、是否將交流納入長期記憶。',

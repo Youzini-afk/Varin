@@ -920,6 +920,12 @@ export class AgentRuntimeClient {
   updateThread(input: import('./protocol.generated.js').ThreadMetadataUpdateParams, signal?: AbortSignal): Promise<ThreadSummary> {
     return this.kernel.agentRuntimeRequest('runtime.thread.update', input, signal);
   }
+  prepareThreadTitle(input: import('./protocol.generated.js').ThreadTitlePrepareParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').ThreadTitleJob | null> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.title.prepare', input, signal);
+  }
+  finishThreadTitle(input: import('./protocol.generated.js').ThreadTitleFinishParams, signal?: AbortSignal): Promise<boolean> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.title.finish', input, signal);
+  }
   deleteThread(input: import('./protocol.generated.js').ThreadDeleteParams, signal?: AbortSignal): Promise<ThreadSummary> {
     return this.kernel.agentRuntimeRequest('runtime.thread.delete', input, signal);
   }

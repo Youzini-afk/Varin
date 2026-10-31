@@ -890,6 +890,13 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['auxiliary', 'utility', 'title', 'commit', 'pull request'] },
   },
   {
+    id: 'sessions.title-updates', category: 'sessions', owner: 'agent-settings',
+    field: { path: 'titleUpdateInterval', kind: 'number', scope: 'user', min: 0, integer: true, default: 5,
+      note: 'Completed user/Agent exchanges between automatic title checks; zero keeps initial naming only. Context always uses the recent three complete exchanges.' },
+    apply: 'immediate',
+    ui: { page: 'sessions', titleKey: 'settings.titleUpdates.label', descriptionKey: 'settings.titleUpdates.description', keywords: ['title', 'rename', '标题', '命名', 'frequency'] },
+  },
+  {
     id: 'sessions.auto-cleanup', category: 'sessions', owner: 'app',
     field: { path: 'autoDeleteEnabled', kind: 'boolean' },
     apply: 'immediate',

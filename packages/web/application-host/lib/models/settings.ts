@@ -10,6 +10,9 @@ import { readResourceSettings } from '../agent-resources/configuration.js';
 import { ConfigurationFile, ModelConfigurationError, object } from './configuration.js';
 
 export function validateAgentSettings(document: Record<string, unknown>): Record<string, JsonValue> {
+  if (document.titleUpdateInterval !== undefined && (typeof document.titleUpdateInterval !== 'number' || !Number.isSafeInteger(document.titleUpdateInterval) || document.titleUpdateInterval < 0)) {
+    throw new ModelConfigurationError('invalid_settings', 'titleUpdateInterval must be a non-negative integer; zero keeps only initial naming');
+  }
   if (document.utilityThinkingLevel !== undefined && !THINKING_LEVELS.includes(document.utilityThinkingLevel as ThinkingLevel)) {
     throw new ModelConfigurationError('invalid_settings', 'utilityThinkingLevel must be a supported thinking level');
   }
