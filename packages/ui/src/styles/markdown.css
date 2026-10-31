@@ -1,5 +1,109 @@
 /* Reading typography for ordinary Markdown. Compact tools and reasoning keep
    their own scale. Theme colors are separate from workbench/editor colors. */
+.markdown-content [data-md-image-gallery] {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 18px 12px;
+  margin-block: 1.1em 1.35em;
+  container-type: inline-size;
+}
+.markdown-content .md-image {
+  --image-width: 560px;
+  --image-ratio: 1.5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: min(100%, var(--image-width), 640px, calc(380px * var(--image-ratio)));
+  min-width: 0;
+  margin-block: 0.85em 1.15em;
+  line-height: 1.5;
+}
+.markdown-content [data-md-image-gallery] > .md-image {
+  flex: 0 1 auto;
+  margin: 0;
+}
+.markdown-content [data-md-image-gallery]:has(> .md-image:nth-of-type(2)) > .md-image {
+  width: min(var(--image-width), calc((100% - 12px) / 2), calc(300px * var(--image-ratio)));
+}
+.markdown-content .md-image-frame {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  aspect-ratio: var(--image-ratio);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  background-image: conic-gradient(color-mix(in srgb, var(--foreground) 4%, transparent) 25%, transparent 0 50%, color-mix(in srgb, var(--foreground) 4%, transparent) 0 75%, transparent 0);
+  background-size: 12px 12px;
+  cursor: zoom-in;
+  isolation: isolate;
+}
+.markdown-content .md-image-frame > img {
+  display: block;
+  width: 100%; height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity var(--motion-dur-fade);
+}
+.markdown-content [data-image-state="loaded"] .md-image-frame > img { opacity: 1; }
+.markdown-content .md-image-status {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  padding: 10px;
+  font-size: var(--text-meta); color: var(--muted-foreground);
+}
+.markdown-content [data-image-state="loaded"] .md-image-status { display: none; }
+.markdown-content [data-image-state="failed"] .md-image-frame { aspect-ratio: auto; min-height: 64px; cursor: pointer; }
+.markdown-content .md-image-affordance {
+  position: absolute; inset: auto 8px 8px auto;
+  padding: 4px 8px; border-radius: 5px;
+  background: var(--popover, var(--background)); color: var(--foreground);
+  font-size: var(--text-micro); line-height: 1.5;
+  opacity: 0; transform: translateY(3px);
+  transition: opacity var(--motion-dur-fade), transform var(--motion-dur-fade);
+  pointer-events: none;
+}
+.markdown-content .md-image-frame:is(:hover, :focus-visible) .md-image-affordance { opacity: 1; transform: none; }
+.markdown-content .md-image-frame:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.markdown-content .md-image-caption {
+  display: block; margin-top: 7px;
+  color: var(--markdown-secondary, var(--muted-foreground));
+  font-size: var(--text-meta); line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.markdown-content .md-image[data-image-shape="portrait"] { max-width: 320px; }
+.markdown-content .md-image[data-image-shape="long"] { width: min(100%, var(--image-width), 440px); }
+.markdown-content .md-image[data-image-shape="long"] .md-image-frame { aspect-ratio: 5 / 6; }
+.markdown-content .md-image[data-image-shape="long"] .md-image-frame > img { object-fit: cover; object-position: top; mask-image: linear-gradient(#000 80%, transparent); }
+.markdown-content [data-image-shape="long"][data-image-state="loaded"] .md-image-affordance { opacity: 1; transform: none; }
+.markdown-content a[data-md-image-link] { cursor: zoom-in; }
+.markdown-content td .md-image { max-width: 180px; }
+@container (max-width: 420px) {
+  .markdown-content [data-md-image-gallery]:has(> .md-image:nth-of-type(2)) > .md-image { width: min(100%, var(--image-width), 440px); }
+}
+.md-image-viewer[data-slot="dialog-content"] { width: min(1200px, 96vw); max-width: 96vw; height: 90dvh; padding: 0; gap: 0; overflow: hidden; }
+.md-image-viewer-toolbar { display: flex; align-items: center; gap: 5px; min-height: 52px; padding: 8px 44px 8px 16px; border-bottom: 1px solid var(--border); }
+.md-image-viewer-navigation { display: flex; align-items: center; gap: 2px; }
+.md-image-viewer-action { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 30px; height: 30px; border-radius: 5px; color: var(--muted-foreground); }
+.md-image-viewer-action:is(:hover, :focus-visible) { color: var(--foreground); background: var(--interactive-hover); }
+.md-image-viewer-action:focus-visible { outline: 2px solid var(--ring); }
+.md-image-viewer-scale { min-width: 48px; font-variant-numeric: tabular-nums; }
+.md-image-viewer-viewport { position: relative; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.md-image-viewer-viewport[data-zoomed="true"] { cursor: grab; }
+.md-image-viewer-viewport[data-zoomed="true"]:active { cursor: grabbing; }
+.md-image-viewer-plane { display: grid; place-items: center; }
+.md-image-viewer-plane > img { display: block; max-width: none; max-height: none; user-select: none; }
+.md-image-viewer-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted-foreground); }
+@media (max-width: 600px) {
+  .md-image-viewer[data-slot="dialog-content"] { width: 96vw; height: 88dvh; }
+  .md-image-viewer-toolbar { flex-wrap: wrap; padding-left: 10px; }
+  .md-image-viewer-toolbar > [data-slot="dialog-title"] { flex-basis: 100%; padding-right: 12px; }
+}
 .markdown-content [data-md-color] {
   display: inline-flex;
   align-items: baseline;

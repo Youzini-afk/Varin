@@ -7,6 +7,7 @@ import { highlightCodeInWorker } from './markdown-worker';
 import { liveFenceLines, parseOpenFence, renderOpenFence } from './liveFence';
 import { MarkdownBlockStream, type MarkdownBlockSource } from './markdownBlocks';
 import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
+import { groupMarkdownImageBlocks, isImageHref, markdownImagePlaceholder } from './imageSources';
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -80,6 +81,17 @@ const parser = marked.use({
   breaks: false,
   extensions: [inlineMathExtension, blockMathExtension],
   renderer: {
+    image({ href, text, title }) {
+      if (href === 'streamdown:incomplete-image') return '';
+      return markdownImagePlaceholder(href, text, title);
+    },
+    paragraph({ tokens }) {
+      const imageOnly = tokens.some(token => token.type === 'image' || token.type === 'link') && tokens.every(token =>
+        token.type === 'image' || (token.type === 'link' && (isImageHref((token as Tokens.Link).href)
+          || (token as Tokens.Link).tokens?.every(child => child.type === 'image')))
+        || token.type === 'br' || (token.type === 'text' && !token.raw.trim()));
+      return `<p${imageOnly ? ' data-md-image-gallery' : ''}>${this.parser.parseInline(tokens)}</p>\n`;
+    },
     // Model output is untrusted. Markdown constructs still render normally,
     // while raw HTML remains visible text instead of becoming application DOM.
     html({ text }) {
@@ -90,6 +102,10 @@ const parser = marked.use({
       // so nested HTML uses the same escaping boundary as the rest of a message.
       const label = autolink ? escapeRawMarkdownHtml(text) : this.parser.parseInline(tokens);
       const target = href ?? '';
+      if (isImageHref(target)) {
+        const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+        return `<a href="${escapeAttr(target)}" data-md-image-href="${escapeAttr(target)}"${titleAttr}>${label}</a>`;
+      }
       if (target.startsWith('varin-material://')) {
         const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
         return `<a href="${escapeAttr(pdfMaterialMarkdownHref(target))}" data-varin-material-link="true"${titleAttr} class="text-primary hover:underline">${label}</a>`;
@@ -305,7 +321,7 @@ export const renderMarkdownBlocks = async (
   if (!text) return [];
 
   const blocks = stream.read(text, streaming);
-  return Promise.all(
+  return groupMarkdownImageBlocks(await Promise.all(
     blocks.map(async (block, index) => {
       // An open fence's HTML also depends on how many of its lines have colour.
       const parsedFence = !block.highlight ? parseOpenFence(block.raw) : null;
@@ -331,5 +347,5 @@ export const renderMarkdownBlocks = async (
       renderedSources.set(block, { coloured: coloured?.length, result });
       return result;
     }),
-  );
+  ));
 };

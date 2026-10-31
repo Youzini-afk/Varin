@@ -9,6 +9,7 @@ import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useConversationPresentation } from './ConversationContext';
 import { getMarkdownCodeText } from '@/components/chat/markdown/decorate';
+import { readMarkdownImageOriginal } from '@/components/chat/markdown/markdownImages';
 import { captureChatSelection, type ChatTextSource as ChatSourceData } from './chatSelection';
 import { ChatMemoryDialog } from './ChatMemoryDialog';
 import { resolveChatTimelineItem, type ChatTimelineProjection } from './chatTimelineProjection';
@@ -101,7 +102,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
     const file = element?.closest<HTMLElement>('[data-varin-file-link="true"]');
     if (!element || !root.current?.contains(element)
       || element.closest('input,textarea,[contenteditable="true"]')
-      || (element.closest('button') && !file && !element.closest('[data-chat-more]'))) return null;
+      || (element.closest('button') && !file && !element.closest('[data-chat-more], [data-md-image-src]'))) return null;
     const runtimeKey = getRuntimeKey();
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
@@ -137,7 +138,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       return { kind: 'file', text: captured.path, element: file, runtimeKey, file: captured };
     }
     const link = element.closest<HTMLAnchorElement>('a[href]');
-    if (link) return { kind: 'link', text: link.getAttribute('href') || '', href: link.href, element: link, runtimeKey };
+    if (link) return { kind: 'link', text: link.getAttribute('data-md-image-href') ?? link.getAttribute('href') ?? '', href: link.getAttribute('data-md-image-href') ?? link.href, element: link, runtimeKey };
     const source = [...sources].find(([sourceElement]) => sourceElement.contains(element))?.[1];
     const code = element.closest('[data-component="markdown-code"],pre')?.querySelector<HTMLElement>('code');
     if (code) return { kind: 'code', text: getMarkdownCodeText(code), sourceEntryId: source?.entryId, runtimeKey };
@@ -185,33 +186,40 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       source: { kind: 'chat', thread: presentation.identity, itemId: value.sourceEntryId, passages: value.passages ?? [], href: sourceLink } });
   };
   const openTarget = (value: MenuTarget) => {
-    if (value.kind === 'image' && value.href) setImagePreview(value.href);
+    const figure = value.element?.closest('[data-md-image-src]');
+    if (value.kind === 'image' && figure) figure.querySelector<HTMLButtonElement>('.md-image-frame')?.click();
+    else if (value.kind === 'image' && value.href) setImagePreview(value.href);
     else if (value.element?.isConnected) value.element.click();
     else if (value.href && /^(https?:|data:image\/|blob:)/u.test(value.href)) window.open(value.href, '_blank', 'noopener,noreferrer');
     else throw new Error(t('chat.context.sourceUnavailable'));
   };
   const imageAction = async (value: MenuTarget, action: 'copy' | 'save' | 'quote') => {
-    const response = await fetch(value.href!);
-    if (!response.ok) throw new Error(t('chat.context.failed'));
-    const blob = await response.blob();
-    if (action === 'save') {
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url; anchor.download = `image.${blob.type.split('/')[1] || 'png'}`;
-      anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 0);
-    } else {
-      const bitmap = await createImageBitmap(blob);
-      const canvas = document.createElement('canvas');
-      canvas.width = bitmap.width; canvas.height = bitmap.height;
-      canvas.getContext('2d')!.drawImage(bitmap, 0, 0); bitmap.close();
-      const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error(t('chat.context.failed'))), 'image/png'));
-      if (action === 'quote') {
-        const image = await fileToImageAttachment(new File([png], 'reference.png', { type: 'image/png' }));
-        if (value.runtimeKey !== getRuntimeKey()) return;
-        addContentReference(presentation.identity, { ref: `chat-image:${crypto.randomUUID()}`, title: t('chat.context.openImage'), image,
-          source: { kind: 'chat', thread: presentation.identity, itemId: value.sourceEntryId, passages: [] } });
-      } else await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
-    }
+    const controller = new AbortController();
+    const original = value.element ? await readMarkdownImageOriginal(value.element, controller.signal) : undefined;
+    try {
+      const response = await fetch(original?.src ?? value.href!);
+      if (!response.ok) throw new Error(t('chat.context.failed'));
+      const blob = await response.blob();
+      if (value.runtimeKey !== getRuntimeKey()) return;
+      if (action === 'save') {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url; anchor.download = `image.${blob.type.split('/')[1] || 'png'}`;
+        anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 0);
+      } else {
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
+        canvas.getContext('2d')!.drawImage(bitmap, 0, 0); bitmap.close();
+        const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error(t('chat.context.failed'))), 'image/png'));
+        if (action === 'quote') {
+          const image = await fileToImageAttachment(new File([png], 'reference.png', { type: 'image/png' }));
+          if (value.runtimeKey !== getRuntimeKey()) return;
+          addContentReference(presentation.identity, { ref: `chat-image:${crypto.randomUUID()}`, title: t('chat.context.openImage'), image,
+            source: { kind: 'chat', thread: presentation.identity, itemId: value.sourceEntryId, passages: [] } });
+        } else await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      }
+    } finally { original?.release?.(); }
   };
   return <ChatActionsContext.Provider value={context}><ChatFileTargetsContext.Provider value={fileTargets}>
     <ContextMenu open={open} onOpenChange={(next, details) => {

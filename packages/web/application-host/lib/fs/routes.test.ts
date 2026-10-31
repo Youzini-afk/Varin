@@ -60,6 +60,7 @@ const createMockResponse = () => {
       body = payload;
       return this;
     },
+    end() { return this; },
     setHeader(name: string, value: unknown) {
       headers.set(name.toLowerCase(), value);
       return this;
@@ -857,6 +858,22 @@ describe('fs exec git-read cache', () => {
 });
 
 describe('fs raw download Content-Disposition', () => {
+  it('serves an authenticated image derivative with dimensions and validates cached previews', async () => {
+    const { createCanvas } = await import('@napi-rs/canvas');
+    const bytes = await createCanvas(32, 24).encode('png');
+    const handler = registerRaw({ stat: async () => ({ isFile: () => true }), readFile: async () => bytes });
+    const response = createMockResponse();
+    const request = { path: '/api/fs/raw', query: { path: '/repo/image.png', preview: 'image' }, headers: {} };
+    await handler(request as unknown as Request, response as unknown as Response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(bytes);
+    expect(response.getHeader('X-Varin-Image-Width')).toBe('32');
+    expect(response.getHeader('X-Varin-Image-Height')).toBe('24');
+    const repeated = createMockResponse();
+    await handler({ ...request, headers: { 'if-none-match': response.getHeader('ETag') } } as unknown as Request, repeated as unknown as Response);
+    expect(repeated.statusCode).toBe(304);
+    expect(repeated.body).toBeNull();
+  });
   it('uses RFC 5987 filename*= encoding for non-ASCII filenames on download', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),

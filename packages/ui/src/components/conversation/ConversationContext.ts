@@ -9,6 +9,8 @@ export interface ConversationPresentation {
   api: ThreadsAPI;
   identity: ThreadIdentity;
   head: string | null;
+  /** File references are relative to this conversation, not sidebar navigation. */
+  fileDirectory?: string;
   toolExecutions: Record<string, ChatToolExecutionState>;
   uiCards?: Record<string, UiCardProjection>;
   sourceEntry?(callId: string): string | undefined;

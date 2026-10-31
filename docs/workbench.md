@@ -272,6 +272,15 @@ reader；页面选区使用真实图像。submit、三种 enqueue 和 child cont
 working branch 和 unsaved draft 分开显示。未知扩展 entry 仍可用 generic/raw detail，扩展 renderer
 保持原注册优先级。
 
+助手正文的图片在原解释位置呈现；相邻的图片段落合为自适应图片组，文字段落结束该组。小素材保持原尺寸，
+普通图片按可用宽高展示，长图显示标明截取的上段预览；图注仅来自原 alt/title。句中图片链接保持文字形态，
+点击进入同一查看器，支持组内切换、适应窗口、原始尺寸、缩放、拖动与下载。亮暗主题只改变周围界面，保留图片原色。
+完整引用进入视口附近才读取；流式正文继续增长时保留已加载图片节点、解码状态和原读取。图片尺寸和加载完成
+沿现有时间线内容变化路径通知布局，用户阅读历史时继续保持阅读锚点。移除内容、关闭查看器和切换 Host 释放其读取与对象 URL。
+本地文件通过原 `/api/fs/raw` 权限和路径检查读取，普通大图在 Host 生成聊天尺寸的派生预览；长图预览不覆盖原文件，
+SVG 在浏览器图像沙箱中显示，动画格式保留原帧。预览使用内容摘要验证浏览器缓存，不另建持久图片库。
+远程图片直接使用原 URL，由浏览器缓存；原链接没有缩略图能力时仍需读取原图。已有工具“查看图片”记录继续使用其类型化媒体回执。
+
 右键 quote 只追加当前 draft，不发送。记忆提取核验选中的原生 source，由 personalization/Bot memory
 owner 保存。Thread PDF 和 typed media 使用当前 Thread 的 material/holder identity；任意 output JSON
 不自动成为 media reference，也不授权访问其中的 URL。

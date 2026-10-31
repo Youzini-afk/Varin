@@ -434,6 +434,7 @@ const decorateLinks = (root: HTMLElement): void => {
   for (const anchor of Array.from(anchors)) {
     if (anchor.getAttribute('data-md-link-decorated') === 'true') continue;
     if (anchor.getAttribute('data-varin-file-link') === 'true') continue;
+    if (anchor.hasAttribute('data-md-image-link')) continue;
     const href = anchor.getAttribute('href') ?? '';
     if (!isExternalHttpUrl(href)) continue;
     anchor.setAttribute('data-md-link-decorated', 'true');

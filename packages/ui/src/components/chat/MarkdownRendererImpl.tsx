@@ -50,6 +50,8 @@ import {
   type ParsedFileReference,
 } from './fileReferenceParser';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
+import { decorateMarkdownImages, preserveMarkdownImage } from './markdown/markdownImages';
+import { useMarkdownImages } from './markdown/useMarkdownImages';
 
 type ContentChangeReason = 'text' | 'structural' | 'permission' | 'animation';
 
@@ -459,6 +461,7 @@ const useFileReferenceInteractions = ({
       let linkedCount = 0;
 
       for (const candidate of Array.from(candidates)) {
+        if (candidate.closest('[data-md-image-link], [data-md-image-src]')) continue;
         const rawCandidate = extractPathCandidateFromElement(candidate);
         const resolved = getResolvedReference(rawCandidate, effectiveDirectory);
         clearFileLinkAttributes(candidate);
@@ -786,6 +789,7 @@ const useMorphdomMarkdown = ({
   ctx,
   onContentChange,
   ink,
+  images,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
@@ -796,8 +800,10 @@ const useMorphdomMarkdown = ({
   onContentChange?: (reason?: ContentChangeReason) => void;
   /** Ink front for streamed text; rewrapped after each morph. */
   ink?: MarkdownInk;
+  images: Pick<ReturnType<typeof useMarkdownImages>, 'labels' | 'refresh'>;
 }) => {
   const onContentChangeRef = React.useRef(onContentChange);
+  const { labels: imageLabels, refresh: refreshImages } = images;
   onContentChangeRef.current = onContentChange;
   // Message identity owns this mutable cache, even when two messages share a prefix.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -840,13 +846,15 @@ const useMorphdomMarkdown = ({
       // its own DOM before morphing, so without this the first paint shows bare
       // <pre>/tables that "snap" into their decorated form a tick later. Matching
       // the structure here keeps the async morph to syntax colors only.
+      decorateMarkdownImages(block, imageLabels);
       decorateMarkdown(block, ctx);
       target.appendChild(block);
+      refreshImages();
       if (shouldRefreshMermaidViewers(block)) {
         refreshMermaidViewers();
       }
     }
-  }, [containerRef, text, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, ctx, refreshMermaidViewers, imageLabels, refreshImages]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -893,12 +901,13 @@ const useMorphdomMarkdown = ({
 
         const temp = document.createElement('div');
         temp.innerHTML = block.html;
+        decorateMarkdownImages(temp, imageLabels);
         decorateMarkdown(temp, ctx);
         const hadMermaidBlock = shouldRefreshMermaidViewers(el);
         const tempHasMermaidBlock = shouldRefreshMermaidViewers(temp);
         morphdom(el, temp, {
           childrenOnly: true,
-          onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
+          onBeforeElUpdated: (fromEl, toEl) => !preserveMarkdownImage(fromEl, toEl) && !fromEl.isEqualNode(toEl),
         });
         el.setAttribute('data-md-id', block.id);
         changedBlocks.add(el);
@@ -923,6 +932,7 @@ const useMorphdomMarkdown = ({
       if (removedMermaidBlock) {
         refreshMermaidViewers();
       }
+      if (changed) refreshImages();
 
       if (changed && inking) ink!.update(target, streaming, undefined, changedBlocks);
       if (changed) {
@@ -933,7 +943,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, blockStream, ctx, refreshMermaidViewers, ink, fenceRevision]);
+  }, [containerRef, text, streaming, cacheKey, blockStream, ctx, refreshMermaidViewers, ink, fenceRevision, imageLabels, refreshImages]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -987,6 +997,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   streamPerfObserve('ui.markdown_renderer.content_len', content.length);
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const images = useMarkdownImages(containerRef, onContentChange);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
   const paced = usePacedText(content, isStreaming && !disableStreamAnimation, cacheKey);
@@ -1022,11 +1033,13 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     ctx,
     onContentChange,
     ink,
+    images,
   });
 
   const markdownContent = (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
       <div className={markdownContentClassName(variant)} data-markdown-content />
+      {images.viewer}
     </div>
   );
 
@@ -1081,6 +1094,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
 }) => {
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const images = useMarkdownImages(containerRef, onContentChange);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
 
   const renderedContent = React.useMemo(
@@ -1114,11 +1128,13 @@ const SimpleMarkdownRendererImpl: React.FC<{
     syntaxVars,
     ctx,
     onContentChange,
+    images,
   });
 
   return (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
       <div className={markdownContentClassName(variant)} data-markdown-content />
+      {images.viewer}
     </div>
   );
 };

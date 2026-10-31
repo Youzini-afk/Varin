@@ -1,6 +1,7 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
+import { createHash } from 'node:crypto';
 import { canonicalizePathIdentity } from '../workspace/path-safety.js';
 import type { Express, Request, Response } from 'express';
 import type { spawn as nodeSpawn } from 'node:child_process';
@@ -914,6 +915,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         '.ico': 'image/x-icon',
         '.bmp': 'image/bmp',
         '.avif': 'image/avif',
+        '.avifs': 'image/avif',
         '.pdf': 'application/pdf',
         '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -942,6 +944,24 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       res.setHeader('Cache-Control', 'no-store');
       if (resolved.granted) {
         res.setHeader('Referrer-Policy', 'no-referrer');
+      }
+      if (req.path === '/api/fs/raw' && req.query.preview === 'image') {
+        if (!mimeType.startsWith('image/')) return res.status(415).json({ error: 'The referenced file is not a supported image' });
+        // Authorization and path checks have already run. Browser validation
+        // avoids re-encoding an unchanged image when a virtual row remounts.
+        const etag = `"image-preview-v1-${createHash('sha256').update(content).digest('hex')}"`;
+        res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+        res.setHeader('ETag', etag);
+        if (req.headers['if-none-match'] === etag) return res.status(304).end();
+        const { renderImagePreview } = await import('./image-preview.js');
+        const preview = await renderImagePreview(content, mimeType);
+        if (preview.width && preview.height) {
+          res.setHeader('X-Varin-Image-Width', String(preview.width));
+          res.setHeader('X-Varin-Image-Height', String(preview.height));
+        }
+        res.setHeader('X-Varin-Image-Cropped', String(preview.cropped === true));
+        res.setHeader('Access-Control-Expose-Headers', 'X-Varin-Image-Width, X-Varin-Image-Height, X-Varin-Image-Cropped');
+        return res.type(preview.mime).send(preview.bytes);
       }
       if (req.path === '/api/fs/office') {
         const { OfficePackage } = await import('../office/package.js');
