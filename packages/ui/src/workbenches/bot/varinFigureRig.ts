@@ -5,7 +5,8 @@ import { VARIN_FIGURE_BLUSH, VARIN_FIGURE_LAYERS, type VarinFigureLayer } from '
 
 /**
  * The Bot figure's rig (docs/design/varin-figure.md): Varin leaning on a window sill, drawn from the
- * traced layers and driven by springs. One instance owns one SVG inside the host element.
+ * traced layers and driven by springs. One instance owns one SVG inside the host element. There is no
+ * frame: she stands on the page itself, leaning on a light ledge that follows the theme.
  *
  * - Every state has a pose and, at full motion, a loop; one-shot moves (wink, nod, tilt, poke) play
  *   on top. Eyes and mouth change shape by closing and reopening, never by cross-fading.
@@ -15,7 +16,8 @@ import { VARIN_FIGURE_BLUSH, VARIN_FIGURE_LAYERS, type VarinFigureLayer } from '
  */
 
 const NS = 'http://www.w3.org/2000/svg';
-const VIEW_FULL = '34 30 1188 1192';
+const VIEW_FULL = '34 -24 1192 1192';
+const VIEW_ORIGIN = [34, -24, 1192] as const;
 const VIEW_HEAD = '330 236 750 750';
 const PIVOT = [628, 1100] as const;
 const SILL = 1100;
@@ -26,6 +28,9 @@ const BROW = { L: [486, 548], R: [757, 542] } as const;
 const HAND = { L: [473, 1097], R: [767, 1097] } as const;
 const AHOGE = [240, 466] as const;
 const SKIN = '#fae5dd';
+// Sleep z's, thinking bubbles and the question mark use the theme's muted ink.
+const MARK_FILL = 'fill: var(--bot-figure-mark, #9aa0ad)';
+const MARK_STROKE = 'stroke: var(--bot-figure-mark, #9aa0ad)';
 const LASH = '#2f3555';
 
 type Side = 'L' | 'R';
@@ -48,7 +53,7 @@ const P0 = {
   fy: 0, frot: 0, fsx: 1, fsy: 1, featX: 0, featY: 0, lookX: 0, lookY: 0, eyeS: 1, eyeY: 1, eyeDim: 0, spark: 0,
   browL: 0, browR: 0, browLr: 0, browRr: 0, blush: 1, shy: 0,
   hLx: HAND.L[0], hLy: HAND.L[1], hRx: HAND.R[0], hRy: HAND.R[1], hLs: 1, hRs: 1,
-  glow: .55, gr: 59, gg: 76, gb: 120, grey: 0, droop: 0,
+  glow: 0, gr: 143, gg: 176, gb: 234, grey: 0, droop: 0,
 };
 type Param = keyof typeof P0;
 type Params = Record<Param, number>;
@@ -107,18 +112,19 @@ interface StateDef {
   pose(t: number, f: VarinFigureRig, L: number): Pose;
   tick?(t: number, f: VarinFigureRig, L: number): void;
 }
+// A soft aura behind her, light enough for both themes; most states keep it faint or off.
 const GLOW: Record<BotFigureState, string> = {
-  idle: '#3b4c78', listening: '#4b72b8', thinking: '#6b5bc0', working: '#3b8aa6', waiting: '#e3a04c',
-  result: '#e590b6', sleeping: '#29305a', waking: '#d9b36e', offline: '#1c202b',
+  idle: '#8fb0ea', listening: '#7aa2ff', thinking: '#a08cff', working: '#5cc6d6', waiting: '#f3b562',
+  result: '#f49ab4', sleeping: '#7f8bd6', waking: '#ffd38a', offline: '#8fb0ea',
 };
 const typing = (t: number, rate: number): [number, number] => ((t % 2.3) < 1.7
   ? [Math.max(0, Math.sin(t * rate)) ** 2, Math.max(0, Math.sin(t * rate + Math.PI)) ** 2]
   : [0, 0]);
 const STATES: Record<BotFigureState, StateDef> = {
-  idle: { blink: true, follow: true, micro: true, glow: .5,
+  idle: { blink: true, follow: true, micro: true, glow: 0,
     pose: (t, f, L) => ({ fy: -3 * L * Math.sin(t * 1.75), fsy: 1 + .006 * L * Math.sin(t * 1.75), lookX: f.glance.x, lookY: f.glance.y, featX: f.glance.x * 5 }) },
   // Leans in; the eyes read along as you type, with a small nod on each burst of keys.
-  listening: { blink: true, follow: true, glow: .62,
+  listening: { blink: true, follow: true, glow: .22,
     enter: f => f.kick('fy', -260),
     pose: (t, _f, L) => {
       const read = L ? -.55 + ((t * .32) % 1) * 1.1 : 0;
@@ -129,12 +135,12 @@ const STATES: Record<BotFigureState, StateDef> = {
       if ((t % 2.6) < 1.8) f.kick('fy', 70 + Math.random() * 50);
       f.mem.nextKey = t + .11 + Math.random() * .16;
     } },
-  thinking: { blink: true, glow: .6, fx: { dots: 1 }, mouth: 'pout',
+  thinking: { blink: true, glow: .22, fx: { dots: 1 }, mouth: 'pout',
     pose: (t, _f, L) => {
       const drift = .32 * L * Math.sin(t * .85), tap = L * bump((t % 1.6) / 1.6, .55, .75);
       return { frot: -2.8, fy: -6, lookX: -.72 + drift, lookY: -.9, featX: -7 + drift * 6, featY: -4, browL: -13, browR: 2, browLr: -4, browRr: 3, hRx: 688, hRy: 868 - 7 * tap };
     } },
-  working: { blink: true, glow: .55, fx: { bits: 1 }, mouth: 'flat',
+  working: { blink: true, glow: .14, fx: { bits: 1 }, mouth: 'flat',
     pose: (t, _f, L) => {
       const [a, b] = L ? typing(t, 15) : [0, 0];
       return { fy: 10 + 3 * L * Math.sin(t * 2.2), lookY: .95, lookX: .18 * L * Math.sin(t * .7), eyeY: .82, featY: 6, browL: 5, browR: 5, browLr: 6, browRr: -6, hLy: HAND.L[1] - 20 * a, hRy: HAND.R[1] - 20 * b, hLx: HAND.L[0] + 18, hRx: HAND.R[0] - 18 };
@@ -149,14 +155,14 @@ const STATES: Record<BotFigureState, StateDef> = {
       });
     } },
   // Hops in, warm glow breathing, a badge, and a wave every few seconds.
-  waiting: { blink: true, follow: true, glow: .78, pulse: true, fx: { alert: 1 }, mouth: 'open',
+  waiting: { blink: true, follow: true, glow: .42, pulse: true, fx: { alert: 1 }, mouth: 'open',
     enter: f => { f.kick('fy', -950); f.kick('fsy', 1.4); },
     pose: (t, _f, L) => {
       const c = t % 3.6, wave = L ? ramp(c, 0, .15) * (1 - ramp(c, 1.25, 1.45)) : 0;
       return { fy: -14, frot: 2.4, eyeS: 1.04, spark: 1, browL: -9, browR: -9, blush: 1.15, hRx: 905 + 30 * wave * Math.sin(c * 15), hRy: 850 - 12 * wave * Math.abs(Math.sin(c * 15)) };
     } },
   // Presses down, pops up with both hands raised, happy eyes and a burst of sparkles.
-  result: { glow: .7, eyes: 'happy', mouth: 'grin',
+  result: { glow: .32, eyes: 'happy', mouth: 'grin',
     enter: f => { f.kick('fsy', -2); f.kick('fy', 380); f.later(.18, () => { f.kick('fy', -1100); f.burst(22); f.sheen(); }); },
     pose: (t, _f, L) => {
       const up = ramp(t, .15, .35), hop = L * Math.abs(Math.sin(t * 4.2)) * ramp(t, .9, 1.1);
@@ -165,10 +171,10 @@ const STATES: Record<BotFigureState, StateDef> = {
         hRx: lerp(HAND.R[0], 918, up), hRy: lerp(HAND.R[1], 826, up) + 16 * L * Math.sin(t * 8.4 + Math.PI) };
     } },
   // Sinks below the sill, chin on her hands, eyes closed, the flyaway lock drooping.
-  sleeping: { glow: .42, fx: { zz: 1 }, eyes: 'closed', mouth: 'sleep', stillAt: 3,
+  sleeping: { glow: .12, fx: { zz: 1 }, eyes: 'closed', mouth: 'sleep', stillAt: 3,
     pose: (t, _f, L) => ({ fy: 150 + 5 * L * Math.sin(t * 1.35), fsy: 1 + .012 * L * Math.sin(t * 1.35), frot: -3, featY: 4, browL: 6, browR: 6, blush: .85, hLx: 560, hRx: 696, hLy: 1092, hRy: 1092, droop: 1 }) },
   // Rises, rubs an eye and yawns, stretches, then blinks awake.
-  waking: { glow: .5, stillAt: 1,
+  waking: { glow: .2, stillAt: 1,
     pose: t => {
       const rise = ramp(t, .3, .9), rub = ramp(t, .95, 1.1) * (1 - ramp(t, 1.85, 2.05)), stretch = ramp(t, 2, 2.25) * (1 - ramp(t, 2.6, 2.95));
       const fy = lerp(150, -4, rise), hLx = lerp(560, 506 + 16 * Math.cos(t * 13), rub), hLy = lerp(1092, 694 + 10 * Math.sin(t * 13), rub), hRx = lerp(696, HAND.R[0], rise);
@@ -326,14 +332,14 @@ export class VarinFigureRig {
   bit(side: Side): void {
     if (!this.animated) return;
     const x = (side === 'L' ? this.p.hLx : this.p.hRx) + (Math.random() - .5) * 60;
-    const colors = ['#8fb0ea', '#f4f4f7', '#f3c690', '#a9c2f2'];
+    const colors = ['#8fb0ea', '#c9d6f5', '#f3c690', '#a9c2f2'];
     const node = el('rect', { x: -9, y: -9, width: 18, height: 18, rx: 3, fill: colors[Math.floor(Math.random() * colors.length)] }, this.fxFront);
     this.parts.push({ node, x, y: 1030, vx: (Math.random() - .5) * 90, vy: -260 - Math.random() * 160, g: 120, r: 45, vr: (Math.random() - .5) * 200, s: .7 + Math.random() * .6, life: 0, max: .95 });
   }
 
   burst(count: number): void {
     if (!this.animated) return;
-    const colors = ['#ffd36e', '#8fb0ea', '#f4a9c0', '#ffffff', '#b8c9f5'];
+    const colors = ['#ffd36e', '#8fb0ea', '#f4a9c0', '#c9d6f5', '#b8c9f5'];
     for (let i = 0; i < count; i += 1) {
       const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.5, speed = 520 + Math.random() * 520, fill = colors[i % colors.length];
       const node = i % 2 === 0
@@ -352,8 +358,8 @@ export class VarinFigureRig {
       at = [1010, 360, 0, -170];
     } else if (kind === 'question') {
       node = el('g', {}, this.fxFront);
-      el('path', { d: 'M-20 -24 C-20 -50 22 -50 22 -22 C22 -4 0 -2 0 16', fill: 'none', stroke: '#e3e4f0', 'stroke-width': 13, 'stroke-linecap': 'round' }, node);
-      el('circle', { cx: 0, cy: 40, r: 8, fill: '#e3e4f0' }, node);
+      el('path', { d: 'M-20 -24 C-20 -50 22 -50 22 -22 C22 -4 0 -2 0 16', fill: 'none', style: MARK_STROKE, 'stroke-width': 13, 'stroke-linecap': 'round' }, node);
+      el('circle', { cx: 0, cy: 40, r: 8, style: MARK_FILL }, node);
       at = [220, 230, 0, -40];
     } else {
       node = el('path', { d: 'M0 -30 Q4 -4 30 0 Q4 4 0 30 Q-4 4 -30 0 Q-4 -4 0 -30 Z', fill: '#ffd36e' }, this.fxFront);
@@ -542,8 +548,8 @@ export class VarinFigureRig {
 
   private pointerLook(): [number, number] {
     if (!pointer || typeof this.host.getBoundingClientRect !== 'function') return [0, 0];
-    const r = this.host.getBoundingClientRect(), s = r.width / 1188;
-    const dx = pointer.x - (r.left + (628 - 34) * s), dy = pointer.y - (r.top + (690 - 30) * s);
+    const r = this.host.getBoundingClientRect(), [x0, y0, span] = VIEW_ORIGIN, s = r.width / span;
+    const dx = pointer.x - (r.left + (628 - x0) * s), dy = pointer.y - (r.top + (690 - y0) * s);
     const d = Math.hypot(dx, dy) || 1, k = Math.min(1, d / (r.width * .55 || 1));
     return [dx / d * k, dy / d * k];
   }
@@ -622,7 +628,7 @@ export class VarinFigureRig {
     const hand = (h: { g: SVGGElement; sh: SVGEllipseElement }, x: number, y: number, s: number): void => {
       h.g.setAttribute('transform', `translate(${x} ${y}) scale(${s})`);
       h.g.style.display = c ? 'none' : '';
-      h.sh.setAttribute('opacity', String(lerp(.28, .45, clamp(1 - (HAND.L[1] - y) / 90))));
+      h.sh.setAttribute('opacity', String(lerp(.12, .22, clamp(1 - (HAND.L[1] - y) / 90))));
     };
     hand(this.hands[0], p.hLx, p.hLy, p.hLs);
     hand(this.hands[1], p.hRx, p.hRy, p.hRs);
@@ -691,10 +697,19 @@ export class VarinFigureRig {
       for (const [fill, d] of layer) el('path', { fill, d, 'fill-rule': 'evenodd' }, parent);
     };
 
-    // The room behind her, a state-coloured glow, then everything above the sill.
-    el('rect', { x: 0, y: 0, width: 1254, height: 1254, fill: '#1c202b' }, svg);
-    el('circle', { cx: 628, cy: 600, r: 660, fill: `url(#${u}g)` }, svg);
-    this.fig = el('g', {}, el('g', { 'clip-path': above }, svg));
+    // No backdrop: a state-coloured aura that fades out well inside the box, then everything above the ledge.
+    el('circle', { cx: 628, cy: 640, r: 520, fill: `url(#${u}g)` }, svg);
+    const aboveLedge = el('g', { 'clip-path': above }, svg);
+    if (this.compact) {
+      // The head crop fades out below the chin instead of ending in a hard edge.
+      const fade = el('linearGradient', { id: `${u}m`, gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: 850, y2: 980 }, defs);
+      el('stop', { offset: 0, 'stop-color': '#ffffff' }, fade);
+      el('stop', { offset: 1, 'stop-color': '#000000' }, fade);
+      const mask = el('mask', { id: `${u}mk`, maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 1254, height: 1254 }, defs);
+      el('rect', { x: 0, y: 0, width: 1254, height: 1254, fill: `url(#${u}m)` }, mask);
+      aboveLedge.setAttribute('mask', `url(#${u}mk)`);
+    }
+    this.fig = el('g', {}, aboveLedge);
 
     // Behind the chin: the shoulder area, the inside of the collar and a little neck.
     const under = el('g', {}, this.fig);
@@ -780,13 +795,12 @@ export class VarinFigureRig {
     el('path', { fill: '#2b2c33', d: 'M858 283 L932 285 L940 297 L924 322 L897 323 L862 384 L820 368 Z' }, clipGroup);
     el('path', { fill: '#7f9fe4', d: 'M889 325 L946 323 L966 343 L930 423 L845 423 L872 370 L880 364 L899 378 L912 355 L908 347 L887 331 Z' }, clipGroup);
 
-    // The window sill and the two ball hands resting on it.
-    el('rect', { x: 0, y: SILL, width: 1254, height: 154, fill: '#282c37' }, svg);
-    el('rect', { x: 0, y: SILL, width: 1254, height: 24, fill: '#373c49' }, svg);
+    // The ledge she leans on, in the theme's surface colour, and the two ball hands resting on it.
+    if (!this.compact) el('rect', { x: 30, y: SILL, width: 1194, height: 40, rx: 20, style: 'fill: var(--bot-figure-ledge, #e3e5eb)' }, svg);
     const hands = el('g', { 'clip-path': lower }, svg);
     this.hands = [-1, 1].map(side => {
       const g = el('g', {}, hands);
-      const sh = el('ellipse', { cx: 0, cy: 14, rx: 66, ry: 64, fill: '#0d0f17', opacity: .45 }, g);
+      const sh = el('ellipse', { cx: 0, cy: 14, rx: 66, ry: 64, style: 'fill: var(--bot-figure-shadow, #141828)', opacity: .22 }, g);
       el('circle', { cx: 0, cy: 0, r: 68, fill: '#efc3b7' }, g);
       el('circle', { cx: -side * 7, cy: -8, r: 61, fill: SKIN }, g);
       return { g, sh };
@@ -799,7 +813,7 @@ export class VarinFigureRig {
     el('circle', { r: 44, fill: '#f3b562' }, this.badge);
     el('rect', { x: -7, y: -26, width: 14, height: 32, rx: 7, fill: '#3a2a12' }, this.badge);
     el('circle', { cx: 0, cy: 19, r: 7.5, fill: '#3a2a12' }, this.badge);
-    this.zz = [0, 1, 2].map(() => el('path', { d: 'M-17 -15 H17 L-17 15 H17', fill: 'none', stroke: '#c9cde0', 'stroke-width': 7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0 }, this.fxFront));
-    this.dots = [[236, 238, 15], [172, 176, 21], [102, 106, 28]].map(([x, y, r]) => ({ x, y, n: el('circle', { cx: x, cy: y, r, fill: '#e3e4f0', opacity: 0 }, this.fxFront) }));
+    this.zz = [0, 1, 2].map(() => el('path', { d: 'M-17 -15 H17 L-17 15 H17', fill: 'none', style: MARK_STROKE, 'stroke-width': 7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0 }, this.fxFront));
+    this.dots = [[236, 238, 15], [172, 176, 21], [102, 106, 28]].map(([x, y, r]) => ({ x, y, n: el('circle', { cx: x, cy: y, r, style: MARK_FILL, opacity: 0 }, this.fxFront) }));
   }
 }
