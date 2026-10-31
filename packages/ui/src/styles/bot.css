@@ -4,82 +4,21 @@
  * tokens in motion.css; reduced and off levels are handled there globally.
  */
 
-/* ── Figure (§5.7). Placeholder drawing; the art replaces the SVG, the states stay. ─────────── */
+/* ── Figure (§5.7, docs/design/varin-figure.md). Drawn and animated by workbenches/bot/varinFigureRig.
+   It brings its own dark "room" behind the window sill, so it reads the same on light and dark themes. */
 .bot-figure {
-  --bot-figure-shell: color-mix(in srgb, var(--surface-elevated, var(--background)) 94%, var(--foreground));
-  --bot-figure-line: var(--foreground);
-  --bot-figure-visor: #20272a;
-  --bot-figure-visor-rest: #3b4245;
-  --bot-figure-eye: #eeeee8;
   position: relative;
   display: inline-block;
   flex: none;
+  overflow: hidden;
+  border-radius: 24%;
+  background: #1c202b;
 }
-.dark .bot-figure {
-  --bot-figure-shell: color-mix(in srgb, var(--surface-elevated, var(--background)) 90%, var(--foreground));
-  --bot-figure-visor: #0b0b0b;
-  --bot-figure-visor-rest: #1a1a1a;
-}
-/* Positioned so it paints above the glow that sits behind it. */
-.bot-figure svg { position: relative; display: block; width: 100%; height: 100%; overflow: visible; }
-.bot-figure-body { transform-box: view-box; transform-origin: 50% 90%; }
-.bot-figure-shell { fill: var(--bot-figure-shell); stroke: var(--bot-figure-line); stroke-width: 3; transition: fill 500ms var(--motion-ease-out); }
-.bot-figure-visor { fill: var(--bot-figure-visor); transition: fill 600ms var(--motion-ease-out); }
-.bot-figure-eyes { transform-box: view-box; transition: transform var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out); }
-.bot-figure-eye { fill: var(--bot-figure-eye); transform-box: fill-box; transform-origin: 50% 50%; transition: transform var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out); }
-.bot-figure-closed, .bot-figure-happy { fill: none; stroke: var(--bot-figure-eye); stroke-width: 3.6; stroke-linecap: round; opacity: 0; transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
-.bot-figure-zz { opacity: 0; transition: opacity 400ms var(--motion-ease-out); }
-.bot-figure-zz text { font: 700 11px var(--font-sans, system-ui); fill: var(--muted-foreground); }
-.bot-figure-glow {
-  /* It sits behind the drawing, so the warm light has to reach past the shell's edge to be seen. */
-  position: absolute; inset: -30%; border-radius: 50%; pointer-events: none; opacity: 0;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--status-warning) 40%, transparent) 55%, transparent 100%);
-  transition: opacity 500ms var(--motion-ease-out);
-}
-.bot-figure[data-state="idle"] .bot-figure-eye { animation: bot-blink 5.6s infinite; }
-.bot-figure[data-state="listening"] .bot-figure-eye { transform: scale(1.08, 1.14); }
-.bot-figure[data-state="listening"] .bot-figure-eyes { transform: translateY(-1px); }
-.bot-figure[data-state="thinking"] .bot-figure-eyes { animation: bot-think 3.4s var(--motion-ease-out) infinite; }
-.bot-figure[data-state="thinking"] .bot-figure-eye { transform: scaleY(.9); }
-.bot-figure[data-state="working"] .bot-figure-eyes { transform: translateY(4px); }
-.bot-figure[data-state="working"] .bot-figure-eye { transform: scaleY(.8); }
-.bot-figure[data-state="working"] .bot-figure-body { animation: bot-bob 2.6s ease-in-out infinite; }
-.bot-figure[data-state="waiting"] .bot-figure-eye { transform: scale(1.1); }
-/* Entering "needs you" it hops once, then the warm glow breathes. */
-.bot-figure[data-state="waiting"] .bot-figure-body { animation: bot-hop var(--motion-dur-settle) var(--motion-ease-settle) 1; }
-.bot-figure[data-state="waiting"] .bot-figure-glow { opacity: 1; animation: bot-glow 2.4s ease-in-out infinite; }
-.bot-figure[data-state="result"] .bot-figure-eyes { opacity: 0; }
-.bot-figure[data-state="result"] .bot-figure-happy { opacity: 1; }
-.bot-figure[data-state="result"] .bot-figure-body { animation: bot-press var(--motion-dur-settle) var(--motion-ease-settle) 1; }
-.bot-figure[data-state="sleeping"] .bot-figure-eyes { opacity: 0; }
-.bot-figure[data-state="sleeping"] .bot-figure-closed { opacity: 1; }
-.bot-figure[data-state="sleeping"] .bot-figure-visor { fill: var(--bot-figure-visor-rest); }
-.bot-figure[data-state="sleeping"] .bot-figure-zz { opacity: 1; }
-.bot-figure[data-state="sleeping"] .bot-figure-zz text { animation: bot-zz 3s ease-in-out infinite; }
-.bot-figure[data-state="sleeping"] .bot-figure-zz text:nth-child(2) { animation-delay: 1s; }
-.bot-figure[data-state="sleeping"] .bot-figure-zz text:nth-child(3) { animation-delay: 2s; }
-.bot-figure[data-state="sleeping"] .bot-figure-body { animation: bot-snooze 4s ease-in-out infinite; }
-.bot-figure[data-state="waking"] .bot-figure-eye { animation: bot-wake 1.4s var(--motion-ease-out) infinite; }
-.bot-figure[data-state="offline"] svg { filter: grayscale(1); opacity: .5; }
-.bot-figure[data-state="offline"] .bot-figure-eye { opacity: .45; }
-/* Small sizes only take the pose. */
-.bot-figure[data-still], .bot-figure[data-still] * { animation: none !important; }
-.bot-figure[data-still] .bot-figure-glow, .bot-figure[data-still] .bot-figure-zz { display: none; }
-/* Loops stop while nobody can see them. */
-:root[data-page-hidden] .bot-figure *, [data-offscreen] .bot-figure * { animation-play-state: paused !important; }
+.bot-figure svg { display: block; width: 100%; height: 100%; }
+.bot-figure[data-still] { border-radius: 26%; }
 /* A newly selected Bot's figure settles into place. */
 .bot-figure-arrive { animation: bot-figure-arrive var(--motion-dur-settle) var(--motion-ease-settle) backwards; }
 @keyframes bot-figure-arrive { from { opacity: 0; scale: .9; } }
-@keyframes bot-blink { 0%, 46%, 50%, 100% { transform: scaleY(1); } 48% { transform: scaleY(.12); } }
-@keyframes bot-think { 0%, 100% { transform: translate(4px, -3px); } 45%, 55% { transform: translate(-3px, -3px); } }
-@keyframes bot-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.6px); } }
-@keyframes bot-hop { 0%, 100% { transform: translateY(0); } 35% { transform: translateY(-5px); } }
-@keyframes bot-press { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.04, .94); } }
-@keyframes bot-glow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-@keyframes bot-zz { 0% { opacity: 0; transform: translate(0, 6px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(9px, -16px); } }
-@keyframes bot-snooze { 0%, 100% { transform: translateY(1.5px); } 50% { transform: translateY(0); } }
-@keyframes bot-wake { 0% { transform: scaleY(.15); } 30% { transform: scaleY(.6); } 40% { transform: scaleY(.2); } 70%, 100% { transform: scaleY(1); } }
-
 /* ── Small marks ───────────────────────────────────────────────────────────────────────── */
 .bot-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--status-info); }
 .bot-dot[data-tone="warn"] { background: var(--status-warning); }
@@ -194,7 +133,7 @@
 @media (max-height: 719px) {
   .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
   .bot-stage-figure { margin: 0; }
-  .bot-stage-figure .bot-figure { width: 40px !important; height: 36px !important; }
+  .bot-stage-figure .bot-figure { width: 40px !important; height: 40px !important; }
   .bot-stage-text { align-items: flex-start; }
   .bot-stage-name { padding: 0; font-size: 14px; line-height: 1.35; }
   .bot-stage-state { min-height: 18px; font-size: 12.5px; }
@@ -204,7 +143,7 @@
 /* In the phone sheet the stage is always the compact row, so the tabs get the room (§8). */
 .mobile-bottom-sheet .bot-stage { height: 64px; flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 0 44px 0 14px; }
 .mobile-bottom-sheet .bot-stage-figure { margin: 0; }
-.mobile-bottom-sheet .bot-stage-figure .bot-figure { width: 40px !important; height: 36px !important; }
+.mobile-bottom-sheet .bot-stage-figure .bot-figure { width: 40px !important; height: 40px !important; }
 .mobile-bottom-sheet .bot-stage-text { align-items: flex-start; }
 .mobile-bottom-sheet .bot-stage-name { padding: 0; font-size: 14px; line-height: 1.35; }
 .mobile-bottom-sheet .bot-stage-state { min-height: 18px; font-size: 12.5px; }
