@@ -1,0 +1,37 @@
+---
+title: 語音模式
+description: 對 Varin 說話，並聽它朗讀回覆。
+---
+
+# 語音模式
+
+語音模式讓你可以口述訊息，並讓回覆朗讀給你聽。在 **Settings → Varin → Voice** 中開啟它。
+
+## 朗讀回覆（文字轉語音）
+
+選擇回覆如何被朗讀：
+
+- **browser** — 你瀏覽器的內建語音，無需設定
+- **OpenAI** — OpenAI 的語音；貼上你的 API 金鑰並選擇一種語音
+- **OpenAI-compatible** — 任何使用 OpenAI 格式的服務；輸入它的 URL，以及（如有需要）一個 API 金鑰
+- **macOS say** — 內建的 `say` 命令，在擁有它的 Mac 上
+
+開啟後，你會在訊息上看到一個播放按鈕，可以聽它們被朗讀出來。
+
+## 口述訊息（語音轉文字）
+
+選擇你的語音如何被轉寫：
+
+- **本機** — 模型在所連線的 Varin 主機上執行，按需下載，之後可離線轉寫。
+- **server** — 一個 OpenAI 相容的轉寫服務；輸入它的 URL，以及（如有需要）一個 API 金鑰
+
+Whisper large-v3 Turbo 支援 100 種語言；Qwen3-ASR 0.6B 支援 30 種；SenseVoice Small 支援中文、英語、日語、韓語和粵語；Parakeet v3 支援 25 種歐洲語言。設定中顯示每個模型的語言覆寫和下載大小，可選擇識別語言或自動偵測。
+
+## 給手機的提示
+
+要在手機上朗讀回覆，OpenAI 或 OpenAI-compatible 選項最可靠 — 行動瀏覽器會限制內建語音。
+
+## 相關內容
+
+- [通知](/zh-tw/notifications/) — 改為收到提醒而不是聆聽
+- [模型渠道](/zh-tw/providers/) — 你的 OpenAI 金鑰可能已經存放在這裡

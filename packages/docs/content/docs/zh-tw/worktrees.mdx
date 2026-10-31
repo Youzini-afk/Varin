@@ -1,0 +1,15 @@
+---
+title: Worktree 會話
+description: 為會話提供獨立的分支和資料夾，讓工作保持隔離。
+---
+
+# Worktree 會話
+
+開啟專案的 **Worktrees** 頁面並建立 worktree 對話。Varin 建立 Git 分支和目錄、執行專案初始化命令，再為該目錄開啟原生 Thread。專案必須是 Git 儲存庫。
+
+在 Git 檢視中檢查、提交和整合修改。Worktree 隔離不同檢出目錄的檔案，但命令仍可能影響目錄之外的內容。
+
+若對話建立失敗或結果未知，worktree 會保留在原 Host。重試前先檢查。歸檔或刪除 Thread 本身不會刪除 Git worktree；請在專案的 worktree/Git 控制元件中單獨管理目錄與分支。
+
+- [Multi-run](/zh-tw/multi-run/)
+- [Git 與 GitHub 工作流程](/zh-tw/git/)

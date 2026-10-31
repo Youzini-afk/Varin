@@ -1,0 +1,41 @@
+---
+title: 桌面版隧道
+description: 從桌面應用程式建立 Cloudflare 或 Ngrok 隧道。
+---
+
+# 桌面版隧道
+
+桌面應用程式可以在 **Settings → Varin → Tunnel** 中建立公開隧道。這個流程不需要你從 CLI 啟動 Varin。
+
+## 安裝提供商
+
+Varin 會在你的機器上啟動提供商 CLI。請先安裝你想使用的提供商：
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare 使用 `cloudflared`。Ngrok 需要 ngrok 帳號，以及從 ngrok dashboard 獲取的 authtoken：
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## 從應用程式啟動
+
+1. 開啟 **Settings → Varin → Tunnel**。
+2. 選擇 **Cloudflare** 或 **Ngrok**。
+3. 啟動 quick tunnel。
+4. 用手機掃描產生的 QR code。
+
+Ngrok 目前支援 quick tunnels。Cloudflare 支援 quick tunnels 和 Cloudflare 託管模式。
+
+## 存取保護
+
+即使提供商 URL 本身是公開的，Varin 仍會用自己的 connect token 保護存取。產生的連線連結包含一次性 token，有 TTL；當你產生新連結或停止/重啟隧道時，舊的未使用連結會被撤銷。
+
+## 相關內容
+
+- [隧道](/zh-tw/tunnels/) — CLI 隧道用法和 Cloudflare 託管模式
+- [PWA 與行動存取](/zh-tw/mobile/) — 從手機存取 Varin

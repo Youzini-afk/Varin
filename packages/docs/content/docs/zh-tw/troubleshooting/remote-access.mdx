@@ -1,0 +1,47 @@
+---
+title: 遠端存取
+description: 修復隧道、遠端執行個體，以及從另一台裝置存取 Varin 的問題。
+---
+
+# 遠端存取
+
+當你無法從手機或另一台機器存取 Varin 時，修復方法取決於你的連線方式。
+
+## 先檢查基礎項
+
+- 先在同一台電腦上開啟 `http://localhost:3000` — 如果這都失敗，那就不是遠端問題；參閱 [疑難排解](/zh-tw/troubleshooting/)
+- 用 `varin status` 確認伺服器正在執行
+
+## 已配對裝置無法連線
+
+- QR code / 配對連結**只能使用一次** — 如果它已被掃描過（或已過期），從 **新增裝置** 建立一個新的
+- 如果裝置是用 **僅家用網路** 配對的，它無法從該網路之外連線 — 用 **任何地方** 重新配對
+- **任何地方** 需要中繼：如果它在 **新增裝置** 中是灰色的，說明伺服器沒有設定 `VARIN_RELAY_URL`；如果已設定，確認伺服器能存取它指向的中繼
+- 如果裝置已被**撤銷**，它的權杖就永久失效了 — 用新的 QR code 重新配對
+
+關於這些連線的工作原理，參閱 [連線裝置](/zh-tw/connect-devices/) 和 [Private Relay](/zh-tw/private-relay/)。
+
+## 隧道連結無法使用
+
+- 執行 `varin tunnel status --all`
+- 從同一個實例和埠重啟隧道
+- 如果之前的連線連結已被使用過，重新產生它
+
+完整設定請參閱 [隧道](/zh-tw/tunnels/)。
+
+## 遠端執行個體無法連線（桌面版）
+
+當某個 [遠端執行個體](/zh-tw/remote-instances/) 停滯時，Varin 會指出失敗的步驟：
+
+- **auth** — 你的 SSH 或 UI 密碼被拒絕；重新輸入它
+- **install / start** — Varin 無法在遠端機器上設定或啟動伺服器；檢查該機器的要求
+- **forwarding** — 連線已建立但埠沒有到達你；嘗試一個不同的本機埠
+
+## 在你自己的伺服器後面
+
+如果你把 Varin 放在反向代理後面，而它載入異常或無法連線，請參閱 [反向代理](/zh-tw/reverse-proxy/)。
+
+## 相關內容
+
+- [連線裝置](/zh-tw/connect-devices/) · [Private Relay](/zh-tw/private-relay/) · [隧道](/zh-tw/tunnels/) · [遠端執行個體](/zh-tw/remote-instances/) · [反向代理](/zh-tw/reverse-proxy/)
+- [安全](/zh-tw/security/) — 在公開 UI 之前保護它

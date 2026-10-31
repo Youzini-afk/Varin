@@ -1,0 +1,35 @@
+---
+title: 疑難排解
+description: 常見的設定與執行問題及快速解決方法。
+---
+
+# 疑難排解
+
+遇到問題了？在下面找到對應的現象，試試相應的解決方法。
+
+## Varin 命令退出或無法啟動
+
+- 確認 Node.js `>=22.19`（Node.js 24 是受支援的開發基線）
+- 在原始碼檢出中，執行 `bun run dev` 或 `bun run start:web`
+- 如果你有已釋出的 CLI，執行 `varin --version`，必要時重新安裝
+
+## 無法存取 Web UI
+
+- 在原始碼檢出中，檢視啟動 `bun run dev` 的那個終端機
+- 如果你有已釋出的 CLI，用 `varin logs` 檢視伺服器日誌
+- 確認活動埠（開發使用 Vite URL；伺服器預設是 `3000`）
+- 在測試隧道連結之前，先直接開啟 `http://localhost:3000`
+
+## 遠端/隧道連結無法使用
+
+- 在已安裝 CLI 時執行 `varin tunnel status --all`
+- 從同一實例/埠重啟隧道
+- 如果之前的權杖已被使用，請重新產生連線連結
+
+完整設定請參閱[隧道](/zh-tw/tunnels/)；如果你使用反向代理，請參閱[反向代理](/zh-tw/reverse-proxy/)。
+
+## 相關內容
+
+- [快速開始](/zh-tw/quickstart/)
+- [隧道](/zh-tw/tunnels/)
+- [反向代理](/zh-tw/reverse-proxy/)

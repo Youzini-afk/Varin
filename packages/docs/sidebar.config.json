@@ -4,6 +4,7 @@
       "label": "Start here",
       "translations": {
         "zh-CN": "从这里开始",
+        "zh-TW": "從這裡開始",
         "fr": "Commencer ici",
         "ja": "ここから開始"
       },
@@ -13,6 +14,7 @@
           "link": "/",
           "translations": {
             "zh-CN": "Varin 文档",
+            "zh-TW": "Varin 文件",
             "fr": "Documentation Varin",
             "ja": "Varin ドキュメント"
           }
@@ -22,6 +24,7 @@
           "link": "/install/",
           "translations": {
             "zh-CN": "安装",
+            "zh-TW": "安裝",
             "fr": "Installation",
             "ja": "インストール"
           }
@@ -31,6 +34,7 @@
           "link": "/quickstart/",
           "translations": {
             "zh-CN": "快速开始",
+            "zh-TW": "快速開始",
             "fr": "Démarrage rapide",
             "ja": "クイックスタート"
           }
@@ -40,6 +44,7 @@
           "link": "/environment/",
           "translations": {
             "zh-CN": "环境变量",
+            "zh-TW": "環境變數",
             "fr": "Variables d’environnement",
             "ja": "環境変数"
           }
@@ -50,6 +55,7 @@
       "label": "Workflows",
       "translations": {
         "zh-CN": "工作流",
+        "zh-TW": "工作流程",
         "fr": "Workflows",
         "ja": "ワークフロー"
       },
@@ -59,6 +65,7 @@
           "link": "/projects/",
           "translations": {
             "zh-CN": "项目",
+            "zh-TW": "專案",
             "fr": "Projets",
             "ja": "プロジェクト"
           }
@@ -68,6 +75,7 @@
           "link": "/context/",
           "translations": {
             "zh-CN": "上下文",
+            "zh-TW": "上下文",
             "fr": "Contexte",
             "ja": "コンテキスト"
           }
@@ -77,6 +85,7 @@
           "link": "/attachments/",
           "translations": {
             "zh-CN": "图片与 PDF",
+            "zh-TW": "圖片與 PDF",
             "fr": "Images et PDF",
             "ja": "画像と PDF"
           }
@@ -86,6 +95,7 @@
           "link": "/notes-todos-plans/",
           "translations": {
             "zh-CN": "项目笔记、待办与计划",
+            "zh-TW": "專案筆記、待辦與計劃",
             "fr": "Notes, todos et plans de projet",
             "ja": "プロジェクトのメモ、Todo、計画"
           }
@@ -95,6 +105,7 @@
           "link": "/scheduled-tasks/",
           "translations": {
             "zh-CN": "计划任务与后续任务",
+            "zh-TW": "計劃任務與後續任務",
             "fr": "Tâches planifiées et suivis",
             "ja": "予定タスクとフォローアップ"
           }
@@ -104,6 +115,7 @@
           "link": "/agent-control-tool/",
           "translations": {
             "zh-CN": "Agent 工具",
+            "zh-TW": "Agent 工具",
             "fr": "Outils de l’agent",
             "ja": "Agent ツール"
           }
@@ -113,6 +125,7 @@
           "link": "/session-goals/",
           "translations": {
             "zh-CN": "持续目标",
+            "zh-TW": "持續目標",
             "fr": "Objectifs continus",
             "ja": "継続目標"
           }
@@ -122,6 +135,7 @@
           "link": "/project-actions/",
           "translations": {
             "zh-CN": "项目操作",
+            "zh-TW": "專案操作",
             "fr": "Actions de projet",
             "ja": "プロジェクトアクション"
           }
@@ -131,6 +145,7 @@
           "link": "/worktrees/",
           "translations": {
             "zh-CN": "Worktree 会话",
+            "zh-TW": "Worktree 會話",
             "fr": "Sessions worktree",
             "ja": "Worktree セッション"
           }
@@ -140,6 +155,7 @@
           "link": "/multi-run/",
           "translations": {
             "zh-CN": "Multi-run",
+            "zh-TW": "Multi-run",
             "fr": "Multi-run",
             "ja": "Multi-run"
           }
@@ -149,6 +165,7 @@
           "link": "/git/",
           "translations": {
             "zh-CN": "Git 与 GitHub 工作流",
+            "zh-TW": "Git 與 GitHub 工作流程",
             "fr": "Workflows Git et GitHub",
             "ja": "Git と GitHub ワークフロー"
           }
@@ -158,6 +175,7 @@
           "link": "/github/",
           "translations": {
             "zh-CN": "GitHub Issue 与 PR",
+            "zh-TW": "GitHub Issue 與 PR",
             "fr": "Issues et PR GitHub",
             "ja": "GitHub Issues と PR"
           }
@@ -167,6 +185,7 @@
           "link": "/agent-personalization/",
           "translations": {
             "zh-CN": "Agent 记忆与系统提示词",
+            "zh-TW": "Agent 記憶與系統提示詞",
             "fr": "Mémoire et instructions de l’agent",
             "ja": "Agent のメモリと指示"
           }
@@ -176,6 +195,7 @@
           "link": "/git-identities/",
           "translations": {
             "zh-CN": "Git 身份",
+            "zh-TW": "Git 身份",
             "fr": "Identités Git",
             "ja": "Git ID"
           }
@@ -186,6 +206,7 @@
       "label": "Agent setup",
       "translations": {
         "zh-CN": "Agent 设置",
+        "zh-TW": "Agent 設定",
         "fr": "Configuration de l’agent",
         "ja": "エージェント設定"
       },
@@ -195,6 +216,7 @@
           "link": "/providers/",
           "translations": {
             "zh-CN": "模型渠道",
+            "zh-TW": "模型渠道",
             "fr": "Canaux de modèles",
             "ja": "モデルチャネル"
           }
@@ -204,6 +226,7 @@
           "link": "/mcp/",
           "translations": {
             "zh-CN": "MCP Servers",
+            "zh-TW": "MCP Servers",
             "fr": "Serveurs MCP",
             "ja": "MCP サーバー"
           }
@@ -213,6 +236,7 @@
           "link": "/skills/",
           "translations": {
             "zh-CN": "技能",
+            "zh-TW": "技能",
             "fr": "Skills",
             "ja": "スキル"
           }
@@ -222,6 +246,7 @@
           "link": "/skills-catalog/",
           "translations": {
             "zh-CN": "技能资源库",
+            "zh-TW": "技能資源庫",
             "fr": "Bibliothèque de skills",
             "ja": "スキルライブラリ"
           }
@@ -231,6 +256,7 @@
           "link": "/commands/",
           "translations": {
             "zh-CN": "命令",
+            "zh-TW": "命令",
             "fr": "Commandes",
             "ja": "コマンド"
           }
@@ -240,6 +266,7 @@
           "link": "/usage/",
           "translations": {
             "zh-CN": "分支 token 用量",
+            "zh-TW": "分支 token 用量",
             "fr": "Tokens utilisés par branche",
             "ja": "ブランチのトークン使用量"
           }
@@ -250,6 +277,7 @@
       "label": "Remote access",
       "translations": {
         "zh-CN": "远程访问",
+        "zh-TW": "遠端存取",
         "fr": "Accès distant",
         "ja": "リモートアクセス"
       },
@@ -259,6 +287,7 @@
           "link": "/connect-devices/",
           "translations": {
             "zh-CN": "连接设备",
+            "zh-TW": "連線裝置",
             "fr": "Connecter un appareil",
             "ja": "デバイスを接続する"
           }
@@ -268,6 +297,7 @@
           "link": "/private-relay/",
           "translations": {
             "zh-CN": "Private Relay",
+            "zh-TW": "Private Relay",
             "fr": "Relais privé",
             "ja": "Private Relay"
           }
@@ -277,6 +307,7 @@
           "link": "/tunnels/",
           "translations": {
             "zh-CN": "隧道",
+            "zh-TW": "隧道",
             "fr": "Tunnels",
             "ja": "トンネル"
           }
@@ -286,6 +317,7 @@
           "link": "/reverse-proxy/",
           "translations": {
             "zh-CN": "反向代理",
+            "zh-TW": "反向代理",
             "fr": "Reverse proxy",
             "ja": "リバースプロキシ"
           }
@@ -295,6 +327,7 @@
           "link": "/mobile/",
           "translations": {
             "zh-CN": "移动应用与 PWA",
+            "zh-TW": "行動應用程式與 PWA",
             "fr": "Applications mobiles et PWA",
             "ja": "モバイルアプリと PWA"
           }
@@ -304,6 +337,7 @@
           "link": "/security/",
           "translations": {
             "zh-CN": "安全",
+            "zh-TW": "安全",
             "fr": "Sécurité",
             "ja": "セキュリティ"
           }
@@ -314,6 +348,7 @@
       "label": "Customize",
       "translations": {
         "zh-CN": "自定义",
+        "zh-TW": "自訂",
         "fr": "Personnaliser",
         "ja": "カスタマイズ"
       },
@@ -323,6 +358,7 @@
           "link": "/themes/",
           "translations": {
             "zh-CN": "主题",
+            "zh-TW": "主題",
             "fr": "Thèmes",
             "ja": "テーマ"
           }
@@ -332,6 +368,7 @@
           "link": "/notifications/",
           "translations": {
             "zh-CN": "通知",
+            "zh-TW": "通知",
             "fr": "Notifications",
             "ja": "通知"
           }
@@ -341,6 +378,7 @@
           "link": "/voice/",
           "translations": {
             "zh-CN": "语音模式",
+            "zh-TW": "語音模式",
             "fr": "Mode vocal",
             "ja": "音声モード"
           }
@@ -350,6 +388,7 @@
           "link": "/project-icons/",
           "translations": {
             "zh-CN": "项目图标",
+            "zh-TW": "專案圖示",
             "fr": "Icônes de projet",
             "ja": "プロジェクトアイコン"
           }
@@ -360,6 +399,7 @@
       "label": "Desktop",
       "translations": {
         "zh-CN": "桌面端",
+        "zh-TW": "桌面版",
         "fr": "Desktop",
         "ja": "デスクトップ"
       },
@@ -369,6 +409,7 @@
           "link": "/remote-instances/",
           "translations": {
             "zh-CN": "远程实例",
+            "zh-TW": "遠端執行個體",
             "fr": "Instances distantes",
             "ja": "リモートインスタンス"
           }
@@ -378,6 +419,7 @@
           "link": "/desktop-browser/",
           "translations": {
             "zh-CN": "桌面浏览器",
+            "zh-TW": "桌面瀏覽器",
             "fr": "Navigateur desktop",
             "ja": "デスクトップブラウザ"
           }
@@ -387,6 +429,7 @@
           "link": "/desktop-tunnels/",
           "translations": {
             "zh-CN": "桌面端隧道",
+            "zh-TW": "桌面版隧道",
             "fr": "Tunnels desktop",
             "ja": "デスクトップトンネル"
           }
@@ -396,6 +439,7 @@
           "link": "/ssh-hosts-proxying/",
           "translations": {
             "zh-CN": "SSH 主机与代理",
+            "zh-TW": "SSH 主機與代理",
             "fr": "Hosts SSH et proxy",
             "ja": "SSH ホストとプロキシ"
           }
@@ -405,6 +449,7 @@
           "link": "/updates/",
           "translations": {
             "zh-CN": "更新",
+            "zh-TW": "更新",
             "fr": "Mises à jour",
             "ja": "更新"
           }
@@ -415,6 +460,7 @@
       "label": "Help",
       "translations": {
         "zh-CN": "帮助",
+        "zh-TW": "幫助",
         "fr": "Aide",
         "ja": "ヘルプ"
       },
@@ -424,6 +470,7 @@
           "link": "/troubleshooting/",
           "translations": {
             "zh-CN": "问题排查",
+            "zh-TW": "疑難排解",
             "fr": "Dépannage",
             "ja": "トラブルシューティング"
           }
@@ -433,6 +480,7 @@
           "link": "/troubleshooting/worktrees-git/",
           "translations": {
             "zh-CN": "Worktree 与 Git",
+            "zh-TW": "Worktree 與 Git",
             "fr": "Worktrees et Git",
             "ja": "Worktrees と Git"
           }
@@ -442,6 +490,7 @@
           "link": "/troubleshooting/remote-access/",
           "translations": {
             "zh-CN": "远程访问",
+            "zh-TW": "遠端存取",
             "fr": "Accès distant",
             "ja": "リモートアクセス"
           }

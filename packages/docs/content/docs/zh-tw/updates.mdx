@@ -1,0 +1,30 @@
+---
+title: 更新
+description: 在桌面版和網頁端保持 Varin 最新。
+---
+
+# 更新
+
+你如何更新 Varin 取決於你如何安裝它。在任何情況下，你都可以在 **Settings → About** 檢視目前版本。
+
+## 桌面應用程式
+
+桌面應用程式會對照 GitHub releases 檢查更新。當有可用更新時，Varin 會告訴你，在你選擇時下載它，並在下次重啟時安裝它。一切都由你掌控 — 沒有你的同意不會安裝任何東西。
+
+Android 上，直接用新版本的 APK 覆蓋安裝，配對資訊會保留。
+
+## Web / CLI
+
+如果你安裝的是已釋出的 CLI，可以從 **About** 用檢查和更新按鈕更新它，或從終端機更新：
+
+```bash
+varin update
+```
+
+Varin 會偵測它是如何安裝的（npm、pnpm、yarn 或 bun），並為你執行正確的更新。`@varin/web` 套件尚未上架公開 npm registry，因此這條路徑僅在釋出之後才適用。
+
+原始碼檢出用 Git 更新。Docker 部署透過拉取新的映像 digest 來更新。
+
+## 相關內容
+
+- [安裝](/zh-tw/install/) — 每個應用程式最初是如何安裝的

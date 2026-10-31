@@ -37,6 +37,7 @@ description: A short description of what the reader can do.
 | --- | --- | --- |
 | English | root | `label` |
 | Simplified Chinese | `zh-cn` | `zh-CN` |
+| Traditional Chinese | `zh-tw` | `zh-TW` |
 | French | `fr` | `fr` |
 | Japanese | `ja` | `ja` |
 
@@ -61,4 +62,4 @@ bun run docs:validate
 
 This checks required frontmatter, page/sidebar routes and engineering-document local links.
 Review behavior, translations and executable examples separately. Rendering and publishing are
-described in [DEPLOYMENT.md](DEPLOYMENT.md); this package currently has no site renderer.
+described in [DEPLOYMENT.md](DEPLOYMENT.md); the website renders these pages with Starlight.

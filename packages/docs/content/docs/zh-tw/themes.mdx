@@ -1,0 +1,34 @@
+---
+title: 主題
+description: 使用內建主題和使用者自訂主題來自訂 Varin。
+---
+
+# 主題
+
+Varin 支援內建主題和自訂主題 JSON 檔案。
+
+## 新增自訂主題
+
+1. 建立主題目錄：
+
+```bash
+# Linux (default data directory)
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/varin/themes"
+```
+
+2. 將你的 JSON 檔案新增到該目錄（例如 `my-theme.json`）。
+3. 開啟 Varin，然後前往 **Settings → Appearance → Reload themes**。
+4. 從下拉選單中選擇你的主題。它會立即生效。
+
+## 主題位置
+
+- Linux: `$XDG_CONFIG_HOME/varin/themes/` (`~/.config/varin/themes/`)
+- macOS: `~/Library/Application Support/Varin/themes/`
+- Windows: `%APPDATA%/Varin/themes/`
+- `VARIN_DATA_DIR`: `$VARIN_DATA_DIR/themes/`
+
+## 完整 JSON 格式參考
+
+請使用主儲存庫文件中的完整格式指南：
+
+- [`docs/ops/CUSTOM_THEMES.md`](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/CUSTOM_THEMES.md)

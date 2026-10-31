@@ -1,0 +1,92 @@
+---
+title: 環境變數
+description: 用環境變數設定 Varin 伺服器、終端機、Git、語音和隧道。
+---
+
+# 環境變數
+
+Varin 會在啟動時讀取這些環境變數。對於開機啟動服務，`varin startup enable` 預設會儲存目前環境的快照，所以如果你改了希望服務使用的變數，請重新執行它。
+
+這些變數設定 Application Host 與平台服務。模型帳號在「設定 → 模型渠道」中設定；更改資料目錄不會匯入或遷移現有儲存。
+
+## Varin 伺服器
+
+### `VARIN_HOST`
+
+Varin Web 伺服器的繫結位址。使用 `0.0.0.0` 可允許其他機器存取。
+
+### `VARIN_UI_PASSWORD`
+
+瀏覽器 UI 的密碼。當你繫結到 localhost 之外、使用隧道或執行在反向代理後面時，請設定它。
+
+### `VARIN_API_ONLY`
+
+設為 `true` 或 `1` 時，以無介面模式啟動 Varin。API 路由仍可供桌面和行動用戶端使用，但不提供瀏覽器 UI。
+
+### `VARIN_DATA_DIR`
+
+覆寫 Varin 資料目錄。預設值：Linux 為 `$XDG_CONFIG_HOME/varin`（或 `~/.config/varin`）；macOS 為 `~/Library/Application Support/Varin`；Windows 為 `%APPDATA%/Varin`。
+
+### `VARIN_COMPRESS_API`
+
+控制 API 回應壓縮。用 `true` 或 `1` 強制開啟，用 `false` 或 `0` 強制關閉。
+
+### `VARIN_SKIP_API_COMPRESSION`
+
+設為 `true` 或 `1` 時停用 API 回應壓縮。此設定優先於 `VARIN_COMPRESS_API`。
+
+### `VARIN_VERBOSE_REQUEST_LOGS`
+
+設為 `true` 或 `1` 時啟用詳細的 HTTP 請求日誌。
+
+### `VARIN_UPDATE_API_URL`
+
+覆寫更新檢查 API 端點。大多數使用者應保持未設定。
+
+### `VARIN_PACKAGE_MANAGER`
+
+當自動偵測出錯時，強制更新操作使用的套件管理器。
+
+## 終端機和 Git
+
+### `VARIN_TERMINAL_SHELL`
+
+Varin 終端機會話使用的 shell 可執行檔案。
+
+### `VARIN_GIT_BINARY`
+
+Varin Git 功能使用的 Git 可執行檔案。
+
+### `GIT_BINARY`
+
+備用的 Git 可執行檔案覆寫。Varin 專用設定請優先使用 `VARIN_GIT_BINARY`。
+
+## 語音和隧道
+
+### `OPENAI_API_KEY`
+
+Varin 語音功能呼叫 OpenAI 相容服務時使用的 API 金鑰。
+
+### `VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+設為 `true` 或 `1` 時，允許語音功能使用遠端 OpenAI 相容 base URL。
+
+### `NGROK_AUTHTOKEN`
+
+Varin 隧道命令使用的 ngrok auth token。你也可以用 `ngrok config add-authtoken <token>` 設定 ngrok。
+
+## Private Relay
+
+### `VARIN_RELAY_URL`
+
+伺服器為 **任何地方** 配對而連出的 [Private Relay](/zh-tw/private-relay/) 端點，必須是 `ws://` 或 `wss://`。Varin 沒有預設中繼：不設定這個變數時，**任何地方** 不可用，伺服器也不會連線任何中繼。`varin connect-url --relay` 也要設為同一個值。
+
+## 執行環境輔助
+
+### `BUN_BINARY`
+
+Varin 在啟動守護程序時應使用的 Bun 可執行檔案。
+
+### `BUN_INSTALL`
+
+Bun 安裝根目錄。Varin 用它查詢 `bin/bun`，用於守護程序啟動和更新。

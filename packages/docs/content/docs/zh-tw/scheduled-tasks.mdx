@@ -1,0 +1,43 @@
+---
+title: "計劃任務與後續任務"
+description: "按日曆啟動原生工作，或按條件繼續對話。"
+---
+
+# 計劃任務與後續任務
+
+## 日曆任務
+
+開啟排程器並選擇專案。建立任務時填寫指令，選擇單次、每天、每週或 cron 日程，指定 IANA 時區，以及錯過時段的處理方式：跳過，或補跑最近一次。
+
+**New work** 每次建立新的 Thread，需選擇已註冊模型、來源，以及唯讀快照、隔離可寫副本或即時工作目錄；還可啟用 **Continuing Goal** 和輸出 token 預算。**Existing work** 指向精確的 Thread 和分支，沿用其模型、來源、權限和目標。
+
+準備完成後啟用日程。**Run now** 表示受理一次執行，不表示已經完成；在對應對話中檢視結果。停用定義會掛起尚未交付的計劃工作，停止某次執行不會停用未來時段。Application Host 必須保持執行。
+
+## Markdown 迴圈
+
+專案 `.agents/loops/` 或使用者 `~/.agents/loops/` 中的檔案可定義 cron 任務。將範例 ID 替換為已儲存模型渠道中的實際 ID：
+
+```markdown
+---
+name: daily-review
+runtime: agent
+schedule: "0 9 * * *"
+timezone: UTC
+enabled: false
+target:
+  kind: new_work
+  model: { providerId: my-channel, modelId: my-model }
+  source: { kind: project }
+  sourceMode: fixed_branch
+  goal: null
+---
+總結昨天以來的儲存庫變化。
+```
+
+檔案是定義的權威來源，編輯使用版本檢查，發現過程不改寫檔案。必須提供 `runtime: agent`、原生 `target`、明確時區、名稱、cron 日程和正文。不支援的舊定義不會自動匯入或改寫。原生定義被改成無效內容後，上一有效任務會暫停等待修復。
+
+## 對話後續任務
+
+使用排程器的 **Follow-ups** 或對話中的 **Schedule a follow-up**。可在指定時間、程序或作業停止、檔案條件、科研產物或收集結果、日誌事件、機器指標閾值滿足時繼續原對話，也可組合任意或全部條件。
+
+選擇單次，或對支援的重複條件選擇每次觀察到的變化。暫停、未回答問題和目標限額仍然有效；觀察中斷可能遺漏變化。可暫停、恢復、取消並檢視發生記錄。取消阻止未來及未交付工作，已有結果和被觀察作業仍保留。

@@ -1,0 +1,186 @@
+---
+title: 反向代理
+description: 在 Nginx、Nginx Proxy Manager 或其他反向代理後正確設定 Varin。
+---
+
+# 反向代理
+
+如果你在 Nginx、Nginx Proxy Manager、Caddy、Cloudflare 或其他反向代理後執行 Varin，請使用本頁。
+
+## 在代理之前
+
+1. 先確認 Varin 可以直接工作。
+2. 從同一網路開啟 `http://<server-ip>:3000` 或你的自訂埠。
+3. 只有在直接連線可用之後，才新增反向代理。
+
+## 代理必須支援的內容
+
+- WebSocket:
+  - `/api/dictation/ws`
+  - `/api/terminal/ws`
+  - `/api/varin/realtime-proxy/ws`
+- 不帶緩衝的 SSE：
+  - `/api/notifications/stream`
+  - `/api/varin/events`
+  - `/api/threads/observe`
+  - `/api/varin/realtime-proxy/sse`
+- 用於附件和檔案操作的大請求本文
+- 用於即時流和終端機會話的長讀取逾時
+
+## 重要規則
+
+- 啟用 WebSocket 代理。
+- 在 SSE 路由上停用緩衝。
+- 如果 Varin 已經壓縮回應，請在代理上停用 gzip。
+- 僅在一層中保持壓縮開啟。
+- 轉發常規代理標頭，例如 `Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
+- 如果使用者上傳檔案，請增大請求本文大小限制。
+
+## 快速檢查清單
+
+- Varin 可在 LAN 內直接存取
+- 代理中已啟用 WebSocket
+- SSE 路由已關閉緩衝
+- 代理主機上 `gzip off`，或以其他方式停用代理壓縮
+- `client_max_body_size` 足夠大以容納附件
+- `proxy_read_timeout` 足夠長以容納流
+
+## 範例：Nginx
+
+<details>
+<summary>顯示範例設定</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+## 範例：Nginx Proxy Manager
+
+在 Nginx Proxy Manager 中啟用 **Websockets Support**。在該主機的 Advanced 設定中使用上方 Nginx 範例的緩衝、請求本文大小和逾時設定，並保留相同的目前 WebSocket 與 SSE 路徑。
+
+## 常見故障跡象
+
+### 頁面能載入，但傳送訊息失敗
+
+- 檢查 `POST /api/threads/*` 的認證與轉發。
+- 確認 `GET /api/threads/observe` 以 SSE 流式傳輸，沒有緩衝或快取。
+
+### 通知或即時狀態不更新
+
+- 某個 SSE 路由被緩衝或快取
+- 缺少 `X-Accel-Buffering "no"`
+
+### 檔案上傳失敗
+
+- `client_max_body_size` 太小
+
+### 本機一切正常，但僅在代理後出問題
+
+- 代理正在壓縮和緩衝即時流量
+- 代理缺少 WebSocket 支援
+
+## 範例：Caddy
+
+<details>
+<summary>顯示範例設定</summary>
+
+```caddy
+reverse_proxy 127.0.0.1:3000 {
+    # WebSocket support is automatic in Caddy
+
+    # Flush SSE responses immediately
+    flush_interval -1
+
+    # Pass through Host and proxy headers
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+
+    # Increase timeouts for long-lived streams
+    transport http {
+        read_timeout 3600s
+        write_timeout 3600s
+    }
+}
+```
+
+</details>
+
+Caddy 會自動處理 WebSocket 升級 — 無需額外設定。`flush_interval -1` 指令可確保 SSE 資料塊立即轉發，不帶緩衝。
+
+## CDN 與雙重壓縮警告
+
+如果你在反向代理前面放置 CDN（例如 Cloudflare），請注意雙重壓縮：
+
+- Varin 使用 gzip 壓縮 HTTP 回應（閾值 1 KB）。
+- Cloudflare 和其他 CDN 預設也會壓縮回應。
+- 這可能導致回應被雙重壓縮或 `Content-Encoding` 標頭不正確。
+
+為避免這種情況，請在**一**層中停用壓縮：
+
+- **Cloudflare：** Rules → Compression → disable（或使用 "Passthrough" 模式）。
+- **Nginx：** `gzip off`（上面的範例已展示）。
+- **Caddy：** 如果上游已傳送壓縮內容，Caddy 預設不會重新壓縮。
+
+SSE 流式路由已被 Varin 排除在壓縮之外，但 CDN 仍可能緩衝它們。請查閱你的 CDN 文件，瞭解如何在 SSE 路徑上停用緩衝。
+
+## 相關
+
+- [隧道](/zh-tw/tunnels/)
+- [疑難排解](/zh-tw/troubleshooting/)

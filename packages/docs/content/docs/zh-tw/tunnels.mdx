@@ -1,0 +1,119 @@
+---
+title: 隧道
+description: 安全地將 Varin 開放給遠端和行動存取。
+---
+
+# 隧道
+
+隧道是指向你的 Varin 的一個公開連結，讓你可以在另一個網路上用普通瀏覽器存取它。使用 `varin tunnel` 為執行中的實例建立一個隧道。
+
+> 連線你**自己的裝置**（行動應用程式、另一台桌面裝置）通常不需要隧道 — 改為 [配對它們](/zh-tw/connect-devices/)，伺服器設定好中繼（`VARIN_RELAY_URL`）後，由端到端加密的 [Private Relay](/zh-tw/private-relay/) 處理外出存取。
+
+## 前置要求
+
+Varin 會在你的機器上啟動隧道提供商的 CLI。請先安裝你想使用的提供商：
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare 快速隧道可以透過 `cloudflared` 執行。Ngrok 需要 ngrok 帳號，以及從 ngrok dashboard 獲取的 authtoken：
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## 快速開始
+
+1. 啟動 Varin：
+
+```bash
+varin
+```
+
+如果跳過這一步，`varin tunnel start` 可以自動啟動 CLI 伺服器。自動啟動時可以傳入伺服器選項，例如 `--port`、`--host`、`--lan`、`--ui-password` 和 `--api-only`。
+
+2. 啟動 Cloudflare 隧道：
+
+```bash
+varin tunnel start --provider cloudflare --mode quick
+```
+
+或啟動 Ngrok 隧道：
+
+```bash
+varin tunnel start --provider ngrok --mode quick
+```
+
+3. 檢視狀態：
+
+```bash
+varin tunnel status
+```
+
+隧道建立後，`status` 會顯示一個公開 URL。開啟它，或掃描 QR code，即可從任何地方存取 Varin。
+
+預設情況下，Varin 會在互動式 TTY 會話中輸出 QR code。使用 `--qr` 強制輸出 QR code，或使用 `--no-qr` 將其停用。
+
+## 提供商
+
+- `cloudflare`：quick、managed remote 和 managed local 模式
+- `ngrok`：quick 模式
+
+## 託管模式
+
+### 託管遠端
+
+使用由 Cloudflare 託管的權杖 + 主機名稱：
+
+```bash
+varin tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### 託管本機
+
+使用本機的 `cloudflared` 設定：
+
+```bash
+varin tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## 設定檔（managed-remote）
+
+儲存一個可重用的設定檔：
+
+```bash
+varin tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+使用已儲存的設定檔啟動：
+
+```bash
+varin tunnel start --profile prod-main
+```
+
+## 實用命令
+
+```bash
+varin tunnel providers
+varin tunnel ready --provider cloudflare
+varin tunnel ready --provider ngrok
+varin tunnel doctor --provider cloudflare
+varin tunnel doctor --provider ngrok
+varin tunnel stop --port 3000
+```
+
+## 行為說明
+
+- 每個 Varin 實例（埠）只有一個活動隧道
+- 在同一實例上啟動新的模式/提供商會替換之前的隧道
+- 產生新的連線連結會弔銷之前未使用的連結
+
+## 相關內容
+
+- [連線裝置](/zh-tw/connect-devices/) — 無需公開 URL 即可配對你自己的裝置
+- [安全](/zh-tw/security/) — 在開放存取前保護 UI
+- [桌面版隧道](/zh-tw/desktop-tunnels/) — 無需從 CLI 啟動即可在桌面應用程式中設定隧道
+- [PWA 與行動存取](/zh-tw/mobile/) — 從手機存取 Varin
+- [疑難排解](/zh-tw/troubleshooting/) — 如果隧道連結無法使用

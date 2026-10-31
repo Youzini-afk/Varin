@@ -2,7 +2,7 @@
 
 # Varin 使用指南
 
-从连接模型、开始对话，到使用文件与工具，可以按手头的任务查找指南。这些 Markdown/MDX 文档可直接在仓库中阅读。
+从连接模型、开始对话，到使用文件与工具，可以按手头的任务查找指南。可以在 [varin.dev/docs](https://varin.dev/docs/) 阅读，也可以直接在仓库中阅读这些 Markdown/MDX 文件。
 
 ## 从这里开始
 
@@ -18,12 +18,12 @@
 
 ## 语言
 
-[English](content/docs/index.mdx) · [简体中文](content/docs/zh-cn/index.mdx) · [Français](content/docs/fr/index.mdx) · [日本語](content/docs/ja/index.mdx)
+[English](content/docs/index.mdx) · [简体中文](content/docs/zh-cn/index.mdx) · [繁體中文](content/docs/zh-tw/index.mdx) · [Français](content/docs/fr/index.mdx) · [日本語](content/docs/ja/index.mdx)
 
 ## 维护这些指南
 
 英文源页位于 `content/docs/`，译本存放在对应语种目录。`sidebar.config.json` 管理路由与导航标签。
 
-页面结构、链接和翻译约定见[编写指南](CONTRIBUTING.zh-CN.md)。在仓库根目录执行 `bun run docs:validate`，检查 frontmatter 与链接。渲染和发布状态见 [DEPLOYMENT.zh-CN.md](DEPLOYMENT.zh-CN.md)；本包当前保存文档源码，尚无独立文档站渲染器。
+页面结构、链接和翻译约定见[编写指南](CONTRIBUTING.zh-CN.md)。在仓库根目录执行 `bun run docs:validate`，检查 frontmatter 与链接。页面由官网渲染并发布，见 [DEPLOYMENT.zh-CN.md](DEPLOYMENT.zh-CN.md)。
 
 系统设计与代码贡献入口见[工程文档](../../docs/README.md)和[贡献指南](../../.github/translations/CONTRIBUTING.zh-CN.md)。

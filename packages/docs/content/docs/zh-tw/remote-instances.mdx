@@ -1,0 +1,46 @@
+---
+title: 遠端執行個體
+description: 透過 SSH 將桌面應用程式連線到另一台機器上的 Varin。
+---
+
+# 遠端執行個體
+
+桌面應用程式可以透過 SSH 連線到執行在另一台機器上的 Varin — 工作伺服器、雲主機、家庭實驗室 — 並把它的 UI 帶到你的螢幕上，彷彿它在本機一樣。在 **Settings → Remote Instances** 中設定它。
+
+
+## 新增遠端執行個體
+
+1. 開啟 **Settings → Remote Instances** 並新增一個。
+2. 給它你通常用來存取該機器的 SSH 命令，外加一個暱稱。
+3. 選擇 Varin 在那裡如何執行：
+   - **managed** — Varin 在遠端機器上安裝並啟動它自己
+   - **external** — 連線到一個已經執行的實例
+4. 連線。
+
+Varin 會引導你完成各個步驟 — 檢查連線、設定遠端、啟動伺服器並轉發埠 — 並在每個階段顯示進度。當它到達 **ready** 時，遠端 UI 會在本機載入。
+
+## 憑證
+
+你來決定是儲存 SSH 和 UI 密碼，還是每次都輸入它們。如果連線斷開，Varin 會報告哪一步失敗了，以便你修復它 — 參閱 [遠端存取](/zh-tw/troubleshooting/remote-access/)。
+
+## 連線連結
+
+如果遠端機器已經在執行 Varin，把桌面應用程式連上去的最簡單方式是配對連結。在遠端伺服器的 UI 中，開啟 **Settings → Remote Instances → 用戶端存取 token → 新增裝置**，建立一個連結，然後在你的桌面應用程式的 **Settings → Remote Instances → 直接遠端執行個體 → 匯入連線** 中匯入它。完整流程參閱 [連線裝置](/zh-tw/connect-devices/)。
+
+用 **任何地方** 建立的連結同時攜帶直接位址和一條 [Private Relay](/zh-tw/private-relay/) 路由：當桌面應用程式能直接存取伺服器時（同一網路）走直連，外出時回退到端到端加密的中繼。每個已儲存伺服器旁邊的狀態會顯示目前使用的是哪條路由。
+
+你也可以在遠端機器的終端機裡建立連結：
+
+```bash
+varin connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+如果該埠上沒有伺服器，`connect-url` 會先啟動伺服器。使用 `--api-only` 可啟動 headless 伺服器，`--lan` 可在啟動時繫結到 LAN，`--ui-password` 可保護瀏覽器存取，`--name` 可為儲存的連線命名。加上 `--relay` 可產生一條在區域網路之外也能使用的連結：裝置在可達時優先直連，否則回退到 [Private Relay](/zh-tw/private-relay/) — 實例會自行啟動中繼。
+
+產生的連結包含一個一次性配對金鑰。匯入後，裝置會持有自己的 client token — 獨立於瀏覽器 UI 密碼 — 它會在伺服器重啟後繼續有效，直到你在簽發它的伺服器上撤銷它。
+
+## 相關內容
+
+- [連線裝置](/zh-tw/connect-devices/) — 配對連結、QR code 與裝置管理
+- [Private Relay](/zh-tw/private-relay/) — 「任何地方」連線的工作原理
+- [遠端存取](/zh-tw/troubleshooting/remote-access/) — 當連線無法完成時

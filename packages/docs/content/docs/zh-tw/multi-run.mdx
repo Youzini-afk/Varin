@@ -1,0 +1,15 @@
+---
+title: Multi-run
+description: 一次性在多個模型或會話上執行相同的提示詞。
+---
+
+# Multi-run
+
+Multi-run 為每個所選模型建立原生 Thread。選擇專案、命名批次、新增提示詞與模型組，然後啟動；沒有固定的五模型上限。
+
+啟用隔離後，每次執行使用獨立 Git worktree 和分支。關閉隔離時，各次執行共享專案的即時目錄，可能修改同一檔案。啟動前檢查初始化命令。
+
+逐項檢視狀態。啟動失敗或結果未確認時，已建立的 Thread 和 worktree 會保留。使用不變的選項重試以核對原請求。worktree 建立未確認時，先檢查原 Host 上的 Git 狀態。**Stop launching** 僅停止後續啟動，已受理的工作繼續執行。
+
+- [Worktree 會話](/zh-tw/worktrees/)
+- [專案](/zh-tw/projects/)

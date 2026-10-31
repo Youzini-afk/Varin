@@ -1,0 +1,43 @@
+---
+title: 行動應用程式與 PWA
+description: 在 iOS 或 Android 上安裝 Varin 應用程式，並把它連線到你的伺服器。
+---
+
+# 行動應用程式與 PWA
+
+在手機上使用 Varin：檢視會話、回覆 Agent、管理工作。應用程式連線你已經在執行的 Varin Host，Agent 仍在那台 Host 上執行。在家透過 Wi-Fi 連線；外出時需要[你設定的中繼](/zh-tw/private-relay/)或你自己的安全遠端通道。
+
+## 安裝應用程式
+
+- **iPhone/iPad** — 還沒有釋出的版本。請使用下面的 PWA，或[從原始碼建置原生應用程式](https://github.com/Youzini-afk/Varin/blob/main/packages/mobile/README.md)。
+- **Android** — 從[最新版本](https://github.com/Youzini-afk/Varin/releases/latest)下載 `Varin-<版本>-android.apk` 安裝。旁邊的 `.sha256` 檔案可用來校驗下載。暫不支援推播通知。
+
+## 連線到你的伺服器
+
+1. 在執行 Varin 的電腦上，開啟 **Settings → Remote Instances → 用戶端存取 token**，然後按 **新增裝置**。
+2. 選擇 **任何地方**（如果只在家裡用手機，可選 **僅家用網路**），然後按 **建立 QR 代碼**。
+3. 在行動應用程式中點選 **掃描 QR code**，用相機對準它。
+
+應用程式會連線並記住這台伺服器。QR code 只能使用一次，每台裝置都會獲得自己的可撤銷權杖 — 關於配對為何安全，參閱 [連線裝置](/zh-tw/connect-devices/)。
+
+你可以把應用程式與多台伺服器配對，並在實例清單中隨意切換；應用程式會為每台伺服器顯示它是否可達，以及你是透過區域網路還是中繼連線的。
+
+## PWA（瀏覽器安裝）
+
+完全不想經過應用程式商店？網頁應用程式可以直接從瀏覽器安裝：
+
+- **桌面瀏覽器** — 使用位址列中的 **Install** 選項
+- **iPhone/iPad（Safari）** — 分享 → **Add to Home Screen**
+- **Android（Chrome）** — 選單 → **Install app** / **Add to Home Screen**
+
+要在你的網路之外存取 PWA，需要一個 [隧道](/zh-tw/tunnels/) 和一個強 [UI 密碼](/zh-tw/security/) — Host 設定了中繼後，Android 應用程式也可以改走中繼。
+
+## 行動裝置設定
+
+在 **Settings → Varin** 下，有幾個選項可以調整行動裝置和已安裝應用程式的體驗 — 應用程式的安裝名稱、螢幕方向，以及螢幕鍵盤的行為方式。
+
+## 相關內容
+
+- [連線裝置](/zh-tw/connect-devices/) — 配對、一次性 QR code 與裝置管理
+- [Private Relay](/zh-tw/private-relay/) — 「任何地方」存取的工作原理
+- [安全](/zh-tw/security/) — 在公開 UI 之前保護它

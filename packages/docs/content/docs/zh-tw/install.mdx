@@ -1,0 +1,70 @@
+---
+title: 安裝
+description: 安裝 Varin 桌面應用程式，用 Docker 自行部署，或從原始碼建置。
+---
+
+# 安裝
+大多數人直接安裝桌面應用程式。也可以用 Docker 自行部署後在瀏覽器裡使用，或者從原始碼建置。
+
+## 桌面應用程式
+
+從[最新版本](https://github.com/Youzini-afk/Varin/releases/latest)下載對應系統的安裝檔：Windows x64 或 ARM64 用 `.exe`，Apple 晶片的 macOS 用 `.dmg`，Linux x64 或 ARM64 用 `.AppImage`。桌面應用程式自帶 Host，不需要另外安裝任何東西，並會自行檢查新版本，見[更新](/zh-tw/updates/)。
+
+Windows 安裝檔和 macOS 安裝檔目前都沒有簽署，第一次開啟時系統可能會要求你確認。
+
+手機請看[行動應用程式與 PWA](/zh-tw/mobile/)。
+
+## 從原始碼建置的前提條件
+
+- Node.js 22.19 或更新（Node.js 24 是開發基線）
+- [Bun](https://bun.sh) 1.3.14
+- 由 `kernel/rust-toolchain.toml` 選定的 Rust 工具鏈（安裝 rustup 後，儲存庫會選擇所需版本）
+- Git
+
+Varin 會隨 Application Host 建置並啟動原生 Rust Agent runtime，無需另裝 Agent CLI。現有工作區檔案與歷史對話資產不會自動遷移或改寫。
+
+## 從原始碼（Web）
+
+```bash
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
+bun install --frozen-lockfile
+bun run dev
+```
+
+開啟終端機中印出的 Vite URL。Varin 會同時啟動 UI 和受信任的 API/執行環境服務。
+
+## 從原始碼（桌面）
+
+```bash
+bun run electron:dev
+```
+
+更接近打包建置：
+
+```bash
+bun run electron:dev:bundled
+```
+
+可以用 `bun run electron:build:win` 在本機建置 Windows 安裝檔。在設定簽署憑證之前，未簽署的安裝檔是預期情況。
+
+## Docker
+
+在 Linux Docker 主機上：
+
+```bash
+mkdir -p data/varin data/ssh data/cloudflared workspaces
+sudo chown -R 1000:1000 data workspaces
+umask 077
+printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+docker compose up -d
+curl --fail http://127.0.0.1:3000/health
+```
+
+開啟 `http://127.0.0.1:3000` 並使用產生的密碼。任何面向網際網路的部署前面都應放置 TLS 反向代理或已批准的隧道。生產環境請將 `VARIN_IMAGE` 固定到已測試的 digest，而不是 `:latest`。
+
+Compose 預設拉取精簡映像 `ghcr.io/youzini-afk/varin-slim:latest`（用來跑服務：Bun、Node、Git、SSH、cloudflared）。如果 Agent 要在容器裡編譯 Python、Java、Go 或 Rust，疊加工具鏈覆蓋層：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
+```

@@ -1,0 +1,44 @@
+---
+title: 安全
+description: 在公開 UI 之前，用密碼和 passkey 保護它。
+---
+
+# 安全
+
+Varin 讓外界可以存取你的機器和程式碼，所以在除你之外的任何人能夠存取它之前，請把它鎖好。本頁介紹 UI 密碼、passkey，以及在將 Varin 暴露到網路之前需要了解的內容。
+
+## 設定 UI 密碼
+
+帶密碼啟動 Varin，瀏覽器 UI 就會要求輸入它：
+
+```bash
+varin --ui-password be-creative-here
+```
+
+你也可以用 `VARIN_UI_PASSWORD` 環境變數來設定它，而不是把它放在命令列上。登入後，Varin 會記住該裝置一段時間，這樣你就不必每次都輸入。
+
+如果實例可以被其他任何人存取，請務必設定密碼 — 尤其是透過 [隧道](/zh-tw/tunnels/) 或公共網際網路時。
+
+## Passkey
+
+設定密碼後，你可以新增 passkey（Face ID、Touch ID、安全金鑰）以便更快登入。在 **Settings → Varin → Passkeys** 中新增它們。
+
+passkey 與目前密碼繫結。如果你更改或移除密碼，已儲存的 passkey 會被清除，你需要重新新增它們。
+
+## 裝置權杖
+
+透過 [連線裝置](/zh-tw/connect-devices/) 配對的裝置使用各自獨立的裝置權杖進行認證，而不是 UI 密碼。配對連結只能使用一次，未使用也會過期；每台已配對的裝置都會列在 **Settings → Remote Instances → 用戶端存取 token** 中，你可以隨時撤銷任何一台。外出時的連線經由 [Private Relay](/zh-tw/private-relay/) 傳輸，它是端到端加密的，無法讀取你的流量。
+
+## 在暴露它之前
+
+- 預設情況下 Varin 只監聽你自己的機器（`127.0.0.1`）。需要一次刻意的更改才能更廣泛地監聽，並且你應該先設定密碼。
+- 對於你自己的裝置，優先使用 [配對](/zh-tw/connect-devices/) 加 [Private Relay](/zh-tw/private-relay/) — 完全不對外暴露任何內容。
+- 如果你需要一個公開 URL，相比向網際網路開放一個埠，更建議使用 [隧道](/zh-tw/tunnels/) 或專用網路（比如 VPN）。
+- 如果你把 Varin 放在你自己的 HTTPS 伺服器後面，請參閱 [反向代理](/zh-tw/reverse-proxy/)。
+
+## 相關內容
+
+- [連線裝置](/zh-tw/connect-devices/) — 一次性配對與裝置級權杖
+- [Private Relay](/zh-tw/private-relay/) — 從任何地方進行端到端加密存取
+- [隧道](/zh-tw/tunnels/) — 需要時開放一個公開 URL
+- [反向代理](/zh-tw/reverse-proxy/) — 在你自己的伺服器後面執行 Varin

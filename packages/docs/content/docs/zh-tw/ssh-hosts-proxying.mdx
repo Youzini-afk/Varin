@@ -1,0 +1,48 @@
+---
+title: SSH 主機與代理
+description: 在桌面應用程式中匯入已儲存的 SSH 主機並新增額外的 SSH 埠轉發。
+---
+
+# SSH 主機與代理
+
+在桌面應用程式的 **Settings → Remote Instances** 中匯入已儲存的 SSH 主機，連線到遠端機器，並透過同一個 SSH 連線開放額外埠。
+
+> SSH 主機和 SSH 代理是**僅限桌面版**的功能。它們使用你電腦上的 SSH 用戶端。
+
+## 匯入 SSH 主機
+
+Varin 可以讀取你本機 SSH config 中的主機，也就是 `ssh work-server` 這類命令使用的同一個地方。
+
+1. 開啟 **Settings → Remote Instances**。
+2. 從 **Saved SSH hosts** 中選擇一個主機。
+3. 如果主機是 pattern，輸入真實目標，例如 `deploy@app.example.com`。
+4. 儲存並連線。
+
+Varin 會用這個 SSH 命令建立 remote instance。當狀態到達 **ready** 時，遠端 Varin UI 會在桌面應用程式中開啟。
+
+## 新增額外埠轉發
+
+每個 remote instance 都有 **Port Forwards** 區域。當 SSH 連線一側需要存取另一側的埠時使用它。
+
+Varin 支援三種轉發型別：
+
+- **Local (-L)** — 在你的電腦上開啟一個埠，連線到遠端機器上的內容。
+- **Remote (-R)** — 在遠端機器上開啟一個埠，連線回你的電腦。
+- **Dynamic (-D)** — 透過 SSH 連線開啟本機 SOCKS proxy。
+
+對於大多數執行在遠端機器上的 app preview 和 dashboard，請使用 **Local (-L)**。
+
+## 使用 SOCKS proxy
+
+如果你希望電腦上的其他工具透過遠端機器存取網路，請選擇 **Dynamic (-D)**。Varin 會為這個 SSH 連線開啟一個本機 SOCKS proxy 埠。
+
+連線 ready 後，從轉發行復制或使用本機 proxy 位址。把你的瀏覽器或工具設定為使用它作為 SOCKS5 proxy。
+
+## 保持私有
+
+本機 bind host 請使用 `127.0.0.1` 或 `localhost`，除非你明確希望網路中的其他裝置存取這個轉發埠。
+
+## 相關內容
+
+- [遠端執行個體](/zh-tw/remote-instances/) — 將桌面應用程式連線到另一台機器上的 Varin
+- [遠端存取](/zh-tw/troubleshooting/remote-access/) — 當 SSH 或遠端存取無法連線時

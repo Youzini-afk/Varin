@@ -2,7 +2,7 @@ English | [简体中文](README.zh-CN.md)
 
 # Varin user guides
 
-Connect a model, start a conversation, and work with files and tools. You can read these Markdown/MDX guides directly in the repository.
+Connect a model, start a conversation, and work with files and tools. Read them at [varin.dev/docs](https://varin.dev/docs/), or as Markdown/MDX in this repository.
 
 ## Start here
 
@@ -18,12 +18,12 @@ Connect a model, start a conversation, and work with files and tools. You can re
 
 ## Languages
 
-[English](content/docs/index.mdx) · [简体中文](content/docs/zh-cn/index.mdx) · [Français](content/docs/fr/index.mdx) · [日本語](content/docs/ja/index.mdx)
+[English](content/docs/index.mdx) · [简体中文](content/docs/zh-cn/index.mdx) · [繁體中文](content/docs/zh-tw/index.mdx) · [Français](content/docs/fr/index.mdx) · [日本語](content/docs/ja/index.mdx)
 
 ## Maintain these guides
 
 English source pages live at `content/docs/`; translations use locale directories. `sidebar.config.json` defines routes and navigation labels.
 
-Read the [writing guide](CONTRIBUTING.md) for page structure, links, and translations. Run `bun run docs:validate` from the repository root to check frontmatter and links. Rendering and publishing status are described in [DEPLOYMENT.md](DEPLOYMENT.md); this package currently contains documentation source, without a standalone site renderer.
+Read the [writing guide](CONTRIBUTING.md) for page structure, links, and translations. Run `bun run docs:validate` from the repository root to check frontmatter and links. The website renders and publishes these pages; see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 For system design and code contributions, see the [engineering documentation](../../docs/README.md) and [contribution guide](../../.github/CONTRIBUTING.md).

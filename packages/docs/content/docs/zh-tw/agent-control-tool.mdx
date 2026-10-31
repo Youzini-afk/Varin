@@ -1,0 +1,18 @@
+---
+title: "Agent 工具"
+description: "瞭解協調原生工作的工具。"
+---
+
+# Agent 工具
+
+原生對話依據已受理的模型、來源、角色和權限提供工具。直接描述需要的結果；每項操作仍須透過自身的授權檢查。
+
+- `dispatch`、`child_status`、`child_report` 和 `wait_child` 協調委派任務。
+- `threads` 和 `read_thread` 檢視目前任務家族中的對話，不授予全部對話或其他任務檔案的存取權。
+- `follow_up` 管理時間或觀察條件觸發的後續指令。
+- `goal_report` 明確報告已建立的持續目標完成或受阻。
+- `resource_read` 讀取已准入指令與技能；`memory` 管理獲准範圍內的筆記。
+
+工具可見不等於擁有檔案寫入、程序或外部服務權限。唯讀對話存取不會啟動目標模型或授予執行控制。受理工作不等於工作完成，請檢視原始結果和狀態。
+
+參閱 [持續目標](/zh-tw/session-goals/)、[計劃任務與後續任務](/zh-tw/scheduled-tasks/) 和 [技能](/zh-tw/skills/)。

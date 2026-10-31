@@ -33,6 +33,7 @@ description: 简短说明读者能够完成的事情。
 | --- | --- | --- |
 | 英文 | 根目录 | `label` |
 | 简体中文 | `zh-cn` | `zh-CN` |
+| 繁体中文 | `zh-tw` | `zh-TW` |
 | 法语 | `fr` | `fr` |
 | 日语 | `ja` | `ja` |
 
@@ -54,4 +55,4 @@ bun run docs:validate
 
 该命令检查 frontmatter、页面与侧边栏路由，以及工程文档本地链接。
 行为、翻译和可执行示例需另行核对。渲染与发布见 [DEPLOYMENT.zh-CN.md](DEPLOYMENT.zh-CN.md)；
-本包当前没有文档站渲染器。
+官网用 Starlight 渲染这些页面。

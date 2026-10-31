@@ -1,0 +1,33 @@
+name: Docs site
+
+# The user guides are rendered by the website repository (Varin-web), which copies packages/docs from main at
+# build time. A change here asks Cloudflare Pages to rebuild that site through its deploy hook.
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/docs/**
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: docs-site
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    name: Rebuild varin.dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call the Pages deploy hook
+        env:
+          DEPLOY_HOOK: ${{ secrets.DOCS_SITE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::notice::DOCS_SITE_DEPLOY_HOOK is not configured; no rebuild was requested."
+            exit 0
+          fi
+          curl --fail --silent --show-error --max-time 30 -X POST "$DEPLOY_HOOK" > /dev/null
+          echo "Requested a rebuild of the docs site."
