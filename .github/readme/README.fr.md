@@ -4,9 +4,9 @@
   <img src="../../.github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-<p align="center"><strong>Le harness d'agents open source, prêt à l'emploi.</strong></p>
+<p align="center"><strong>Confiez la tâche, puis regardez l'équipe la mener à bien.</strong></p>
 
-<p align="center">Tout ce qui entoure le modèle, prêt à l'emploi et personnalisable en profondeur.</p>
+<p align="center">Varin planifie le travail, fait appel à des coéquipiers, vérifie les résultats et vous rend compte.<br />Open source, exécuté sur votre propre ordinateur ou serveur, avec vos propres clés d'API.</p>
 
 <p align="center">
   <a href="https://varin.dev/fr/">Site web</a> ·
@@ -23,25 +23,27 @@
 </p>
 
 <p align="center">
-  <img src="assets/code-mode.png" alt="Varin en mode Programmation : l'agent explore le projet, modifie profile.js, confie un test de non-régression au vérificateur de l'équipe, puis annonce que tous les tests passent" width="960" />
+  <img src="assets/varin-at-work.gif" alt="Varin sur le rebord de la fenêtre de l'espace Bot : elle cherche sur le web, lit trois fichiers, envoie deux coéquipiers avec chacun une partie de la tâche, recueille leurs comptes rendus, répond, puis fête la fin du travail" width="600" />
+  <br />
+  <sub>La scène de l'espace Bot, qui rejoue une exécution scénarisée.</sub>
 </p>
 
-Le modèle réfléchit. Le harness, c'est tout ce qui l'entoure : outils, contexte, exécution, permissions, collaboration et reprise. Varin prépare tout cela, et le même modèle mène à bien des tâches plus longues et plus complexes. Installez-le, ajoutez votre propre clé d'API, et commencez.
+## À quoi ressemble le travail avec Varin
 
-## Pourquoi Varin
+**Le même modèle va plus loin.** Varin prépare tout ce qui entoure le modèle : un contexte rangé à l'avance, chaque étape notée pour que l'exécution survive à un redémarrage, le reste qui avance pendant que l'agent vous attend, des outils chargés au besoin. Le même modèle peut mener à bien des tâches plus longues et plus complexes. [Comment fonctionne le harness](#how-the-harness-works)
 
-**Le même modèle va plus loin.**
+**Une équipe que vous voyez travailler.**
 
-- Contexte autogéré : rangé à l'avance en arrière-plan, résumé en gardant les extraits clés, et compté avec des tokenizers locaux calés sur l'usage réel.
-- Exécution durable : chaque étape est notée et l'exécution reprend après un redémarrage. Une action au résultat incertain s'arrête pour vérification au lieu d'être rejouée.
-- Questions sans blocage : le reste avance pendant que l'agent attend votre réponse, et les objectifs budgétés reprennent quand leurs conditions sont remplies.
-- Outils à la demande : les outils courants restent sous la main, les autres se chargent au besoin. Les serveurs MCP peuvent être exposés directement ou découverts à la demande.
+- L'agent principal découpe la tâche et en confie les parties à ses coéquipiers : un Worker écrit l'implémentation, l'agent de recherche rassemble le contexte, le vérificateur lance les tests. Les coéquipiers avancent en parallèle, s'écrivent directement, se transmettent du code avec son diff fichier par fichier, et rendent compte dans le panneau de collaboration. Intervenez quand vous voulez.
+- Un bot a son propre nom, ses instructions, son modèle, son dossier de travail et sa mémoire, et mène plusieurs tâches de front. Sa scène dans l'espace Bot montre ce qu'il est en train de faire et quels coéquipiers sont partis en mission. Mettez-le en veille et son travail est suspendu ; réveillez-le et il reprend là où il s'était arrêté.
+- Codex, Claude Code, Pi et les programmes compatibles avec ACP peuvent tourner sur votre Host comme sessions dans Varin, ou prendre en charge le travail confié par l'agent principal. Ils gardent leurs propres modèles, comptes et outils.
+- Dans l'application de bureau, un compagnon de bureau facultatif s'installe sur votre bureau et mime ce que fait le bot. Ses illustrations se téléchargent à part, dans les Paramètres.
 
-**Prêt à l'emploi.** Environ 90 outils natifs, 4 modes de travail, 4 espaces de travail officiels, 7 serveurs de langage intégrés et 9 protocoles de modèle natifs, avec une interface en 10 langues.
+**À vous de le faire tourner et de le façonner.** Les clés restent sur votre propre Host et les requêtes partent directement vers les fournisseurs que vous configurez. N'importe quel agent prédéfini peut recevoir un nouveau modèle, de nouvelles instructions ou de nouveaux outils, et les espaces de travail eux-mêmes sont des extensions que vous pouvez désactiver ou remplacer. Varin est distribué sous licence AGPL-3.0.
 
-**Personnalisation en profondeur, sans écrire de code.** Changez le modèle, les instructions ou les outils de n'importe quel agent prédéfini, ou créez le vôtre. Choisissez des modèles distincts pour les titres, le contexte, la planification, les images et les embeddings. Modifiez les instructions système et la mémoire, utilisez les Skills des dossiers `.claude` et `.agents` ou installez-les depuis un dépôt Git, et choisissez, outil par outil, d'autoriser, de demander ou de refuser.
-
-**Vos clés, vos données.** Les clés restent sur votre propre Host, et les requêtes partent directement vers les fournisseurs que vous configurez : OpenAI, Anthropic, Gemini, Vertex AI, Azure OpenAI, Bedrock, Mistral, Alibaba Model Studio, Zhipu et StepFun, ou Ollama, LM Studio et tout endpoint compatible. L'usage est enregistré par canal et par modèle, tour après tour.
+<p align="center">
+  <img src="assets/team.png" alt="L'agent principal confie une vérification à un coéquipier, qui lance les tests et rend compte dans le panneau de collaboration" width="960" />
+</p>
 
 ## Quatre façons de travailler
 
@@ -55,17 +57,8 @@ Le mode détermine les outils dont l'agent dispose d'emblée et les coéquipiers
 | Général | Chercher une information, rédiger, créer un petit outil interactif. | « Compare ces trois appareils photo et fais-moi un graphique réglable. » |
 
 <p align="center">
-  <img src="assets/research-mode.png" alt="Varin en mode Recherche : une comparaison d'articles récents présentée sous forme de tableau dans la conversation" width="960" />
-</p>
-
-## Équipes, bots et modifications réversibles
-
-- **Équipes.** L'agent principal découpe la tâche et en confie les parties à ses coéquipiers : un Worker écrit l'implémentation, l'agent de recherche rassemble le contexte, le vérificateur lance les tests. Les coéquipiers avancent en parallèle, s'écrivent directement, se transmettent du code avec son diff fichier par fichier, et rendent compte une fois le travail terminé. Suivez leurs échanges dans le panneau de collaboration et intervenez quand vous voulez.
-- **Bots.** Un bot a son propre nom, ses instructions, son modèle et son dossier de travail, et mène plusieurs tâches de front. Vous voyez tout ce dont il se souvient, vous pouvez le corriger ou le lui faire oublier. Mettez-le en veille et son travail est suspendu ; réveillez-le et il reprend là où il s'était arrêté.
-- **Historique des fichiers.** Chaque fichier modifié s'aligne sur une frise, tour par tour. Revenez en arrière en un geste, et annulez ce retour si besoin. Les fichiers que vous avez modifiés vous-même ne sont jamais écrasés.
-
-<p align="center">
-  <img src="assets/team.png" alt="L'agent principal confie une vérification à un coéquipier, qui lance les tests et rend compte dans le panneau de collaboration" width="960" />
+  <img src="assets/code-mode.png" alt="Varin en mode Programmation : l'agent explore le projet, modifie profile.js, confie un test de non-régression au vérificateur de l'équipe, puis annonce que tous les tests passent" width="480" />
+  <img src="assets/research-mode.png" alt="Varin en mode Recherche : une comparaison d'articles récents présentée sous forme de tableau dans la conversation" width="480" />
 </p>
 
 ## Commencer
@@ -83,6 +76,24 @@ Le mode détermine les outils dont l'agent dispose d'emblée et les coéquipiers
 3. Choisissez un mode de travail, sélectionnez un dossier de projet si la tâche en a besoin, puis lancez votre première tâche.
 
 Varin est en développement actif avant la version 1.0. Cette page décrit les sources actuelles ; les [notes de version](https://github.com/Youzini-afk/Varin/releases) décrivent chaque build publié. Sauvegardez les données importantes de l'application avant une mise à niveau.
+
+<a id="how-the-harness-works"></a>
+
+## Comment fonctionne le harness
+
+Le modèle réfléchit. Le harness, c'est tout ce qui l'entoure : outils, contexte, exécution, permissions, collaboration et reprise.
+
+- Contexte autogéré : rangé à l'avance en arrière-plan, résumé en gardant les extraits clés, et compté avec des tokenizers locaux calés sur l'usage réel.
+- Exécution durable : chaque étape est notée et l'exécution reprend après un redémarrage. Une action au résultat incertain s'arrête pour vérification au lieu d'être rejouée.
+- Questions sans blocage : le reste avance pendant que l'agent attend votre réponse, et les objectifs budgétés reprennent quand leurs conditions sont remplies.
+- Outils à la demande : les outils courants restent sous la main, les autres se chargent au besoin. Les serveurs MCP peuvent être exposés directement ou découverts à la demande.
+- Historique des fichiers : chaque fichier modifié s'aligne sur une frise, tour par tour. Revenez en arrière en un geste, et annulez ce retour si besoin. Les fichiers que vous avez modifiés vous-même ne sont jamais écrasés.
+
+**Prêt à l'emploi.** Environ 90 outils natifs, 4 modes de travail, 4 espaces de travail officiels, 7 serveurs de langage intégrés et 9 protocoles de modèle natifs, avec une interface en 10 langues.
+
+**Personnalisation en profondeur, sans écrire de code.** Changez le modèle, les instructions ou les outils de n'importe quel agent prédéfini, ou créez le vôtre. Choisissez des modèles distincts pour les titres, le contexte, la planification, les images et les embeddings. Modifiez les instructions système et la mémoire, utilisez les Skills des dossiers `.claude` et `.agents` ou installez-les depuis un dépôt Git, et choisissez, outil par outil, d'autoriser, de demander ou de refuser.
+
+**Vos clés, vos données.** Les clés restent sur votre propre Host, et les requêtes partent directement vers les fournisseurs que vous configurez : OpenAI, Anthropic, Gemini, Vertex AI, Azure OpenAI, Bedrock, Mistral, Alibaba Model Studio, Zhipu et StepFun, ou Ollama, LM Studio et tout endpoint compatible. L'usage est enregistré par canal et par modèle, tour après tour. Vous voyez tout ce dont un bot se souvient, et vous pouvez le corriger ou le lui faire oublier.
 
 ## Exécuter depuis les sources
 
