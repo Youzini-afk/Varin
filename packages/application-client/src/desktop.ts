@@ -444,6 +444,7 @@ export interface VarinDesktopCommandMap {
   desktop_get_companion: { args: void; result: { enabled: boolean; visible: boolean } };
   desktop_set_companion: { args: { enabled: boolean }; result: { enabled: boolean; visible: boolean } };
   desktop_companion_library: { args: DesktopCompanionLibraryAction; result: DesktopCompanionLibrary };
+  desktop_companion_presented: { args: { status: 'ready' } | { status: 'failed'; message: string }; result: null };
   desktop_companion_scene: { args: { descriptor: DesktopCompanionScene; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number; decorationBottom?: number } }; result: DesktopCompanionSceneLayoutReceipt | null };
   desktop_companion_stool: { args: { phase: 'clear' } | { phase: 'lift' | 'landing'; viewport: { x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number } }; result: null };
   desktop_companion_drag: { args: { phase: 'start'; anchor: { x: number; y: number } } | { phase: 'move' | 'end' }; result: null };
@@ -614,6 +615,7 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_get_companion: true,
   desktop_set_companion: true,
   desktop_companion_library: true,
+  desktop_companion_presented: true,
   desktop_companion_scene: true,
   desktop_companion_stool: true,
   desktop_companion_drag: true,

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { CompanionAssets, readCompanionAssetCatalog, type CompanionAssetCatalog } from './companion-assets';
+import { CompanionAssets, readCompanionAssetCatalog, type CompanionAssetCatalog } from './companion-assets.js';
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 function fixture(suffix = '') {

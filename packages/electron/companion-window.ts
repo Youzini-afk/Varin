@@ -1,5 +1,47 @@
 /** Native movement owns only the sender's auxiliary window, never Agent execution. */
 type Bounds = { x: number; y: number; width: number; height: number };
+
+interface CompanionPresentationOwner {
+  id: number;
+  isDestroyed(): boolean;
+  showInactive(): void;
+  destroy(): void;
+  once(event: 'closed', callback: () => void): unknown;
+  webContents: { once(event: 'render-process-gone' | 'did-fail-load', callback: () => void): unknown };
+}
+
+/** A loaded document is not a painted character. Wake completes only at the player's first frame. */
+export class CompanionWindowPresentation {
+  private readonly pending = new Map<number, { promise: Promise<void>; ready: boolean; resolve(): void; reject(error: Error): void }>();
+
+  wait(owner: CompanionPresentationOwner): Promise<void> {
+    const existing = this.pending.get(owner.id);
+    if (existing) return existing.promise;
+    let resolve!: () => void, reject!: (error: Error) => void;
+    const promise = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+    this.pending.set(owner.id, { promise, ready: false, resolve, reject });
+    owner.once('closed', () => {
+      this.pending.get(owner.id)?.reject(new Error('Companion window closed before its artwork was ready'));
+      this.pending.delete(owner.id);
+    });
+    owner.webContents.once('render-process-gone', () => this.fail(owner, 'Companion renderer stopped'));
+    owner.webContents.once('did-fail-load', () => this.fail(owner, 'Companion page could not load'));
+    return promise;
+  }
+
+  presented(owner: CompanionPresentationOwner): void {
+    const entry = this.pending.get(owner.id);
+    if (!entry || entry.ready || owner.isDestroyed()) return;
+    entry.ready = true;
+    owner.showInactive();
+    entry.resolve();
+  }
+
+  fail(owner: CompanionPresentationOwner, message: string): void {
+    this.pending.get(owner.id)?.reject(new Error(message));
+    if (!owner.isDestroyed()) owner.destroy();
+  }
+}
 export interface CompanionWindowOwner {
   id: number; isDestroyed(): boolean; getBounds(): Bounds; getContentBounds(): Bounds; setPosition(x: number, y: number): void;
   setIgnoreMouseEvents(ignore: boolean, options?: { forward: boolean }): void;

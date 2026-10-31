@@ -17,7 +17,7 @@ vi.mock('react-dom/client', async original => {
   return { ...actual, createRoot: (...args: Parameters<typeof actual.createRoot>) => (boundary.root = actual.createRoot(...args)) };
 });
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), getRuntimeEndpointGeneration: () => 1, getRuntimeKey: () => 'test-host', subscribeRuntimeEndpointChanged: () => boundary.noop, runtimeFetch: async () => ({ ok: true, json: async () => ({ themes: [] }) }) }));
-vi.mock('@/lib/desktop', () => ({ isElectronShell: () => false, isDesktopShell: () => true, isDesktopLocalOriginActive: () => true, invokeDesktop: boundary.native }));
+vi.mock('@/lib/desktop', () => ({ isElectronShell: () => !window.location.search.includes('review=1'), isDesktopShell: () => true, isDesktopLocalOriginActive: () => true, invokeDesktop: boundary.native }));
 vi.mock('@/lib/desktopNative', () => ({ setDesktopWindowTheme: boundary.native }));
 vi.mock('@/lib/persistence', () => ({ updateDesktopSettings: boundary.persist }));
 vi.mock('@/lib/i18n', () => ({ initializeLocale: boundary.noop, I18nProvider: ({ children }: { children: React.ReactNode }) => children, useI18n: () => ({ t: (key: string) => key }) }));
@@ -47,12 +47,14 @@ vi.mock('@/components/companion/useCompanionWindow', async () => {
 let cleanup: (() => void) | undefined;
 afterEach(async () => { await act(async () => boundary.root?.unmount()); cleanup?.(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-async function mountHarness() {
+async function mountHarness(production = false, loadFailure?: Error) {
   vi.clearAllMocks(); boundary.working=true; boundary.stopKey=undefined; boundary.blockPaint=false;
+  boundary.native.mockResolvedValue(null);
   const { window, document } = parseHTML('<html><head></head><body style="background-color:transparent"><div id="root"></div></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('crypto', webcrypto);
   const write = vi.fn();
-  Object.defineProperties(window, { location: { configurable: true, value: { search: '?review=1', origin: 'http://localhost', href: 'http://localhost/companion.html?review=1' } }, localStorage: { configurable: true, value: { getItem: () => JSON.stringify({ mode: 'light', lightThemeId: 'varin-light', darkThemeId: 'varin-dark', splash: { light: { background: '#fff', foreground: '#000' }, dark: { background: '#000', foreground: '#fff' } } }), setItem: write } } });
+  const search = production ? '' : '?review=1';
+  Object.defineProperties(window, { location: { configurable: true, value: { search, origin: 'http://localhost', href: `http://localhost/companion.html${search}` } }, localStorage: { configurable: true, value: { getItem: () => JSON.stringify({ mode: 'light', lightThemeId: 'varin-light', darkThemeId: 'varin-dark', splash: { light: { background: '#fff', foreground: '#000' }, dark: { background: '#000', foreground: '#fff' } } }), setItem: write } } });
   Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   const media = () => ({ matches: false, addEventListener: boundary.noop, removeEventListener: boundary.noop });
   vi.stubGlobal('matchMedia', media);
@@ -60,7 +62,10 @@ async function mountHarness() {
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++frameId, callback); return frameId; });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   const raw = readFileSync(new URL('../../../web/public/companion-assets/bundle.json', import.meta.url), 'utf8');
-  vi.stubGlobal('fetch', vi.fn(async (url: URL) => String(url).includes('bundle.json') ? { ok: true, text: async () => raw } : { ok: true, blob: async () => new Blob() }));
+  vi.stubGlobal('fetch', vi.fn(async (url: URL) => {
+    if (loadFailure) throw loadFailure;
+    return String(url).includes('bundle.json') ? { ok: true, text: async () => raw } : { ok: true, blob: async () => new Blob() };
+  }));
   vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4096, height: 4096, close: boundary.noop })));
   // Registered real masks process deterministic blue canvas samples. Raster decode
   // fidelity belongs to artwork tests; this checks the real render/material path.
@@ -93,10 +98,13 @@ async function mountHarness() {
   const apis = { threads: { list: listThreads }, extensions: {} } as unknown as RuntimeAPIs;
   await act(async () => renderCompanionApp(apis));
   // Exercise the real selected-assets review control, not a mocked mode predicate.
-  const selectedReview = document.querySelector<HTMLInputElement>('[aria-label="Review selected director assets"]')!;
-  expect(selectedReview).toBeDefined();
-  await act(async () => { selectedReview.checked = true; selectedReview.dispatchEvent(new window.Event('click', { bubbles: true })); });
+  if (!production) {
+    const selectedReview = document.querySelector<HTMLInputElement>('[aria-label="Review selected director assets"]')!;
+    expect(selectedReview).toBeDefined();
+    await act(async () => { selectedReview.checked = true; selectedReview.dispatchEvent(new window.Event('click', { bubbles: true })); });
+  }
   const tick = async (now: number) => { await act(async () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(now)); }); };
+  if (loadFailure) return {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick};
   // Bundle digest/decode are async; wait on their actual completion, not wall time.
   for (let step = 0; step < 30 && !material.mock.calls.length; step++) {
     await act(async () => new Promise<void>(resolve => setImmediate(resolve)));
@@ -104,9 +112,27 @@ async function mountHarness() {
   }
   expect(material.mock.calls.length).toBeGreaterThan(0);
   await tick(1000); await tick(1200);
-  expect(material.mock.lastCall?.[1].action).toBe('work-active');
+  if (!production) expect(material.mock.lastCall?.[1].action).toBe('work-active');
   return {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick};
 }
+
+it('shows a painted character without persistent status boxes and opens controls on demand', async () => {
+  const { window, document, paintedPixels } = await mountHarness(true);
+  expect(paintedPixels).toHaveBeenCalled();
+  expect(boundary.native.mock.calls.filter(([command]) => command === 'desktop_companion_presented'))
+    .toEqual([['desktop_companion_presented', { status: 'ready' }]]);
+  expect([...document.querySelectorAll('main > :not(style)')].map(node => node.textContent).join('')).toBe('⋯');
+  await act(async () => document.querySelector('canvas')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true })));
+  expect(document.querySelector('[aria-label="companion.controls"]')?.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('main')?.textContent).toContain('companion.close');
+});
+
+it('reports failed artwork to the window owner without leaving floating error or status boxes', async () => {
+  const { document } = await mountHarness(true, new TypeError('Failed to fetch'));
+  expect(boundary.native).toHaveBeenCalledWith('desktop_companion_presented', { status: 'failed', message: 'TypeError: Failed to fetch' });
+  expect([...document.querySelectorAll('main > :not(style)')].map(node => node.textContent).join('')).toBe('');
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+});
 
 it('repaints actual work, paused and grabbed exposures without restarting player, cue or scene identity', async () => {
   const {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick}=await mountHarness();

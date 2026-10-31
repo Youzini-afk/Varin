@@ -1,5 +1,40 @@
-import { expect, it } from 'vitest';
-import { CompanionWindowMovement, requireCompanionWindow, applyCompanionPassthrough, type CompanionWindowOwner } from './companion-window.js';
+import { EventEmitter } from 'node:events';
+import { expect, it, vi } from 'vitest';
+import { CompanionWindowMovement, CompanionWindowPresentation, requireCompanionWindow, applyCompanionPassthrough, type CompanionWindowOwner } from './companion-window.js';
+
+function presentationOwner() {
+  const events = new EventEmitter();
+  let destroyed = false;
+  return Object.assign(events, {
+    id: 1, webContents: new EventEmitter(), isDestroyed: () => destroyed,
+    showInactive: vi.fn(), destroy: vi.fn(() => { destroyed = true; events.emit('closed'); }),
+  });
+}
+
+it('keeps wake pending and the window hidden until the character has painted', async () => {
+  const owner = presentationOwner(), presentation = new CompanionWindowPresentation();
+  const ready = vi.fn();
+  const wake = presentation.wait(owner).then(ready);
+  owner.emit('ready-to-show');
+  await Promise.resolve();
+  expect(ready).not.toHaveBeenCalled(); expect(owner.showInactive).not.toHaveBeenCalled();
+  presentation.presented(owner);
+  await wake;
+  expect(ready).toHaveBeenCalledOnce(); expect(owner.showInactive).toHaveBeenCalledOnce();
+  presentation.presented(owner);
+  expect(owner.showInactive).toHaveBeenCalledOnce();
+  owner.destroy();
+});
+
+it('returns artwork failure to the wake caller and removes the incomplete window', async () => {
+  const owner = presentationOwner(), presentation = new CompanionWindowPresentation();
+  const wake = presentation.wait(owner);
+  const failed = expect(wake).rejects.toThrow('Failed to fetch');
+  presentation.fail(owner, 'Failed to fetch');
+  await failed;
+  presentation.presented(owner);
+  expect(owner.destroy).toHaveBeenCalledOnce(); expect(owner.showInactive).not.toHaveBeenCalled();
+});
 
 it('keeps pointer-origin displacement, clamps to work area, and ignores late moves after cancel', () => {
   const positions: number[][] = [];

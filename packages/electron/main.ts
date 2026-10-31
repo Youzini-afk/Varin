@@ -26,7 +26,7 @@ import contextMenu from 'electron-context-menu';
 import { CompanionStoolWindows } from './companion-stool.js';
 import { CompanionAssets, readCompanionAssetCatalog } from './companion-assets.js';
 import { CompanionSceneWindows, readCompanionSceneDescriptor, type CompanionSceneViewport } from './companion-scene.js';
-import { CompanionWindowMovement, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect, captureCompanionPlacement, restoreCompanionPlacement } from './companion-window.js';
+import { CompanionWindowMovement, CompanionWindowPresentation, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect, captureCompanionPlacement, restoreCompanionPlacement } from './companion-window.js';
 import { createComputerFeedback } from './computer-feedback.js';
 import { createComputerControls } from './computer-controls.js';
 import { ElectronBrowserOwner } from './browser-owner.js';
@@ -2684,8 +2684,8 @@ const createBrowserWindow = ({
     }
     if (decorative) browserWindow.setIgnoreMouseEvents(true);
     if (decorative) return; // Owners verify scene data or the selected plate before showing inert surfaces.
-    if (companion) browserWindow.showInactive();
-    else { browserWindow.show(); browserWindow.focus(); }
+    if (companion) return; // The player reports its first painted frame before its owner shows it.
+    browserWindow.show(); browserWindow.focus();
     if (useVibrancy) applyMacVibrancy(browserWindow);
   });
 
@@ -2861,6 +2861,7 @@ const recoverCompanionPlacement = () => {
 let companionAssetStore: CompanionAssets | null = null;
 let companionAssetStoreStart: Promise<CompanionAssets> | null = null;
 let companionControlQueue: Promise<void> = Promise.resolve();
+const companionPresentation = new CompanionWindowPresentation();
 const withCompanionControl = <T,>(operation: () => Promise<T>): Promise<T> => {
   const pending = companionControlQueue.then(operation, operation);
   companionControlQueue = pending.then(() => {}, () => {});
@@ -2887,7 +2888,7 @@ const ensureCompanionAssets = (): Promise<CompanionAssets> => {
         // An update must not resurrect a companion the user is putting to sleep or deleting.
         // Reconcile through the same control owner after the current preference operation settles.
         void withCompanionControl(async () => {
-          if (readSettingsRoot().desktopCompanionEnabled === true && selectedCompanionPackId() === id) openCompanionWindow();
+          if (readSettingsRoot().desktopCompanionEnabled === true && selectedCompanionPackId() === id) await openCompanionWindow();
         }).catch(error => log.warn('[companion] installed artwork could not be shown', error));
       },
     });
@@ -2900,9 +2901,12 @@ const copyCompanionAssetSelection = (url: URL, owner: { webContents: { getURL():
     const value = source.searchParams.get(key); if (value) url.searchParams.set(key, value);
   }
 };
-const openCompanionWindow = (review = false): BrowserWindow => {
+const openCompanionWindow = async (review = false): Promise<BrowserWindow> => {
   const existing = BrowserWindow.getAllWindows().find((window: BrowserWindow) => !window.isDestroyed() && window.__varinLabel === 'companion');
-  if (existing) { existing.showInactive(); return existing; }
+  if (existing) {
+    if (!review) await companionPresentation.wait(existing);
+    existing.showInactive(); return existing;
+  }
   const base = shouldUsePackagedUi() ? buildPackagedUiUrl('/companion.html') : state.localOrigin || state.sidecarUrl;
   if (!base) throw new Error('Local companion UI is not available');
   const url = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
@@ -2914,7 +2918,10 @@ const openCompanionWindow = (review = false): BrowserWindow => {
   }
   const placement = restoreCompanionPlacement(companionPlacementMemory ?? readSettingsRoot().desktopCompanionPlacement,
     { width: 360, height: 480 }, screen.getAllDisplays(), screen.getPrimaryDisplay().id);
-  return createBrowserWindow({ label: 'companion', presentation: 'companion', ...(placement ? { fixedBounds: placement } : {}), url: url.toString(), runtimeConfig: getWindowRuntimeConfig(state.mainWindow) });
+  const window = createBrowserWindow({ label: 'companion', presentation: 'companion', ...(placement ? { fixedBounds: placement } : {}), url: url.toString(), runtimeConfig: getWindowRuntimeConfig(state.mainWindow) });
+  if (review) window.once('ready-to-show', () => { if (!window.isDestroyed()) window.showInactive(); });
+  else await companionPresentation.wait(window);
+  return window;
 };
 const companionStools = new CompanionStoolWindows((bounds, phase, owner) => {
   const base = shouldUsePackagedUi() ? buildPackagedUiUrl('/companion.html') : state.localOrigin || state.sidecarUrl;
@@ -4099,7 +4106,7 @@ const handleInvoke = async (
             if (!assets.get(id as string)) throw new Error('Companion artwork is not installed');
             closeCompanionWindows();
             await mutateSettingsRoot(root => { root.desktopCompanionPackId = id; });
-            if (readSettingsRoot().desktopCompanionEnabled === true) openCompanionWindow();
+            if (readSettingsRoot().desktopCompanionEnabled === true) await openCompanionWindow();
             break;
           default: throw new Error('Unknown companion library action');
         }
@@ -4114,7 +4121,7 @@ const handleInvoke = async (
       if (enabled) {
         const assets = await ensureCompanionAssets();
         await assets.ready(selectedCompanionPackId());
-        openCompanionWindow();
+        await openCompanionWindow();
       }
       else for (const window of BrowserWindow.getAllWindows() as BrowserWindow[]) if (!window.isDestroyed() && window.__varinLabel === 'companion') window.close();
       await mutateSettingsRoot(root => { root.desktopCompanionEnabled = enabled; });
@@ -4122,6 +4129,14 @@ const handleInvoke = async (
       return companionStatus();
     });
 
+    case 'desktop_companion_presented': {
+      const owner = requireCompanionWindow(browserWindow);
+      if (args.status === 'ready') companionPresentation.presented(owner);
+      else if (args.status === 'failed' && typeof args.message === 'string') companionPresentation.fail(owner, args.message);
+      else throw new Error('Invalid companion presentation result');
+      emitToAllWindows('varin:companion-library-changed');
+      return null;
+    }
     case 'desktop_companion_scene': {
       const owner = requireCompanionWindow(browserWindow);
       const descriptor = readCompanionSceneDescriptor(args.descriptor);
@@ -5766,17 +5781,14 @@ app.whenReady().then(async () => {
   const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
 
-  // Restore only artwork already downloaded by the user. Startup never downloads optional art.
-  try {
+  // Restore downloaded artwork without holding the main application's startup on its first frame.
+  void (async () => {
     if (readSettingsRoot().desktopCompanionEnabled === true) {
       await ensureCompanionAssets();
-      if (selectedCompanionPackId()) openCompanionWindow();
+      if (selectedCompanionPackId()) await openCompanionWindow();
     }
-    else if (!app.isPackaged && process.env.VARIN_COMPANION_REVIEW === '1') openCompanionWindow(true);
-  } catch {
-    // An optional presentation must never interrupt the primary application startup.
-    console.warn('[electron] companion window could not be opened');
-  }
+    else if (!app.isPackaged && process.env.VARIN_COMPANION_REVIEW === '1') await openCompanionWindow(true);
+  })().catch(error => log.warn('[electron] companion window could not be opened', error));
 
   // In remote mode, set up system tray and background notification listener
   // so the app stays alive when windows are closed and can deliver OS-level

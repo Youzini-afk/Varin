@@ -167,9 +167,12 @@ retired data. Installed packs work offline and survive application updates. Expl
 the installed appearance and its download cache. Startup never downloads optional artwork automatically.
 
 The character, stool and decorative masks pin the same installed generation in their native window URL.
-The existing `varin://app/companion-assets/<id>/<version>/...` protocol serves only files declared by that
+The existing `varin-ui://app/companion-assets/<id>/<version>/...` protocol serves only files declared by that
 installed pack, without falling through to arbitrary filesystem paths or an HTML application fallback.
 New application builds can offer an artwork update while retaining the previously installed appearance.
+Wake completes after the player paints its first character frame. Loading windows stay hidden; a failed
+asset load closes the incomplete window and returns the error to Settings. Normal presentation has no
+persistent diagnostic or task-summary bars; right-click or the hover/focus menu opens the controls and details.
 
 ### Native workspace components
 
