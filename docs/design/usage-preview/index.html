@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varin · 用量设计工作稿</title>
+<!-- 设计预览：示例数据，不连接服务。视觉语言沿用 ../settings-redesign.html（设置设计工作稿）。设计说明见 ../usage-dashboard.md。 -->
+<style>
+:root{color-scheme:dark;--bg:#151515;--side:#111111;--raised:#202020;--hover:#252525;--ink:#ededeb;--muted:#a2a29e;--faint:#73736f;--line:#30302e;--soft:#242422;--accent:#d7dfce;--green:#a4c5ab;--amber:#dfb880;--red:#e7a097;--field:#191919;--r:8px;--sans:Inter,"Segoe UI","Microsoft YaHei",sans-serif;
+  /* 与存储页占用条同一组低饱和色；颜色只区分系列，含义永远有文字。 */
+  --c0:#8fae94;--c1:#8193ad;--c2:#ad977d;--c3:#a08eaa;--c4:#7fa6a4;--c5:#6f6f6b;--hatch:#5a5a56}
+[data-theme=light]{color-scheme:light;--bg:#fbfbf8;--side:#f0f0ec;--raised:#fff;--hover:#eaeae5;--ink:#252624;--muted:#6c6e66;--faint:#878a81;--line:#d8dad2;--soft:#e9eae3;--accent:#334c38;--green:#416b49;--amber:#8c611f;--red:#a34235;--field:#f6f6f1;
+  --c0:#5f8a67;--c1:#5a6f8f;--c2:#8d7254;--c3:#7c6789;--c4:#4f8582;--c5:#9a9a94;--hatch:#b9bab2}
+*{box-sizing:border-box}
+body{margin:0;background:#090909;color:var(--ink);font:14px/1.6 var(--sans)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+select{font:inherit;color:var(--ink);background:var(--raised);border:1px solid var(--line);border-radius:6px;padding:7px 30px 7px 12px;font-size:13px;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px;background-repeat:no-repeat}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:5px}
+h1,h2,h3,p{margin:0}
+h1{font-size:25px;letter-spacing:-.6px;font-weight:600;line-height:1.4}
+h2{font-size:15px;line-height:1.5;font-weight:600}
+small{font-size:12px}
+.muted{color:var(--muted)}.faint{color:var(--faint)}
+.num{font-variant-numeric:tabular-nums}
+svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+.reviewbar{height:40px;padding:0 18px;display:flex;align-items:center;gap:14px;background:#090909;color:#a5a5a3;font-size:12px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+.reviewbar strong{color:#e4e4e0;font-weight:500}
+.reviewbar .spacer{flex:1}
+.reviewbar button{color:#aaa;padding:3px 7px;font-size:12px}
+.reviewbar button.active{color:#fff}
+.reviewbar .sep{width:1px;height:14px;background:#333}
+
+.stage{height:calc(100vh - 52px);margin:0 10px 12px;display:flex;border-radius:12px;overflow:hidden;background:var(--bg);border:1px solid #232323}
+.stage.phone{width:390px;margin:0 auto 12px;height:calc(100vh - 52px)}
+.nav{width:220px;flex-shrink:0;background:var(--side);border-right:1px solid var(--soft);display:flex;flex-direction:column}
+.stage.phone .nav{display:none}
+.brand{display:flex;align-items:center;gap:8px;padding:22px 20px 18px;font-weight:600;font-size:16px}
+.brand small{font-weight:400;color:var(--muted);margin-left:4px}
+.search{margin:0 10px 14px;display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:7px;padding:7px 10px;color:var(--faint);font-size:12px}
+.nav-body{flex:1;overflow:auto;padding:0 10px 10px;scrollbar-width:thin}
+.nav-group-title{font-size:11px;color:var(--faint);letter-spacing:.5px;padding:14px 10px 6px;text-transform:uppercase}
+.nav-link{display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border-radius:6px;font-size:13px;color:var(--muted);text-align:left}
+.nav-link:hover{background:var(--hover);color:var(--ink)}
+.nav-link.active{background:var(--raised);color:var(--ink);box-shadow:0 1px 2px #0003}
+.nav-link .new{margin-left:auto;font-size:10px;color:var(--amber);border:1px solid color-mix(in srgb,var(--amber) 45%,transparent);border-radius:4px;padding:0 4px}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topline{height:52px;display:flex;align-items:center;gap:10px;padding:0 24px;font-size:12px;color:var(--muted);flex-shrink:0}
+.topline .current{color:var(--ink)}
+.topline .spacer{flex:1}
+.stage.phone .topline{padding:0 14px}
+.scroll{flex:1;overflow:auto;scrollbar-width:thin}
+.page{padding:12px 44px 70px;max-width:1200px;margin:0 auto}
+.stage.phone .page{padding:6px 18px 50px}
+
+.page-head{display:flex;gap:20px;align-items:flex-start;margin-bottom:26px}
+.page-head>div:first-child{flex:1;min-width:0}
+.page-head p{color:var(--muted);font-size:13px;margin-top:6px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:7px 12px;border:1px solid var(--line);border-radius:6px;white-space:nowrap;font-size:12px;line-height:1.5;background:var(--raised)}
+.btn:hover{border-color:var(--faint)}
+.text-button{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.text-button:hover{color:var(--ink)}
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:26px}
+.controls .spacer{flex:1}
+.segmented{display:inline-flex;gap:3px;padding:3px;border-radius:7px;background:var(--side);border:1px solid var(--soft);max-width:100%;overflow-x:auto;scrollbar-width:none}
+.segmented button{padding:5px 12px;border-radius:4px;font-size:12px;color:var(--muted);white-space:nowrap}
+.segmented button.active{background:var(--raised);color:var(--ink);box-shadow:0 1px 3px #0002}
+
+.total{display:flex;align-items:flex-end;flex-wrap:wrap;gap:6px 12px;margin:0 0 8px}
+.total strong{font-size:38px;font-weight:450;letter-spacing:-1px;line-height:1}
+.total strong sup{font-size:20px;vertical-align:top;margin-left:2px;color:var(--amber)}
+.total span{font-size:12px;color:var(--muted);padding-bottom:4px}
+.facts{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12px;color:var(--muted);margin-bottom:20px}
+.facts b{color:var(--ink);font-weight:450}
+.compbar{display:flex;height:13px;border-radius:3px;overflow:hidden;gap:2px;margin-bottom:20px;background:var(--soft)}
+.compbar span{height:100%;opacity:.85;min-width:3px}
+.hatch{background:repeating-linear-gradient(135deg,var(--hatch) 0 3px,transparent 3px 6px)}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:11px 35px;margin-bottom:18px}
+.stage.phone .legend{grid-template-columns:1fr;gap:10px}
+.legend>div{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);min-width:0}
+.legend i{height:7px;width:7px;border-radius:2px;flex-shrink:0}
+.legend em{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legend strong{margin-left:auto;color:var(--ink);font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap}
+.legend .tag{margin-left:auto}
+.status{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.status:before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+.status.warn{color:var(--amber)}.status.ok{color:var(--green)}
+.notes{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+.tag{font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.tag.warn{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent)}
+.note{border-left:2px solid var(--line);padding:8px 13px;color:var(--muted);font-size:12px;line-height:1.8;margin:16px 0}
+.note.error{border-color:var(--red);color:var(--red)}
+
+.section{border-top:1px solid var(--line);padding:25px 0 27px}
+.section-head{display:flex;align-items:flex-start;gap:15px;margin-bottom:17px;flex-wrap:wrap}
+.section-head>div:first-child{flex:1;min-width:0}
+.section-head p{font-size:12px;color:var(--muted);margin-top:3px}
+.section-head .aside{font-size:12px;color:var(--muted)}
+
+.chart{position:relative;height:196px;user-select:none}
+.chart svg{display:block;width:100%;height:100%;overflow:visible}
+.chart .grid{stroke:var(--soft);stroke-width:1}
+.chart .axis{fill:var(--faint);font-size:10.5px;font-family:var(--sans)}
+.chart .col{cursor:pointer}
+.chart .col:hover .hit,.chart .col.selected .hit{fill:var(--hover)}
+.chart .hit{fill:transparent}
+.chart .today{fill:none;stroke:var(--faint);stroke-dasharray:2 2}
+.chart .mark{fill:var(--amber);font-size:10px;font-weight:600;text-anchor:middle}
+.tip{position:absolute;pointer-events:none;min-width:190px;background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12px;box-shadow:0 12px 40px #0006;z-index:5;opacity:0;transition:opacity .12s}
+.tip.on{opacity:1}
+.tip h4{margin:0 0 6px;font-size:12px;font-weight:550;display:flex;gap:10px}
+.tip h4 span{margin-left:auto;font-variant-numeric:tabular-nums}
+.tip div{display:flex;align-items:center;gap:7px;color:var(--muted);line-height:1.9}
+.tip div i{width:7px;height:7px;border-radius:2px}
+.tip div b{margin-left:auto;color:var(--ink);font-weight:400;font-variant-numeric:tabular-nums}
+.tip p{margin-top:5px;padding-top:5px;border-top:1px solid var(--soft);color:var(--muted)}
+.chart-foot{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:12px;font-size:12px;color:var(--muted)}
+
+.tabs{display:flex;gap:23px;border-bottom:1px solid var(--line);margin-bottom:6px;overflow-x:auto;scrollbar-width:none}
+.tabs button{padding:0 0 11px;position:relative;color:var(--muted);white-space:nowrap;font-size:13px}
+.tabs button.active{color:var(--ink)}
+.tabs button.active:after{content:"";position:absolute;height:2px;left:0;right:0;bottom:0;background:var(--ink)}
+.toolbar{display:flex;align-items:center;gap:10px;margin:14px 0 4px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.toolbar .spacer{flex:1}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:2px 6px 2px 10px;color:var(--ink);font-size:12px}
+.chip button{color:var(--muted);width:16px;height:16px;border-radius:50%;line-height:16px}
+.chip button:hover{background:var(--hover);color:var(--ink)}
+
+.table{display:grid;grid-template-columns:minmax(0,1fr) repeat(4,minmax(72px,104px)) minmax(130px,170px);align-items:stretch}
+.thead{font-size:11px;color:var(--faint);padding:10px 8px 8px;border-bottom:1px solid var(--soft)}
+.thead:first-child{padding-left:3px}
+.thead.r{text-align:right}
+.section{position:relative}
+.trow{display:contents}
+.trow>.cell{padding:13px 8px;border-bottom:1px solid var(--soft);min-width:0;font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:var(--muted);display:flex;flex-direction:column;justify-content:center}
+.trow>.cell.name{text-align:left;color:var(--ink);flex-direction:row;align-items:center;justify-content:flex-start;gap:12px;cursor:pointer;padding-left:3px}
+.trow:hover>.cell{background:color-mix(in srgb,var(--hover) 45%,transparent)}
+.trow>.cell.cost{color:var(--ink)}
+.name strong{display:block;font-weight:550;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.name small{display:flex;gap:6px;align-items:center;color:var(--muted);flex-wrap:wrap}
+.logo{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--bg);flex-shrink:0}
+.chev{margin-left:auto;color:var(--faint);transition:transform .18s}
+.trow.open .chev{transform:rotate(90deg)}
+.share{height:3px;border-radius:2px;background:var(--soft);margin-top:6px;overflow:hidden}
+.share span{display:block;height:100%;opacity:.85}
+.detail{grid-column:1/-1;padding:4px 3px 18px 41px;border-bottom:1px solid var(--soft);display:none}
+.trow.open+.detail{display:block}
+.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 24px;margin:8px 0 12px}
+.dgrid>div{font-size:12px;color:var(--muted)}
+.dgrid b{display:block;color:var(--ink);font-weight:400;font-size:13px;font-variant-numeric:tabular-nums}
+.dline{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);align-items:center}
+.stage.phone .table{grid-template-columns:minmax(0,1fr) auto}
+.stage.phone .table .wide{display:none}
+.stage.phone .trow>.cell.cost{padding-left:8px}
+.stage.phone .detail{padding-left:3px}
+.stage.phone .name small .wide-only{display:none}
+.mobile-sub{display:none}
+.stage.phone .mobile-sub{display:block;color:var(--faint);font-size:11.5px}
+
+.row{display:flex;align-items:center;gap:20px;min-height:53px;padding:14px 0;border-top:1px solid var(--soft)}
+.row:first-of-type{border-top:0}
+.row>svg.i{color:var(--muted)}
+.row-copy{min-width:0;flex:1}
+.row-copy>span{display:block;font-size:13px;font-weight:550}
+.row-copy p{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.7;max-width:620px}
+.stage.phone .row{gap:12px;flex-wrap:wrap}
+.empty{text-align:center;padding:60px 0 50px;color:var(--muted)}
+.empty strong{display:block;color:var(--ink);font-weight:550;font-size:14px;margin:10px 0 4px}
+.hint{font-size:12px;color:var(--faint);line-height:1.8;margin-top:22px}
+@media (max-width:900px){.stage:not(.phone) .nav{display:none}.page{padding:12px 24px 60px}}
+</style>
+</head>
+<body>
+<div class="reviewbar">
+  <strong>设置 · 用量 · 设计工作稿</strong><span class="secondary">示例数据，不连接服务、不写入配置</span>
+  <span class="spacer"></span>
+  <button data-review="layout" data-value="desktop" class="active">桌面</button><button data-review="layout" data-value="phone">手机</button>
+  <span class="sep"></span>
+  <button data-review="theme" data-value="dark" class="active">暗</button><button data-review="theme" data-value="light">明</button>
+  <span class="sep"></span>
+  <button data-review="state" data-value="normal" class="active">正常</button><button data-review="state" data-value="partial">部分未报告</button><button data-review="state" data-value="unpriced">缺少价格</button><button data-review="state" data-value="empty">无用量</button><button data-review="state" data-value="loading">读取中</button><button data-review="state" data-value="error">读取失败</button>
+</div>
+<div class="stage" id="stage">
+  <aside class="nav">
+    <div class="brand"><svg class="i" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M7 9.5 11 5.5h7l1.7 1.7h-7L9.7 10.2v4.3L8 12.8Z" fill="currentColor" stroke="none"/><path d="M17 14.5 13 18.5H6L4.3 16.8h7l3-3V9.5L16 11.2Z" fill="currentColor" stroke="none" opacity=".55"/></svg>Varin<small>设置</small></div>
+    <div class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2"/></svg>搜索设置</div>
+    <div class="nav-body" id="nav"></div>
+  </aside>
+  <main class="main">
+    <div class="topline" id="topline"></div>
+    <div class="scroll"><div class="page" id="page"></div></div>
+  </main>
+</div>
+<script>
+// ---------- 示例数据 ----------
+// 每条“模型行”是一个渠道上的一个模型，和对话里的用量面板分组方式一致（渠道 + 模型）。
+// billing：metered 按 Token 计价；custom 用户在模型服务里填写的价格；unpriced 找不到价格；subscription 订阅；local 本地。
+const MODELS = [
+  { id: 'sonnet', name: 'Claude Sonnet 4.5', channel: 'Anthropic', logo: 'A', color: 0, billing: 'metered', price: { in: 3, out: 15, cr: 0.3, cw: 3.75 }, weight: 0.30, cache: 0.68, out: 0.055, cw: 0.04 },
+  { id: 'gpt5', name: 'GPT-5', channel: 'OpenAI', logo: 'O', color: 1, billing: 'metered', price: { in: 1.25, out: 10, cr: 0.125 }, weight: 0.17, cache: 0.6, out: 0.07 },
+  { id: 'gpt5-or', name: 'GPT-5', channel: 'OpenRouter', logo: 'R', color: 1, billing: 'metered', price: { in: 1.25, out: 10, cr: 0.125 }, weight: 0.05, cache: 0.42, out: 0.07 },
+  { id: 'ds', name: 'DeepSeek V3.2', channel: 'DeepSeek', logo: 'D', color: 2, billing: 'metered', price: { in: 0.28, out: 0.42, cr: 0.028 }, weight: 0.15, cache: 0.71, out: 0.06 },
+  { id: 'flash', name: 'Gemini 2.5 Flash', channel: 'Google', logo: 'G', color: 3, billing: 'metered', price: { in: 0.3, out: 2.5, cr: 0.075 }, weight: 0.11, cache: 0.35, out: 0.09 },
+  { id: 'qwen', name: 'Qwen3 Coder Plus', channel: '阿里云百炼', logo: 'Q', color: 4, billing: 'custom', price: { in: 1, out: 5, cr: 0.2 }, weight: 0.05, cache: 0.5, out: 0.06 },
+  { id: 'relay', name: 'gpt-4.1-mini', channel: '中转 · OpenAI 兼容', logo: '?', color: 'hatch', billing: 'unpriced', reason: '未匹配价格目录', weight: 0.04, cache: 0.2, out: 0.08 },
+  { id: 'opus', name: 'Claude Opus 4.1', channel: 'Claude Pro / Max', logo: 'C', color: 5, billing: 'subscription', price: { in: 15, out: 75, cr: 1.5 }, weight: 0.08, cache: 0.6, out: 0.05 },
+  { id: 'local', name: 'qwen3:8b', channel: 'Ollama', logo: 'L', color: 5, billing: 'local', weight: 0.05, cache: 0, out: 0.12 },
+];
+const KINDS = [
+  { name: '对话', note: '你发起的对话，含派出的队友', share: 0.66 },
+  { name: '上下文整理', note: '后台提前整理、写摘要', share: 0.11, bg: true },
+  { name: '代码检索', note: '检索子任务', share: 0.07, bg: true },
+  { name: '规划', note: '目标与计划的模型调用', share: 0.05, bg: true },
+  { name: '标题与摘要', note: '会话标题、提交信息等短任务', share: 0.03, bg: true },
+  { name: '记忆与知识嵌入', note: '向量索引', share: 0.03, bg: true },
+  { name: '图像生成与编辑', note: '按图像模型的 Token 计量', share: 0.03 },
+  { name: 'MCP 采样', note: 'MCP 服务请求的模型调用', share: 0.02 },
+];
+const THREADS = [
+  { name: '重构登录模块', where: 'varin-web', kind: '对话', mates: 3, share: 0.21, last: '今天 14:20' },
+  { name: '五月出行', where: 'Bot · Varin', kind: 'Bot', mates: 2, share: 0.14, last: '今天 09:02' },
+  { name: '近两年检索增强论文对比', where: '研究', kind: '对话', mates: 1, share: 0.12, last: '昨天' },
+  { name: '每日依赖检查', where: 'Bot · 定时任务', kind: '定时', mates: 0, share: 0.08, last: '今天 08:00' },
+  { name: '把订单导出成 Excel', where: '办公', kind: '对话', mates: 0, share: 0.06, last: '10月26日' },
+  { name: '修复移动端配对', where: 'varin', kind: '对话', mates: 2, share: 0.05, last: '10月24日' },
+];
+const ICON = {
+  chevron: '<path d="m9 6 6 6-6 6"/>', download: '<path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 19h14"/>', refresh: '<path d="M19 12a7 7 0 1 1-2.05-4.95M19 5v4h-4"/>',
+  tag: '<path d="M4 12.5V5a1 1 0 0 1 1-1h7.5l7.5 7.5-8.5 8.5Z"/><circle cx="8.5" cy="8.5" r="1.3"/>', card: '<rect x="3.5" y="6" width="17" height="12" rx="2"/><path d="M3.5 10h17"/>',
+  terminal: '<path d="m5 8 4 4-4 4M11 16h8"/>', open: '<path d="M14 5h5v5M19 5l-8 8M17 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4"/>', chart: '<path d="M5 19V9M10 19V5M15 19v-7M20 19v-4"/>',
+  back: '<path d="m15 6-6 6 6 6"/>', dot: '<circle cx="12" cy="12" r="2.2"/>', alert: '<path d="M12 4 3 20h18Z"/><path d="M12 10v4M12 17v.5"/>',
+};
+const icon = (name, extra = '', cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" ${extra}>${ICON[name]}</svg>`;
+
+// 可复现的伪随机：同一范围每次生成同一组示例数字。
+const rand = (seed) => () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+const TODAY = new Date(2026, 9, 30);
+const RANGES = [['7', '7 天'], ['30', '30 天'], ['month', '本月'], ['last', '上月'], ['90', '90 天']];
+const rangeDays = (key) => {
+  if (key === 'month') return { start: new Date(2026, 9, 1), days: 30, live: true };
+  if (key === 'last') return { start: new Date(2026, 8, 1), days: 30, live: false };
+  const days = Number(key); const start = new Date(TODAY); start.setDate(start.getDate() - days + 1);
+  return { start, days, live: true };
+};
+function build(rangeKey, state) {
+  const { start, days, live } = rangeDays(rangeKey);
+  const r = rand(rangeKey.length * 97 + days * 13 + (rangeKey === 'last' ? 7 : 1));
+  const out = [];
+  for (let d = 0; d < days; d += 1) {
+    const date = new Date(start); date.setDate(start.getDate() + d);
+    const weekend = date.getDay() === 0 || date.getDay() === 6;
+    const isToday = live && d === days - 1;
+    let total = 1.65e6 * (weekend ? 0.45 : 1) * (0.55 + r() * 0.9) * (isToday ? 0.55 : 1);
+    if (d % 11 === 7) total *= 1.9; // 偶尔有大任务的一天
+    const rows = MODELS.map((m) => {
+      const tokens = total * m.weight * (0.6 + r() * 0.8);
+      const output = tokens * m.out, input = tokens - output, cacheRead = input * m.cache, cacheWrite = input * (m.cw ?? 0);
+      const requests = Math.max(0, Math.round(tokens / 36000));
+      return { m, tokens, input, output, cacheRead, cacheWrite, requests };
+    });
+    const missing = state === 'partial' && r() < 0.35 ? Math.ceil(r() * 4) : 0;
+    out.push({ date, isToday, rows, missing });
+  }
+  return { days: out, live };
+}
+// “缺少价格”状态把自定义价格的 Qwen 当作没有价格，用来演示未计价的呈现。
+const billingOf = (m) => (ui.state === 'unpriced' && m.id === 'qwen' ? 'unpriced' : m.billing);
+const priced = (m) => billingOf(m) === 'metered' || billingOf(m) === 'custom';
+const costOf = (row, force = false) => {
+  const { m } = row; if (!m.price || (!priced(m) && !force)) return null;
+  const p = m.price;
+  return ((row.input - row.cacheRead - row.cacheWrite) * p.in + row.cacheRead * (p.cr ?? p.in) + row.cacheWrite * (p.cw ?? p.in) + row.output * p.out) / 1e6;
+};
+const savedOf = (row) => (priced(row.m) && row.m.price.cr != null ? row.cacheRead * (row.m.price.in - row.m.price.cr) / 1e6 : 0);
+function aggregate(days, state) {
+  const map = new Map();
+  for (const day of days) for (const row of day.rows) {
+    const a = map.get(row.m.id) ?? { m: row.m, tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, requests: 0, cost: 0, saved: 0, equivalent: 0 };
+    for (const k of ['tokens', 'input', 'output', 'cacheRead', 'cacheWrite', 'requests']) a[k] += row[k];
+    a.cost += costOf(row) ?? 0; a.saved += savedOf(row); a.equivalent += row.m.billing === 'subscription' ? costOf(row, true) : 0;
+    map.set(row.m.id, a);
+  }
+  const rows = [...map.values()].map((a) => (state === 'unpriced' && a.m.id === 'qwen' ? { ...a, m: { ...a.m, billing: 'unpriced', reason: '自定义端点，没有价格', color: 'hatch' }, cost: 0, saved: 0 } : a));
+  return rows;
+}
+
+// ---------- 格式化 ----------
+const nf = new Intl.NumberFormat('zh-CN');
+const tokens = (n) => (n >= 1e8 ? `${(n / 1e8).toFixed(2)} 亿` : n >= 1e4 ? `${nf.format(Math.round(n / 1e4))} 万` : nf.format(Math.round(n)));
+const usd = (n) => (n == null ? '—' : n < 0.01 && n > 0 ? '<$0.01' : `$${n.toFixed(2)}`);
+const day = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;
+const color = (c) => (c === 'hatch' ? '' : `background:var(--c${c})`);
+
+// ---------- 界面状态 ----------
+const ui = { layout: 'desktop', theme: 'dark', state: 'normal', range: 'month', measure: 'cost', tab: 'model', sort: 'cost', selected: null, open: new Set(['sonnet']) };
+
+const NAV = [
+  ['使用偏好', ['通用', '外观', '聊天', '对话默认', '通知', '语音', '快捷键', '存储', '历史与恢复']],
+  ['Agent', ['模型服务', '用量', 'Agents', '外部 Agent', 'Varin bot', '系统提示词', '记忆', '工具与执行', '上下文管理']],
+  ['开发与项目', ['项目', '编辑器', '终端', 'Git']],
+  ['连接与扩展', ['工作连接', '远程实例', 'MCP', 'Skills', 'Varin 扩展']],
+];
+function renderNav() {
+  document.getElementById('nav').innerHTML = NAV.map(([group, items]) => `<div class="nav-group-title">${group}</div>${items.map((item) =>
+    `<button class="nav-link${item === '用量' ? ' active' : ''}">${icon(item === '用量' ? 'chart' : 'dot', item === '用量' ? '' : 'style="opacity:.5"')}${item}${item === '用量' ? '<span class="new">新</span>' : ''}</button>`).join('')}`).join('');
+  document.getElementById('topline').innerHTML = ui.layout === 'phone'
+    ? `<button class="text-button">${icon('back')}设置</button><span class="spacer"></span>`
+    : `<span>Agent</span>${icon('chevron', 'style="width:13px;height:13px"')}<span class="current">用量</span><span class="spacer"></span><span>Local · 此电脑</span>`;
+}
+
+function render() {
+  renderNav();
+  const page = document.getElementById('page');
+  const head = `<div class="page-head"><div><h1>用量</h1><p>这台 Host 上所有模型请求的 Token 和估算费用。</p></div>
+    ${ui.layout === 'phone' ? '' : `<button class="btn">${icon('download')}导出 CSV</button>`}</div>
+    <div class="controls">
+      <select aria-label="Host"><option>Local · 此电脑</option><option>办公室服务器</option></select>
+      <div class="segmented" role="group" aria-label="时间范围">${RANGES.map(([k, v]) => `<button data-range="${k}" class="${ui.range === k ? 'active' : ''}">${v}</button>`).join('')}</div>
+      <span class="spacer"></span>
+      <div class="segmented" role="group" aria-label="度量">${[['cost', '费用'], ['tokens', 'Token']].map(([k, v]) => `<button data-measure="${k}" class="${ui.measure === k ? 'active' : ''}">${v}</button>`).join('')}</div>
+    </div>`;
+  if (ui.state === 'loading') { page.innerHTML = head + `<p class="status" role="status" style="margin:30px 0">正在统计这段时间的用量…</p>`; bind(); return; }
+  if (ui.state === 'error') { page.innerHTML = head + `<div class="note error">无法读取用量：Host 没有响应。已有记录没有受影响。<br><button class="btn" style="margin-top:10px" data-retry>重试</button></div>`; bind(); return; }
+  if (ui.state === 'empty') {
+    page.innerHTML = head + `<div class="empty">${icon('chart', 'style="width:24px;height:24px;color:var(--faint)"')}<strong>这段时间没有模型请求</strong>换一个时间范围，或开始一次对话后再来看。</div>`; bind(); return;
+  }
+  const { days, live } = build(ui.range, ui.state);
+  const scoped = ui.selected == null ? days : [days[ui.selected]];
+  const rows = aggregate(scoped, ui.state);
+  const all = aggregate(days, ui.state);
+  const sum = (list, k) => list.reduce((s, x) => s + x[k], 0);
+  const cost = sum(all, 'cost'), tok = sum(all, 'tokens'), req = sum(all, 'requests');
+  const input = sum(all, 'input'), cacheRead = sum(all, 'cacheRead'), saved = sum(all, 'saved');
+  const unpriced = all.filter((a) => a.m.billing === 'unpriced');
+  const free = all.filter((a) => a.m.billing === 'subscription' || a.m.billing === 'local');
+  const missing = days.reduce((s, d) => s + d.missing, 0);
+  const { start } = rangeDays(ui.range);
+  const end = days[days.length - 1].date;
+  const isCost = ui.measure === 'cost';
+
+  // 合计与构成：费用口径只排有价格的模型；Token 口径排全部。
+  const comp = (isCost ? all.filter((a) => priced(a.m)) : all).map((a) => ({ a, v: isCost ? a.cost : a.tokens })).sort((x, y) => y.v - x.v);
+  const compTotal = comp.reduce((s, x) => s + x.v, 0);
+  const legend = comp.slice(0, 6).map(({ a, v }) => `<div><i style="${color(a.m.color)}" class="${a.m.color === 'hatch' ? 'hatch' : ''}"></i><em>${a.m.name} · ${a.m.channel}</em><strong>${isCost ? usd(v) : tokens(v)}</strong></div>`).join('')
+    + (comp.length > 6 ? `<div><i style="background:var(--c5)"></i><em>其他 ${comp.length - 6} 个</em><strong>${isCost ? usd(comp.slice(6).reduce((s, x) => s + x.v, 0)) : tokens(comp.slice(6).reduce((s, x) => s + x.v, 0))}</strong></div>` : '')
+    + (isCost && unpriced.length ? `<div><i class="hatch"></i><em>${unpriced.map((a) => a.m.name).join('、')}</em><span class="tag warn">未计价</span></div>` : '');
+  const notes = [
+    missing ? `<span class="status warn">${missing} 次请求没有报告用量，合计可能偏低。未报告不按 0 计算。</span>` : '',
+    isCost && unpriced.length ? `<span class="status warn">${unpriced.length} 个模型没有价格，${tokens(sum(unpriced, 'tokens'))} Token 未计入费用。<button class="text-button" style="color:inherit;text-decoration:underline" data-goto-prices>查看</button></span>` : '',
+    isCost && free.length ? `<span class="status">订阅和本地模型的 ${tokens(sum(free, 'tokens'))} Token 不计费用。按 API 标价约 ${usd(sum(free, 'equivalent'))}，已由订阅覆盖。</span>` : '',
+  ].filter(Boolean).join('');
+  const hero = `<div class="total"><strong class="num">${isCost ? usd(cost) : tokens(tok)}${missing || (isCost && unpriced.length) ? '<sup title="部分请求未报告或未计价">+</sup>' : ''}</strong>
+      <span>${isCost ? '估算费用' : 'Token'} · ${day(start)} – ${day(end)}${live ? '（含今天）' : ''}</span><span class="faint">较前一段 ${isCost ? '+12%' : '+8%'}</span></div>
+    <div class="facts">${isCost ? `<span><b class="num">${tokens(tok)}</b> Token</span>` : `<span>估算费用 <b class="num">${usd(cost)}</b></span>`}<span><b class="num">${nf.format(req)}</b> 次请求</span>
+      <span>缓存命中 <b class="num">${Math.round((cacheRead / input) * 100)}%</b></span><span>缓存省下 <b class="num">${usd(saved)}</b></span><span>后台工作占 <b class="num">${Math.round(KINDS.filter((k) => k.bg).reduce((s, k) => s + k.share, 0) * 100)}%</b></span></div>
+    <div class="compbar" aria-hidden="true">${comp.map(({ a, v }) => `<span class="${a.m.color === 'hatch' ? 'hatch' : ''}" style="flex:${v / compTotal};${color(a.m.color)}" title="${a.m.name}"></span>`).join('')}${isCost && unpriced.length ? '<span class="hatch" style="flex:.035"></span>' : ''}</div>
+    <div class="legend">${legend}</div><div class="notes">${notes}</div>`;
+
+  // 每日趋势
+  const values = days.map((d) => d.rows.map((row) => ({ row, v: isCost ? costOf(row) ?? 0 : row.tokens })));
+  const dayTotal = values.map((list) => list.reduce((s, x) => s + x.v, 0));
+  const peak = Math.max(...dayTotal);
+  const peakIndex = dayTotal.indexOf(peak);
+  const trend = `<div class="section"><div class="section-head"><div><h2>每日趋势</h2><p>${ui.layout === 'phone' ? '点按一天查看构成，并只看这一天的明细。' : '悬停查看当天构成，点击一天只看这一天的明细。'}</p></div>
+      <span class="aside num">日均 ${isCost ? usd(cost / days.length) : tokens(tok / days.length)} · 最高 ${day(days[peakIndex].date)} ${isCost ? usd(peak) : tokens(peak)}</span></div>
+      <div class="chart" id="chart"></div><div class="tip" id="tip"></div>
+      <div class="chart-foot"><span>按本机时区（UTC+8）切分日期。</span>${live ? '<span>虚线框是今天，仍在累计。</span>' : ''}${missing ? '<span style="color:var(--amber)">“?” 表示当天有未报告的请求。</span>' : ''}</div></div>`;
+
+  // 明细
+  const tabs = [['model', '模型'], ['channel', '渠道'], ['kind', '用途'], ['thread', '对话']];
+  const sel = ui.selected != null ? `<span class="chip">${day(days[ui.selected].date)}<button data-clear aria-label="清除日期">×</button></span>` : '';
+  const detail = `<div class="section" id="detail"><div class="section-head"><div><h2>明细</h2><p>${ui.selected != null ? '只看选中的一天。' : '所选时间范围内的全部请求。'}</p></div></div>
+    <div class="tabs" role="tablist">${tabs.map(([k, v]) => `<button role="tab" data-tab="${k}" class="${ui.tab === k ? 'active' : ''}">${v}</button>`).join('')}</div>
+    <div class="toolbar">${sel}<span class="spacer"></span>排序<select data-sort aria-label="排序">${[['cost', '按费用'], ['tokens', '按 Token'], ['requests', '按请求数']].map(([k, v]) => `<option value="${k}" ${ui.sort === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+    ${renderTable(rows)}</div>`;
+
+  // 价格
+  const prices = `<div class="section" id="prices"><div class="section-head"><div><h2>价格</h2><p>费用按每次请求当时的标价估算，不含折扣、批量价、中转加价和税费；以服务商账单为准。</p></div></div>
+    <div class="row">${icon('tag')}<div class="row-copy"><span>价格目录</span><p>来自 models.dev，10月30日 14:02 更新。价格变动只影响之后的请求，已有记录保留当时的价格。</p></div><button class="text-button">${icon('refresh')}刷新</button></div>
+    <div class="row">${icon('alert', 'style="color:var(--amber)"')}<div class="row-copy"><span>没有价格的模型（${aggregate(days, ui.state).filter((a) => a.m.billing === 'unpriced').length}）</span><p>${aggregate(days, ui.state).filter((a) => a.m.billing === 'unpriced').map((a) => `${a.m.name}（${a.m.channel} · ${a.m.reason}）`).join('；')}。在模型服务里填写价格后，这些模型过去和之后的请求都会计入，过去的按新价格补算并标注。</p></div><button class="btn">设置价格</button></div>
+    <div class="row">${icon('card')}<div class="row-copy"><span>订阅与本地</span><p>Claude Pro / Max 等订阅渠道和 Ollama 本地模型只统计 Token，不计费用。订阅渠道另外显示按 API 标价折算的参考值。</p></div></div></div>`;
+
+  const external = `<div class="section"><div class="section-head"><div><h2>外部 Agent</h2><p>Codex、Claude Code 和 Pi 自己报告的 Token，由各自的账号计费，不计入上面的合计。</p></div></div>
+    ${[['Codex', '1,284 万', '412 轮', '部分会话只报告累计值，按会话最后一次更新的日期计入'], ['Claude Code', '836 万', '207 轮', ''], ['Pi', '74 万', '31 轮', '']].map(([n, t, turns, extra]) =>
+      `<div class="row">${icon('terminal')}<div class="row-copy"><span>${n}</span><p>${t} Token · ${turns}${extra ? ` · ${extra}` : ''}</p></div></div>`).join('')}</div>`;
+
+  const hint = `<p class="hint">统计范围：这台 Host 上的全部对话、Bot、定时任务、队友和后台工作；外部 Agent 单独列出。实测、估算和未报告的请求分开统计；未报告的请求不按 0 计算，合计旁会标出“+”。</p>`;
+  page.innerHTML = head + hero + trend + detail + prices + external + hint;
+  drawChart(days, values, dayTotal, isCost);
+  bind();
+}
+
+function renderTable(rows) {
+  const isCost = ui.measure === 'cost';
+  const sortKey = ui.sort === 'cost' ? 'cost' : ui.sort;
+  const totalCost = rows.reduce((s, a) => s + a.cost, 0), totalTok = rows.reduce((s, a) => s + a.tokens, 0);
+  const headCols = (first) => `<span class="thead">${first}</span><span class="thead r wide">请求</span><span class="thead r wide">输入</span><span class="thead r wide">缓存读取</span><span class="thead r wide">输出</span><span class="thead r">${isCost ? '估算费用' : 'Token'}</span>`;
+  const billingTag = (a) => ({ metered: '', custom: '<span class="tag">自定义价格</span>', unpriced: '<span class="tag warn">未计价</span>', subscription: '<span class="tag">订阅</span>', local: '<span class="tag">本地</span>' }[a.m.billing]);
+  const money = (a) => (a.m.billing === 'unpriced' ? '<span style="color:var(--amber)">未计价</span>' : a.m.billing === 'subscription' ? '订阅' : a.m.billing === 'local' ? '本地' : usd(a.cost));
+  const shareBar = (a) => { const v = isCost ? a.cost / (totalCost || 1) : a.tokens / (totalTok || 1); return `<div class="share"><span class="${a.m.color === 'hatch' ? 'hatch' : ''}" style="width:${Math.max(1, v * 100)}%;${color(a.m.color)}"></span></div>`; };
+  const valueCell = (a) => `<div class="cell cost">${isCost ? money(a) : tokens(a.tokens)}${shareBar(a)}<span class="mobile-sub">${tokens(a.tokens)} Token · ${nf.format(a.requests)} 次</span></div>`;
+
+  if (ui.tab === 'model') {
+    const list = [...rows].sort((x, y) => (sortKey === 'cost' && isCost ? (y.cost - x.cost) || (y.tokens - x.tokens) : y[sortKey === 'cost' ? 'tokens' : sortKey] - x[sortKey === 'cost' ? 'tokens' : sortKey]));
+    return `<div class="table">${headCols('模型与渠道')}${list.map((a) => {
+      const p = a.m.price;
+      const priceLine = { metered: `models.dev 标价 · 每百万 Token 输入 $${p?.in} / 缓存读取 $${p?.cr ?? p?.in} / 输出 $${p?.out}${p?.cw ? ` / 缓存写入 $${p.cw}` : ''}`, custom: `自定义价格 · 输入 $${p?.in} / 缓存读取 $${p?.cr} / 输出 $${p?.out} · 在模型服务里修改`,
+        unpriced: `没有价格：${a.m.reason}`, subscription: `订阅渠道，不按 Token 计费 · 按 API 标价约 ${usd(a.equivalent)}`, local: '本地模型，不产生 API 费用' }[a.m.billing];
+      return `<div class="trow${ui.open.has(a.m.id) ? ' open' : ''}" data-row="${a.m.id}"><div class="cell name"><span class="logo ${a.m.color === 'hatch' ? 'hatch' : ''}" style="${color(a.m.color)}">${a.m.logo}</span><span style="min-width:0"><strong>${a.m.name}</strong><small>${a.m.channel}${billingTag(a)}</small></span>${icon('chevron', '', 'chev')}</div>
+        <div class="cell wide">${nf.format(a.requests)}</div><div class="cell wide">${tokens(a.input)}</div><div class="cell wide">${tokens(a.cacheRead)}</div><div class="cell wide">${tokens(a.output)}</div>${valueCell(a)}</div>
+        <div class="detail"><div class="dgrid"><div>未缓存输入<b>${tokens(a.input - a.cacheRead - a.cacheWrite)}</b></div><div>缓存读取<b>${tokens(a.cacheRead)}</b></div><div>缓存写入<b>${a.cacheWrite ? tokens(a.cacheWrite) : '未报告'}</b></div><div>输出<b>${tokens(a.output)}</b></div><div>推理（含在输出中）<b>${a.m.id === 'gpt5' ? tokens(a.output * 0.45) : '未报告'}</b></div><div>缓存省下<b>${priced(a.m) ? usd(a.saved) : '—'}</b></div></div>
+          <div class="dline"><span>${priceLine}</span>${a.m.billing === 'unpriced' ? '<button class="btn">设置价格</button>' : ''}</div>
+          <div class="dline" style="margin-top:6px"><span class="status ok">实测 ${nf.format(Math.round(a.requests * 0.97))} 次</span><span class="status">估算 ${nf.format(Math.round(a.requests * 0.03))} 次</span>${ui.state === 'partial' ? '<span class="status warn">未报告 3 次</span>' : ''}</div></div>`;
+    }).join('')}</div>`;
+  }
+  if (ui.tab === 'channel') {
+    const byChannel = new Map();
+    for (const a of rows) { const c = byChannel.get(a.m.channel) ?? { ...a, models: [] }; if (c !== a && byChannel.has(a.m.channel)) { for (const k of ['tokens', 'input', 'output', 'cacheRead', 'requests', 'cost']) c[k] += a[k]; } c.models.push(a.m.name); byChannel.set(a.m.channel, c); }
+    const list = [...byChannel.values()].sort((x, y) => (isCost ? y.cost - x.cost : y.tokens - x.tokens));
+    return `<div class="table">${headCols('渠道')}${list.map((a) => `<div class="trow"><div class="cell name"><span class="logo ${a.m.color === 'hatch' ? 'hatch' : ''}" style="${color(a.m.color)}">${a.m.logo}</span><span style="min-width:0"><strong>${a.m.channel}</strong><small>${a.models.join('、')}${billingTag(a)}</small></span></div>
+      <div class="cell wide">${nf.format(a.requests)}</div><div class="cell wide">${tokens(a.input)}</div><div class="cell wide">${tokens(a.cacheRead)}</div><div class="cell wide">${tokens(a.output)}</div>${valueCell(a)}</div>`).join('')}</div>`;
+  }
+  const totals = { tokens: rows.reduce((s, a) => s + a.tokens, 0), input: rows.reduce((s, a) => s + a.input, 0), cacheRead: rows.reduce((s, a) => s + a.cacheRead, 0), output: rows.reduce((s, a) => s + a.output, 0), requests: rows.reduce((s, a) => s + a.requests, 0), cost: totalCost };
+  const scaled = (share) => ({ m: { color: 5 }, tokens: totals.tokens * share, input: totals.input * share, cacheRead: totals.cacheRead * share, output: totals.output * share, requests: Math.round(totals.requests * share), cost: totals.cost * share });
+  if (ui.tab === 'kind') {
+    return `<div class="table">${headCols('用途')}${KINDS.map((k, i) => { const a = scaled(k.share); a.m = { color: k.bg ? 3 : 0, billing: 'metered' };
+      return `<div class="trow"><div class="cell name"><span style="min-width:0"><strong>${k.name}</strong><small>${k.note}${k.bg ? '<span class="tag">后台</span>' : ''}</small></span></div>
+        <div class="cell wide">${nf.format(a.requests)}</div><div class="cell wide">${tokens(a.input)}</div><div class="cell wide">${tokens(a.cacheRead)}</div><div class="cell wide">${tokens(a.output)}</div>${valueCell(a)}</div>`; }).join('')}</div>
+      <p class="hint" style="margin-top:12px">后台工作在你没有直接发消息时也会调用模型，可以在「上下文管理」「记忆与知识嵌入」等页面为它们指定更便宜的模型。</p>`;
+  }
+  return `<div class="table">${headCols('对话')}${THREADS.map((th) => { const a = scaled(th.share); a.m = { color: th.kind === 'Bot' ? 4 : th.kind === '定时' ? 2 : 0, billing: 'metered' };
+    return `<div class="trow"><div class="cell name"><span style="min-width:0"><strong>${th.name}</strong><small>${th.where}${th.mates ? ` · 含 ${th.mates} 位队友` : ''}<span class="wide-only">· ${th.last}</span></small></span><button class="text-button chev" title="打开对话的用量" style="transform:none">${icon('open')}</button></div>
+      <div class="cell wide">${nf.format(a.requests)}</div><div class="cell wide">${tokens(a.input)}</div><div class="cell wide">${tokens(a.cacheRead)}</div><div class="cell wide">${tokens(a.output)}</div>${valueCell(a)}</div>`; }).join('')}</div>
+    <p class="hint" style="margin-top:12px">队友的请求计入派出它的对话。已删除对话的用量保留在合计里，归入“已删除的对话”。</p>`;
+}
+
+function drawChart(days, values, dayTotal, isCost) {
+  const box = document.getElementById('chart'); const tip = document.getElementById('tip');
+  const W = box.clientWidth, H = box.clientHeight, top = 14, bottom = 22, left = 0, right = 44;
+  const plotW = W - left - right, plotH = H - top - bottom;
+  const max = Math.max(...dayTotal) * 1.08 || 1;
+  const step = plotW / days.length, barW = Math.max(3, Math.min(22, step * 0.62));
+  const grid = [0, 0.5, 1].map((f) => { const y = top + plotH - plotH * f; const v = max * f; return `<line class="grid" x1="0" x2="${plotW}" y1="${y}" y2="${y}"/><text class="axis" x="${plotW + 8}" y="${y + 3.5}">${f === 0 ? '0' : isCost ? usd(v) : tokens(v)}</text>`; }).join('');
+  const labelEvery = days.length > 31 ? 15 : days.length > 10 ? 5 : 1;
+  const cols = days.map((d, i) => {
+    const x = left + i * step + (step - barW) / 2; let y = top + plotH;
+    const order = values[i].filter((s) => s.v > 0).sort((a, b) => (a.row.m.color === 'hatch') - (b.row.m.color === 'hatch'));
+    const segs = order.map(({ row, v }) => { const h = (v / max) * plotH; y -= h; return `<rect x="${x}" y="${y}" width="${barW}" height="${Math.max(0, h - 0.6)}" rx="1.5" fill="${row.m.color === 'hatch' ? 'var(--hatch)' : `var(--c${row.m.color})`}" opacity=".85"/>`; }).join('');
+    const unpricedCap = isCost && d.rows.some((r) => billingOf(r.m) === 'unpriced') ? `<rect x="${x}" y="${y - 3}" width="${barW}" height="2" fill="var(--hatch)"/>` : '';
+    const today = d.isToday ? `<rect class="today" x="${x - 2.5}" y="${top}" width="${barW + 5}" height="${plotH + 2}" rx="3"/>` : '';
+    const mark = d.missing ? `<text class="mark" x="${x + barW / 2}" y="${y - 6}">?</text>` : '';
+    const label = (i % labelEvery === 0 || i === days.length - 1) ? `<text class="axis" x="${x + barW / 2}" y="${H - 5}" text-anchor="middle">${d.isToday ? '今天' : `${d.date.getMonth() + 1}/${d.date.getDate()}`}</text>` : '';
+    return `<g class="col${ui.selected === i ? ' selected' : ''}" data-day="${i}"><rect class="hit" x="${left + i * step}" y="${top - 6}" width="${step}" height="${plotH + 10}" rx="4"/>${today}${segs}${unpricedCap}${mark}${label}</g>`;
+  }).join('');
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="每日${isCost ? '估算费用' : 'Token'}">${grid}${cols}</svg>`;
+  box.querySelectorAll('.col').forEach((g) => {
+    const i = Number(g.dataset.day), d = days[i];
+    g.addEventListener('mousemove', (event) => {
+      const items = values[i].filter((s) => s.v > 0).sort((a, b) => b.v - a.v).slice(0, 5);
+      const unp = d.rows.filter((r) => billingOf(r.m) === 'unpriced');
+      tip.innerHTML = `<h4>${day(d.date)}${d.isToday ? ' · 进行中' : ''}<span>${isCost ? usd(dayTotal[i]) : tokens(dayTotal[i])}</span></h4>${items.map(({ row, v }) => `<div><i style="${row.m.color === 'hatch' ? 'background:var(--hatch)' : `background:var(--c${row.m.color})`}"></i>${row.m.name} · ${row.m.channel}<b>${isCost ? usd(v) : tokens(v)}</b></div>`).join('')}
+        <p>${nf.format(d.rows.reduce((s, r) => s + r.requests, 0))} 次请求${d.missing ? ` · <span style="color:var(--amber)">${d.missing} 次未报告</span>` : ''}${isCost && unp.length ? ` · ${unp.map((r) => r.m.name).join('、')} 未计价` : ''}</p>`;
+      const rect = box.getBoundingClientRect(), host = box.parentElement.getBoundingClientRect();
+      let left = event.clientX - host.left + 14; if (left + 220 > host.width) left = event.clientX - host.left - 230;
+      tip.style.left = `${left}px`; tip.style.top = `${rect.top - host.top + 6}px`; tip.classList.add('on');
+    });
+    g.addEventListener('mouseleave', () => tip.classList.remove('on'));
+    g.addEventListener('click', () => { ui.selected = ui.selected === i ? null : i; render(); document.getElementById('detail')?.scrollIntoView({ block: 'nearest' }); });
+  });
+}
+
+function bind() {
+  document.querySelectorAll('[data-range]').forEach((b) => b.onclick = () => { ui.range = b.dataset.range; ui.selected = null; render(); });
+  document.querySelectorAll('[data-measure]').forEach((b) => b.onclick = () => { ui.measure = b.dataset.measure; render(); });
+  document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { ui.tab = b.dataset.tab; render(); });
+  document.querySelectorAll('[data-row]').forEach((r) => r.querySelector('.name').onclick = () => { const id = r.dataset.row; ui.open.has(id) ? ui.open.delete(id) : ui.open.add(id); render(); });
+  document.querySelector('[data-sort]')?.addEventListener('change', (e) => { ui.sort = e.target.value; render(); });
+  document.querySelector('[data-clear]')?.addEventListener('click', () => { ui.selected = null; render(); });
+  document.querySelector('[data-goto-prices]')?.addEventListener('click', () => document.getElementById('prices')?.scrollIntoView({ behavior: 'smooth' }));
+  document.querySelector('[data-retry]')?.addEventListener('click', () => { ui.state = 'normal'; syncReview(); render(); });
+}
+function syncReview() {
+  document.querySelectorAll('[data-review]').forEach((b) => b.classList.toggle('active', ui[b.dataset.review] === b.dataset.value));
+  document.documentElement.dataset.theme = ui.theme;
+  document.getElementById('stage').classList.toggle('phone', ui.layout === 'phone');
+}
+document.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', () => { ui[b.dataset.review] = b.dataset.value; syncReview(); render(); }));
+addEventListener('resize', () => render());
+const params = new URLSearchParams(location.search);
+for (const key of ['layout', 'theme', 'state', 'range', 'measure', 'tab']) if (params.get(key)) ui[key] = params.get(key);
+syncReview(); render();
+</script>
+</body>
+</html>
