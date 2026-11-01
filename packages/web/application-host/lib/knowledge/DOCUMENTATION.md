@@ -71,6 +71,10 @@ error and never automatically replays writes or silently switches storage backen
 Host shutdown collects each owner's errors while continuing its ordered teardown;
 a failed semantic-index close cannot skip the authority stores' durable close.
 Deferred checkpoint and disconnect-close diagnostics retain the original storage error.
+Observation preparation classifies native `TDB_CORRUPTED_FILE` by its structured code, preserved across
+private IPC, rather than localized diagnostic text. I/O, closed-owner and unknown failures remain
+unavailable; neither case recreates the store or discards original events. Public warnings keep a
+fixed message while the original cause remains available to the trusted owner.
 
 Directory removal reports its current resource-release, vector-cache, inference-receipt,
 symbol-catalog or compaction phase. Independent cleanup domains continue after a failure

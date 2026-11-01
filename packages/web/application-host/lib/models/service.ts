@@ -11,7 +11,7 @@ import { ConfigurationFile, ModelConfigurationError, object, revisionOf } from '
 import { CredentialService, fileSecretStore, type ResolvedCredential } from './credentials.js';
 import { AgentSettingsService } from './settings.js';
 import { compileToolJsonSchema } from './schema.js';
-import { appendModelPath, modelEgressOverride, validateModelConnection } from './connection.js';
+import { appendModelPath, modelEndpoint, modelRequestUrl, modelEgressOverride, validateModelConnection } from './connection.js';
 import type { EgressFetch, EgressOverride } from '../harness/egress.js';
 import { AwsCredentialOwner } from './aws-auth.js';
 import { GoogleCredentialOwner } from './google-auth.js';
@@ -66,12 +66,7 @@ function validateModelPaths(paths: unknown, baseUrl: string, keys: readonly stri
     appendModelPath(baseUrl, path);
   }
 }
-function endpoint(value: string) {
-  let url: URL;
-  try { url = new URL(value); } catch { return fail('model-endpoint-invalid', 'Enter a complete model endpoint'); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) return fail('model-endpoint-invalid', 'Use an HTTP endpoint without embedded credentials');
-  return url;
-}
+const endpoint = modelEndpoint;
 
 /** Shared model configuration and immutable execution selections for this Application Host. */
 export class ModelsService {
@@ -381,7 +376,8 @@ export class ModelsService {
       const source = await this.#aws.source(channel.id, { ...(auth.profile ? { AWS_PROFILE: auth.profile } : {}) });
       return { auth: { headers: await this.#aws.sign(source, dispatch, channel.connection?.headers ?? {}, typeof channel.parameters.region === 'string' ? channel.parameters.region : undefined) }, source: 'aws-chain' };
     }
-    return this.#credentialHeaders(this.types.get(channel.type)!, await this.credentials.resolve(auth, channel.id, undefined, dispatch));
+    const type = this.types.get(channel.type)!;
+    return this.#credentialHeaders(type, await this.credentials.resolve(auth, channel.id, undefined, dispatch, type.oauthProviders?.map(provider => provider.id) ?? []));
   }
   currentScope(providerId: string) { return this.#channel(providerId, true).then(channel => this.#scope(channel)); }
   async currentProviderAccount(providerId: string): Promise<string | undefined> { const auth = (await this.#channel(providerId, true)).authentication; return auth.kind === 'credential' ? this.credentials.providerAccount(auth.reference) : undefined; }
@@ -440,7 +436,7 @@ export class ModelsService {
     const type = this.types.get(channel.type)!;
     const scope = await this.#scope(channel);
     const captured = channel.authentication.kind === 'credential' || channel.authentication.kind === 'environment' || channel.authentication.kind === 'none'
-      ? await this.credentials.captureResolver(channel.authentication, channel.id) : undefined;
+      ? await this.credentials.captureResolver(channel.authentication, channel.id, type.oauthProviders?.map(provider => provider.id) ?? []) : undefined;
     let releaseAdapter: (() => void) | undefined;
     try { releaseAdapter = await type.adapter?.capture(); } catch (error) { captured?.release(); throw error; }
     const assertAvailable = async () => {
@@ -483,7 +479,7 @@ export class ModelsService {
     const type = this.types.get(channel.type)!;
     const scope: CredentialScope = input.secret ? { reference: channel.id, authority: this.credentials.authorityId, account: `draft:${randomUUID()}`, generation: 0 } : await this.#scope(channel);
     const captured = !input.secret && ['credential', 'environment', 'none'].includes(channel.authentication.kind)
-      ? await this.credentials.captureResolver(channel.authentication, channel.id) : undefined;
+      ? await this.credentials.captureResolver(channel.authentication, channel.id, type.oauthProviders?.map(provider => provider.id) ?? []) : undefined;
     let releaseAdapter: (() => void) | undefined;
     try { releaseAdapter = await type.adapter?.capture(); } catch (error) { captured?.release(); throw error; }
     let released = false;
@@ -549,7 +545,7 @@ export class ModelsService {
     }
     const routes = operation === 'decision' ? classifierRequestRoutes(api, baseUrl, configuredPath, model.decision?.paths)
       : configuredPath !== undefined ? [{ requestUrl: appendModelPath(baseUrl, configuredPath), requestKind: 'model_compute' as const }]
-      : image ? (api === 'openrouter-images' ? ['chat/completions'] : [operation === 'image-editing' ? 'images/edits' : 'images/generations']).map(path => ({ requestUrl: `${baseUrl.replace(/\/+$/, '')}/${path}`, requestKind: 'model_compute' as const }))
+      : image ? (api === 'openrouter-images' ? ['chat/completions'] : [operation === 'image-editing' ? 'images/edits' : 'images/generations']).map(path => ({ requestUrl: modelRequestUrl(baseUrl, `/${path}`), requestKind: 'model_compute' as const }))
       : operation === 'embedding' ? [{ requestUrl: embeddingRequestUrl(baseUrl), requestKind: 'model_compute' as const }]
         : [{ requestUrl: rerankRequestUrl(baseUrl, override), requestKind: 'model_compute' as const }];
     routes.forEach(route => endpoint(route.requestUrl));
@@ -560,7 +556,7 @@ export class ModelsService {
       if (revisionOf(current.authentication) !== revisionOf(channel.authentication) || !sameScope(await this.#scope(current), credentialScope)) return fail('credential-scope-changed', 'The selected account changed');
     };
     const captured = channel.authentication.kind === 'credential' || channel.authentication.kind === 'environment' || channel.authentication.kind === 'none'
-      ? await this.credentials.captureResolver(channel.authentication, channel.id) : undefined;
+      ? await this.credentials.captureResolver(channel.authentication, channel.id, type.oauthProviders?.map(provider => provider.id) ?? []) : undefined;
     let tokenizer: Awaited<ReturnType<ModelsService['acquireTokenizer']>> | undefined;
     try {
       tokenizer = await this.acquireTokenizer(model.tokenizer);
@@ -638,8 +634,11 @@ export class ModelsService {
       if (!sameScope(expected, await currentScope())) return fail('credential-scope-changed', 'The account changed during model discovery');
       signal?.throwIfAborted();
       const headers = new Headers(request.headers);
-      for (const [key, value] of Object.entries(channel.connection?.headers ?? {})) headers.set(key, value);
       for (const [key, value] of Object.entries(auth.auth.headers ?? {})) if (value !== null) headers.set(key, value);
+      for (const [key, value] of Object.entries(channel.connection?.headers ?? {})) {
+        if (key.toLowerCase() === 'anthropic-beta') headers.append(key, value);
+        else if (!headers.has(key)) headers.set(key, value);
+      }
       if (auth.auth.apiKey) headers.set(type.protocol === 'anthropic-messages' ? 'x-api-key' : type.protocol.startsWith('google-') ? 'x-goog-api-key' : 'authorization', type.protocol === 'anthropic-messages' || type.protocol.startsWith('google-') ? auth.auth.apiKey : `Bearer ${auth.auth.apiKey}`);
       const response = await fetchImpl(request.url, { headers, ...(signal ? { signal } : {}), redirect: 'manual' }, modelEgressOverride(channel.connection));
       if (!response.ok) return fail('model-discovery-failed', `Model discovery failed (${response.status})`);

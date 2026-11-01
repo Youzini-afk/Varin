@@ -52,6 +52,9 @@ impl AzureResponsesProvider {
     pub fn set_max_output_tokens(&mut self, max: u64) {
         self.inner.max_output_tokens = Some(max);
     }
+    pub fn set_supports_strict_mode(&mut self, supported: Option<bool>) {
+        self.inner.supports_strict_mode = supported;
+    }
     pub fn set_reasoning(&mut self, reasoning: Option<Value>) {
         self.inner.reasoning = reasoning;
     }

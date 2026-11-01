@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createKnowledgeContextRuntime, type ThreadObservationSource } from './context-runtime.js';
 import { openKnowledgeStoreEngine } from './store-engine.js';
-import type { KnowledgeStore } from './store.js';
+import { openWorkspaceKnowledge, type KnowledgeStore } from './store.js';
 import { createTerminalCommandObserveAdapter, createTerminalCommandProjector } from './terminal-projection.js';
 import { createContextObservationPublication } from './context-publication.js';
 import { ContextService } from '../kernel/context-service.js';
@@ -36,7 +36,7 @@ it('publishes original user interventions immediately outside the source write t
   expect(request.mock.calls.filter(([method]) => method.endsWith('admit'))).toHaveLength(1);
   await context.dispose();
 });
-it('keeps model preparation available with a corrupt observation store and publishes the original events after recovery', async () => {
+it.each(['native', 'private-process'] as const)('keeps model preparation available with a corrupt %s observation store and publishes original events after recovery', async transport => {
   const owner = source();
   await store.putEvent({ kind: 'edit', at: 1, sessionId: owner.runId, text: 'editor save', source: 'user' });
   await store.close();
@@ -45,7 +45,10 @@ it('keeps model preparation available with a corrupt observation store and publi
   await writeFile(marker, 'invalid checkpoint marker');
   let opened = false;
   const load = vi.fn(async () => {
-    if (!opened) { store = await openKnowledgeStoreEngine({ dataDir: root, hostId: 'host', workspaceId: 'ws', embedding: null }); opened = true; }
+    if (!opened) {
+      const open = transport === 'native' ? openKnowledgeStoreEngine : openWorkspaceKnowledge;
+      store = await open({ dataDir: root, hostId: 'host', workspaceId: 'ws', embedding: null }); opened = true;
+    }
     return store;
   });
   const context = createKnowledgeContextRuntime({ getStore: load });
@@ -67,7 +70,8 @@ it('keeps model preparation available with a corrupt observation store and publi
     expect(await prepare()).toMatchObject({ status: 'ready' });
     expect(await prepare()).toMatchObject({ status: 'ready' });
     expect(warning).toHaveBeenCalledOnce();
-    expect(warning.mock.calls[0]?.[0]).toMatchObject({ workspaceId: 'ws', reason: 'corrupt' });
+    expect(warning.mock.calls[0]?.[0]).toMatchObject({ workspaceId: 'ws', reason: 'corrupt',
+      message: 'Workspace change notifications are unavailable', cause: { code: 'TDB_CORRUPTED_FILE' } });
     expect(admitted).toEqual([]);
     expect(await readFile(marker, 'utf8')).toBe('invalid checkpoint marker');
     await writeFile(marker, original);
@@ -76,6 +80,22 @@ it('keeps model preparation available with a corrupt observation store and publi
     expect(await prepare()).toMatchObject({ status: 'ready' });
     expect(admitted).toHaveLength(1);
   } finally { service.close(); await context.dispose(); }
+});
+it('keeps a closed storage owner unavailable rather than corrupt and recovers original events', async () => {
+  const owner = source();
+  const original = await store.putEvent({ kind: 'edit', at: 1, sessionId: owner.runId, text: 'original saved event', source: 'user' });
+  await store.close();
+  store = await openWorkspaceKnowledge({ dataDir: root, hostId: 'host', workspaceId: 'ws', embedding: null });
+  await store.close();
+  const context = createKnowledgeContextRuntime({ getStore: async () => store });
+  try {
+    await expect(context.observationsForSource(owner)).rejects.toMatchObject({ workspaceId: 'ws', reason: 'unavailable',
+      message: 'Workspace change notifications are unavailable' });
+    store = await openWorkspaceKnowledge({ dataDir: root, hostId: 'host', workspaceId: 'ws', embedding: null });
+    const recovered = await context.observationsForSource(owner);
+    expect(recovered.events).toHaveLength(1);
+    expect(recovered.events[0]?.event).toMatchObject({ id: original.id, text: 'original saved event' });
+  } finally { await context.dispose(); }
 });
 it('persists real document and terminal observations to admitted native Threads with durable dedupe', async () => {
   let context = runtime(); sources.push(source('thread:b'));

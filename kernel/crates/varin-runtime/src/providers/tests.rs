@@ -1,4 +1,7 @@
 use super::*;
+mod stream_contracts;
+mod signed_chat;
+mod request_options;
 
 #[test]
 fn context_display_uses_protocol_cache_accounting() {
@@ -396,6 +399,58 @@ fn truncated_response_and_out_of_order_tool_delta_do_not_complete() {
         generate(&p, responses::FAMILY).0.unwrap_err().code,
         "invalid_event_order"
     );
+}
+
+#[test]
+fn responses_incomplete_text_waits_for_terminal_and_keeps_usage_and_refusal() {
+    for (reason, expected) in [("max_output_tokens", FinishReason::Length), ("content_filter", FinishReason::ContentFilter)] {
+        let item = json!({"id":"partial","type":"message","status":"incomplete","role":"assistant","content":[{"type":"output_text","text":"partial "},{"type":"refusal","refusal":"refusal"}]});
+        let events = vec![
+            json!({"type":"response.output_text.delta","item_id":"partial","delta":"partial "}),
+            json!({"type":"response.refusal.delta","item_id":"partial","delta":"refusal"}),
+            json!({"type":"response.output_item.done","item":item}),
+        ];
+        let p = responses::ResponsesProvider::new(connection(events.clone(), 1));
+        let (result, output) = generate(&p, responses::FAMILY);
+        assert_eq!(result.unwrap_err().code, "stream_interrupted");
+        assert!(!output.iter().any(|event| matches!(event, ProviderEvent::ItemCompleted { .. })));
+        let mut terminal = events;
+        terminal.push(json!({"type":"response.incomplete","response":{"output":[item],"incomplete_details":{"reason":reason},"usage":{"output_tokens":7,"vendor_detail":{"billable":true}}}}));
+        let p = responses::ResponsesProvider::new(connection(terminal, 1));
+        let (result, output) = generate(&p, responses::FAMILY);
+        assert_eq!(result.unwrap(), expected);
+        assert_eq!(output.iter().filter_map(|event| match event {
+            ProviderEvent::TextDelta { text, .. } => Some(text.as_str()), _ => None,
+        }).collect::<String>(), "partial refusal");
+        let completed: Vec<_> = output.iter().filter_map(|event| match event {
+            ProviderEvent::ItemCompleted { item } => Some(item), _ => None,
+        }).collect();
+        assert_eq!(completed.len(), 1);
+        assert!(matches!(&completed[0].content, Content::Text { text } if text == "partial refusal"));
+        assert_eq!(completed[0].opaque.as_ref().unwrap().value, item);
+        assert!(output.iter().any(|event| matches!(event, ProviderEvent::Usage { receipt }
+            if receipt.input_tokens.is_none() && receipt.output_tokens == Some(7)
+                && receipt.raw.as_ref().unwrap()["vendor_detail"]["billable"] == true)));
+    }
+}
+
+#[test]
+fn responses_failed_and_incomplete_tools_retain_usage_without_executable_partial_calls() {
+    let usage = json!({"input_tokens":9,"vendor_charge":"unknown"});
+    for terminal in ["response.failed", "response.incomplete", "response.completed"] {
+        let item = json!({"id":"partial-call","type":"function_call","status":"incomplete","call_id":"call-1","name":"read","arguments":"{}"});
+        let p = responses::ResponsesProvider::new(connection(vec![
+            json!({"type":"response.output_item.done","item":item}),
+            json!({"type":terminal,"response":{"output":[item],"error":{"code":"server_error","message":"private prompt must not escape"},"incomplete_details":{"reason":"max_output_tokens"},"usage":usage}}),
+        ], 1));
+        let (result, output) = generate(&p, responses::FAMILY);
+        let error = result.unwrap_err();
+        assert!(!error.message.contains("private prompt"));
+        assert!(!output.iter().any(|event| matches!(event, ProviderEvent::ItemCompleted { item }
+            if matches!(item.content, Content::ToolCall { .. }))));
+        assert!(output.iter().any(|event| matches!(event, ProviderEvent::Usage { receipt }
+            if receipt.input_tokens == Some(9) && receipt.output_tokens.is_none() && receipt.raw.as_ref() == Some(&usage))));
+    }
 }
 #[test]
 fn anthropic_signature_and_server_tool_remain_opaque() {
@@ -863,6 +918,51 @@ fn chat_truncated_after_finish_does_not_emit_complete_items_and_multiple_choices
 }
 
 #[test]
+fn chat_reasoning_aliases_emit_once_but_keep_the_original_replay_fields() {
+    let provider = chat::ChatProvider::new(chat_connection(vec![
+        json!({"id":"aliases","choices":[{"index":0,"delta":{"reasoning_content":"think","reasoning":"think"},"finish_reason":null}]}),
+        json!({"id":"aliases","choices":[{"index":0,"delta":{"reasoning_content":"","reasoning":" more","content":"answer"},"finish_reason":"stop"}]}),
+    ], true));
+    let (result, output) = generate(&provider, chat::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::Stop);
+    assert_eq!(output.iter().filter_map(|event| match event {
+        ProviderEvent::ReasoningDelta { text, .. } => Some(text.as_str()), _ => None,
+    }).collect::<String>(), "think more");
+    let mut replay = view(chat::FAMILY);
+    replay.history = output.into_iter().filter_map(|event| match event {
+        ProviderEvent::ItemCompleted { item } => Some(Arc::new(ConversationItem {
+            resource_activation: None, id: item.id, provenance: Provenance::Assistant,
+            content: item.content, opaque: item.opaque,
+        })), _ => None,
+    }).collect();
+    let body = provider.serialize(&replay, None).unwrap().to_value();
+    assert_eq!(body["messages"][0]["reasoning_content"], "think");
+    assert_eq!(body["messages"][0]["reasoning"], "think more");
+}
+
+#[test]
+fn chat_empty_tools_is_only_sent_for_historical_tool_exchanges() {
+    let provider = chat::ChatProvider::new(chat_connection(vec![
+        json!({"id":"history","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}),
+    ], true));
+    let (result, output) = generate(&provider, chat::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+    let mut replay = view(chat::FAMILY);
+    replay.binding.tools.clear();
+    assert!(provider.serialize(&replay, None).unwrap().to_value().get("tools").is_none());
+    replay.history = output.into_iter().filter_map(|event| match event {
+        ProviderEvent::ItemCompleted { item } => Some(Arc::new(ConversationItem {
+            resource_activation: None, id: item.id, provenance: Provenance::Assistant,
+            content: item.content, opaque: item.opaque,
+        })), _ => None,
+    }).collect();
+    let body = provider.serialize(&replay, None).unwrap().to_value();
+    assert_eq!(body["tools"], json!([]));
+    assert_eq!(body["messages"][0]["tool_calls"][0]["id"], "call-1");
+    assert!(replay.binding.tools.is_empty());
+}
+
+#[test]
 fn copilot_headers_and_chat_reasoning_follow_the_actual_request() {
     struct Inspect;
     impl HttpTransport for Inspect {
@@ -1201,6 +1301,9 @@ fn mistral_thinking_chunks_and_clean_eof_preserve_visible_text() {
     let p = mistral::MistralProvider::new(connection(events.clone(), 1));
     let (result, output) = generate(&p, mistral::FAMILY);
     assert_eq!(result.unwrap(), FinishReason::Stop);
+    assert_eq!(output.iter().filter_map(|event| match event {
+        ProviderEvent::ReasoningDelta { text, .. } => Some(text.as_str()), _ => None,
+    }).collect::<String>(), "firstsecond");
     let item = output
         .into_iter()
         .find_map(|e| {

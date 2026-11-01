@@ -68,6 +68,8 @@ struct Options {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResponseOptions {
+    #[serde(default, deserialize_with = "explicit_boolean")]
+    supports_strict_mode: Option<bool>,
     text_verbosity: Option<String>,
     service_tier: Option<String>,
 }
@@ -100,9 +102,17 @@ struct BedrockOptions {
 struct PiOptions {
     cache_retention: Option<String>,
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Empty {}
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MistralOptions {
+    prompt_mode: Option<String>,
+    prompt_cache_key: Option<String>,
+}
+fn explicit_boolean<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(deserializer).map(Some)
+}
 fn empty_object() -> Value {
     json!({})
 }
@@ -154,6 +164,7 @@ fn bind(
                 let mut p = responses::ResponsesProvider::new(connection);
                 p.max_output_tokens = c.max_output_tokens;
                 p.reasoning = reasoning;
+                p.supports_strict_mode = o.supports_strict_mode;
                 Arc::new(p)
             } else if c.provider_family == azure::FAMILY {
                 let deployment = c
@@ -181,8 +192,15 @@ fn bind(
                     p.set_max_output_tokens(max);
                 }
                 p.set_reasoning(reasoning);
+                p.set_supports_strict_mode(o.supports_strict_mode);
                 Arc::new(p)
             } else {
+                if o.supports_strict_mode.is_some() {
+                    return Err(ExecutionError::new(
+                        "unsupported_codex_options",
+                        "Codex strict capability is not configurable",
+                    ));
+                }
                 if c.max_output_tokens.is_some()
                     || options.temperature.is_some()
                     || options.sampling_params.is_some()
@@ -276,8 +294,25 @@ fn bind(
             Arc::new(p)
         }
         mistral::FAMILY => {
-            let _: Empty = decode(options.protocol)?;
+            let o: MistralOptions = decode(options.protocol)?;
+            if o.prompt_mode
+                .as_deref()
+                .is_some_and(|mode| mode != "reasoning")
+            {
+                return Err(ExecutionError::new(
+                    "model_options",
+                    "Mistral prompt mode must be reasoning",
+                ));
+            }
+            if o.prompt_mode.is_some() && c.reasoning_effort.is_some() {
+                return Err(ExecutionError::new(
+                    "model_options",
+                    "Mistral prompt mode and reasoning effort are mutually exclusive",
+                ));
+            }
             let mut p = mistral::MistralProvider::new(connection);
+            p.prompt_mode = o.prompt_mode;
+            p.prompt_cache_key = o.prompt_cache_key;
             if let Some(max) = c.max_output_tokens {
                 p.set_max_output_tokens(max);
             }
@@ -339,6 +374,7 @@ fn bind(
             ));
         }
         for (key, value) in parameters {
+            // Null retains the API default of one choice, as does an omitted n.
             if c.provider_family == chat::FAMILY
                 && key == "n"
                 && !value.is_null()
@@ -357,11 +393,16 @@ fn bind(
                     | "instructions"
                     | "tools"
                     | "stream"
+                    | "stream_options"
+                    | "store"
+                    | "include"
+                    | "previous_response_id"
+                    | "conversation"
                     | "max_tokens"
                     | "max_completion_tokens"
                     | "max_output_tokens"
             ) {
-                return Err(ExecutionError::new("sampling_parameters", "sampling parameters cannot replace the frozen model, history, tools or output capacity"));
+                return Err(ExecutionError::new("sampling_parameters", "sampling parameters cannot replace frozen model, history, tools, output capacity, privacy or streaming controls"));
             }
             fields[key] = value;
         }

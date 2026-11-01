@@ -25,26 +25,55 @@ fn invalid() -> ExecutionError {
         "invalid model channel connection options",
     )
 }
+// Match whole credential components, not harmless words such as "tokens" or "sessionless".
+pub(crate) fn credential_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let name = lower.as_str();
+    let parts: Vec<_> = name.split(['-', '_']).collect();
+    parts.iter().any(|part| {
+        matches!(
+            *part,
+            "authorization"
+                | "authentication"
+                | "auth"
+                | "bearer"
+                | "cookie"
+                | "cookies"
+                | "token"
+                | "secret"
+                | "password"
+                | "credential"
+                | "credentials"
+                | "session"
+                | "signature"
+                | "apikey"
+                | "accesskey"
+                | "privatekey"
+                | "subscriptionkey"
+                | "securitykey"
+                | "authtoken"
+                | "accesstoken"
+                | "refreshtoken"
+                | "sessiontoken"
+                | "securitytoken"
+                | "bearertoken"
+                | "idtoken"
+                | "apitoken"
+                | "clientsecret"
+        )
+    }) || parts.windows(2).any(|pair| {
+        pair[1] == "key"
+            && matches!(
+                pair[0],
+                "api" | "access" | "private" | "subscription" | "security"
+            )
+    })
+}
 fn headers(options: &ModelHttpConfiguration) -> Result<reqwest::header::HeaderMap, ExecutionError> {
     let mut result = reqwest::header::HeaderMap::new();
     for (key, value) in options.headers.iter().flatten() {
         let lower = key.to_ascii_lowercase();
-        if [
-            "authorization",
-            "cookie",
-            "token",
-            "secret",
-            "password",
-            "credential",
-            "session",
-            "signature",
-            "api-key",
-            "apikey",
-            "access-key",
-            "private-key",
-        ]
-        .iter()
-        .any(|part| lower.contains(part))
+        if credential_name(&lower)
             || matches!(
                 lower.as_str(),
                 "host"
@@ -189,6 +218,15 @@ mod tests {
         let first = transport(Some(&options)).unwrap();
         let second = transport(Some(&options)).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
+        assert!(transport(Some(&ModelHttpConfiguration {
+            headers: Some(BTreeMap::from([
+                ("x-max-tokens".into(), "100".into()),
+                ("x-sessionless".into(), "".into()),
+                ("x-tokenizer".into(), "custom".into()),
+            ])),
+            proxy: None,
+        }))
+        .is_ok());
         let direct = transport(Some(&ModelHttpConfiguration {
             headers: None,
             proxy: Some(ModelProxyConfiguration::Direct),
@@ -199,26 +237,38 @@ mod tests {
             "Authorization",
             "X-Api-Key",
             "X-Access-Token",
+            "x-auth",
+            "X-AuthToken",
+            "X-AccessToken",
+            "X-RefreshToken",
+            "X-SessionToken",
+            "X-SecurityToken",
+            "X-BearerToken",
+            "X-IDToken",
+            "X-ApiToken",
+            "X-ClientSecret",
+            "x-subscription-key",
+            "x-security-key",
+            "x-access_key",
+            "authentication",
+            "x-cookies",
+            "x-credentials",
             "Host",
             "Transfer-Encoding",
         ] {
-            assert!(
-                transport(Some(&ModelHttpConfiguration {
-                    headers: Some(BTreeMap::from([(name.into(), "value".into())])),
-                    proxy: None
-                }))
-                .is_err()
-            );
-        }
-        assert!(
-            transport(Some(&ModelHttpConfiguration {
-                headers: None,
-                proxy: Some(ModelProxyConfiguration::Proxy {
-                    url: "http://user:password@proxy.example".into()
-                })
+            assert!(transport(Some(&ModelHttpConfiguration {
+                headers: Some(BTreeMap::from([(name.into(), "value".into())])),
+                proxy: None
             }))
-            .is_err()
-        );
+            .is_err());
+        }
+        assert!(transport(Some(&ModelHttpConfiguration {
+            headers: None,
+            proxy: Some(ModelProxyConfiguration::Proxy {
+                url: "http://user:password@proxy.example".into()
+            })
+        }))
+        .is_err());
     }
     struct Capture;
     impl HttpTransport for Capture {
@@ -231,6 +281,15 @@ mod tests {
             assert_eq!(request.headers["authorization"], "Bearer private");
             assert_eq!(request.headers["x-region"], "original");
             assert_eq!(request.headers["x-client"], "channel");
+            assert_eq!(
+                request
+                    .headers
+                    .get_all("anthropic-beta")
+                    .iter()
+                    .map(|value| value.to_str().unwrap())
+                    .collect::<Vec<_>>(),
+                vec!["credential-feature", "channel-feature"]
+            );
             Ok(())
         }
     }
@@ -240,6 +299,7 @@ mod tests {
             headers: Some(BTreeMap::from([
                 ("x-region".into(), "edited".into()),
                 ("x-client".into(), "channel".into()),
+                ("Anthropic-Beta".into(), "channel-feature".into()),
             ])),
             proxy: None,
         };
@@ -250,6 +310,7 @@ mod tests {
         let mut authorized = reqwest::header::HeaderMap::new();
         authorized.insert("authorization", "Bearer private".parse().unwrap());
         authorized.insert("x-region", "original".parse().unwrap());
+        authorized.insert("anthropic-beta", "credential-feature".parse().unwrap());
         wrapper
             .stream(
                 HttpRequest {

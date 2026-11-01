@@ -7,7 +7,7 @@ import type {
   FastDecisionQuestion,
 } from "@varin/protocol";
 import type { ModelDecisionPaths } from '@varin/application-client';
-import { appendModelPath } from './connection.js';
+import { appendModelPath, modelRequestUrl } from './connection.js';
 
 /** Criteria key used when the caller asks for an explicit "no suitable option". */
 const NONE_OPTION = "__none__";
@@ -66,14 +66,14 @@ export function classifierRequestRoutes(api: string, baseUrl: string, endpoint?:
     if (endpoint !== undefined || paths?.classify !== undefined) throw new ClassifierRequestError("llama.cpp classification uses tokenize, apply-template and completion endpoints; configure their individual paths instead of a single endpoint override");
     const root = llamaServerRoot(baseUrl);
     return [
-      { requestUrl: paths?.tokenize === undefined ? new URL(`${root}/tokenize`).toString() : appendModelPath(root, paths.tokenize), requestKind: "preparation" },
-      { requestUrl: paths?.applyTemplate === undefined ? new URL(`${root}/apply-template`).toString() : appendModelPath(root, paths.applyTemplate), requestKind: "preparation" },
-      { requestUrl: paths?.completion === undefined ? new URL(`${root}/completion`).toString() : appendModelPath(root, paths.completion), requestKind: "model_compute" },
+      { requestUrl: paths?.tokenize === undefined ? modelRequestUrl(root, '/tokenize') : appendModelPath(root, paths.tokenize), requestKind: "preparation" },
+      { requestUrl: paths?.applyTemplate === undefined ? modelRequestUrl(root, '/apply-template') : appendModelPath(root, paths.applyTemplate), requestKind: "preparation" },
+      { requestUrl: paths?.completion === undefined ? modelRequestUrl(root, '/completion') : appendModelPath(root, paths.completion), requestKind: "model_compute" },
     ];
   }
   if (api !== "typesafe-system-one" && api !== "cloudflare-workers-ai-system-one") throw new ClassifierRequestError("Unsupported classifier API");
   const path = endpoint ?? paths?.classify;
-  return [{ requestUrl: path === undefined ? new URL(`${baseUrl.replace(/\/+$/u, "")}${api === "typesafe-system-one" ? "/systemone" : "/run"}`).toString() : appendModelPath(baseUrl, path), requestKind: "model_compute" }];
+  return [{ requestUrl: path === undefined ? modelRequestUrl(baseUrl, api === "typesafe-system-one" ? "/systemone" : "/run") : appendModelPath(baseUrl, path), requestKind: "model_compute" }];
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -374,7 +374,7 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
           const index = defaultRoutes?.findIndex(value => value.requestUrl === new URL(String(url)).toString()) ?? -1;
           if (defaultRoutes && index < 0) throw new ClassifierRequestError("Classifier request left its selected protocol routes");
           const route = routes?.[index];
-          const destination = route?.requestUrl ?? (request.endpoint ? `${request.baseUrl.replace(/\/+$/u, "")}${request.endpoint}` : url);
+          const destination = route?.requestUrl ?? (request.endpoint ? appendModelPath(request.baseUrl, request.endpoint) : url);
           let response: Response;
           try { response = await fetchImpl(destination, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }, route); }
           catch (error) { if (!route || route.requestKind === "model_compute") computeUsage.push(undefined); throw error; }

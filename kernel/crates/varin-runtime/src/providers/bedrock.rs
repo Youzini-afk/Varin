@@ -240,6 +240,9 @@ impl ModelProvider for BedrockProvider {
             },
         )?;
         decoder.finish()?;
+        if let Some(error) = state.terminal_failure {
+            return Err(error);
+        }
         state.finish.ok_or_else(|| {
             failure(
                 "stream_interrupted",
@@ -252,6 +255,7 @@ impl ModelProvider for BedrockProvider {
 struct StreamState {
     started: bool,
     finish: Option<FinishReason>,
+    terminal_failure: Option<ModelFailure>,
     blocks: BTreeMap<u64, Block>,
     stopped: BTreeSet<u64>,
     tool_ids: BTreeSet<String>,
@@ -451,6 +455,21 @@ impl StreamState {
                         ));
                     }
                 };
+                // A valid message stop cannot complete an open executable tool block.
+                // Latch the failure without admitting items, then drain valid trailing
+                // metadata so a paid response retains its usage. Framing and event-order
+                // errors still fail normally; partial text previews remain visible.
+                if self.blocks.iter().any(|(index, block)| {
+                    matches!(block, Block::Tool { .. }) && !self.stopped.contains(index)
+                }) {
+                    self.terminal_failure = Some(failure(
+                        "incomplete_tool_call",
+                        "Bedrock message stopped before its tool block completed",
+                    ));
+                    self.finish = Some(finish);
+                    self.blocks.clear();
+                    return Ok(());
+                }
                 for (index, block) in std::mem::take(&mut self.blocks) {
                     let (content, raw) = match block {
                         Block::Text(text) => {

@@ -17,6 +17,8 @@ export interface SecretStore {
   modify(reference: string, change: (current: string | null) => string | null): Promise<void>;
 }
 export interface ResolvedCredential { auth: { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string }; source?: string; anthropicOauth?: boolean }
+/** Optional caller-owned source policy; undefined leaves non-model credential consumers unchanged. */
+export type OAuthSourcePolicy = readonly string[];
 export interface OAuthProvider {
   /** Retain the exact reviewed implementation for a captured execution. */
   capture?(): { provider: OAuthProvider; release(): void };
@@ -65,8 +67,15 @@ export class CredentialService {
       for (const [id, provider] of next) { this.#oauth.set(id, provider); this.#oauthOwners.set(id, owner); }
     };
   }
-  async captureResolver(source: ConnectionAuthentication, reference: string) {
+  #admitOAuth(record: AccountCredential, policy?: OAuthSourcePolicy) {
+    if (record.value.kind === 'oauth' && policy && !policy.includes(record.value.provider)) {
+      return invalid('oauth-provider-mismatch', 'The selected OAuth account is not supported by this channel type. Select a matching channel type or use an API key.');
+    }
+  }
+  async captureResolver(source: ConnectionAuthentication, reference: string, oauthPolicy?: OAuthSourcePolicy) {
+    const policy = oauthPolicy === undefined ? undefined : [...oauthPolicy];
     const record = source.kind === 'credential' ? await this.#read(source.reference) : undefined;
+    if (record) this.#admitOAuth(record, policy);
     const oauth = record?.value.kind === 'oauth' ? this.#oauth.get(record.value.provider) : undefined;
     if (record?.value.kind === 'oauth' && !oauth) return invalid('oauth-provider-unavailable', 'The selected authentication provider is unavailable');
     const captured = oauth?.capture?.();
@@ -74,7 +83,7 @@ export class CredentialService {
     return {
       resolve: (signal?: AbortSignal, dispatch?: CredentialDispatch) => {
         if (released) return Promise.reject(new ModelConfigurationError('credential-binding-released', 'The account binding has been released'));
-        return this.#resolve(source, reference, signal, dispatch, record && oauth ? { account: record, provider: captured?.provider ?? oauth } : undefined);
+        return this.#resolve(source, reference, signal, dispatch, record && oauth ? { account: record, provider: captured?.provider ?? oauth } : undefined, policy);
       },
       release: () => { if (!released) { released = true; captured?.release(); } },
     };
@@ -168,16 +177,17 @@ export class CredentialService {
     }
     return pending;
   }
-  resolve(source: ConnectionAuthentication, reference: string, signal?: AbortSignal, dispatch?: CredentialDispatch): Promise<ResolvedCredential> {
-    return this.#resolve(source, reference, signal, dispatch);
+  resolve(source: ConnectionAuthentication, reference: string, signal?: AbortSignal, dispatch?: CredentialDispatch, oauthPolicy?: OAuthSourcePolicy): Promise<ResolvedCredential> {
+    return this.#resolve(source, reference, signal, dispatch, undefined, oauthPolicy === undefined ? undefined : [...oauthPolicy]);
   }
   async #resolve(source: ConnectionAuthentication, reference: string, signal?: AbortSignal, _dispatch?: CredentialDispatch,
-    captured?: { account: AccountCredential; provider: OAuthProvider }): Promise<ResolvedCredential> {
+    captured?: { account: AccountCredential; provider: OAuthProvider }, oauthPolicy?: OAuthSourcePolicy): Promise<ResolvedCredential> {
     signal?.throwIfAborted();
     if (source.kind === 'none') return { auth: {}, source: 'anonymous' };
     if (source.kind === 'environment') return { auth: { apiKey: this.#environment(source, reference).value }, source: 'environment' };
     if (source.kind !== 'credential') return invalid('credential-resolver-required', 'Cloud authentication must be resolved by its registered owner');
     const record = await this.#read(source.reference);
+    this.#admitOAuth(record, oauthPolicy);
     if (captured && (!sameAccount(captured.account, record) || record.value.kind !== 'oauth'
       || captured.account.value.kind !== 'oauth' || record.value.provider !== captured.account.value.provider)) return invalid('credential-scope-changed', 'The selected account changed');
     const provider = record.value.kind === 'oauth' ? captured?.provider ?? this.#oauth.get(record.value.provider) : undefined;

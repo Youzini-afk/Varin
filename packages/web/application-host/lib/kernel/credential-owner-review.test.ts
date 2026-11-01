@@ -1,5 +1,6 @@
 import { ToolBridge } from './tool-bridge.js';
 import { expect, it, onTestFinished, vi } from 'vitest';
+import type { SelectedModel } from './model-authority.js';
 import { createModelAuthority } from './model-authority.js';
 import { CredentialBridge, type PrivateCredentialResponse } from './credential-bridge.js';
 import { ExistingHostCredentialOwner, type CredentialOwnerOptions, type CredentialScope } from './credential-owner.js';
@@ -32,6 +33,29 @@ it('model selection preserves capacity, thinking mapping and sampling through cr
   expect(configuration.modelOptions).toMatchObject({ samplingParams: { top_p: 0.8 } });
   expect((await recovered.resolve(scope)).headers.authorization).toBe('Bearer fake-test-key');
   recovered.release(); recoveredExplicit.release();
+});
+it('model authority resolves explicit Mistral prompt switches and Responses strict capabilities', async () => {
+  let model: SelectedModel = { providerId: 'fixture', modelId: 'arbitrary-alias', name: 'Fixture',
+    api: 'mistral-conversations', baseUrl: 'https://model.example.test/v1', maxTokens: 4096,
+    reasoning: true, thinking: { mode: 'switch' }, compat: { thinkingFormat: 'mistral-prompt', promptCacheKey: '' } };
+  const authority = createModelAuthority({ selectedModel: async () => model, listModels: async () => [model],
+    currentScope: async () => scope, currentProviderAccount: async () => undefined, routingEnvironment: async () => ({}),
+    getAuth: async () => ({ auth: { apiKey: 'fake-test-key' } }) });
+  const select = (thinkingLevel: 'off' | 'on' | 'high') => authority.resolveModel({ providerId: 'fixture', modelId: 'arbitrary-alias', thinkingLevel });
+  expect((await select('on')).configuration).toMatchObject({ reasoningEffort: null, modelOptions: { protocol: { promptMode: 'reasoning', promptCacheKey: '' } } });
+  expect((await select('off')).configuration.modelOptions).toEqual({ protocol: { promptCacheKey: '' } });
+  model = { ...model, thinkingLevelMap: { on: 'high' } };
+  await expect(select('on')).rejects.toMatchObject({ code: 'model-thinking-mapping-invalid' });
+  delete model.thinkingLevelMap;
+  model = { ...model, thinking: { mode: 'levels', levels: ['high'], allowOff: true } };
+  await expect(select('high')).rejects.toMatchObject({ code: 'model-thinking-mapping-invalid' });
+  model = { ...model, compat: {}, thinkingLevelMap: { high: 'high', off: 'none' } };
+  expect((await select('high')).configuration).toMatchObject({ reasoningEffort: 'high', modelOptions: {} });
+  expect((await select('off')).configuration.reasoningEffort).toBe('none');
+  model = { ...model, api: 'openai-responses', reasoning: false, compat: { supportsStrictMode: false } };
+  expect((await select('off')).configuration.modelOptions).toEqual({ protocol: { supportsStrictMode: false } });
+  model = { ...model, compat: { supportsStrictMode: 'false' } };
+  await expect(select('off')).rejects.toMatchObject({ code: 'model-strict-mode-capability-invalid' });
 });
 function owner(overrides: Partial<CredentialOwnerOptions> = {}) {
   return new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint: 'https://model.example.test/v1/responses', currentScope: async () => ({ ...scope }), runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-test-key' } }) }, ...overrides });

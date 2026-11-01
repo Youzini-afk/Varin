@@ -254,6 +254,11 @@ it('native OAuth refresh preserves the captured account, and logout prevents ano
   const unregister = f.authority.credentials.registerOAuth('ledger-test-refresh', {
     refresh, headers: value => ({ authorization: `Bearer ${value.accessToken}` }),
   });
+  const unregisterType = f.authority.types.register({ ...f.authority.types.get('openai-compatible')!,
+    id: 'ledger-oauth-fixture', name: 'Ledger OAuth fixture',
+    oauthProviders: [{ id: 'ledger-test-refresh', name: 'Ledger test refresh' }] });
+  const selected = (await f.authority.read()).channels[0]!;
+  await f.authority.save({ ...selected, type: 'ledger-oauth-fixture' }, (await f.authority.read()).revision);
   await f.authority.credentials.linkOAuth({ kind: 'oauth', provider: 'ledger-test-refresh', accessToken: 'fake-expired-ledger-token', expiresAt: 0 }, 'ledger-test-account');
   const lease = await f.inference().capture();
   try {
@@ -264,5 +269,5 @@ it('native OAuth refresh preserves the captured account, and logout prevents ano
     await f.authority.removeCredential('ledger-test-account');
     await expect(lease.embed(input(lease, indexOperation('after-logout')))).rejects.toThrow();
     expect(f.requests()).toBe(1);
-  } finally { lease.release(); unregister(); }
+  } finally { lease.release(); unregister(); unregisterType(); }
 });

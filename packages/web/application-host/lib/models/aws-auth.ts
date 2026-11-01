@@ -70,7 +70,7 @@ export class AwsCredentialOwner {
       const client = await source.client;
       const url = new URL(dispatch.endpoint);
       const endpointRegion = /^bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?$/.exec(url.hostname)?.[1];
-      const region = selectedRegion || endpointRegion || await client.config.region();
+      const region = endpointRegion || selectedRegion || await client.config.region();
       const { signer } = await libraries();
       const signing = new signer.SignatureV4({ credentials: client.config.credentials, region, service: 'bedrock', sha256: client.config.sha256 });
       const query: Record<string, string[]> = Object.create(null);

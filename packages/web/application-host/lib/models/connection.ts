@@ -5,7 +5,7 @@ import { ModelConfigurationError, object } from './configuration.js';
 
 const invalid = (message: string): never => { throw new ModelConfigurationError('model-connection-invalid', message); };
 const operations: readonly ModelOperation[] = ['chat', 'embedding', 'rerank', 'decision', 'image-generation', 'image-editing'];
-const secretHeader = /(?:^|[-_])(?:authorization|authentication|auth|bearer|cookie|cookies|token|secret|password|credential|credentials|session|signature|(?:api|access|private|subscription|security)[-_]?key)(?:$|[-_])/i;
+const secretHeader = /(?:^|[-_])(?:authorization|authentication|auth|bearer|cookie|cookies|token|secret|password|credential|credentials|session|signature|(?:auth|access|refresh|session|security|bearer|id|api)[-_]?token|client[-_]?secret|(?:api|access|private|subscription|security)[-_]?key)(?:$|[-_])/i;
 const transportHeaders = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'proxy-connection', 'upgrade', 'trailer', 'te']);
 // Control bytes are deliberately excluded from both literal and decoded URL paths.
 // eslint-disable-next-line no-control-regex
@@ -62,11 +62,35 @@ export function validateModelConnection(value: unknown, supported: readonly Mode
   }
 }
 
+/** The catalog and every prepared operation use the same credential-free endpoint rule. */
+export function modelEndpoint(value: string): URL {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new ModelConfigurationError('model-endpoint-invalid', 'Enter a complete model endpoint'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) {
+    throw new ModelConfigurationError('model-endpoint-invalid', 'Use an HTTP endpoint without embedded credentials');
+  }
+  for (const name of url.searchParams.keys()) {
+    if (secretHeader.test(name) || /^(key|sig)$/i.test(name)) {
+      throw new ModelConfigurationError('model-endpoint-contains-credentials', 'Model endpoint queries cannot contain credentials');
+    }
+  }
+  return url;
+}
+
+/** Default protocol suffixes preserve mount prefixes and non-secret query parameters. */
+export function modelRequestUrl(baseUrl: string, path: string): string {
+  validateModelPath(path);
+  const url = modelEndpoint(baseUrl);
+  const base = url.pathname.replace(/\/+$/, '');
+  url.pathname = base.endsWith(path) ? base : `${base}${path}`;
+  return url.toString();
+}
+
 export function appendModelPath(baseUrl: string, path: string): string {
   validateModelPath(path);
   let base: URL;
-  try { base = new URL(baseUrl); } catch { return invalid('Enter a complete model endpoint'); }
-  if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) return invalid('Custom model paths require an HTTP endpoint without credentials, query or fragment');
+  try { base = modelEndpoint(baseUrl); } catch { return invalid('Enter a complete model endpoint'); }
+  if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.hash) return invalid('Custom model paths require an HTTP endpoint without credentials or fragment');
   base.pathname = `${base.pathname.replace(/\/+$/, '')}${path}`;
   return base.toString();
 }

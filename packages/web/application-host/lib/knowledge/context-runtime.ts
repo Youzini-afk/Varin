@@ -22,7 +22,10 @@ export class ObservationStoreUnavailableError extends Error {
   constructor(readonly workspaceId: string, cause: unknown) {
     super('Workspace change notifications are unavailable', { cause });
     this.name = 'ObservationStoreUnavailableError';
-    this.reason = cause instanceof Error && cause.message.startsWith('TDB_ERROR:') && cause.message.includes('Corrupted file')
+    // TriviumDB's structured code survives private storage IPC; localized/native
+    // diagnostic text is not a stable classification contract. Other failures,
+    // including I/O, closed handles and unknown errors, remain unavailable.
+    this.reason = cause instanceof Error && 'code' in cause && cause.code === 'TDB_CORRUPTED_FILE'
       ? 'corrupt' : 'unavailable';
   }
 }

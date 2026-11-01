@@ -32,7 +32,25 @@ export function modelOptions(model: SelectedModel, requested: ThreadThinkingLeve
   };
   switch (model.api) {
     case 'openai-responses': case 'azure-openai-responses': case 'openai-codex-responses': {
+      if (model.api !== 'openai-codex-responses' && model.compat?.supportsStrictMode !== undefined) {
+        if (typeof model.compat.supportsStrictMode !== 'boolean') return failed('model-strict-mode-capability-invalid');
+        protocol.supportsStrictMode = model.compat.supportsStrictMode;
+      }
       if (model.reasoning && level === 'off') reasoningEffort = model.thinkingLevelMap?.off ?? 'none';
+      break;
+    }
+    case 'mistral-conversations': {
+      // Prompt-mode models have an on/off switch, not an effort scale. Never infer it
+      // from an alias/name: other Mistral-hosted models use reasoning_effort instead.
+      if (model.compat?.thinkingFormat === 'mistral-prompt') {
+        if (!['off', 'on'].includes(level) || effort !== null) return failed('model-thinking-mapping-invalid');
+        if (model.reasoning && level === 'on') protocol.promptMode = 'reasoning';
+        reasoningEffort = null;
+      } else if (model.reasoning && level === 'off') reasoningEffort = model.thinkingLevelMap?.off ?? 'none';
+      if (model.compat?.promptCacheKey !== undefined) {
+        if (typeof model.compat.promptCacheKey !== 'string') return failed('model-prompt-cache-key-invalid');
+        protocol.promptCacheKey = model.compat.promptCacheKey;
+      }
       break;
     }
     case 'anthropic-messages': {

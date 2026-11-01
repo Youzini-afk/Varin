@@ -255,14 +255,8 @@ fn hash_identity(
     }
     for (key, _) in url.query_pairs() {
         let key = key.to_ascii_lowercase();
-        if key.contains("token")
-            || key.contains("secret")
-            || key.contains("credential")
-            || key.contains("signature")
-            || matches!(
-                key.as_str(),
-                "key" | "api_key" | "api-key" | "apikey" | "authorization" | "sig" | "password"
-            )
+        if crate::providers::connection_options::credential_name(&key)
+            || matches!(key.as_str(), "key" | "sig")
         {
             return Err(ExecutionError::new(
                 "credential_in_endpoint",
@@ -293,4 +287,51 @@ fn hash_identity(
         "connection-sha256-{}",
         hex::encode(Sha256::digest(bytes))
     ))
+}
+
+#[cfg(test)]
+mod endpoint_query_tests {
+    use super::*;
+
+    #[test]
+    fn native_endpoint_admission_distinguishes_credentials_from_nonsecret_query_names() {
+        let mut configuration: ModelSessionConfiguration = serde_json::from_value(json!({
+            "providerFamily": "openai-completions", "model": "fixture", "endpoint": "https://fixture.invalid/v1/chat/completions",
+            "credentialEnvironment": null, "allowAnonymous": true, "configurationGeneration": 1, "maxOutputTokens": null
+        })).unwrap();
+        for name in [
+            "key",
+            "sig",
+            "api_key",
+            "authorization",
+            "X-Access-Token",
+            "authToken",
+            "accessToken",
+            "refreshToken",
+            "sessionToken",
+            "securityToken",
+            "bearerToken",
+            "idToken",
+            "apiToken",
+            "clientSecret",
+            "x-subscription-key",
+        ] {
+            configuration.endpoint =
+                format!("https://fixture.invalid/v1/chat/completions?{name}=fixture-secret");
+            let error = connection_identity(&configuration).unwrap_err();
+            assert_eq!(error.code, "credential_in_endpoint");
+            assert!(!error.message.contains("fixture-secret"));
+        }
+        for name in [
+            "tenant",
+            "api-version",
+            "max_tokens",
+            "tokenizer",
+            "sessionless",
+        ] {
+            configuration.endpoint =
+                format!("https://fixture.invalid/mount/v1/chat/completions?{name}=value");
+            assert!(connection_identity(&configuration).is_ok(), "{name}");
+        }
+    }
 }

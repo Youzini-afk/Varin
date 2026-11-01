@@ -121,6 +121,10 @@ test('MCP bearer projection uses the same OAuth identity and refuses unsupported
   const { models, channel } = await fixture();
   const reference = await models.credentials.linkOAuth({ kind: 'oauth', provider: 'openrouter', accessToken: 'oauth-token' });
   await models.save({ ...channel, authentication: { kind: 'credential', reference } }, (await models.read()).revision);
+  await expect(models.mcpBearerToken(channel.id)).rejects.toMatchObject({ code: 'oauth-provider-mismatch' });
+  const scope = await models.currentScope(channel.id);
+  await models.save({ ...channel, type: 'openrouter', parameters: {}, authentication: { kind: 'credential', reference } }, (await models.read()).revision);
+  expect(await models.currentScope(channel.id)).toEqual(scope);
   expect(await models.mcpBearerToken(channel.id)).toBe('oauth-token');
   const original = models.getAuth;
   models.getAuth = async () => ({ auth: { headers: { authorization: 'Basic abc' } }, source: 'oauth' });
@@ -163,4 +167,24 @@ test('recovery keeps the original AWS signing region and channel headers after o
     expect(auth.headers['x-project']).toBe('original');
     expect(original.configuration.awsRegion).toBe('us-west-2');
   } finally { restored.release(); original.credentialOwner.release(); }
+});
+
+test.each([
+  ['https://bedrock-runtime.us-east-1.amazonaws.com', 'us-west-2'],
+  ['https://proxy.example.test/aws', 'us-east-1'],
+])('Bedrock ARN signing matches the dispatched region while preserving explicit gateways: %s', async (baseUrl, signingRegion) => {
+  const { models, channel, authority } = await fixture();
+  vi.stubEnv('AWS_ACCESS_KEY_ID', 'fixture-access'); vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'fixture-secret'); vi.stubEnv('AWS_PROFILE', '');
+  vi.stubEnv('AWS_SHARED_CREDENTIALS_FILE', join(models.directory, 'absent-credentials'));
+  vi.stubEnv('AWS_CONFIG_FILE', join(models.directory, 'absent-config'));
+  const aws: ModelChannel = { ...channel, type: 'bedrock', baseUrl, authentication: { kind: 'aws-chain' }, parameters: { region: 'us-east-1' },
+    models: [{ ...channel.models[0]!, requestModelId: 'arn:aws:bedrock:us-west-2:123456789012:inference-profile/fixture' }] };
+  await models.save(aws, (await models.read()).revision);
+  const selected = await authority.resolveModel({ providerId: aws.id, modelId: 'logical-model' });
+  try {
+    const scope = await selected.credentialOwner.scope();
+    const auth = await selected.credentialOwner.resolve(scope, undefined, { method: 'POST', endpoint: selected.configuration.endpoint, payloadSha256: 'a'.repeat(64) });
+    expect(auth.headers.authorization).toContain(`/${signingRegion}/bedrock/aws4_request`);
+    expect(new URL(selected.configuration.endpoint).hostname).toBe(baseUrl.includes('amazonaws.com') ? 'bedrock-runtime.us-west-2.amazonaws.com' : 'proxy.example.test');
+  } finally { selected.credentialOwner.release(); }
 });

@@ -142,7 +142,8 @@ Image protocol selection belongs to each model's `image.api`. An unset value inh
 image capabilities and do not rewrite sibling models or the channel default. Prepared image bindings
 retain their original protocol and route. `image.paths.generation` and `image.paths.editing` override
 the respective channel paths. Image and single-call decision paths append to the configured service
-base URL's existing path; they keep the same origin and reject traversal, query strings and fragments.
+base URL's existing path and preserve its validated, non-secret query parameters. Custom path values
+keep the same origin and reject traversal, query strings and fragments.
 The model editor always shows editable paths. Choosing a protocol preset fills its standard paths;
 clearing a path restores its inherited/default value. Request formats stay with the selected protocol.
 
@@ -228,6 +229,13 @@ UI previews, chat controls and execution use the same declared choices. A reason
 not claim support for all effort levels or for disabling reasoning. Providers retain their own wire
 formats and output-budget constraints; this metadata does not add unsupported server capabilities.
 
+Responses/Azure `compat.supportsStrictMode:false` omits the optional strict field; Codex does not expose
+that override. Mistral `compat.thinkingFormat:"mistral-prompt"` requires an on/off thinking choice and
+cannot also map it to reasoning effort. Its optional `compat.promptCacheKey` supplies the native cache
+key and request affinity. Sampling parameters cannot override native history/tool, privacy, streaming
+or output-capacity ownership; Chat accepts only one completion choice. These are explicit capabilities,
+not deductions from model aliases.
+
 The model editor's explicit Test action uses `/api/models/test` and the existing standalone
 `ModelTextService`/Catalog inference owner. It captures the unsaved connection, selected model and
 thinking choice, sends one short request, and retains the ordinary usage receipt. It does not create
@@ -237,10 +245,14 @@ Leaving the test signals cancellation; the inference owner retains credentials u
 Connection options are explicit and credential-free:
 
 - `headers` accepts non-sensitive HTTP headers. Authentication and transport-controlled headers are
-  rejected here; resolved credential headers take precedence case-insensitively at dispatch.
+  rejected here; credential/protocol headers take precedence case-insensitively at dispatch and
+  discovery. Channel `anthropic-beta` values append to required features. Harmless names such as
+  `x-max-tokens` remain valid; known compact credential names such as `X-AccessToken` do not.
 - `paths` selects supported operation endpoints beneath the configured base path. Paths cannot
-  change origin, traverse directories, or carry query/fragment data. Azure retains its deployment
-  and API-version binding. The multi-route llama.cpp classifier rejects a single decision-path override.
+  change origin, traverse directories, or carry literal/escaped query or fragment data. Safe queries
+  on the base endpoint survive both default and explicit paths, including llama.cpp preparation routes;
+  credential-bearing queries are rejected before settings/discovery/request admission. Azure retains
+  its deployment and API-version binding. The multi-route llama.cpp classifier rejects a single decision-path override.
 - `proxy` is absent for the existing Host policy, `direct` for explicit direct access, or `proxy`
   with a credential-free HTTP(S) proxy origin. An explicit override cannot silently become direct.
 
@@ -258,6 +270,13 @@ or explicit anonymous access. Cloud libraries are direct dependencies: Google's 
 refresh and the AWS/Smithy owners resolve chains and sign native requests. No library is loaded
 through Pi's dependency tree. OAuth authorization uses the existing Host interaction owner with a
 local callback or manual callback response; an unrelated channel does not wait for that interaction.
+
+Model credential resolution accepts OAuth accounts only from issuer IDs declared by the installed
+channel type, before capture, refresh or header generation. The same rule covers direct, draft,
+discovery and auxiliary requests without rewriting stored settings or accounts. Captures retain their
+original issuer policy and implementation across ordinary channel edits; account replacement remains
+invalidating. API keys stay generic. Matching issuer admission permits explicit custom proxy endpoints
+and does not replace the original scope, exact request-target or egress checks.
 
 Kimi Code, GitHub Copilot, xAI and Meta use device codes displayed by the same authorization panel.
 The Host polls at the issuer's interval, observes code expiry and cancels when the user closes sign-in.

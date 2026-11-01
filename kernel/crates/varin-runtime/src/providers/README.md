@@ -162,13 +162,26 @@ assistant wire message while retaining semantic calls for cross-family replay, a
 `legacy_max_tokens`, stream usage and reasoning choices are explicit configuration, and unsupported
 vendor deltas fail rather than disappearing.
 The `reasoningDetails` Chat option accepts structured reasoning deltas for Cline-compatible services;
-encrypted fragments remain opaque and replay under the original connection identity.
-Responses, Azure and Codex explicitly send `strict:false` for ordinary function tools. Tool declarations
-can have optional fields and full JSON Schema alternatives; server normalization must not turn omitted
+encrypted fragments remain opaque and replay under the original connection identity. Chat preserves
+Google-compatible tool `extra_content.google.thought_signature` values atomically: identical repeats
+are accepted, while malformed or conflicting values fail. Signed messages use a model-bound v2 opaque
+envelope; changing model or connection drops that original and rebuilds portable text/tool calls.
+Unsigned v1 messages retain same-connection cross-model replay behavior. The Mistral encoding explicitly rejects
+this signed extension rather than rewriting its signed tool IDs.
+Responses, Azure and Codex default to `strict:false` for ordinary function tools. Responses and Azure
+alone accept `protocol.supportsStrictMode:false` to omit the field for compatible endpoints that reject
+it; this does not enable strict schemas or relax execution validation. Tool declarations can have optional
+fields and full JSON Schema alternatives; server normalization must not turn omitted
 fields into required nullable values. Invocation validation remains with the original tool owner. See
 the [function-calling contract](https://developers.openai.com/api/docs/guides/function-calling#strict-mode).
-Chat sampling options cannot expand the adapter's single-choice contract: a non-default `n` is
-rejected during binding, before credentials or a potentially billable request are dispatched.
+Chat sampling options cannot expand the adapter's single-choice contract: `n` may be omitted, `1`, or `null` (the API default of one); other values are rejected.
+Responses/Chat/Azure sampling fields cannot replace the frozen model, history, tools, output capacity,
+stream controls, `store`, `include`, `previous_response_id` or `conversation`. These conflicts fail
+at binding, before credentials or a potentially billable request are dispatched.
+
+Responses retains terminal usage before reporting `response.failed` or rejecting incomplete tool
+output. Known incomplete text/refusal endings can complete as length/content-filter results; an
+incomplete tool batch cannot become executable calls. Received raw usage stays with the failed request.
 
 Azure requires the complete endpoint, deployment and API version selected by the Host. It validates
 or appends the API-version query and uses deployment as the request model. Resource defaults and
@@ -184,7 +197,8 @@ fails as unsupported because resumable server work needs an orchestration contra
 completed Run. Received provider server tools are not automatically declared executable client tools.
 
 Google and Vertex use complete `:streamGenerateContent` endpoints with `alt=sse`. EOF is accepted
-only after a finish reason; trailing usage is retained. Original thought signatures are model-scoped.
+only after a real finish reason; empty and `FINISH_REASON_UNSPECIFIED` values are nonterminal.
+Trailing usage is retained. Original thought signatures are model-scoped.
 Changing models keeps portable content and drops incompatible originals. Partial-argument function
 streaming currently fails explicitly. Gemini API keys, Vertex express API keys and Host-owned ADC
 are different authentication/routing paths; see [AUTH.md](AUTH.md).
@@ -194,10 +208,16 @@ are different authentication/routing paths; see [AUTH.md](AUTH.md).
 `mistral-conversations` names the locked SDK's chat-completions family, not Mistral's separate stateful
 Conversations API. The profile has consistent nine-character alphanumeric tool IDs, typed text/thinking
 arrays, joined thinking chunks, object-form tool arguments and `model_length` handling. DONE or clean
-EOF needs a prior finish reason. Its explicit prompt-cache key also supplies request-local `x-affinity`.
+EOF needs a prior finish reason. Thinking chunks emit public reasoning progress while their wire originals
+remain intact. Host `compat.thinkingFormat:"mistral-prompt"` selects an explicit on/off switch:
+`on` supplies `protocol.promptMode:"reasoning"`, and `off` omits it. Prompt mode cannot coexist with
+reasoning effort; other Mistral models keep their configured effort mapping. `compat.promptCacheKey`
+becomes `protocol.promptCacheKey`, the body cache key and request-local `x-affinity`.
 These semantics must not weaken the OpenAI Chat adapter's terminal contract.
 
-`pi-messages` preserves that HTTP wire format's signed blocks, tool pairing and native usage. Using
+`pi-messages` preserves that HTTP wire format's signed blocks, tool pairing and native usage. Tool-start
+progress precedes arguments; reopened block indices and duplicate call IDs are rejected. Missing
+terminal usage stays missing, and raw receipts retain response model metadata. Using
 this adapter does not invoke Pi's agent execution loop or migrate Pi histories into Catalog.
 
 ### Codex SSE
@@ -215,7 +235,9 @@ pooling and zstd are not implemented by the SSE adapter. Live account authorizat
 
 ConverseStream uses `/model/{encodedModelId}/converse-stream` and AWS binary eventstream, not SSE.
 The decoder validates prelude/message CRC32, fragmented frames, content type and event budgets. Success
-requires `messageStop` plus a complete final frame; trailing usage is retained. Exceptions are sanitized
+requires `messageStop` plus a complete final frame. A stop with an unclosed tool block admits no
+completed items; its semantic failure is deferred until trailing usage and framing are processed.
+Framing/order errors still fail, and partial arguments never become executable calls. Exceptions are sanitized
 and never trigger retries. Signed reasoning/redacted bytes remain model/connection-scoped originals.
 
 The Host resolves bearer keys or its existing AWS credential-chain/SigV4 owner. Model ARN region takes

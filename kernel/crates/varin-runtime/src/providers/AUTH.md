@@ -33,8 +33,11 @@ relink, sign-out and changed dynamic sources invalidate affected bindings.
 
 Model preparation fixes the configuration and captures its authentication implementation. Accepted
 Runs, queued selections, continuations and inherited child selections retain that original owner and
-its implementation dependencies. `CredentialBridge.findOwner` forks a matching retained owner rather
-than resolving today's adapter catalog. The private registration fixes kernel epoch, Run and optional
+its implementation dependencies. Model OAuth resolution admits only issuer IDs declared by the installed
+channel type, before provider capture, refresh or header materialization. The captured issuer policy
+survives ordinary channel edits; account replacement still invalidates it. API keys remain generic,
+and a matching issuer may use an explicitly configured proxy endpoint—this is not a hostname allowlist.
+`CredentialBridge.findOwner` forks a matching retained owner rather than resolving today's adapter catalog. The private registration fixes kernel epoch, Run and optional
 binding/Operation identity. Exact queued-model registrations are idempotent; another scope cannot
 replace them merely by reusing a display name.
 
@@ -71,15 +74,18 @@ target. Explicit anonymous channels are permitted only when their frozen binding
 
 Built-in protocol families map resolved keys to their actual authentication header. Reviewed custom
 protocols receive configured credential headers from the Host model service. Non-sensitive connection
-headers are separate; authentication headers take precedence case-insensitively. Header values do
-not enter request snapshots, histories, public events, configuration hashes or debug output.
+headers are separate; credential/protocol headers take precedence case-insensitively, while channel
+`anthropic-beta` features append to required features. Sensitive header names, including compact
+credential names such as `accessToken`, cannot be stored as ordinary connection options. Secret header
+values do not enter request snapshots, histories, public events, configuration hashes or debug output.
 
 For signed requests, private dispatch supplies `POST`, the exact registered endpoint and a lowercase
 SHA-256 digest of the frozen body. The Host validates that target and digest; AWS signing uses the
 same payload hash, overriding conflicting configured hash headers. Rust persists, hashes and sends
 one frozen body allocation, without reserializing after signing. Auth frames contain no prompt body.
-The bounded bridge preflights frames before queueing, so malformed preparation does not kill the
-shared writer.
+Standard Bedrock targets use the final endpoint region for signing; explicit custom endpoints retain
+the selected region. The bounded bridge preflights frames before queueing, so malformed preparation
+does not kill the shared writer.
 
 ## Provider-specific ownership
 
