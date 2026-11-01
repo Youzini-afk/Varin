@@ -48,8 +48,8 @@ describe("live shell integration", () => {
       let output = '';
       const data = handle.onData(text => { output += text; });
       await vi.waitFor(() => expect(runtime.inspectSession(handle.id)?.integration).toBe('ready'), { timeout: 15_000 });
-      await handle.write("Write-Output '中文🙂'\r");
-      await vi.waitFor(() => expect(commands.some(command => command.command.includes('中文🙂') && command.exitCode === 0)).toBe(true), { timeout: 15_000 });
+      await handle.write("Write-Output '中文🙂'\r".repeat(2));
+      await vi.waitFor(() => expect(commands.filter(command => command.command.includes('中文🙂') && command.exitCode === 0)).toHaveLength(2), { timeout: 15_000 });
       expect(output).toContain('中文🙂');
       data.dispose();
       await handle.destroy();
@@ -79,25 +79,21 @@ describe("live shell integration", () => {
         owner: "user",
         shell: shell.shell,
       });
-      const deadline = Date.now() + 15_000;
-      while (Date.now() < deadline && runtime.inspectSession("live-user")?.integration !== "ready") {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      handle.write("echo varin-live-probe\r");
-      while (Date.now() < deadline && seen.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(seen[0]).toMatchObject({
+      await vi.waitFor(() => expect(runtime.inspectSession(handle.id)?.integration).toBe('ready'), { timeout: 15_000 });
+      await handle.write("echo varin-live-probe\r");
+      await vi.waitFor(() => expect(seen).toContainEqual(expect.objectContaining({
         command: expect.stringContaining("echo varin-live-probe"),
         owner: "user",
         integration: "osc-633",
         terminalId: "live-user",
-      });
-      expect(Number.isInteger(seen[0]?.exitCode)).toBe(true);
+        exitCode: 0,
+      })), { timeout: 15_000 });
       await handle.destroy();
     } finally {
       subscription.dispose();
       await runtime.shutdown();
     }
-  }, 20_000);
+  // Match the Store-shell case: startup, two observed phases and native teardown
+  // cannot share the old 20s outer budget while each phase permits 15s.
+  }, 35_000);
 });

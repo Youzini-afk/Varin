@@ -243,7 +243,7 @@ await cp(join(extractedRoot, 'LICENSE'), join(languageServersOutputRoot, 'LICENS
 
 const yamlRoot = packageRoot('yaml-language-server');
 await bundleNodeServer(
-  join(yamlRoot, 'out', 'server', 'src', 'server.js'),
+  join(yamlRoot, 'out', 'src', 'server.js'),
   join(languageServersOutputRoot, 'runtime', 'yaml-language-server.cjs'),
 );
 await cp(join(yamlRoot, 'l10n'), join(languageServersOutputRoot, 'l10n'), { recursive: true });

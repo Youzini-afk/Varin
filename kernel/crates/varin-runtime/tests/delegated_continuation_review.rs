@@ -40,7 +40,10 @@ fn first(f: &mut Fixture) -> ChildTask {
     if matches!(child.code_result, ChildCodeResult::Pending) {
         source.mode = SourceMode::Materialized;
     }
-    let (proposal, basis) = context(&child, "first-context");
+    let (proposal, mut basis) = context(&child, "first-context");
+    if f.db.bot_for_thread(&child.child_thread_id).unwrap().is_some() {
+        basis.mode = "bot".into();
+    }
     f.db.prepare_child(&child.execution_id, source, proposal, basis)
         .unwrap()
 }
@@ -388,6 +391,31 @@ fn concurrent_preparation_is_one_execution_and_failed_pre_run_intent_does_not_bl
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
+#[test]
+fn bot_receives_a_continuation_preparation_failure_once_without_a_ready_source() {
+    let mut f = Fixture::new_in_bot("bot");
+    let child = first(&mut f);
+    finish(&mut f.db, &child, Some("initial result"));
+    let command = continuation_command(&f.db, &child, "failed-bot-continuation", json!("continue"));
+    let pending = accept(&mut f.db, command);
+    assert!(pending.source.is_none());
+    let failed = f.db.fail_delegated_preparation(&pending.execution_id, "source_unavailable", None).unwrap();
+    assert!(failed.source.is_none());
+    assert_eq!(failed.report.unwrap().outcome, Outcome::Failed);
+    let owner = std::sync::Mutex::new(f.db);
+    varin_runtime::catalog::child_delivery::reconcile_reports(&owner).unwrap();
+    let cursor = owner.lock().unwrap().event_cursor().unwrap();
+    varin_runtime::catalog::child_delivery::reconcile_reports(&owner).unwrap();
+    assert_eq!(owner.lock().unwrap().event_cursor().unwrap(), cursor);
+    f.db = owner.into_inner().unwrap();
+    let message_id = format!("message:bot-report:{}", pending.execution_id);
+    let report = f.db.capture_message(&child.parent_thread_id, &child.parent_branch_id, &message_id).unwrap().load().unwrap();
+    assert!(report.text.contains("source_unavailable"));
+    let root = f.root.clone();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn isolated_continuation_uses_exact_published_root_without_rewriting_unknown_effect() {
     let mut f = Fixture::new_isolated();

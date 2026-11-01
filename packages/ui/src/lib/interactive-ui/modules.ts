@@ -1,4 +1,4 @@
-import { init, parse } from 'es-module-lexer';
+import { init, parse } from 'es-module-lexer/minimal';
 import { uiFrameDocument } from './frame';
 import type { UiSource, UiViewState } from '@varin/application-client';
 export function workFilePath(from: string, ref: string): string | null {

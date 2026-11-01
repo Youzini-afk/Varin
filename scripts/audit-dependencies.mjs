@@ -9,6 +9,12 @@ const repairs = [
   ['http-cache-semantics@4.2.0', 'GHSA-ch52-4w7c-c8xp'],
   ['sprintf-js@1.1.3', 'GHSA-hp3w-g68c-fv3c'],
   ['deepmerge@4.3.1', 'GHSA-gcqx-w48m-w2h4'],
+  ['minimatch@9.0.9', 'GHSA-g3hv-75wg-m249'],
+  ['minimatch@10.2.4', 'GHSA-g3hv-75wg-m249'],
+  ['minimatch@10.2.5', 'GHSA-g3hv-75wg-m249'],
+  ['minimatch@10.2.6', 'GHSA-g3hv-75wg-m249'],
+  ['glob@11.1.0', 'GHSA-3g3m-2fjr-6pw4'],
+  ['glob@13.0.6', 'GHSA-3g3m-2fjr-6pw4'],
 ];
 for (const [dependency] of repairs) {
   if (manifest.patchedDependencies?.[dependency] !== `bun-patches/${dependency}.patch`) {
@@ -23,6 +29,6 @@ function run(command, args) {
 }
 // Bun's advisory database only sees published versions. Verify the installed repairs before
 // excluding their version-based reports; every other advisory still fails the audit.
-run(process.execPath, ['--test', 'scripts/dependency-security.test.mjs']);
+run(process.execPath, ['--test', 'scripts/dependency-security.test.mjs', 'scripts/glob-security.test.mjs']);
 for (const [dependency, advisory] of repairs) console.log(`[audit] Verified local repair: ${dependency}; exclude version report ${advisory}`);
 run('bun', ['audit', ...repairs.flatMap(([, advisory]) => ['--ignore', advisory])]);

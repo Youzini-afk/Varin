@@ -3,6 +3,11 @@ import { COMPANION_PROJECT_VISIBLE_LIMIT, type DesktopCompanionPortfolio, type D
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const key = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 200;
 const count = (v: unknown) => v === null || Number.isSafeInteger(v) && (v as number) >= 0;
+const hasControlCharacter = (value: string) => [...value].some(character => {
+  const code = character.codePointAt(0)!;
+  return code <= 0x1f || code >= 0x7f && code <= 0x9f
+    || code >= 0x202a && code <= 0x202e || code >= 0x2066 && code <= 0x2069;
+});
 /** Copies only bounded, inert presentation fields; no task text, markup or resource URLs. */
 export function readCompanionPortfolio(input: unknown, readTeam: (value: unknown) => DesktopCompanionTeam): DesktopCompanionPortfolio {
   if (!object(input) || !['overview','intake','inspection','attention','result'].includes(String(input.mode))
@@ -12,7 +17,7 @@ export function readCompanionPortfolio(input: unknown, readTeam: (value: unknown
     if (!object(raw) || !key(raw.key) || keys.has(raw.key) || !['A','B','C'].includes(String(raw.label)) || labels.has(String(raw.label))
       || !object(raw.lead) || !isAgentAvatarId(raw.lead.avatar) || !['project-lead','child-agent','task'].includes(String(raw.lead.role))
       || !['needs-user','uncertain','active','settling','result','available','unknown'].includes(String(raw.status))
-      || raw.caption !== undefined && (typeof raw.caption !== 'string' || [...raw.caption].length > 24 || !raw.caption.trim() || raw.caption.replace(/\s+/gu, ' ').trim() !== raw.caption || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(raw.caption))
+      || raw.caption !== undefined && (typeof raw.caption !== 'string' || [...raw.caption].length > 24 || !raw.caption.trim() || raw.caption.replace(/\s+/gu, ' ').trim() !== raw.caption || hasControlCharacter(raw.caption))
       || raw.notice !== undefined && !['permission','question','mixed','inspect','unknown'].includes(String(raw.notice))
       || !count(raw.requestCount) || !count(raw.uncertainCount)
       || raw.detail !== undefined && !['reading','editing','searching','executing','computing','organizing','verifying','delegating','generating','waiting'].includes(String(raw.detail))) throw new Error('Invalid director project');

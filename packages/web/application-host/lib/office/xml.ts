@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 
-// xmldom 0.8's declarations import the browser DOM globally. Keep its small XML
+// xmldom's declarations import the browser DOM globally. Keep its small XML
 // API local so the Node Host retains Node's streams, fetch and WebCrypto types.
 export interface XmlNode {
   readonly nodeType: number;
@@ -31,7 +31,7 @@ export interface XmlDocument extends XmlNode {
   createElementNS(namespace: string, name: string): XmlElement;
 }
 const xml = createRequire(import.meta.url)('@xmldom/xmldom') as {
-  DOMParser: new(options: { errorHandler: { warning(message: string): void; error(message: string): void; fatalError(message: string): void } }) => { parseFromString(source: string, mime: string): XmlDocument };
+  DOMParser: new(options: { onError(level: 'warning' | 'error' | 'fatalError', message: string): void }) => { parseFromString(source: string, mime: string): XmlDocument };
   XMLSerializer: new() => { serializeToString(node: XmlNode): string };
 };
 export const { DOMParser, XMLSerializer } = xml;

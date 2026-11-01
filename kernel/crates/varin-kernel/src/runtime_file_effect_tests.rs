@@ -101,11 +101,15 @@ fn process_launch_does_not_turn_pending_startup_into_a_false_exit_and_can_be_sto
     let params = json!({"workspaceId":"workspace","rootId":f.root_id,"processId":"launch","cwd":"","command":"must-not-start",
         "args":[],"env":[],"mode":"pipe"});
     f.begin("process.spawn", params.clone(), "process");
-    let WorkerRequest::Workspace(admission) = f.rx.recv_timeout(WAIT).unwrap() else {
-        panic!("process cwd admission did not return to Storage");
-    };
-    f.short("storage.health", json!({}), Some("reader"));
-    admission(f.kernel.storage.as_mut());
+    // Lease acquisition is a separate control round trip before the durable
+    // launch intent. Advance to that intent rather than counting RPC callbacks.
+    while f.kernel.storage.as_ref().unwrap().process_spawn_not_dispatched("launch").unwrap() {
+        let WorkerRequest::Workspace(admission) = f.rx.recv_timeout(WAIT).unwrap() else {
+            panic!("process cwd admission did not return to Storage");
+        };
+        f.short("storage.health", json!({}), Some("reader"));
+        admission(f.kernel.storage.as_mut());
+    }
     let WorkerRequest::Workspace(before_launch) = f.rx.recv_timeout(WAIT).unwrap() else {
         panic!("guardian launch did not preserve its authorization boundary");
     };

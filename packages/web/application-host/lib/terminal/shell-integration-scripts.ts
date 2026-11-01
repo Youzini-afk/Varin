@@ -104,7 +104,9 @@ function global:__VarinEscape([string]$Value) {
 
 function global:__VarinEmit([string]$Payload) {
   # Windows PowerShell 5.1 treats backtick-e as the literal letter e.
-  [Console]::Write(([string][char]0x1b + "]633;pi;" + $env:VARIN_SHELL_INTEGRATION_ID + ";" + $Payload + [char]0x07))
+  # The Console text encoder can still be a legacy code page. Host output uses
+  # the Unicode terminal path without changing the user's native I/O encoding.
+  $Host.UI.Write(([string][char]0x1b + "]633;pi;" + $env:VARIN_SHELL_INTEGRATION_ID + ";" + $Payload + [char]0x07))
 }
 
 $__VarinOriginalPrompt = $function:prompt
@@ -121,19 +123,20 @@ function global:prompt {
 
 if (Get-Module -ListAvailable -Name PSReadLine) {
   Import-Module PSReadLine -ErrorAction SilentlyContinue
-  $__VarinPreviousHistoryHandler = (Get-PSReadLineOption).AddToHistoryHandler
-  Set-PSReadLineOption -AddToHistoryHandler {
-    param($line)
-    if ($line) {
-      ${POWERSHELL_COMMAND_START_CAPTURE}
-      __VarinEmit ("E;" + (__VarinEscape $line))
-      __VarinEmit 'C'
-      $global:__VarinAwaitingFinish = $true
+  # History handlers may not run for duplicate lines. Observe the actual accepted
+  # input instead, leaving the user's history policy and callbacks untouched.
+  $global:__VarinOriginalReadLine = $function:PSConsoleHostReadLine
+  if ($global:__VarinOriginalReadLine) {
+    function global:PSConsoleHostReadLine {
+      $line = & $global:__VarinOriginalReadLine
+      if ($line) {
+        ${POWERSHELL_COMMAND_START_CAPTURE}
+        __VarinEmit ("E;" + (__VarinEscape $line))
+        __VarinEmit 'C'
+        $global:__VarinAwaitingFinish = $true
+      }
+      $line
     }
-    if ($__VarinPreviousHistoryHandler) {
-      return & $__VarinPreviousHistoryHandler $line
-    }
-    $true
   }
 }
 `;

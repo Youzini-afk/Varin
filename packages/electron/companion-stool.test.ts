@@ -3,7 +3,7 @@ import { CompanionStoolWindows, type StoolBounds, type StoolPhase } from './comp
 afterEach(() => vi.useRealTimers());
 function fixture() {
   const calls: { bounds: StoolBounds; phase: StoolPhase; closed: boolean; ready?: () => void }[] = [];
-  let bounds = { x: -300, y: 25, width: 440, height: 640 };
+  const bounds = { x: -300, y: 25, width: 440, height: 640 };
   const owner = { id: 5, isDestroyed: () => false, getBounds: () => bounds };
   const manager = new CompanionStoolWindows((captured, phase) => {
     const state = { bounds: captured, phase, closed: false }; calls.push(state);

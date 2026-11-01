@@ -125,6 +125,9 @@ Windows 的无桌面 input targeting 回归由 `packages/computer-driver/windows
 
 生产构建由 `scripts/build-products.mjs` 统一准备，产物与可丢弃的构建回执在 `artifacts/build`。
 复用同时核对源码、工具链/选项及现有产物的内容摘要，输出缺失、被改写或上次构建失败时重新生成。
+Docker 等不含 Git 元数据的源码目录直接构建，返回真实产物摘要供后续阶段使用；缓存复用由外层构建负责。
+跨工作区导出、导入构建回执仍使用 Git 工作区核对源码身份。
+CLI 按所选 Host 产物的声明编译，清洁构建不依赖开发目录中的类型缓存。
 浏览器产物与平台 Host、kernel、CLI 分开：移动端只消费浏览器；桌面消费浏览器、对应平台的 Host/kernel，
 再收集独立的生产依赖目录；Web/cloud 将各部分组合。桌面构建不会覆盖正在运行的 Web server generation。
 `bun run --cwd packages/web build` 仍将完成的 Web 产品发布到原有 `server`、`dist`、`kernel`、`bin` 路径。

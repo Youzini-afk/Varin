@@ -59,6 +59,13 @@ it('creates editable presentation charts and changes one text shape without rebu
   for (const entry of preserved) expect(output.getEntry(entry.entryName)!.getData()).toEqual(entry.getData());
 });
 
+it('reports the OOXML part when the XML parser rejects malformed content', () => {
+  const archive = new AdmZip();
+  archive.addFile('word/document.xml', Buffer.from('<broken'));
+  expect(() => new OfficePackage(archive.toBuffer()).read({ view: 'content' }))
+    .toThrow('Cannot parse document part word/document.xml');
+});
+
 it('creates a presentation with an embedded PNG and rejects unsupported image bytes', async () => {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
   const content = { format: 'pptx' as const, slides: [{ objects: [

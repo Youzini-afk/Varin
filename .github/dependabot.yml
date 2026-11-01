@@ -72,6 +72,11 @@ updates:
           - '@capacitor/*'
           - '@capacitor-mlkit/*'
           - '@aparajita/capacitor-*'
+      # Even a 0.x minor can change the persisted database format. Review its
+      # upgrade path separately instead of hiding it among routine libraries.
+      storage-runtime:
+        patterns:
+          - triviumdb
       # Keep routine upgrades in one review/build instead of one full CI run per package.
       # Major upgrades remain separate unless they belong to a coupled group above.
       routine-libraries:
