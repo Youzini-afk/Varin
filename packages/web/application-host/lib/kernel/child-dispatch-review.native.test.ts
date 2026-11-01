@@ -2039,7 +2039,7 @@ const combinedFormatDefects: Record<string, string> = {
   'partial context index with valid collaboration': 'DROP TABLE context_checkpoints; CREATE TABLE context_checkpoints(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,through_id TEXT REFERENCES history(id),body TEXT NOT NULL,project_id TEXT); CREATE UNIQUE INDEX combined_partial_context ON context_checkpoints(branch_id,revision) WHERE revision<0',
   'partial collaboration index with valid context': 'DROP TABLE child_tasks; CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL REFERENCES threads(id),body TEXT NOT NULL); CREATE UNIQUE INDEX combined_partial_child ON child_tasks(child_thread_id) WHERE 0',
 };
-describe.sequential('combined read-only format rejection', () => {
+describe('combined read-only format rejection', { concurrent: false }, () => {
   const disposers: Array<() => Promise<void>> = [];
   let f: Awaited<ReturnType<typeof fixture>>;
   let baseline: string;

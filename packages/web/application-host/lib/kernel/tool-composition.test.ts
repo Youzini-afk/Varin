@@ -22,6 +22,10 @@ const deferred = <T>() => {
   return { promise, resolve, reject };
 };
 const tick = () => new Promise<void>((r) => setImmediate(r));
+// This transport double supplies only the child facts consumed by preparation.
+type ChildExecutionResponse = Pick<DelegatedExecution,
+  'execution_id' | 'child_operation_id' | 'parent_run_id' | 'selected_profile' | 'launch'
+> & { trigger: Pick<DelegatedExecution['trigger'], 'kind'> };
 function contribution(
   service: string,
   version: string,
@@ -147,7 +151,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     failReadyNumber: number | undefined,
     mcp: LiveMcpBinding | undefined;
   let admittedScope: RunContextScope | null = null;
-  let child: DelegatedExecution | null = null;
+  let child: ChildExecutionResponse | null = null;
   let currentProject: string | null = null;
   const preparedScopes: Array<Parameters<ExtensionToolPreparer>[0]> = [];
   const preparer: ExtensionToolPreparer = async (input) => {
@@ -299,7 +303,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     launch,
     releaseChildHandoff: kernel.releaseChildToolHandoff,
     preparedScopes,
-    child: (value: DelegatedExecution) => { child = value; },
+    child: (value: ChildExecutionResponse) => { child = value; },
     admittedScope: (scope: RunContextScope | null) => {
       admittedScope = scope;
     },
@@ -340,7 +344,9 @@ it.each(['dispatch', 'user_continuation'] as const)('%s binds only its admitted 
   f.launch.selection.extension_bindings = [extension.binding];
   f.launch.selection.mcp_binding = original.binding;
   f.child({ execution_id: trigger === 'dispatch' ? 'parent-dispatch' : 'next-execution', child_operation_id: 'parent-dispatch',
-    parent_run_id: 'parent-run', trigger: { kind: trigger }, launch: structuredClone(f.launch.selection) } as DelegatedExecution); // Committed child response fixture; Catalog fences are tested by its owner.
+    parent_run_id: 'parent-run', trigger: { kind: trigger },
+    selected_profile: { preset_id: null, catalog_identity: null, work_mode: 'read_only', tools: [], instructions: '' } satisfies DelegatedExecution['selected_profile'],
+    launch: structuredClone(f.launch.selection) }); // Catalog fences are tested by their owner.
   const derived: McpToolLease = { ...original, binding: { ...original.binding, reference: 'child-execution-owner' } };
   f.mcpLeases.push(derived);
   await f.runtime.prepareMcp('run', null);
