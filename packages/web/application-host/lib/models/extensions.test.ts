@@ -200,6 +200,7 @@ test('authentication uses the reviewed exact-endpoint capability and an explicit
   const f = await fixture(fetchImpl); let wrongEndpoint = true;
   const implementation = codec(1);
   implementation.description.authentication.push({ id: 'fixture.oauth', name: 'Fixture account', header: 'x-fixture-session', prefix: 'Session ', endpoints: ['https://accounts.fixture.invalid/token'] });
+  implementation.description.channels[0]!.oauthProviders = [{ id: 'fixture.oauth', name: 'Fixture account' }];
   implementation.authenticate = async (input, _signal, client) => {
     if (input.kind !== 'refresh') throw new Error('Expected refresh');
     const result = await client.request(wrongEndpoint ? 'https://other.fixture.invalid/token' : 'https://accounts.fixture.invalid/token', { refresh_token: input.token.refreshToken! }) as { access_token: string };
