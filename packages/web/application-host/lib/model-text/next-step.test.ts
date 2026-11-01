@@ -9,7 +9,7 @@ const row = (id: string, run: string, source: HistoryItem['source'], text: strin
   id, run_id: run, source, thread_id: identity.threadId, parent: null, provider: null,
   content: source === 'user' ? { text } : { content: { kind: 'text', text } },
 });
-function fixture() {
+function fixture(status: () => Promise<{ eventCursor: number }> = async () => ({ eventCursor: 0 })) {
   const run = { id: 'run:now', thread_id: identity.threadId, branch_id: identity.branchId, state: 'completed' } as Run;
   const branch = { branch_id: identity.branchId, head: 'answer', active_run_id: null as string | null, latest_run: run };
   const thread = { ...identity, thread_id: identity.threadId, parent_thread_id: null, bot_id: null, deleted_at_ms: null, branches: [branch] } as unknown as ThreadSummary;
@@ -29,7 +29,7 @@ function fixture() {
       return { head: input.headId ?? branch.head, items: references.slice(start, end), previous: start ? references[start - 1]!.id : null };
     }),
     historyItem: vi.fn(async (ref: HistoryReference) => items.find(item => item.id === ref.id)!),
-    status: vi.fn(async () => ({ eventCursor: 0 })), events: vi.fn(async (cursor: number) => events.filter(event => event.cursor > cursor)),
+    status: vi.fn(status), events: vi.fn(async (cursor: number) => events.filter(event => event.cursor > cursor)),
     onEvent: vi.fn((fn: typeof listener) => { listener = fn; return () => {}; }), onReady: () => () => {}, onExit: () => () => {},
   } as unknown as Parameters<typeof createNextStepService>[0]['runtime'];
   let settings: unknown = { harness: { nextStep: { enabled: true }, models: { nextStep: { providerId: 'chosen', modelId: 'fast' } } } };
@@ -48,6 +48,7 @@ function fixture() {
   const service = createNextStepService({ runtime, modelText, readSettings: async () => settings, onError });
   return { service, runtime, generate, count, release, items, branch, run, onError, modelText,
     settings: (value: unknown) => { settings = value; },
+    notify: (cursor: number) => listener({ stream: 'durable', cursor } as AgentRuntimeStreamEvent),
     emit: (event: RuntimeEvent) => { events.push(event); listener({ stream: 'durable', cursor: event.cursor } as AgentRuntimeStreamEvent); } };
 }
 
@@ -157,4 +158,29 @@ it('keeps an explicit conservative bound when the selected model only has a refe
   const system = `${NEXT_STEP_SYSTEM}\nReturn JSON conforming to this schema:\n${JSON.stringify(NEXT_STEP_SCHEMA)}`;
   expect(Buffer.byteLength(prompt) + Buffer.byteLength(system) + 64).toBeLessThanOrEqual(2400);
   expect(prompt).toContain('暂时不要打包'); await f.service.close();
+});
+
+
+it.each([
+  { first: 0, status: 0, after: 0 },
+  { first: 0, status: 5, after: 0 },
+  { first: 3, status: 5, after: 2 },
+])('catches up suggestion events from $after when wake $first precedes status $status', async ({ first, status, after }) => {
+  let ready!: (status: { eventCursor: number }) => void;
+  const f = fixture(() => new Promise(resolve => { ready = resolve; }));
+  const completed: RuntimeEvent = { cursor: first || 1, subject: f.run.id, revision: 1, kind: 'run.changed', data: f.run };
+  vi.mocked(f.runtime.events).mockImplementation(async cursor => [completed,
+    ...(status > completed.cursor ? [{ ...completed, cursor: status, kind: 'unrelated' }] : [])].filter(event => event.cursor > cursor));
+  try {
+    f.notify(first); ready({ eventCursor: status });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (status === 0) {
+      expect(f.runtime.events).not.toHaveBeenCalled();
+      f.notify(1);
+    }
+    await vi.waitFor(() => expect(f.runtime.events).toHaveBeenCalled());
+    expect(vi.mocked(f.runtime.events).mock.calls[0]![0]).toBe(after);
+    await vi.waitFor(() => expect(f.generate).toHaveBeenCalledOnce());
+    expect(f.onError).not.toHaveBeenCalled();
+  } finally { await f.service.close(); }
 });

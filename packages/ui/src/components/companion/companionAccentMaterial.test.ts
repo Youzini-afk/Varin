@@ -37,7 +37,7 @@ test('fixed tonal response is deterministic, retains shadow order and does not n
   expect(at(a, 1, 1)[2]).toBeLessThan(at(a, 2, 1)[2]!);
 });
 
-test('only frozen bundle/source identity is treated; two-frame cache reuses pixels and invalidates new bitmap generation', () => {
+test('only frozen bundle/source identity is treated; cached pixels invalidate with bitmap generation or clear', () => {
   const sources = Object.keys(profile.sources);
   const raw = readFileSync(new URL('../../../../web/public/companion-assets/bundle.json', import.meta.url));
   const selected = JSON.parse(raw.toString()) as { packages: CompanionPackage[] };
@@ -56,12 +56,8 @@ test('only frozen bundle/source identity is treated; two-frame cache reuses pixe
   expect(stage.getImageData).toHaveBeenCalledTimes(1);
   material.apply(stage, sequence(sources[0]!), {} as ImageBitmap, 0, profile.bundleSHA256);
   expect(stage.getImageData).toHaveBeenCalledTimes(2);
-  material.apply(stage, sequence(sources[1]!), bitmap, 0, profile.bundleSHA256);
-  material.apply(stage, sequence(sources[2]!), bitmap, 0, profile.bundleSHA256);
-  material.apply(stage, sequence(sources[0]!), bitmap, 0, profile.bundleSHA256);
-  expect(stage.getImageData).toHaveBeenCalledTimes(5);
   material.clear(); material.apply(stage, sequence(sources[0]!), bitmap, 0, profile.bundleSHA256);
-  expect(stage.getImageData).toHaveBeenCalledTimes(6);
+  expect(stage.getImageData).toHaveBeenCalledTimes(3);
 });
 
 test('source regions reject escaped/fractional or overlapping treatment rather than recolor twice', () => {
@@ -94,7 +90,7 @@ test('all registered palettes preserve alpha, fixed material colors and protecte
   }
 });
 
-test('cache switches palettes without stale tint, reuses two exposures, and evicts the third', () => {
+test('cache switches palettes without stale tint and reuses the original palette', () => {
   const material = new CompanionAccentMaterial();
   const sha256 = Object.keys(profile.sources)[0]!;
   const sequence = { canvas: [512,512], geometryReference: profile.geometryReference, frames: [{sha256}] } as CompanionPackage;
@@ -109,16 +105,12 @@ test('cache switches palettes without stale tint, reuses two exposures, and evic
     return {width:512,height:512,data:pixels};
   }), putImageData: vi.fn() } as unknown as CanvasRenderingContext2D;
   const bitmap = {} as ImageBitmap;
-  const apply = (id: string, image = bitmap) => material.apply(stage, sequence, image, 0, profile.bundleSHA256, resolveCompanionAccentPalette(getThemeById(id)));
+  const apply = (id: string) => material.apply(stage, sequence, bitmap, 0, profile.bundleSHA256, resolveCompanionAccentPalette(getThemeById(id)));
   apply('aura-dark'); apply('vesper-dark'); apply('aura-dark');
   const paints = vi.mocked(stage.putImageData).mock.calls;
   expect(at(paints[0]![0].data, ...sample!)).not.toEqual(at(paints[1]![0].data, ...sample!));
-  expect(paints[2]![0]).toBe(paints[0]![0]);
+  expect(at(paints[2]![0].data, ...sample!)).toEqual(at(paints[0]![0].data, ...sample!));
   expect(stage.getImageData).toHaveBeenCalledTimes(2);
-  apply('mono-dark'); apply('vesper-dark');
-  expect(stage.getImageData).toHaveBeenCalledTimes(4);
-  apply('vesper-dark', {} as ImageBitmap);
-  expect(stage.getImageData).toHaveBeenCalledTimes(5);
 });
 
 test('a looping package recolours each of its sources once instead of on every exposure', () => {

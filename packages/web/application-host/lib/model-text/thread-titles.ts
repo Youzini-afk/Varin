@@ -112,7 +112,8 @@ export function createThreadTitleService(options: {
     const generation = epoch;
     initializing = options.runtime.status(lifetime.signal).then(status => {
       if (generation !== epoch || closed) return;
-      cursor = Math.min(status.eventCursor, firstNotification === undefined ? status.eventCursor : firstNotification - 1);
+      // Cursor zero is an empty-store wake, not an event with a negative predecessor.
+      cursor = Math.min(status.eventCursor, firstNotification === undefined ? status.eventCursor : Math.max(0, firstNotification - 1));
       notified = Math.max(notified, status.eventCursor); void pump(); void recover();
     }).catch(error => { if (!closed) options.onError(error); }).finally(() => { initializing = undefined; });
   }

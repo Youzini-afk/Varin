@@ -82,3 +82,34 @@ it('keeps manual names, delegated Agent identities and the primary Bot entry out
   expect(f.runtime.prepareThreadTitle).not.toHaveBeenCalled();
   await owner.close();
 });
+
+
+it.each([
+  { first: 0, status: 0, after: 0 },
+  { first: 0, status: 5, after: 0 },
+  { first: 3, status: 5, after: 2 },
+])('catches up title events from $after when wake $first precedes status $status', async ({ first, status, after }) => {
+  const f = fixture();
+  let ready!: (status: { eventCursor: number }) => void;
+  f.runtime.status.mockImplementation(() => new Promise(resolve => { ready = resolve; }));
+  let notify!: (event: AgentRuntimeStreamEvent) => void;
+  f.runtime.onEvent.mockImplementation(listener => { notify = listener; return () => {}; });
+  const completed: RuntimeEvent = { cursor: first || 1, subject: 'main-run', revision: 1, kind: 'run.changed',
+    data: { state: 'completed', thread_id: f.thread.thread_id, branch_id: 'main' } };
+  f.runtime.events.mockImplementation(async cursor => [completed,
+    ...(status > completed.cursor ? [{ ...completed, cursor: status, kind: 'unrelated' }] : [])].filter(event => event.cursor > cursor));
+  const owner = createThreadTitleService(f.options);
+  const wake = (cursor: number) => notify({ v: 73, kind: 'runtime-event', kernelEpoch: 'fixture', stream: 'durable', cursor });
+  try {
+    wake(first); ready({ eventCursor: status });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (status === 0) {
+      expect(f.runtime.events).not.toHaveBeenCalled();
+      wake(1);
+    }
+    await vi.waitFor(() => expect(f.runtime.events).toHaveBeenCalled());
+    expect(f.runtime.events.mock.calls[0]![0]).toBe(after);
+    await vi.waitFor(() => expect(f.modelText.generate).toHaveBeenCalledOnce());
+    expect(f.onError).not.toHaveBeenCalled();
+  } finally { await owner.close(); }
+});
