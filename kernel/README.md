@@ -51,10 +51,13 @@ and reuse limits are in [Documents observation](../packages/web/application-host
 
 ## Storage and file authority
 
-Storage has one OS-held owner lock and the current typed catalog/object schema. It validates supported
-format and structural identity before normal writable recovery. Unsupported/future/malformed/corrupt
-stores are errors and their assets are preserved. No second TS writer or internal-format upgrade/import
-backend is selected. Workspace files, Git, native Pi data and external configuration are separate assets.
+Storage has one OS-held `kernel.lock` and its own `catalog.sqlite`, separate from the Agent Catalog.
+[core.rs](crates/varin-kernel/src/storage/core.rs) accepts only the current Storage format (22), SQLite
+`user_version` (16) and schema fingerprint; it has no older-generation conversion chain. The format
+probe precedes opening the writer, and structural validation precedes staging/ephemeral-pin cleanup.
+Unsupported/future/malformed/corrupt stores are errors and their assets are preserved. Agent Catalog
+upgrades do not upgrade this domain. Workspace files, Git, native Pi data and external configuration
+are separate assets; no second TS writer or import fallback is selected.
 
 Native grants bind current Thread/Run authority. The four retired session identity fields remain
 null in new serialized grant records for historical decoding; non-null values cannot authorize access
@@ -204,11 +207,18 @@ including directory enumeration. Converting a nonempty file/directory or a multi
 explicitly rejected because the current shared representation cannot retain hidden backing data.
 Unknown reparse tags still require a corresponding shared representation.
 
-Remaining work includes lossless native names, opaque reparse backing data,
-active writable mapping fences, project activation, source/consumer binding and mount restart recovery.
-FSKit is not yet a backend. Current file tools, processes, IDE and external harnesses still use their
-existing source paths. Registering a mount as a legacy physical root is not supported: synchronous path
-I/O on the Storage actor would wait for callbacks to that same actor.
+Current consumer binding is implemented: the Host [native workspace owner](../packages/web/application-host/lib/kernel/native-workspaces.ts)
+opens logical branch identities into an epoch-specific mount generation; Documents and
+[external Harness sources](../packages/web/application-host/lib/external-agents/source.ts) acquire that
+view rather than persisting its path as authority. [native_sources.rs](crates/varin-kernel/src/storage/native_sources.rs)
+admits the corresponding root, and file/process workers keep physical I/O outside the Storage actor
+so mount callbacks can reach the same owner. Reopening rebuilds the mount from durable branch state;
+it does not preserve old OS handles or prove unpublished process-local writes survived a crash.
+
+Remaining representation limits include lossless native names and opaque reparse backing data.
+Writable mappings require the selected backend's actual cache fence; unsupported connections retain
+the scoped active-writer obstacle rather than silently promising a snapshot. FSKit selection, mounted
+I/O, restart and cleanup still need their stated real-platform acceptance; implementation is not qualification.
 
 Root admission queries an index of pending file operations; protocol traffic is not scanned as
 file recovery work. Query indexes are rebuildable and leave the record format unchanged. Ordinary

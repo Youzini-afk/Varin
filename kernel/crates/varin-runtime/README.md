@@ -26,6 +26,8 @@ This document is the local code map and maintenance boundary, not an implementat
 | Child/family work, current/history directory, messages and continuation | [catalog_collaboration.rs](src/catalog_collaboration.rs), [catalog_delegated.rs](src/catalog_delegated.rs), [catalog_family.rs](src/catalog_family.rs), [catalog_messages.rs](src/catalog_messages.rs), [catalog_activation.rs](src/catalog_activation.rs) |
 | Durable conditions and deliveries | [catalog_observations.rs](src/catalog_observations.rs), [catalog_followups.rs](src/catalog_followups.rs), [catalog_process_wait.rs](src/catalog_process_wait.rs), [catalog_reply_wait.rs](src/catalog_reply_wait.rs) |
 | Goals, Bot suspension and memory work | [catalog_goals.rs](src/catalog_goals.rs), [catalog_bot.rs](src/catalog_bot.rs), [catalog_memory_work.rs](src/catalog_memory_work.rs) |
+| Request usage, retained billing attribution and content-free ledger | [catalog_usage.rs](src/catalog_usage.rs), [catalog_usage_ledger.rs](src/catalog_usage_ledger.rs) |
+| External Harness bindings, admissions and observations (not native execution loops) | [catalog_external.rs](src/catalog_external.rs) |
 | Independent domain Jobs and calendar occurrences | [catalog_host_jobs.rs](src/catalog_host_jobs.rs), [catalog_calendar.rs](src/catalog_calendar.rs) |
 
 Private domain types stay in Rust. [The kernel schema](../../protocol/schema.json) generates wire
@@ -38,8 +40,11 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. The owner upgrades format 78 (v0.9.33) to 79 in place;
-  conversion, version marker and upgrade event commit atomically before epoch changes or recovery.
+  malformed stores before writable recovery. The owner upgrades supported formats 78 and 79 to 80
+  in place: 78 → 79 adds external-agent records; 79 → 80 initializes the usage ledger and its recording
+  start time. Older receipts lack reliable
+  settlement time/attribution and are not backfilled. Conversion, final version marker and upgrade event
+  commit atomically before epoch changes or recovery.
   Failure or process interruption before commit rolls back the conversion; reopening retries it.
   Existing immutable bodies, identities and original receipts remain in place without a full database copy.
   A failed open cannot turn history into an empty cache or replay a dispatched effect.

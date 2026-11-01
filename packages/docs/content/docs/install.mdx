@@ -21,7 +21,7 @@ For a phone, see [Mobile apps & PWA](/mobile/).
 - A Rust toolchain selected by `kernel/rust-toolchain.toml` (install rustup; the repository selects the required version)
 - Git
 
-Varin builds and starts its native Rust Agent runtime with the Application Host. No separate agent CLI is required. Existing workspace files and historical conversation assets are not automatically migrated or rewritten.
+Varin builds and starts its native Rust Agent runtime with the Application Host. No separate agent CLI is required. Supported older native Catalog formats upgrade automatically when opened. Original workspace files and conversation content are preserved; this does not import another harness’s conversations. Unknown or newer store formats are rejected rather than overwritten.
 
 ## From source (web)
 

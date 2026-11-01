@@ -50,16 +50,24 @@ generation; poll itself is not a permanent latch. Explicit flush crosses each or
 before consuming a finite inotify queue prefix. Queue order alone is insufficient: a visible VFS name mutation
 can pause before queuing fsnotify. The barrier costs O(watched directories) syscalls and held directory handles;
 it does not enumerate every child entry or wait for filesystem quiet. It proves namespace observation before
-the final capture fence, not an atomic filesystem snapshot or content coherence. File bodies always follow the
-existing capture hashes and complete state verification. Windows/network/unsupported roots still fully recheck
+the final capture fence, not an atomic filesystem snapshot or content coherence. File-body reuse and
+verification belong separately to the Rust capture owner below. Windows/network/unsupported roots still fully recheck
 their directory inventory; no Windows filesystem guarantee is inferred from Linux checks.
 
-Stored capture uses two complete source reads. Its later whole-baseline verification supplies the original
-physical states to `file.captureBatch`: one fresh full hash/state read compares against that existing reference,
-without establishing another reference by double-reading again. The Host retains physical modes before the
-Windows Git-index projection. Explicit scope files join the same body pass; their namespace is rechecked
-afterward. A fresh standalone observation still uses two passes. These reads retain the original leases,
-cancellation, root/grant admission and publication checks; no timestamp cache establishes unchanged bytes.
+`../harness/working-state/source-preparation.ts` captures the selected paths, then supplies the original
+physical states to `file.captureBatch` for whole-baseline verification. The Host retains physical modes
+before the Windows Git-index projection; explicit scope files join the same verification and their
+namespace is rechecked afterward.
+
+Rust `storage/capture_resources.rs` can reuse a captured state when the original root/path has the same
+native file identity/change time and its still-installed object remains verified with unchanged identity.
+The process-local cache retains no blobs. Unsupported identities, changed sources or unavailable objects
+fall back to source reads/hashing; cold stored capture reads and verifies its source, while a verification
+with supplied original states need not establish another reference first. Fresh standalone observations
+retain their own two-pass read path. `storage/file_identity.rs` uses inode/device/ctime or Windows file
+index/ChangeTime, not only user-restorable size/mtime. Original leases, cancellation, root/grant admission
+and publication checks apply even to reuse. This is separate from namespace inventory reuse and from
+Native Workspace adoption's clone/reflink-or-stream import; neither eliminates all hashing or commit cost.
 
 Documents keeps one latest namespace inventory on its original root watcher after a stable capture. This is
 only path metadata, not a branch, blob pin, grant or another task record. Adjacent captures under continuous
@@ -69,7 +77,8 @@ from the root inventory, while explicit capture scopes retain their separate rul
 reset, reconnect and Host restart lose reuse. Failed/cancelled Documents captures do not advance it. A successful
 `completeCapture` may retain verified namespace metadata independently of a later branch-create failure; that
 metadata says nothing about whether the Source operation committed. Original kernel capture/publication still
-checks the current owner and every file body. Closing the Host drops the metadata and all retained watches.
+checks the current owner and each selected file state under the capture rules above. Closing the Host drops
+the metadata and all retained watches.
 
 Capture, language views and managed file observation await subscription readiness. `settle()` joins the finite
 native fence and Host metadata processing. Overflow or handle loss invalidates the generation; reconnect
@@ -80,6 +89,8 @@ individual capture's temporary listener, which is what makes cross-capture reuse
 ## Routes
 
 - `POST /api/documents/workspace/resolve`
+- `POST /api/documents/workspace/retention`
+- `POST /api/documents/resource/identity`
 - `POST /api/documents/read`
 - `POST /api/documents/write`
 - `POST /api/documents/move`

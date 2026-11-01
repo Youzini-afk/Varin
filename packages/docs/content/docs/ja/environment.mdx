@@ -7,7 +7,7 @@ description: 環境変数で Varin サーバー、ターミナル、Git、音声
 
 Varin は起動時にこれらの環境変数を読みます。スタートアップサービスでは、`varin startup enable` がデフォルトで現在の環境をスナップショットするため、サービスに使わせたい変数を変えたあとは再実行してください。
 
-これらの変数は Application Host とプラットフォームサービスを設定します。モデルアカウントは「設定 → モデルチャネル」で設定します。データディレクトリを変更しても既存ストアはインポート・移行されません。
+これらの変数は Application Host とプラットフォームサービスを設定します。モデルアカウントは「設定 → Model services」で設定します。データディレクトリを変更しても既存ストアはインポート・移行されません。
 
 ## Varin サーバー
 
@@ -55,11 +55,11 @@ Varin ターミナルセッションで使うシェル実行ファイルです�
 
 ### `VARIN_GIT_BINARY`
 
-Varin の Git 機能が使う Git 実行ファイルです。
+Windows で Git 実行ファイルを指定します。macOS と Linux では `PATH` から `git` を解決します。
 
 ### `GIT_BINARY`
 
-別の Git 実行ファイル上書きです。Varin 専用の設定には `VARIN_GIT_BINARY` を優先してください。
+Windows で `VARIN_GIT_BINARY` より先に確認する Git 実行ファイル指定です。利用可能な指定を順に確認した後、Git を検索します。
 
 ## 音声とトンネル
 
@@ -83,10 +83,6 @@ Varin のトンネルコマンドが使う ngrok auth token です。`ngrok conf
 
 ## ランタイム補助
 
-### `BUN_BINARY`
-
-デーモンプロセスを起動するときに Varin が使うべき Bun 実行ファイルです。
-
 ### `BUN_INSTALL`
 
-Bun のインストールルートです。Varin はデーモン起動と更新のために `bin/bun` を探すのに使います。
+パッケージマネージャーによる更新時に Bun を探すインストールルートです。CLI デーモンと起動サービスは Varin を起動した実行ファイル（`process.execPath`）を使います。`BUN_BINARY` による上書きには対応していません。

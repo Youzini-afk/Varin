@@ -15,7 +15,7 @@ folder and reload it without restarting the application.
 
 3. In Varin: **Settings → Appearance → Reload themes**.
 
-4. Select your theme from the dropdown.
+4. Select your theme in the theme picker.
 
 Built-in theme names and style descriptions follow the interface language. Original palette names
 remain recognizable, and the picker previews each variant's actual background, primary accent and
@@ -243,18 +243,24 @@ directory; a remote browser or mobile client does not read themes from its own d
 }
 ```
 
-## Surface alpha requirement
+## Surface opacity
 
-- `colors.surface.muted` and `colors.surface.elevated` must always use 90 alpha (`...90` in 8-digit hex, e.g. `#1C1B1A90`).
+`colors.surface.muted` and `colors.surface.elevated` may be opaque or use an alpha value appropriate
+to the palette. The `...90` values in the example are choices, not a validation requirement.
+Check contrast against the actual underlying surfaces; custom surface values are not forced to a
+built-in opacity.
 
 ## Validation
 
 Themes are validated on load. Invalid themes are skipped with a console warning.
+The [Host loader](../../packages/web/application-host/lib/platform/theme-runtime.ts) checks the
+required structure and nonempty color strings, not whether each string is valid CSS or has sufficient
+contrast. A file passing this check still needs a visual check in the application.
 
 Common issues:
 - Missing required fields
 - Invalid `variant` (must be `"light"` or `"dark"`)
-- File size > 512KB
+- File size > 512 KiB (524,288 bytes)
 
 ## Tips
 

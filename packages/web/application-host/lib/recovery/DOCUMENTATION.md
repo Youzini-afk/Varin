@@ -160,8 +160,11 @@ The public recovery v7 contract still permits replacement providers to implement
 workspace-local, workspace-adjacent, or custom locations. For those providers, transfer and cleanup semantics
 remain provider-owned. They do not grant direct access to the built-in kernel catalog.
 
-The built-in payload is the kernel catalog plus its content-addressed object and staging directories. Content
-objects use SHA-256 over the uncompressed bytes. Checkpoints store only affected-path state references.
+The built-in payload belongs to the Storage catalog and its object/staging/file-version directories.
+Ordinary `sha256-…` objects hash their bytes; `ranges-sha256-…` references identify a flat range
+description and its ordinary-object dependencies, not the hash of the reconstructed whole file.
+The native content reader resolves either form, and recovery/GC retain and count shared dependencies
+once. Checkpoints store only affected-path state references.
 Working branches and every published Thread result own independent object references in this catalog, so
 releasing recovery history cannot collect result or baseline content that a Thread still retains.
 

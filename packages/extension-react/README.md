@@ -8,7 +8,10 @@ that root and shows the contribution seam's built-in fallback. The fallback stay
 passed across React singleton boundaries.
 
 Using React is optional; managed and isolated extensions may use any framework or direct DOM/Canvas.
-`defineReactShell`, `defineReactView`, and `defineReactEditor` are typed aliases of the same adapter.
+`defineReactView` and `defineReactEditor` alias the same adapter. `defineReactShell` additionally
+provides the mount's `VarinWorkbenchCompositionHost` as a `workbench` prop and through
+`useWorkbenchCompositionHost()`. That hook returns null outside a Shell mount; child composition
+uses the Shell's declared seams, not private product UI imports.
 `defineReactTransitionScene` and `useVarinTransitionScene` adapt the stable transition controller
 without sharing Varin's own React root or prescribing a Shell DOM structure.
 See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).

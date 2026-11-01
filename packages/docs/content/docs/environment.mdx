@@ -7,7 +7,7 @@ description: Configure the Varin server, terminals, Git, voice, and tunnels with
 
 Varin reads these environment variables at startup. For startup services, `varin startup enable` snapshots the current environment by default, so rerun it after changing variables you want the service to use.
 
-These variables configure the Application Host and platform services. Configure model accounts in Settings → Model channels; changing the data directory does not import or migrate an existing store.
+These variables configure the Application Host and platform services. Configure model accounts in Settings → Model services; changing the data directory does not import or migrate an existing store.
 
 ## Varin server
 
@@ -55,11 +55,11 @@ Shell executable used for Varin terminal sessions.
 
 ### `VARIN_GIT_BINARY`
 
-Git executable used by Varin Git features.
+Windows Git executable override. On macOS and Linux, Varin resolves `git` from `PATH`.
 
 ### `GIT_BINARY`
 
-Alternative Git executable override. Prefer `VARIN_GIT_BINARY` for Varin-specific configuration.
+Windows Git executable override checked before `VARIN_GIT_BINARY`. Varin uses the first available configured executable, then searches for Git.
 
 ## Voice and tunnels
 
@@ -83,10 +83,6 @@ ngrok auth token used by Varin tunnel commands. You can also configure ngrok wit
 
 ## Runtime helpers
 
-### `BUN_BINARY`
-
-Bun executable Varin should use when spawning daemon processes.
-
 ### `BUN_INSTALL`
 
-Bun installation root. Varin uses it to find `bin/bun` for daemon startup and updates.
+Bun installation root used to locate Bun for package-manager update operations. CLI daemon and startup services use the executable that launched Varin (`process.execPath`); `BUN_BINARY` is not a supported override.

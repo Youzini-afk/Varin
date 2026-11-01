@@ -19,10 +19,12 @@ Nginx、Nginx Proxy Manager、Caddy、Cloudflare、その他のリバースプ�
   - `/api/dictation/ws`
   - `/api/terminal/ws`
   - `/api/varin/realtime-proxy/ws`
+  - `/api/varin/observations/ws`
 - バッファリングなしの SSE:
   - `/api/notifications/stream`
   - `/api/varin/events`
   - `/api/threads/observe`
+  - `/api/external-agents/observe`
   - `/api/varin/realtime-proxy/sse`
 - 添付ファイルとファイル操作向けの大きなリクエストボディ
 - ライブストリームとターミナルセッション向けの長い read timeout
@@ -65,7 +67,7 @@ proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
 
-location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
+location ~ ^/api/(varin/(realtime-proxy|observations)|terminal|dictation)/ws$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -79,25 +81,16 @@ location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_send_timeout 3600s;
 }
 
-location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
+location /api/ {
     proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Connection "";
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
     proxy_buffering off;
     proxy_cache off;
     gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-}
-
-location /api {
-    proxy_pass http://127.0.0.1:3000;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
 }

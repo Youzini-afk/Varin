@@ -12,7 +12,7 @@ Varin 可以连接执行 Host 上的 Codex、Claude Code、Pi，以及支持 ACP
 
 ## 执行和持久化
 
-- `application-client/external-agents.ts` 是公开、带类型的 API。Host 的 `lib/external-agents` 解析协议、运行进程和协调交互。
+- [`application-client/src/external-agents.ts`](../packages/application-client/src/external-agents.ts) 是公开、带类型的 API。Host 的 `lib/external-agents` 解析协议、运行进程和协调交互。
 - Rust Catalog 的 `external_*` 表保存配置、外部会话、输入、轮次和交办关系；正文沿不可变 ContentStore 保存。独立执行不创建虚假的原生 Thread、branch 或模型 Run。
 - Codex 使用 app-server；Claude 使用 SDK core，通过 Rust 跟踪的桥接进程连接用户指定的 CLI；Pi 使用独立 RPC 进程；ACP 在初始化时协商能力。
 - 进程树、来源捕获、目录物化与文件回收继续由 Rust Storage 管理。关闭面板只取消观察，停止操作作用于实际轮次；删除会话先关闭受管连接，再清理其拥有的目录和内容引用。
@@ -47,6 +47,12 @@ Varin 可以连接执行 Host 上的 Codex、Claude Code、Pi，以及支持 ACP
 
 本轮交付直接聊天与跨 Harness 派发。Varin CLI、Skill、MCP 对外能力共享按产品决定暂缓；不会写入外部程序的全局配置。ACP 没有声明尚未连接的文件或终端回调。
 
-直接聊天当前选择本 Host 的实际目录；远端客户端使用其所连接 Host 的程序。托管来源的跨资源 Host 派发需要在来源所在 Host 执行。普通图片输入已接通；文档附件、从外部程序导入已有会话、接管其他终端的活跃进程、边界恢复点增强和原生上下文专属操作仍保留为后续能力。已在 Varin 内建立的外部会话可以重连并继续原生会话。
+直接聊天当前选择本 Host 的实际目录；远端客户端使用其所连接 Host 的程序。托管来源的跨资源 Host 派发需要在来源所在 Host 执行。普通图片输入已接通；文档附件、从外部程序导入已有会话、接管其他终端的活跃进程、边界恢复点增强和原生上下文专属操作仍保留为后续能力。已在 Varin 内建立的外部会话在后端支持恢复时可以重连并继续原生会话。
 
-当前私有协议为 67，Agent Catalog 格式为 79。旧内部格式按既有规则明确拒绝，不自动覆盖或迁移资产。
+ACP 的图片与恢复能力分别取实际初始化返回的 `promptCapabilities.image` 和 `loadSession`；未声明恢复时，
+重连已有会话明确失败，不另建会话替代。模型选项优先读取会话的 model config option，兼容协议提供的模型列表；
+运行模式同样来自该会话。Codex/Pi 的模型目录读取失败保留 `modelsError`，不把空目录解释为连接失败或自动更换后端。
+
+私有协议版本由生成的 [kernel 协议](../kernel/crates/varin-kernel/src/protocol_generated.rs) 定义，Catalog 格式与支持的升级链由
+[Catalog upgrade owner](../kernel/crates/varin-runtime/src/catalog_upgrade.rs) 管理。支持的旧格式在打开时事务升级，保留原会话身份、正文和回执；
+未知、更新或结构损坏的格式拒绝打开，不覆盖用户资产，也不重放外部输入。

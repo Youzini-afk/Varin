@@ -218,10 +218,13 @@ readback confirms `set_value`. Tool text contains the short result and relevant 
 internal trace. Explicit `app_post` text requires a native Edit/RichEdit handle in the selected window;
 it cannot silently route browser input through unsupported Win32 edit messages.
 
-The original desktop record's `runtimeVersion:4` stores discriminated work/usage and a short
+The original desktop record's `runtimeVersion:5` stores discriminated work/usage, exact control
+events/cancellations and a short
 `physicalControl` marker before input. It identifies the Host control generation, original input
 helper and actual assignment or human holder. Malformed or obsolete nonempty runtime metadata remains
 an actionable fenced state; desktop configuration and external assets are not migrated or erased.
+`computer-records.ts` decodes this boundary and `computer-service.ts` writes the current version;
+Agent Catalog format upgrades do not convert or clear this physical-control record.
 An empty reservation map, replacement Host/helper, readiness probe or new control epoch cannot prove
 old held input released. Confirmation requires the original helper's release acknowledgement plus
 callback/process drainage, or the original managed desktop session's actual stop. A failed durable

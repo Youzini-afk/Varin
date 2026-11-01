@@ -16,6 +16,12 @@ bearer/pairing token、Authorization header、任意环境值或文件正文。�
 另一个 Host 上同名路径不是授权。固定来源仍须当前 registration/trust 和原 Storage grant。
 撤权阻止新访问，不改写历史或虚构已受理效果回滚。
 
+Native Workspace 的逻辑 branch 与本次 mount generation 分开校验。
+[Rust 原生来源准入](../kernel/crates/varin-kernel/src/storage/native_sources.rs)同时检查原 grant、root、
+branch、scope、generation 与保留租约；只知道挂载路径或旧 generation 不能复用权限。
+[挂载 owner](../kernel/crates/varin-kernel/src/workspace_resources.rs)限定原 owner 的 mount/close 操作，
+并把子目录绑定限制在原挂载内的真实目录。独立文件树不隔离任意 shell 的 OS 权限，不能宣称为安全沙箱。
+
 配置在同一 origin 下的不同挂载前缀是不同 Host endpoint。Managed Source 身份、探测与原 owner 请求保留该前缀；
 桌面 realtime proxy 只给该前缀内的明确路由附加配置凭据，不跟随重定向。切换 Host 时，尚在准备认证的浏览器请求
 必须在派发前失败，不能把旧请求正文或凭据送到新 Host。

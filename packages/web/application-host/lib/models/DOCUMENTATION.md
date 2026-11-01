@@ -37,6 +37,7 @@ Unknown usage is preserved, and server Retry-After may exceed the configured exp
 | Revisioned settings and file observation | `configuration.ts`, `settings.ts` |
 | Model account storage, OAuth and cloud credential sources | `credentials.ts`, `oauth.ts`, `google-auth.ts`, `aws-auth.ts`, `anthropic-auth.ts` |
 | Reviewed extension contributions and exact service pins | `extensions.ts` |
+| Request price snapshots and Host usage projection | `pricing.ts`, `usage-routes.ts`; Catalog remains the durable ledger owner |
 | Authenticated client access | `routes.ts`, `application-client/src/model-connections.ts` |
 
 `VARIN_DATA_DIR/models.json` contains channels and their models; `agent-settings.json` contains
@@ -354,6 +355,13 @@ keeps conversation retention counts separate from the compaction model input. Re
 tokenizer/chunk estimates, and
 Goal budgets retain their existing output-token scope. These are different consumers of evidence,
 not interchangeable counters. Raw non-token image usage is preserved without inventing token costs.
+
+`usage-routes.ts` serves authenticated `/api/usage/summary` via `runtime.usage.summary`, not a
+Host-side usage database. `pricing.ts` freezes catalog/custom prices and billing class with the actual
+model binding. The route supplies current prices only as labeled estimates for previously unpriced
+receipts; ambiguous same-model price candidates are omitted, and original snapshots remain authoritative.
+The client supplies local-day boundaries; the Settings consumer refreshes on `usage.updated`. Native
+ledger totals and external Harness self-reported turn/cumulative values remain separate.
 
 ## Rationale and support boundaries
 

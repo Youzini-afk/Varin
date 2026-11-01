@@ -5,8 +5,10 @@ Trusted application-host ownership for the Varin extension catalog.
 The host stores manifests, installation records, desired state, capability grants, application-host
 identity, and truthful diagnostics. It materializes npm, Git, local-directory, and registered built-in
 sources without lifecycle scripts; managed Surface entrypoints are bundled into immutable SHA-256
-artifacts. Selected and candidate versions remain separate until a Surface activation transaction
-successfully selects the candidate with a catalog revision precondition.
+artifacts. Selected and candidate versions remain separate until explicit application publishes the
+candidate with a catalog revision precondition. Host and Surface actual generations normally reconcile
+independently; only an explicit `updateReadiness.surfaceEntrypoints` group adds the named Surface
+preparation barrier. A local Surface failure cannot undo an already durable Host selection.
 
 Published extensions can point a managed entrypoint at a self-contained `.cjs` browser bundle; it is
 copied verbatim and works in hosts that intentionally do not ship a source compiler. Other supported

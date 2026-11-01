@@ -71,6 +71,7 @@
 | --- | --- |
 | LiveRoot | 使用原准入目录，读取当前文件，复用实际执行位置 |
 | Materialized | 使用原 environment/Run 的工作副本，不新建另一份检索 worktree |
+| Native workspace | 绑定原逻辑 branch 与范围，读取、搜索和命令使用该分支当前挂载的同一原生工作状态 |
 | FixedBranch | 初始读取不可变 branch/revision；第一次需要命令时按需物化同一版本 |
 | Managed Host | 原资源 Host 持有读取、物化、进程和清理权威 |
 | 无来源 | 保留不需要来源的能力；需要 cwd 的命令明确报错 |

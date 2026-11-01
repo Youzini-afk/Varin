@@ -6,6 +6,8 @@
 进程归属见[架构](architecture.md)，Catalog 见[运行时](runtime.md)。具体实现入口：
 [Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md)、
 [WorkingState](../packages/web/application-host/lib/harness/working-state)、
+[Native Workspace Host owner](../packages/web/application-host/lib/kernel/native-workspaces.ts)、
+[Rust 挂载与租约](../kernel/crates/varin-kernel/src/workspace_resources.rs)、
 [进程](../packages/web/application-host/lib/process/DOCUMENTATION.md)、
 [Recovery](../packages/web/application-host/lib/recovery/DOCUMENTATION.md)。
 
@@ -16,7 +18,7 @@ Agent Thread API 显式选择来源 owner、mode 和内容。本地与 managed-h
 
 - **FixedBranch**：读取不可变 branch/revision。原目录移动后，只要当前登记/信任和原对象仍有效，仍能读固定内容。
   命令首次受理时按需准备该版本的执行目录，随后文件工具和进程共用这个视图；旧证据保留原版本。
-  workspace MCP 继续要求其显式执行来源。
+  workspace MCP 继续要求其显式执行来源；不能因为命令已物化目录就把 FixedBranch 自动当作 MCP cwd。
 - **Materialized**：绑定原 environment/Run、受管物理副本和不可变 baseline。副本丢失或身份变化时，不静默重造同一执行。
 - **NativeWorkspace**：保存逻辑 workspace、branch 和可选子目录。当前 Host 为它建立独立挂载、generation 和实际路径；重启重开原状态，旧路径失效。新隔离写入采用此来源，文件与程序共用原生文件服务。
 - **LiveRoot**：使用当前准入的物理根，选择已保存文件，不是不可变草稿覆盖，也不承诺隔离任意外部 writer。
@@ -75,7 +77,8 @@ Windows 安全描述符按固定组件排列生成公开元数据，保留 SID�
 跨 Host 传输发送确切描述及其普通正文依赖，接收方核验哈希、区间、长度与原 owner 后发布；文件及树身份保持不变。
 普通目录导出生成真实文件正文。GC 从树、pin、记录和活动 reader 追踪区间依赖，描述与原正文分别按实际物理字节回收。
 恢复占用统计亦按去重后的描述和共享正文计数，不为每个区间版本重复累计整文件的逻辑长度。
-macOS 默认运行时加载已安装的 libfuse3 session 接口，缺少组件不阻止应用启动；显式 SDK 构建仍保留 libfuse2/libfuse3 入口。真实挂载仍需平台验收。
+macOS 选择 macFUSE 后端时，默认运行时加载已安装的 libfuse3 session 接口；它不是优先于已启用 FSKit 的后端。
+缺少挂载组件不阻止普通应用启动；显式 SDK 构建仍保留 libfuse2/libfuse3 入口。真实挂载仍需平台验收。
 原生会话已通过 `workspace.*` 私有协议接入真实 Kernel 与 Host 客户端：项目 owner 持有文件系统，Run／Operation
 租约独立接纳和释放；挂载、区间版本持久化、卸载及进程／计算退出的等待都在 worker，原 Storage 继续服务回调。
 Windows 使用 WinFsp 本地 UNC 文件系统，普通用户即可挂载，标准 Windows、Rust 和 Node 路径解析保留同一来源身份。
@@ -102,7 +105,10 @@ Windows 标准符号链接和 junction 保存原始重解析数据，并由 WinF
 普通项目会话使用原目录。系统挂载是显式选择的可选后端，项目设置展示其依赖、实际目录及准备进度。导入普通文件从已准入的打开句柄尝试 APFS clone／Linux reflink，在实际支持的卷共享原数据块，再读取固定内容登记 hash；跨卷或不支持 CoW 时沿同一句柄流式导入。硬链接共享内容；结束时核对身份、原生 change time、属性和目录变化，省去全量正文复读与第二次递归遍历。受管来源之后按根与增量区间分叉，不回扫原目录。
 任意原生字节名称和活动可写映射切分仍有明确能力边界。实现与实机验收入口见 [kernel README](../kernel/README.md)。
 
-保存的 Native 来源不持久化 mount path。Documents 登记逻辑引用并解析本次真实目录，编辑器保存的标签、草稿 journal、watch 和操作分别持有自己的寿命。
+保存的 Native 来源不持久化 mount path。[Host owner](../packages/web/application-host/lib/kernel/native-workspaces.ts)
+以逻辑 workspace／branch 重开本次 epoch 的 generation，再获取实际目录；Documents 登记逻辑引用，
+编辑器保存的标签、草稿 journal、watch 和操作分别持有自己的寿命。重开恢复的是已持久化分支，
+不保证恢复旧 OS 句柄或尚未 seal／发布的进程内 dirty 字节；不能把逻辑来源可重开等同于任意崩溃下零数据损失。
 挂载 dispatcher 退出会使原根失效，不再把底下的空目录当作文件结果。文件条件任务重启后沿保存的 Source 绑定原分支，取消继续释放原回执。
 会话删除先停止原准备任务和执行者，由 Catalog 检查存活来源引用，再由 Storage 关闭实际挂载、清理派生分支、配对属性与原 pin。
 清理失败保留原责任，资源释放事件触发继续；完成后辅助清理记录也删除。项目主状态与已保存编辑器、子任务、外部会话引用继续保留。
@@ -133,9 +139,14 @@ Host Documents 负责根准入、文档修订和 Surface 协调。Rust Storage �
 expected state。read/read 可重叠，不冲突的工作可绕过等待项；等待者不提前持有部分资源。
 
 文件通知是失效事实，不是内容 revision。支持的 Linux 本地根在连续覆盖下复用路径 inventory，只重扫 dirty subtree；
-inotify/VFS fence 依赖原 mount/root 身份和未丢失事件。这只减少 namespace 枚举，**仍对所有选中文件正文哈希与校验**。
-Windows 和不支持的根保留 unknown coverage，完整复核目录 inventory。重启、overflow 或订阅丢失使复用失效；
+inotify/VFS fence 依赖原 mount/root 身份和未丢失事件。这只减少 namespace 枚举。
+Windows 和不支持的根保留 unknown coverage，完整复核目录 inventory。重启、overflow 或订阅丢失使 inventory 复用失效；
 独立 watcher 不持有 runtime/Storage owner。
+
+正文另由 Rust [capture_resources.rs](../kernel/crates/varin-kernel/src/storage/capture_resources.rs)管理进程内捕获复用：
+原 root/path 下的源原生身份与 change time 未变，且原对象仍已验证、对象身份未变时，可复用原正文状态。
+缺少身份、对象被回收或身份变化时重新读取；复用不持有 blob，也不能替代当前 grant、租约和提交核验。
+这不是仅凭 size/mtime 的缓存，也不同于 Native Workspace adoption 的 clone/reflink 导入。
 
 冷对象验证、正文读取和捕获哈希由有限 native worker 执行。临时 exact-hash 引用保护 GC/退出前的字节，不是访问授权。
 完成时再次核验权限；caller 取消不会提前释放仍在读的对象引用或物理租约。

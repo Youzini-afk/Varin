@@ -2,7 +2,8 @@
 
 先读[架构](architecture.md)及最近的模块 README / DOCUMENTATION；[文档索引](README.md)负责领域导航。
 代码、类型、schema、测试和 package.json 定义可执行行为，文档解释职责与非显然约束，Git 保存历史设计与交付过程。
-当前对话执行只有原生 Rust Agent runtime。
+Varin 原生对话由 Rust Agent runtime 执行；已启用的外部 Harness 保留自己的执行循环，
+其绑定、派发和观察由同一 Catalog 管理，不伪造原生 Run，见[外部 Agent](external-agents.md)。
 
 ## 启动
 
@@ -120,8 +121,10 @@ Windows 的无桌面 input targeting 回归由 `packages/computer-driver/windows
 ## 输出和 native 边界
 
 `build:runtime-dependencies` 按依赖图准备一次共享输出；`build:type-dependencies` 再生成 Host 声明。
-根 build、Web build 和 type-check 复用这些有序输出。包级 `build` 保持独立可用；`build:raw` 仅供已经准备依赖的
-有序聚合使用。`type-check:prepared` 不重新构建。发布前仍使用相应目标的正式命令。
+根 build、Web build 和 type-check 复用这些有序输出。包级 `build` 保持独立可用；多数共享包的 `build:raw`
+仅供已经准备依赖的有序聚合使用，但 Web 的 `build` 与 `build:raw` 都进入
+`build-products.mjs web --publish`，会自行准备或核验依赖及产物，不能将名字当作跳过依赖的保证。
+`type-check:prepared` 不重新构建。发布前仍使用相应目标的正式命令。
 
 生产构建由 `scripts/build-products.mjs` 统一准备，产物与可丢弃的构建回执在 `artifacts/build`。
 复用同时核对源码、工具链/选项及现有产物的内容摘要，输出缺失、被改写或上次构建失败时重新生成。

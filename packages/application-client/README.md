@@ -248,6 +248,15 @@ closed completion watcher does not remove the user's ability to review that reta
 shared panel fetches full JSON on demand; neither local choice nor explicit external navigation
 retries the old RPC or resumes its Run. Public identity checks remain the original Thread/branch path.
 
+## Standalone Host clients
+
+The package root also exports `createExternalAgentsHttpAPI` (`external-agents.ts`) and
+`createUsageHttpAPI` (`usage.ts`); these are not fields on the `RuntimeAPIs` aggregate. External
+conversations use `/api/external-agents/*` and their own Harness/session/turn identities, not fabricated
+native Runs. Usage reads `/api/usage/summary` from the selected Host with explicit date boundaries.
+Both clients retain endpoint generation and reject stale results after Host switching. These adapters
+do not own external execution or the Catalog usage ledger.
+
 ## Transport and Host switching
 
 Ordinary authenticated APIs pass route paths to `runtimeFetch`. Browser-owned URLs such as iframes,

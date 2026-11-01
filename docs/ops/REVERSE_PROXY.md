@@ -18,13 +18,22 @@ WebSocket routes. A proxy for the native product must preserve:
 
 | Transport | Routes | Requirement |
 | --- | --- | --- |
-| WebSocket | `/api/terminal/ws`, `/api/dictation/ws`, `/api/varin/realtime-proxy/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
-| SSE | `/api/varin/events`, `/api/notifications/stream`, `/api/threads/observe`, `/api/varin/realtime-proxy/sse` | Disable proxy buffering, caching, and response transformation |
+| WebSocket | `/api/terminal/ws`, `/api/dictation/ws`, `/api/varin/observations/ws`, `/api/varin/realtime-proxy/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
+| SSE / streaming HTTP | `/api/threads/observe`, `/api/external-agents/observe`, `/api/documents/watch`, `/api/interactive-ui/view/observe`, event routes and `/api/varin/realtime-proxy/sse` | Disable proxy buffering, caching, and response transformation |
 | HTTP | `/api/*`, `/auth/*`, `/health`, application assets | Preserve method, body, cookies, authorization, and normal forwarded headers |
 
 The application authenticates these routes and checks WebSocket origins. Do not strip cookies,
 `Authorization`, `Origin`, `Host`, or the query string. Do not add a proxy-side authentication bypass
 for requests that happen to arrive from loopback.
+
+`/api/varin/observations/ws` multiplexes permitted observation requests over one connection;
+it is not an unrestricted HTTP proxy. Preserve its upgrade even when the underlying Thread or
+notification API is also listed as SSE. Its endpoint and allowed requests are defined by
+[the observation protocol](../../packages/application-client/src/transport/observation-protocol.ts).
+The streaming examples are not an exhaustive route list. The Nginx example disables response
+buffering for all `/api/` requests, so other direct event/desktop streams and long-lived observations
+do not accidentally fall through to a buffered ordinary-HTTP rule. It preserves the client's `Accept`
+header rather than forcing every API request to SSE.
 
 Attachments and file operations can contain large request bodies. Choose a deployment-appropriate
 limit instead of relying on a proxy's small default. Only one layer should compress a response; SSE
@@ -50,7 +59,7 @@ server {
     # Configure ssl_certificate / ssl_certificate_key for your deployment.
     client_max_body_size 100m;
 
-    location ~ ^/api/(varin/realtime-proxy|terminal|dictation)/ws$ {
+    location ~ ^/api/(varin/(realtime-proxy|observations)|terminal|dictation)/ws$ {
         proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -64,7 +73,7 @@ server {
         proxy_send_timeout 1h;
     }
 
-    location ~ ^/api/(threads/observe|notifications/stream|varin/(events|realtime-proxy/sse))$ {
+    location /api/ {
         proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Connection '';
@@ -72,14 +81,12 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Accept text/event-stream;
         proxy_buffering off;
         proxy_cache off;
         gzip off;
-        add_header X-Accel-Buffering no always;
-        add_header Cache-Control 'no-cache, no-transform' always;
         proxy_read_timeout 1h;
         proxy_send_timeout 1h;
+        proxy_request_buffering off;
     }
 
     location / {
@@ -126,7 +133,8 @@ varin.example.com {
 After configuring the proxy, verify more than the HTML page:
 
 1. Sign in through the public HTTPS origin and reload the page.
-2. Open or create a Thread and confirm live output reaches the timeline.
+2. Open or create a Thread and confirm live output reaches the timeline. Check the observation
+   WebSocket upgrade as well as direct SSE; a working terminal alone does not validate both paths.
 3. Open a terminal, send input, resize it, detach, and reattach.
 4. Leave the page open long enough to receive a notification or scheduled-task SSE update.
 5. Upload an attachment large enough to exercise the configured body limit.

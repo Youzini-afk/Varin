@@ -5,13 +5,14 @@ description: 對 Varin 說話，並聽它朗讀回覆。
 
 # 語音模式
 
-語音模式讓你可以口述訊息，並讓回覆朗讀給你聽。在 **Settings → Varin → Voice** 中開啟它。
+語音模式讓你可以口述訊息，並讓回覆朗讀給你聽。在 **Settings → Voice** 中開啟它。
 
 ## 朗讀回覆（文字轉語音）
 
 選擇回覆如何被朗讀：
 
 - **browser** — 你瀏覽器的內建語音，無需設定
+- **Local** — 下載模型後，在連線的 Host 上執行英語 Kokoro 語音，無需雲端語音 API
 - **OpenAI** — OpenAI 的語音；貼上你的 API 金鑰並選擇一種語音
 - **OpenAI-compatible** — 任何使用 OpenAI 格式的服務；輸入它的 URL，以及（如有需要）一個 API 金鑰
 - **macOS say** — 內建的 `say` 命令，在擁有它的 Mac 上

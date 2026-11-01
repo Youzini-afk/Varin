@@ -166,7 +166,7 @@ single-writer ownership, and adds no candidate limit or longer tool timeout.
 
 ### Bot memory implementation boundary
 
-Bot and Thread scopes use hashed filename-safe keys through `owner-scope.ts`;
+Bot and Thread scopes use hashed filename-safe keys through `../harness/owner-scope.ts`;
 these identities are not document workspace roots. They share this storage worker,
 not a new database owner. Automatic memory enabled by the user commits effective
 `accepted` rows; claim nature and source still distinguish inference from explicit
@@ -206,7 +206,7 @@ turns the KnowledgeStore into a second inference scheduler or creates an inciden
 See [Bot background inference](../memory/DOCUMENTATION.md#bot-background-inference) for admission,
 Sleep and explicit Retry.
 
-Explicit chat selection extraction uses `memory/thread-memory.ts` and `memory/thread-memory-routes.ts`. Preview validates native
+Explicit chat selection extraction uses `../memory/thread-memory.ts` and `../memory/thread-memory-routes.ts`. Preview validates native
 branch text and exact offsets, calls the existing organizer narrator without automatic coverage/commit,
 and returns editable drafts with source revisions. Save resolves the Thread's real owner (including
 Bot/Thread scopes), validates the frozen owner and original revisions, then uses MemoryService.remember.
