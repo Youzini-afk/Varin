@@ -63,6 +63,8 @@ describe('built-in TypeScript language extension', () => {
         command: process.execPath,
         args: [path.join(packageRoot, 'runtime', 'typescript-language-server.mjs'), '--stdio'],
         initializationOptions: {
+          // This local TypeScript project needs no downloaded JavaScript typings.
+          disableAutomaticTypingAcquisition: true,
           tsserver: { fallbackPath: path.join(packageRoot, 'runtime', 'typescript', 'lib', 'tsserver.js') },
         },
         languageIds: ['javascript', 'javascriptreact', 'typescript', 'typescriptreact'],
