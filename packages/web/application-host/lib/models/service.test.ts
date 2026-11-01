@@ -289,3 +289,55 @@ test('cancelling discovery between pages prevents the next request', async () =>
   await expect(models.discover(configured.id, async () => { calls++; controller.abort(); return Response.json({ models: [], nextPageToken: 'second' }); }, controller.signal)).rejects.toThrow();
   expect(calls).toBe(1);
 });
+
+test('model OAuth admission covers direct, captured, draft, discovery and auxiliary paths without rewriting assets', async () => {
+  const { models } = await fixture();
+  const reference = await models.credentials.linkOAuth({ kind: 'oauth', provider: 'opencode', accessToken: 'fixture-expired', expiresAt: 0 });
+  const selected = { ...channel(), type: 'openai-compatible', authentication: { kind: 'credential' as const, reference } };
+  selected.models[0]!.operations = ['chat', 'embedding'];
+  await models.save(selected, (await models.read()).revision);
+  const settings = await models.read();
+  const credentials = await readFile(models.credentialPath, 'utf8');
+  let fetches = 0;
+  const fetcher = async () => { fetches++; return Response.json({ data: [] }); };
+  for (const resolve of [
+    () => models.getAuth(selected.id),
+    () => models.anthropicAuthentication(selected.id),
+    () => models.mcpBearerToken(selected.id),
+    () => models.captureModel(selected.id, 'chat'),
+    () => models.captureDraftModel({ channel: selected }, 'chat'),
+    () => models.discover(selected.id, fetcher),
+    () => models.discoverDraft({ channel: selected }, fetcher),
+    () => models.resolveEmbeddingBinding(selected.id, 'chat'),
+  ]) await expect(resolve()).rejects.toMatchObject({ code: 'oauth-provider-mismatch' });
+  expect(fetches).toBe(0);
+  expect(await models.read()).toEqual(settings);
+  expect(await readFile(models.credentialPath, 'utf8')).toBe(credentials);
+  await models.storeCredential('fixture-key', reference);
+  expect((await models.getAuth(selected.id)).auth.apiKey).toBe('fixture-key');
+});
+
+test('matching OAuth issuer allows custom proxy endpoints and captured channels keep their original source policy', async () => {
+  const { models } = await fixture();
+  const reference = await models.credentials.linkOAuth({ kind: 'oauth', provider: 'opencode', accessToken: 'fixture-token' });
+  const selected: ModelChannel = { ...channel(), type: 'opencode', baseUrl: 'https://proxy.example.test/custom', authentication: { kind: 'credential', reference },
+    connection: { proxy: { mode: 'direct' } } };
+  await models.save(selected, (await models.read()).revision);
+  const captured = await models.captureModel(selected.id, 'chat');
+  const originalScope = await captured.authority.currentScope(selected.id);
+  try {
+    expect((await models.getAuth(selected.id)).auth.headers?.authorization).toBe('Bearer fixture-token');
+    await models.discoverDraft({ channel: selected }, async (url, init) => {
+      expect(String(url)).toBe('https://proxy.example.test/custom/v1/models');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer fixture-token');
+      return Response.json({ data: [] });
+    });
+    await models.save({ ...selected, type: 'openai-compatible' }, (await models.read()).revision);
+    await expect(models.getAuth(selected.id)).rejects.toMatchObject({ code: 'oauth-provider-mismatch' });
+    expect(await captured.authority.currentScope(selected.id)).toEqual(originalScope);
+    expect((await captured.authority.getAuth(selected.id))?.auth.headers?.authorization).toBe('Bearer fixture-token');
+    await models.credentials.linkOAuth({ kind: 'oauth', provider: 'opencode', accessToken: 'replacement-account' }, reference);
+    await expect(captured.authority.currentScope(selected.id)).rejects.toMatchObject({ code: 'credential-scope-changed' });
+    await expect(captured.authority.getAuth(selected.id)).rejects.toMatchObject({ code: 'credential-scope-changed' });
+  } finally { captured.release(); }
+});

@@ -509,7 +509,9 @@ impl StreamState {
                         });
                     }
                 }
-                if let Some(reason) = candidate["finishReason"].as_str() {
+                if let Some(reason) = candidate["finishReason"].as_str()
+                    .filter(|reason| !reason.is_empty() && *reason != "FINISH_REASON_UNSPECIFIED")
+                {
                     self.finish = Some(match reason {
                         "STOP" => {
                             if self.calls.is_empty() {

@@ -115,3 +115,37 @@ it('uses single-token choice labels while retaining the caller option identities
   expect(labels).toContain('\nA'); expect(labels).toContain('\nB');
   expect(result).toMatchObject({ answers: [{ id: 'choice', choice: 'blue', probabilities: { red: 0, blue: 1 } }], missing: [] });
 });
+
+it.each(['typesafe-system-one', 'cloudflare-workers-ai-system-one'] as const)('preserves query and mount prefix through the %s protocol route guard', async api => {
+  const suffix = api === 'typesafe-system-one' ? 'systemone' : 'run';
+  for (const path of ['v1/', `v1/${suffix}`]) {
+    const baseUrl = `https://classifier.invalid/gateway/${path}?tenant=a&api-version=preview`;
+    const result = await requestClassifier({ ...request, baseUrl, nativeModel: { api, id: model.id, baseUrl },
+      fetchImpl: async (url, init, route) => {
+        expect(String(url)).toBe(`https://classifier.invalid/gateway/v1/${suffix}?tenant=a&api-version=preview`);
+        expect(route?.requestUrl).toBe(String(url));
+        expect(route?.requestKind).toBe('model_compute');
+        expect(bodyOf(init).model).toBe(model.id);
+        const response = { answers: { one: { type: 'score', score: 0 } } };
+        return Response.json(api === 'typesafe-system-one' ? response : { success: true, result: response });
+      } });
+    expect(result).toMatchObject({ answers: [{ id: 'one', score: 0 }], missing: [] });
+  }
+});
+
+it('strips only the llama.cpp pathname /v1 suffix and preserves query on preparation and compute routes', async () => {
+  const baseUrl = 'https://llama.invalid/gateway/v1/?tenant=a&route=/v1';
+  const seen = new Set<string>();
+  const result = await requestClassifier({ ...request, baseUrl, nativeModel: { ...model, baseUrl }, fetchImpl: async (url, init, route) => {
+    const endpoint = new URL(String(url)); seen.add(endpoint.pathname);
+    expect(endpoint.search).toBe('?tenant=a&route=/v1');
+    expect(route?.requestUrl).toBe(String(url));
+    const body = bodyOf(init);
+    if (endpoint.pathname === '/gateway/tokenize') return tokenize(body);
+    if (endpoint.pathname === '/gateway/apply-template') return Response.json({ prompt: body.messages[1]!.content });
+    expect(endpoint.pathname).toBe('/gateway/completion');
+    return completion(13);
+  } });
+  expect(seen).toEqual(new Set(['/gateway/tokenize', '/gateway/apply-template', '/gateway/completion']));
+  expect(result).toMatchObject({ answers: [{ id: 'one', score: 0 }], missing: [], usage: { inputTokens: 13, outputTokens: 1 } });
+});

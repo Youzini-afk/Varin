@@ -1,3 +1,4 @@
+import { modelEndpoint, modelRequestUrl } from './connection.js';
 /** Direct classifier protocols. The caller supplies transport and owns each actual request. */
 export type ClassifierApi = 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify';
 export interface Question { type: 'bool' | 'choice' | 'score'; instructions: string; criteria: Record<string, string> | string[] }
@@ -5,7 +6,11 @@ export interface ClassifierContext { state: unknown; questions: Record<string, Q
 export interface ClassifierModel<A extends string = string> { api: A; id: string; baseUrl?: string; [key: string]: unknown }
 interface Answer { type: 'bool' | 'choice' | 'score'; probability?: number; choice?: string; score?: number; probabilities?: Record<string, number>; confidence?: number }
 export type ClassifierFunction = (model: ClassifierModel, context: ClassifierContext, options: { apiKey?: string; headers?: Record<string, string>; signal?: AbortSignal; fetch: typeof fetch }) => Promise<{ answers: Record<string, Answer>; stopReason: 'stop' | 'error' | 'aborted'; usage?: { input: number; output: number } }>;
-export const llamaServerRoot = (base: string) => base.replace(/\/+$/, '').replace(/\/v1$/, '');
+export const llamaServerRoot = (base: string) => {
+  const url = modelEndpoint(base);
+  url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/v1$/, '');
+  return url.toString();
+};
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 export function renderQuestion(context: ClassifierContext, id: string) {
   const q = context.questions[id]!;
@@ -41,7 +46,7 @@ async function postJson(url: string, body: unknown, options: Parameters<Classifi
 const classifySystem: ClassifierFunction = async (model, context, options) => {
   const input = { state: context.state, questions: Object.fromEntries(Object.entries(context.questions).map(([id, q]) => [id, { ...q, type: q.type === 'bool' ? 'noul' : q.type }])) };
   const cloudflare = model.api === 'cloudflare-workers-ai-system-one';
-  let body = await postJson(`${model.baseUrl!.replace(/\/+$/, '')}/${cloudflare ? 'run' : 'systemone'}`,
+  let body = await postJson(modelRequestUrl(model.baseUrl!, cloudflare ? '/run' : '/systemone'),
     cloudflare ? { model: model.id, input } : { model: model.id, ...input }, options);
   if (cloudflare) { body = object(body) && body.success !== false ? body.result : undefined; if (object(body) && body.state === 'Completed') body = body.result; }
   if (!object(body) || !object(body.answers)) throw new Error('Classifier response is invalid');
@@ -54,7 +59,7 @@ export const classifyCloudflare = classifySystem;
 export const classifyLlama: ClassifierFunction = async (model, context, options) => {
   const root = llamaServerRoot(model.baseUrl!);
   const post = async (path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    const result = await postJson(`${root}/${path}`, { model: model.id, ...body }, options);
+    const result = await postJson(modelRequestUrl(root, `/${path}`), { model: model.id, ...body }, options);
     if (!object(result)) throw new Error('Classifier response is invalid');
     return result;
   };

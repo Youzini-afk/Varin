@@ -1,3 +1,4 @@
+import { modelRequestUrl } from './connection.js';
 import type { ChannelTypeInfo, ChannelModel, DiscoveredModel, ModelChannel } from '@varin/application-client';
 import type { JsonValue } from '@varin/protocol';
 import { MODEL_PRESETS } from './catalog.js';
@@ -22,13 +23,13 @@ const schema = (properties: Record<string, JsonValue> = {}): Record<string, Json
 const string = { type: 'string' };
 const decisionApi = { enum: ['typesafe-system-one', 'cloudflare-workers-ai-system-one', 'llama-cpp-classify'] };
 const modelListUrl = (channel: ModelChannel, parameter: string, cursor?: string) => {
-  const url = new URL(`${channel.baseUrl.replace(/\/+$/, '')}/models`);
+  const url = new URL(modelRequestUrl(channel.baseUrl, '/models'));
   if (cursor !== undefined) url.searchParams.set(parameter, cursor);
   return url.href;
 };
 const direct = (id: string, name: string, protocol: string, defaultBaseUrl?: string): ChannelType => ({
   id, name, protocol, ...(defaultBaseUrl === undefined ? {} : { defaultBaseUrl }), authentication: ['credential', 'environment', 'none'], operations: ['chat'], discovery: true,
-  parametersSchema: schema(), discoveryRequest: channel => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/models` }), parseDiscovery: modelList,
+  parametersSchema: schema(), discoveryRequest: channel => ({ url: modelRequestUrl(channel.baseUrl, '/models') }), parseDiscovery: modelList,
 });
 
 const channelTypes: ChannelType[] = [
@@ -44,7 +45,7 @@ const channelTypes: ChannelType[] = [
     credentialHeader: { name: 'authorization', prefix: 'Bearer ' }, requestProfile: 'opencode' as const,
     modelBasePaths: { 'openai-completions': '/openai/v1', 'openai-responses': '/openai/v1', 'anthropic-messages': '/anthropic/v1', 'google-generative-ai': '/google/v1beta' },
     publicDirectory: `https://opencode.ai/inference${id === 'opencode-go' ? '/go' : ''}/v1/models`,
-    discoveryRequest: (channel: ModelChannel) => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/v1/models` }),
+    discoveryRequest: (channel: ModelChannel) => ({ url: modelRequestUrl(channel.baseUrl, '/v1/models') }),
     oauthProviders: [{ id: 'opencode', name: 'OpenCode' }],
   })),
   { ...direct('commandcode', 'Command Code', 'openai-completions', 'https://api.commandcode.ai/provider/v1'),
@@ -74,7 +75,7 @@ const channelTypes: ChannelType[] = [
     authentication: ['aws-chain'], parametersSchema: schema({ region: string }), defaultParameters: { region: 'us-east-1' } },
   { ...direct('github-copilot', 'GitHub Copilot', 'openai-responses', 'https://api.individual.githubcopilot.com'),
     authentication: ['credential'], oauthProviders: [{ id: 'github-copilot', name: 'GitHub Copilot' }],
-    discoveryRequest: channel => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/models`, headers: COPILOT_HEADERS }), parseDiscovery: copilotModels },
+    discoveryRequest: channel => ({ url: modelRequestUrl(channel.baseUrl, '/models'), headers: COPILOT_HEADERS }), parseDiscovery: copilotModels },
   { ...direct('kimi-coding', 'Kimi Code', 'openai-completions', 'https://api.kimi.com/coding/v1'), oauthProviders: [{ id: 'kimi-coding', name: 'Kimi Code' }] },
   { ...direct('xai', 'xAI', 'openai-responses', 'https://api.x.ai/v1'), oauthProviders: [{ id: 'xai', name: 'Grok' }] },
   { ...direct('meta', 'Meta', 'openai-responses', 'https://api.meta.ai/v1'), oauthProviders: [{ id: 'meta', name: 'Meta' }] },

@@ -1,7 +1,7 @@
 //! Locked pi-ai 1.0.4 message wire protocol. This is an HTTP adapter, not a Pi loop.
 use super::*;
 use serde_json::json;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 pub const FAMILY: &str = "pi-messages";
 pub struct PiMessagesProvider {
     pub connection: Connection,
@@ -209,6 +209,8 @@ impl ModelProvider for PiMessagesProvider {
     ) -> Result<FinishReason, ModelFailure> {
         let mut started = false;
         let mut blocks = BTreeMap::<u64, Value>::new();
+        let mut seen_indices = BTreeSet::new();
+        let mut tool_ids = BTreeSet::new();
         let mut finish = None;
         self.connection.run(request,cancel,&[],&mut |event| {
             let kind=required(&event,"type")?;
@@ -216,7 +218,7 @@ impl ModelProvider for PiMessagesProvider {
             if kind=="error"||kind=="done" {
                 if kind=="done" && (!started||!blocks.is_empty()){return Err(invalid());}
                 let usage=&event["usage"];
-                emit_event(emit,ProviderEvent::Usage{receipt:UsageReceipt{measurement:UsageMeasurement::Actual,input_tokens:usage["input"].as_u64(),output_tokens:usage["output"].as_u64(),cached_input_tokens:usage["cacheRead"].as_u64(),cache_write_tokens:usage["cacheWrite"].as_u64(),raw:Some(json!({"usage":usage,"responseId":event.get("responseId"),"providerThinkingLevel":event.get("providerThinkingLevel"),"rewrite":event.get("rewrite")})),..Default::default()}})?;
+                emit_event(emit,ProviderEvent::Usage{receipt:UsageReceipt{measurement:if usage.is_object(){UsageMeasurement::Actual}else{UsageMeasurement::Missing},input_tokens:usage["input"].as_u64(),output_tokens:usage["output"].as_u64(),cached_input_tokens:usage["cacheRead"].as_u64(),cache_write_tokens:usage["cacheWrite"].as_u64(),raw:Some(json!({"usage":usage,"responseId":event.get("responseId"),"responseModel":event.get("responseModel"),"providerThinkingLevel":event.get("providerThinkingLevel"),"rewrite":event.get("rewrite")})),..Default::default()}})?;
                 if kind=="error" {return Err(failure(if event["reason"]=="aborted"{"cancelled"}else{"pi_messages_error"},"pi-messages generation failed"));}
                 finish=Some(match required(&event,"reason")?{"stop"=>FinishReason::Stop,"length"=>FinishReason::Length,"toolUse"=>FinishReason::ToolCalls,_=>return Err(invalid())});return Ok(true);
             }
@@ -225,7 +227,14 @@ impl ModelProvider for PiMessagesProvider {
             match kind {
                 "text_start"|"thinking_start"|"toolcall_start"=>{
                     let block=match kind {"text_start"=>json!({"type":"text","text":""}),"thinking_start"=>json!({"type":"thinking","thinking":""}),_=>json!({"type":"toolCall","id":required(&event,"id")?,"name":required(&event,"toolName")?,"arguments":{}})};
-                    if blocks.insert(index,block).is_some(){return Err(invalid());}
+                    if !seen_indices.insert(index){return Err(invalid());}
+                    if kind=="toolcall_start" {
+                        let call_id=required(&block,"id")?;
+                        let name=required(&block,"name")?;
+                        if !tool_ids.insert(call_id.to_owned()){return Err(invalid());}
+                        emit_event(emit,ProviderEvent::ToolCallStarted{call_id:call_id.into(),name:name.into(),request_id:request.view.request_id.clone()})?;
+                    }
+                    blocks.insert(index,block);
                 },
                 "text_delta"|"thinking_delta"|"toolcall_delta"=>{
                     let block=blocks.get_mut(&index).ok_or_else(invalid)?;let delta=required(&event,"delta")?;
@@ -235,7 +244,7 @@ impl ModelProvider for PiMessagesProvider {
                 "text_end"|"thinking_end"|"toolcall_end"=>{
                     let mut block=blocks.remove(&index).ok_or_else(invalid)?;
                     let content=if kind=="toolcall_end" {
-                        let tool=&event["toolCall"];if block["type"]!="toolCall"||tool["id"]!=block["id"]||tool["name"]!=block["name"]||!tool["arguments"].is_object(){return Err(invalid());}
+                        let tool=&event["toolCall"];if block["type"]!="toolCall"||tool["type"]!="toolCall"||tool["id"]!=block["id"]||tool["name"]!=block["name"]||!tool["arguments"].is_object(){return Err(invalid());}
                         block=tool.clone();Content::ToolCall{call:ToolCall{call_id:required(tool,"id")?.into(),name:required(tool,"name")?.into(),arguments:tool["arguments"].clone(),schema_version:schema_version(&request.view,required(tool,"name")?)?}}
                     }else {let field=if kind=="text_end"{"text"}else{"thinking"};if block["type"]!=field{return Err(invalid());}let text=event["content"].as_str().ok_or_else(invalid)?.to_owned();block[field]=json!(text);if let Some(signature)=event.get("contentSignature"){block[if field=="text"{"textSignature"}else{"thinkingSignature"}]=signature.clone();}if let Some(redacted)=event.get("redacted"){block["redacted"]=redacted.clone();}if field=="text"{Content::Text{text}}else{Content::ProviderOnly}};
                     emit_event(emit,ProviderEvent::ItemCompleted{item:ProviderItem{id:format!("pi-{index}"),content,opaque:opaque(&request.view,json!({"model":request.view.binding.model,"block":block}))}})?;

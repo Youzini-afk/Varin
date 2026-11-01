@@ -88,7 +88,11 @@ fn chat_message(
     for projected in items {
         let item = projected.item;
         if let Some(original) = projected.opaque {
-            message = original.value.clone();
+            message = if original.adapter_version == "2" {
+                original.value["message"].clone()
+            } else {
+                original.value.clone()
+            };
             continue;
         }
         let role = if item.provenance.is_system() {
@@ -166,12 +170,34 @@ impl ChatProvider {
         let mut groups: Vec<ChatGroup<'_>> = Vec::new();
         let mut replayed = BTreeSet::new();
         let mut pending_media = Vec::new();
-        for projected in project_history(
+        for mut projected in project_history(
             &view.history,
             self.family,
             &view.binding.connection_identity,
         ) {
+            // Signed originals bind the entire assistant message to its model.
+            // Drop only the opaque projection on mismatch: semantic text/calls remain
+            // portable, and GroupCompiler's opaque bit distinguishes cached bodies.
+            if let Some(original) = projected.opaque {
+                match original.adapter_version.as_str() {
+                    "1" => {},
+                    "2" => {
+                        if !original.value["model"].as_str().is_some_and(|model| !model.is_empty())
+                            || original.value["message"]["role"] != "assistant"
+                            || !original.value["message"]["tool_calls"].is_array() {
+                            return Err(ExecutionError::new("invalid_opaque", "invalid signed Chat continuation"));
+                        }
+                        if original.value["model"] != view.binding.model {
+                            projected.opaque = None;
+                        }
+                    }
+                    _ => return Err(ExecutionError::new("opaque_version", "unsupported Chat continuation version")),
+                }
+            }
             let item = projected.item;
+            if projected.opaque.is_none() && matches!(item.content, Content::ProviderOnly) {
+                continue;
+            }
             if !matches!(item.content, Content::ToolResult { .. }) && !pending_media.is_empty() {
                 groups.push(ChatGroup {
                     kind: "tool_media",
@@ -180,13 +206,12 @@ impl ChatProvider {
                 });
             }
             if let Some(original) = projected.opaque {
-                if original.adapter_version != "1" {
-                    return Err(ExecutionError::new(
-                        "opaque_version",
-                        "unsupported Chat continuation version",
-                    ));
-                }
-                if let Some(calls) = original.value["tool_calls"].as_array() {
+                let message = if original.adapter_version == "2" {
+                    &original.value["message"]
+                } else {
+                    &original.value
+                };
+                if let Some(calls) = message["tool_calls"].as_array() {
                     for call in calls {
                         if let Some(id) = call["id"].as_str() {
                             replayed.insert(id);
@@ -195,7 +220,7 @@ impl ChatProvider {
                 }
                 groups.push(ChatGroup {
                     kind: "message",
-                    assistant: original.value["role"] == "assistant",
+                    assistant: message["role"] == "assistant",
                     items: vec![projected],
                 });
                 continue;
@@ -290,6 +315,10 @@ impl ChatProvider {
                 view.binding.tools.iter().map(|tool| Ok(json!({"type":"function","function":{"name":tool.name,"description":tool.description,"parameters":if self.mistral { tool_schema::parameters(tool)? } else { tool_schema::openai_parameters(tool)? }}})))
                     .collect::<Result<Vec<_>, ExecutionError>>().map(Value::Array)
             })?);
+        } else if view.history.iter().any(|item| matches!(item.content, Content::ToolCall { .. } | Content::ToolResult { .. })) {
+            // Compatible gateways may require this field for historical exchanges.
+            // An empty list does not resurrect tools removed from the frozen binding.
+            body.insert("tools", json!([]));
         }
         if self.include_stream_usage {
             body.insert("stream_options", json!({"include_usage":true}));
@@ -378,6 +407,7 @@ struct Call {
     id: Option<String>,
     name: String,
     arguments: String,
+    thought_signature: Option<String>,
 }
 #[derive(Default)]
 struct StreamState {
@@ -456,6 +486,15 @@ impl StreamState {
                             "Mistral thinking chunk lacks parts",
                         )
                     })?;
+                    for fragment in thinking {
+                        let text = fragment["text"].as_str().filter(|_| fragment["type"] == "text")
+                            .ok_or_else(|| failure("invalid_content_delta", "Mistral thinking part is not text"))?;
+                        if !text.is_empty() {
+                            emit_event(emit, ProviderEvent::ReasoningDelta {
+                                item_id: format!("{id}:thinking"), text: text.into(),
+                            })?;
+                        }
+                    }
                     if part.as_object().is_some_and(|v| v.len() == 2)
                         && content.last().is_some_and(|last| {
                             last["type"] == "thinking"
@@ -543,7 +582,11 @@ impl StreamState {
                     content: Content::ToolCall { call: call_value },
                     opaque: None,
                 });
-                raw_calls.push(json!({"id":call_id,"type":"function","function":{"name":call.name,"arguments":call.arguments}}));
+                let mut raw_call = json!({"id":call_id,"type":"function","function":{"name":call.name,"arguments":call.arguments}});
+                if let Some(signature) = &call.thought_signature {
+                    raw_call["extra_content"] = json!({"google":{"thought_signature":signature}});
+                }
+                raw_calls.push(raw_call);
             }
             if self.finish == Some(FinishReason::ToolCalls) && raw_calls.is_empty() {
                 return Err(failure(
@@ -598,13 +641,22 @@ impl StreamState {
             } else {
                 Content::Text { text }
             };
+            let signed = self.calls.values().any(|call| call.thought_signature.is_some());
+            let mut original = opaque(view, if signed {
+                json!({"model":view.binding.model,"message":self.message})
+            } else {
+                Value::Object(self.message.clone())
+            });
+            if signed {
+                original.as_mut().expect("Chat original").adapter_version = "2".into();
+            }
             emit_event(
                 emit,
                 ProviderEvent::ItemCompleted {
                     item: ProviderItem {
                         id: format!("{id}:message"),
                         content,
-                        opaque: opaque(view, Value::Object(self.message.clone())),
+                        opaque: original,
                     },
                 },
             )?;
@@ -671,6 +723,10 @@ impl StreamState {
                     "Chat content follows finish_reason",
                 ));
             }
+            // Some proxies include the same reasoning under both aliases. Retain
+            // both wire originals, but expose a single public stream per chunk.
+            let public_reasoning = ["reasoning_content", "reasoning"].into_iter()
+                .find(|key| delta.get(*key).and_then(Value::as_str).is_some_and(|text| !text.is_empty()));
             for (key, value) in delta {
                 match key.as_str() {
                     "role" => {
@@ -704,7 +760,7 @@ impl StreamState {
                                     text: text.into(),
                                 },
                             )?;
-                        } else {
+                        } else if public_reasoning == Some(key.as_str()) {
                             emit_event(emit, ProviderEvent::ReasoningDelta {
                                 item_id: format!("{id}:{key}"), text: text.into(),
                             })?;
@@ -767,11 +823,7 @@ impl StreamState {
                             } else {
                                 saved.push(detail.clone());
                             }
-                            if !delta.get("reasoning").is_some_and(|value| !value.is_null())
-                                && !delta
-                                    .get("reasoning_content")
-                                    .is_some_and(|value| !value.is_null())
-                            {
+                            if public_reasoning.is_none() {
                                 let text = match fields.get("type").and_then(Value::as_str) {
                                     Some("reasoning.text") => {
                                         fields.get("text").and_then(Value::as_str)
@@ -804,6 +856,22 @@ impl StreamState {
                                 failure("invalid_tool_call", "tool delta lacks index")
                             })?;
                             let call = self.calls.entry(index).or_default();
+                            // https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures
+                            // documents this OpenAI-compatible field as an opaque signature,
+                            // not a text delta. Our conservative merge policy is atomic:
+                            // identical repeats are harmless; never concatenate or replace
+                            // conflicting values without a protocol contract to do so.
+                            if let Some(signature) = value.pointer("/extra_content/google/thought_signature") {
+                                if self.mistral {
+                                    return Err(failure("unsupported_content_delta", "signed tool metadata is unsupported by the Mistral encoding"));
+                                }
+                                let signature = signature.as_str().filter(|value| !value.is_empty())
+                                    .ok_or_else(|| failure("invalid_thought_signature", "tool thought signature must be a nonempty string"))?;
+                                if call.thought_signature.as_deref().is_some_and(|old| old != signature) {
+                                    return Err(failure("conflicting_thought_signature", "tool thought signature changed"));
+                                }
+                                call.thought_signature = Some(signature.into());
+                            }
                             if let Some(kind) = value.get("type") {
                                 if kind != "function" {
                                     return Err(failure(

@@ -7,6 +7,8 @@ pub struct ResponsesProvider {
     family: &'static str,
     pub connection: Connection,
     pub max_output_tokens: Option<u64>,
+    /// Compatible endpoints can explicitly reject the optional strict-mode field.
+    pub supports_strict_mode: Option<bool>,
     /// Provider-native reasoning settings, fixed when the adapter generation is constructed.
     pub reasoning: Option<Value>,
 }
@@ -16,6 +18,7 @@ impl ResponsesProvider {
             family: FAMILY,
             connection,
             max_output_tokens: None,
+            supports_strict_mode: None,
             reasoning: None,
         }
     }
@@ -124,7 +127,11 @@ impl ResponsesProvider {
             tools.clone()
         } else {
             let tools = view.binding.tools.iter().map(|t| {
-                Ok(crate::request_body::FrozenJson::new(json!({"type":"function","name":t.name,"description":t.description,"parameters":tool_schema::openai_parameters(t)?,"strict":false})))
+                let mut tool = json!({"type":"function","name":t.name,"description":t.description,"parameters":tool_schema::openai_parameters(t)?});
+                if self.supports_strict_mode != Some(false) {
+                    tool["strict"] = json!(false);
+                }
+                Ok(crate::request_body::FrozenJson::new(tool))
             }).collect::<Result<Vec<_>, ExecutionError>>()?;
             if let Some(reuse) = reuse.as_mut() {
                 reuse.responses_tools = Some(tools.clone());
@@ -208,6 +215,7 @@ impl ResponsesProvider {
 struct StreamState {
     finished: Option<FinishReason>,
     completed: BTreeMap<String, Value>,
+    incomplete: BTreeMap<String, Value>,
     calls: BTreeMap<String, String>,
     tool_calls: bool,
 }
@@ -215,10 +223,16 @@ impl StreamState {
     fn item(
         &mut self,
         raw: Value,
+        terminal_incomplete: bool,
         view: &RequestView,
         emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<(), ModelFailure> {
         let id = required(&raw, "id")?.to_owned();
+        if let Some(previous) = self.incomplete.get(&id) {
+            if previous != &raw {
+                return Err(failure("conflicting_provider_item", "provider changed an already finished item"));
+            }
+        }
         if let Some(previous) = self.completed.get(&id) {
             if previous != &raw {
                 return Err(failure(
@@ -228,16 +242,21 @@ impl StreamState {
             }
             return Ok(());
         }
-        if raw
-            .get("status")
-            .and_then(Value::as_str)
-            .is_some_and(|status| status != "completed")
-        {
+        let status = raw.get("status").and_then(Value::as_str);
+        if status == Some("incomplete") && !terminal_incomplete {
+            // A done item can be truncated. Wait for the terminal response (and its
+            // usage) before deciding whether it is valid incomplete text or a failure.
+            self.incomplete.insert(id, raw);
+            return Ok(());
+        }
+        if status.is_some_and(|status| status != "completed")
+            && !(terminal_incomplete && status == Some("incomplete") && raw["type"] == "message") {
             return Err(failure(
                 "incomplete_provider_item",
                 "provider did not complete an output item",
             ));
         }
+        self.incomplete.remove(&id);
         self.completed.insert(id.clone(), raw.clone());
         let content = match required(&raw, "type")? {
             "function_call" => {
@@ -316,7 +335,7 @@ impl StreamState {
                     );
                 }
             }
-            "response.output_text.delta" => emit_event(
+            "response.output_text.delta" | "response.refusal.delta" => emit_event(
                 emit,
                 ProviderEvent::TextDelta {
                     item_id: required(&event, "item_id")?.into(),
@@ -348,8 +367,8 @@ impl StreamState {
                     },
                 )?;
             }
-            "response.output_item.done" => self.item(event["item"].clone(), view, emit)?,
-            "response.completed" | "response.incomplete" => {
+            "response.output_item.done" => self.item(event["item"].clone(), false, view, emit)?,
+            "response.completed" | "response.incomplete" | "response.failed" => {
                 let response = &event["response"];
                 if let Some(usage) = response.get("usage").filter(|v| v.is_object()) {
                     emit_event(
@@ -371,12 +390,28 @@ impl StreamState {
                         },
                     )?;
                 }
+                if event["type"] == "response.failed" {
+                    return Err(provider_failure(&response["error"], "provider_error"));
+                }
+                let incomplete = event["type"] == "response.incomplete";
+                if !incomplete && !self.incomplete.is_empty() {
+                    return Err(failure("incomplete_provider_item", "completed response contains an incomplete item"));
+                }
                 if let Some(items) = response["output"].as_array() {
                     for item in items {
-                        self.item(item.clone(), view, emit)?;
+                        if !incomplete && item["status"] == "incomplete" {
+                            return Err(failure("incomplete_provider_item", "completed response contains an incomplete item"));
+                        }
+                        self.item(item.clone(), incomplete, view, emit)?;
                     }
                 }
-                self.finished = Some(if event["type"] == "response.incomplete" {
+                for item in self.incomplete.values().cloned().collect::<Vec<_>>() {
+                    self.item(item, incomplete, view, emit)?;
+                }
+                if incomplete && self.tool_calls {
+                    return Err(failure("incomplete_tool_call", "Responses did not finish the tool-call batch"));
+                }
+                self.finished = Some(if incomplete {
                     match response["incomplete_details"]["reason"].as_str() {
                         Some("max_output_tokens") => FinishReason::Length,
                         Some("content_filter") => FinishReason::ContentFilter,
@@ -393,12 +428,6 @@ impl StreamState {
                     FinishReason::Stop
                 });
                 return Ok(true);
-            }
-            "response.failed" => {
-                return Err(provider_failure(
-                    &event["response"]["error"],
-                    "provider_error",
-                ));
             }
             "error" => return Err(provider_failure(&event, "provider_error")),
             // Protocol adds events over time. Only explicit terminal events establish completion.

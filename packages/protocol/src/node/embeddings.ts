@@ -41,9 +41,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 );
 
 export const embeddingRequestUrl = (baseUrl: string, endpoint?: string): string => {
-  const trimmed = baseUrl.replace(/\/+$/u, "");
-  if (endpoint) return `${trimmed}${endpoint}`;
-  return trimmed.endsWith("/embeddings") ? trimmed : `${trimmed}/embeddings`;
+  const url = new URL(baseUrl);
+  const path = endpoint || "/embeddings";
+  const base = url.pathname.replace(/\/+$/u, "");
+  url.pathname = !endpoint && base.endsWith(path) ? base : `${base}${path}`;
+  return url.toString();
 };
 
 /** Credential-free vector configuration identity, shared by both runtime paths. */

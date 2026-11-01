@@ -1,3 +1,4 @@
+import { modelRequestUrl } from './connection.js';
 /** Reviewed service data can evolve independently of installed authentication/protocol behavior. */
 import { readFileSync } from 'node:fs';
 import { object } from './configuration.js';
@@ -32,7 +33,7 @@ export function directoryChannel(entry: ChannelDirectoryEntry, template?: Channe
     operations: ['chat'], discovery: true, parametersSchema: { type: 'object', properties: {}, additionalProperties: false },
     ...(entry.environmentVariable ? { defaultEnvironmentVariable: entry.environmentVariable } : {}),
     ...(entry.metadataId ? { metadataId: entry.metadataId } : {}),
-    discoveryRequest: template?.discoveryRequest ?? (channel => ({ url: `${channel.baseUrl.replace(/\/+$/, '')}/models` })),
+    discoveryRequest: template?.discoveryRequest ?? (channel => ({ url: modelRequestUrl(channel.baseUrl, '/models') })),
     parseDiscovery: template?.parseDiscovery ?? modelList,
     ...(template?.discoveryCursor ? { discoveryCursor: template.discoveryCursor } : {}) };
 }

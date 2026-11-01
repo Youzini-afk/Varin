@@ -1,3 +1,4 @@
+import { appendModelPath, modelRequestUrl } from './connection.js';
 /**
  * Explicit HTTP rerank wire contract. This is not chat completion and not
  * OpenAI embeddings.
@@ -36,9 +37,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 );
 
 export const rerankRequestUrl = (baseUrl: string, endpoint?: string): string => {
-  const root = baseUrl.replace(/\/+$/u, "");
   const path = (endpoint ?? "/rerank").startsWith("/") ? (endpoint ?? "/rerank") : `/${endpoint}`;
-  return `${root}${path}`;
+  return endpoint === undefined ? modelRequestUrl(baseUrl, path) : appendModelPath(baseUrl, path);
 };
 
 export class RerankResponseError extends Error {

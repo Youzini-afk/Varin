@@ -25,6 +25,7 @@ async function fixture(connection?: ModelConnectionOptions) {
 
 test('custom paths append to the existing endpoint path, with escaped traversal and origin changes rejected', () => {
   expect(appendModelPath('https://models.example/gateway/v1/', '/custom/embeddings')).toBe('https://models.example/gateway/v1/custom/embeddings');
+  expect(appendModelPath('https://models.example/mount/v1?tenant=a&api-version=preview', '/run')).toBe('https://models.example/mount/v1/run?tenant=a&api-version=preview');
   expect(appendModelPath('https://models.example/v1', '/models/model:run')).toBe('https://models.example/v1/models/model:run');
   for (const path of ['https://other.example/run', '//other.example/run', '/a/../run', '/./run', '/%2e%2e/run', '/%252e%252e/run', '/a%2fb', '/a%5cb', '/run?key=secret', '/run#fragment', '/run%3fkey=value', '/a\\b', '/run\n', 'run', '/bad%zz']) {
     expect(() => appendModelPath('https://models.example/v1', path), path).toThrow();
@@ -33,7 +34,7 @@ test('custom paths append to the existing endpoint path, with escaped traversal 
 });
 
 test('connection validation rejects stored secrets, transport overrides and ambiguous headers without echoing values', () => {
-  const headers = ['Authorization', 'Proxy-Authorization', 'Cookie', 'Set-Cookie', 'X-Api-Key', 'api-key', 'x-goog-api-key', 'X-Auth-Token', 'X-Amz-Security-Token', 'x-fixture-session', 'Ocp-Apim-Subscription-Key'];
+  const headers = ['Authorization', 'Proxy-Authorization', 'Cookie', 'Set-Cookie', 'X-Api-Key', 'api-key', 'x-goog-api-key', 'X-Auth-Token', 'X-Amz-Security-Token', 'x-fixture-session', 'Ocp-Apim-Subscription-Key', 'x-auth', 'x-security-key', 'x-access_key', 'authentication', 'x-cookies', 'x-credentials', 'X-AuthToken', 'X-AccessToken', 'X-RefreshToken', 'X-SessionToken', 'X-SecurityToken', 'X-BearerToken', 'X-IDToken', 'X-ApiToken', 'X-ClientSecret'];
   for (const header of headers) {
     expect(() => validateModelConnection({ headers: { [header]: 'sensitive-value' } })).toThrow('Sensitive model headers');
     try { validateModelConnection({ headers: { [header]: 'sensitive-value' } }); } catch (error) { expect(String(error)).not.toContain('sensitive-value'); }
@@ -42,7 +43,7 @@ test('connection validation rejects stored secrets, transport overrides and ambi
   for (const headers of [{ Host: 'other.example' }, { 'content-length': '0' }, { x: 'one', X: 'two' }, { x: 1 }, { x: 'value\r\ninjected: header' }]) expect(() => validateModelConnection({ headers })).toThrow();
   for (const proxy of [{ mode: 'proxy', url: 'https://user:secret@proxy.example' }, { mode: 'proxy', url: 'socks5://proxy.example' }, { mode: 'proxy', url: 'https://proxy.example/path' }, { mode: 'proxy', url: 'https://proxy.example?password=secret' }, { mode: 'direct', url: 'https://proxy.example' }]) expect(() => validateModelConnection({ proxy })).toThrow();
   expect(() => validateModelConnection({ paths: { chat: '/run' } }, ['embedding'])).toThrow();
-  expect(() => validateModelConnection({ headers: { 'X-Request-Source': '', 'OpenAI-Organization': 'org-123', 'anthropic-version': '2023-06-01' }, proxy: { mode: 'proxy', url: 'http://127.0.0.1:8888' } })).not.toThrow();
+  expect(() => validateModelConnection({ headers: { 'X-Request-Source': '', 'x-max-tokens': '100', 'x-tokenizer': 'custom', 'x-sessionless': '', 'OpenAI-Organization': 'org-123', 'anthropic-version': '2023-06-01' }, proxy: { mode: 'proxy', url: 'http://127.0.0.1:8888' } })).not.toThrow();
   expect(modelEgressOverride(undefined)).toBeUndefined();
   expect(modelEgressOverride({ proxy: { mode: 'direct' } })).toEqual({ mode: 'direct' });
   expect(modelEgressOverride({ proxy: { mode: 'proxy', url: 'http://localhost:8888' } })).toEqual({ mode: 'proxy', proxyUrl: 'http://localhost:8888' });
@@ -270,4 +271,97 @@ test('Azure custom paths keep deployment and API-version protocol parameters', a
     expect(selected.configuration.azureDeployment).toBe('original-deployment');
     expect(selected.configuration.azureApiVersion).toBe('2026-01-01');
   } finally { selected.credentialOwner.release(); }
+});
+
+test('safe endpoint queries and mount prefixes reach discovery, chat and every auxiliary default route', async () => {
+  const { models, channel } = await fixture();
+  await models.save({ ...channel, baseUrl: `${channel.baseUrl}/?tenant=a&api-version=preview`, models: channel.models.map(model => ({ ...model, operations: [...model.operations, 'decision'] })) }, (await models.read()).revision);
+  const fetchImpl = vi.fn<EgressFetch>(async () => Response.json({ data: [] }));
+  await models.discover(channel.id, fetchImpl);
+  expect(fetchImpl.mock.calls[0]?.[0]).toBe(`${channel.baseUrl}/models?tenant=a&api-version=preview`);
+  const chat = await createModelAuthority(models).resolveModel({ providerId: channel.id, modelId: 'model' });
+  const bindings = await Promise.all([models.resolveEmbeddingBinding(channel.id, 'model'), models.resolveRerankBinding(channel.id, 'model'),
+    models.resolveImageBinding(channel.id, 'model', 'generation'), models.resolveImageBinding(channel.id, 'model', 'editing'), models.resolveDecisionBinding(channel.id, 'model')]);
+  try {
+    expect(chat.configuration.endpoint).toBe(`${channel.baseUrl}/chat/completions?tenant=a&api-version=preview`);
+    expect(bindings.map(binding => binding.requestUrl)).toEqual(['embeddings', 'rerank', 'images/generations', 'images/edits', 'systemone']
+      .map(path => `${channel.baseUrl}/${path}?tenant=a&api-version=preview`));
+  } finally { chat.credentialOwner.release(); bindings.forEach(binding => binding.release?.()); }
+});
+
+test('credential-bearing endpoint queries cannot enter settings or discovery', async () => {
+  const { models, channel } = await fixture();
+  const revision = (await models.read()).revision;
+  for (const name of ['key', 'api_key', 'access-token', 'accessToken', 'refreshToken', 'authToken', 'sessionToken', 'securityToken', 'bearerToken', 'idToken', 'apiToken', 'clientSecret', 'Authorization', 'x-subscription-key', 'sig']) {
+    const draft = { ...channel, baseUrl: `${channel.baseUrl}?${name}=fixture-secret` };
+    await expect(models.save(draft, revision)).rejects.toMatchObject({ code: 'model-endpoint-contains-credentials' });
+    const fetchImpl = vi.fn<EgressFetch>(async () => Response.json({ data: [] }));
+    await expect(models.discoverDraft({ channel: draft }, fetchImpl)).rejects.not.toThrow('fixture-secret');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  }
+  expect((await models.read()).revision).toBe(revision);
+});
+
+test('discovery keeps protocol and credential headers and appends channel Anthropic beta features', async () => {
+  const { models, channel } = await fixture();
+  const reference = await models.credentials.linkOAuth({ kind: 'oauth', provider: 'anthropic', accessToken: 'fixture-token' });
+  const draft: ModelChannel = { ...channel, type: 'anthropic', authentication: { kind: 'credential', reference }, models: [],
+    connection: { headers: { 'Anthropic-Version': 'wrong-version', 'Anthropic-Beta': 'custom-feature', 'x-max-tokens': '100' } } };
+  await models.discoverDraft({ channel: draft }, async (_url, init) => {
+    const headers = new Headers(init?.headers);
+    expect(headers.get('anthropic-version')).toBe('2023-06-01');
+    expect(headers.get('anthropic-beta')).toBe('oauth-2025-04-20, custom-feature');
+    expect(headers.get('authorization')).toBe('Bearer fixture-token');
+    expect(headers.get('x-max-tokens')).toBe('100');
+    return Response.json({ data: [] });
+  });
+});
+
+test('already-complete default routes are recognized by pathname rather than query text', async () => {
+  const { models, channel } = await fixture();
+  for (const [suffix, operation] of [['models', 'discovery'], ['rerank', 'rerank'], ['images/generations', 'image']] as const) {
+    const baseUrl = `${channel.baseUrl}/${suffix}?tenant=a`;
+    await models.save({ ...channel, baseUrl }, (await models.read()).revision);
+    if (operation === 'discovery') {
+      await models.discover(channel.id, async url => { expect(String(url)).toBe(baseUrl); return Response.json({ data: [] }); });
+    } else {
+      const binding = operation === 'rerank' ? await models.resolveRerankBinding(channel.id, 'model') : await models.resolveImageBinding(channel.id, 'model', 'generation');
+      try { expect(binding.requestUrl).toBe(baseUrl); } finally { binding.release?.(); }
+    }
+  }
+});
+
+test('custom operation paths preserve safe base queries and captured routes through later edits', async () => {
+  const { models, channel } = await fixture();
+  const baseUrl = `${channel.baseUrl}?tenant=original&api-version=preview&tokenizer=custom&max_tokens=100&sessionless=true`;
+  const paths = { chat: '/dialogue', embedding: '/vectors', rerank: '/rank', decision: '/judge', 'image-generation': '/pictures', 'image-editing': '/edits' };
+  const configured: ModelChannel = { ...channel, baseUrl, connection: { paths }, models: channel.models.map(model => ({ ...model, operations: [...model.operations, 'decision'] })) };
+  await models.save(configured, (await models.read()).revision);
+  const chat = await createModelAuthority(models).resolveModel({ providerId: channel.id, modelId: 'model' });
+  const bindings = await Promise.all([models.resolveEmbeddingBinding(channel.id, 'model'), models.resolveRerankBinding(channel.id, 'model'),
+    models.resolveDecisionBinding(channel.id, 'model'), models.resolveImageBinding(channel.id, 'model', 'generation'), models.resolveImageBinding(channel.id, 'model', 'editing')]);
+  const expected = (path: string) => `${channel.baseUrl}${path}${new URL(baseUrl).search}`;
+  try {
+    expect(chat.configuration.endpoint).toBe(expected('/dialogue'));
+    expect(bindings.map(binding => binding.requestUrl)).toEqual(['/vectors', '/rank', '/judge', '/pictures', '/edits'].map(expected));
+    await models.save({ ...configured, baseUrl: `${channel.baseUrl}?tenant=replacement`, connection: { paths: { embedding: '/next' } } }, (await models.read()).revision);
+    for (const binding of bindings) await binding.assertAvailable();
+    expect(chat.configuration.endpoint).toBe(expected('/dialogue'));
+    expect(bindings.map(binding => binding.requestUrl)).toEqual(['/vectors', '/rank', '/judge', '/pictures', '/edits'].map(expected));
+    const scope = await chat.credentialOwner.scope();
+    await expect(chat.credentialOwner.resolve(scope, undefined, { method: 'POST', endpoint: expected('/dialogue'), payloadSha256: 'a'.repeat(64) })).resolves.toMatchObject({ headers: {} });
+    await expect(chat.credentialOwner.resolve(scope, undefined, { method: 'POST', endpoint: `${channel.baseUrl}/dialogue?tenant=replacement`, payloadSha256: 'a'.repeat(64) })).rejects.toMatchObject({ code: 'credential-request-target-changed' });
+    const next = await models.resolveEmbeddingBinding(channel.id, 'model');
+    try { expect(next.requestUrl).toBe(`${channel.baseUrl}/next?tenant=replacement`); } finally { next.release?.(); }
+  } finally { chat.credentialOwner.release(); bindings.forEach(binding => binding.release?.()); }
+});
+
+test('installed protocol-specific model base paths retain a custom gateway query', async () => {
+  const { models, channel } = await fixture();
+  const selected: ModelChannel = { ...channel, type: 'opencode', baseUrl: 'https://gateway.example/mount?tenant=a',
+    models: [{ id: 'fixture', name: 'Fixture', enabled: true, operations: ['chat'], protocol: 'openai-completions' }] };
+  await models.save(selected, (await models.read()).revision);
+  const bound = await createModelAuthority(models).resolveModel({ providerId: channel.id, modelId: 'fixture' });
+  try { expect(bound.configuration.endpoint).toBe('https://gateway.example/mount/openai/v1/chat/completions?tenant=a'); }
+  finally { bound.credentialOwner.release(); }
 });

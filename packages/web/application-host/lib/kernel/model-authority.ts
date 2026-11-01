@@ -6,7 +6,7 @@ import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import { createHash } from 'node:crypto';
 import { ExistingHostCredentialOwner, type ExistingModelAuthRuntime, type CredentialScope, type CredentialDispatch } from './credential-owner.js';
 import type { ModelSessionConfiguration } from './protocol.generated.js';
-import { appendModelPath } from '../models/connection.js';
+import { appendModelPath, modelEndpoint } from '../models/connection.js';
 import type { ModelConnectionOptions, ModelThinkingConfiguration, ThreadModel, ThreadModelInfo, ThreadThinkingLevel } from '@varin/application-client';
 import { modelOptions, thinkingLevels } from './model-options.js';
 import type { TokenizerLease } from '../models/tokenizers.js';
@@ -45,14 +45,7 @@ interface ModelAuthority extends ModelExecutionAuthority {
 const families = new Set(['openai-responses', 'openai-completions', 'anthropic-messages', 'azure-openai-responses',
   'google-generative-ai', 'google-vertex', 'mistral-conversations', 'openai-codex-responses', 'bedrock-converse-stream', 'pi-messages']);
 const failed = (code: string): never => { throw Object.assign(new Error(code), { code }); };
-function trustedUrl(value: string): URL {
-  let url: URL; try { url = new URL(value); } catch { return failed('model-endpoint-missing'); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) return failed('model-endpoint-invalid');
-  for (const key of url.searchParams.keys()) {
-    if (/^(key|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret|signature|sig)$/i.test(key)) return failed('model-endpoint-contains-credentials');
-  }
-  return url;
-}
+const trustedUrl = modelEndpoint;
 function append(url: URL, suffix: string): string {
   const path = url.pathname.replace(/\/+$/, '');
   if (!path.endsWith(`/${suffix}`)) url.pathname = `${path}/${suffix}`;
