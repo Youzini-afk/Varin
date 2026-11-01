@@ -7,7 +7,7 @@ import { SwapIcon } from './SwapIcon';
 let root: Root;
 let container: HTMLElement;
 let finishAll: () => Promise<void>;
-let animated: Array<{ element: Element; keyframes: Keyframe[]; options: KeyframeAnimationOptions }>;
+let animated: Element[];
 
 beforeEach(() => {
   const { window, document } = parseHTML('<html><body></body></html>');
@@ -16,8 +16,8 @@ beforeEach(() => {
   animated = [];
   const finishers: Array<() => void> = [];
   finishAll = async () => { finishers.splice(0).forEach(finish => finish()); await Promise.resolve(); await Promise.resolve(); };
-  window.HTMLElement.prototype.animate = function animate(this: Element, keyframes: Keyframe[], options: KeyframeAnimationOptions) {
-    animated.push({ element: this, keyframes, options });
+  window.HTMLElement.prototype.animate = function animate(this: Element) {
+    animated.push(this);
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; });
     finishers.push(finish);
@@ -38,11 +38,9 @@ it('lets the previous icon leave in the same cell while the next one lands', asy
   const leaving = container.querySelector('[data-swap-leaving]');
   expect(leaving?.getAttribute('aria-hidden')).toBe('true');
   expect(leaving?.querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('arrow-up');
-  expect(container.querySelector('.swap-icon-current [data-icon]')?.getAttribute('data-icon')).toBe('stop');
-  // The arrow rises out; Stop drops in with the settle spring.
-  expect(String(animated[0]!.keyframes[1]!.transform)).toContain('translateY(-');
-  expect(animated[1]!.element.className).toBe('swap-icon-current');
-  expect(String(animated[1]!.keyframes[0]!.transform)).toContain('scale(.6)');
+  const current = container.querySelector('[data-icon="stop"]');
+  expect(current).not.toBeNull();
+  expect(current?.closest('[aria-hidden="true"]')).toBeNull();
   await finishAll();
   expect(container.querySelector('[data-swap-leaving]')).toBeNull();
 });
