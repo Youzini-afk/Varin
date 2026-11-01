@@ -18,9 +18,11 @@ bun run kernel:protocol
 ```
 
 Do not edit generated DTOs by hand or add a second TypeScript execution authority. The kernel wire
-protocol is version 46. This is independent of kernel resource storage format 22 (SQLite
-`user_version` 16) and Agent Catalog format 77. A wire version is not a database migration version;
-unsupported stores are rejected without rewriting existing assets.
+protocol is version 73, as declared by [the schema](../../kernel/protocol/schema.json). This is
+independent of kernel resource storage format 22 (SQLite `user_version` 16) and Agent Catalog format 80.
+A wire version is not a database migration version: Catalog upgrades supported 78/79 stores to 80
+through its original writer; Storage currently accepts only its own current format. Unsupported
+stores fail without rebuilding user assets. See [storage ownership](../../docs/architecture.md#状态归属).
 
 ## Domain contracts
 

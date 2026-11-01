@@ -11,16 +11,21 @@ those responsibilities to Host entry points.
 ## Transport and authority
 
 `kernel-client.ts`, `kernel-launch.ts` and the wire helpers start the real executable, verify packaged
-manifest/build/protocol/architecture, bootstrap the local authenticated epoch and carry separate control
+manifest/build/protocol/architecture for installed artifacts, bootstrap the local authenticated epoch and carry separate control
 and content streams. `protocol.generated.ts` comes from `kernel/protocol/schema.json`; do not hand-edit it.
+Production requires the executable manifest. The explicit development path may use an unmanifested
+local binary or Cargo runner; that path is not installed-product verification. Wire compatibility,
+Agent Catalog upgrades and resource Storage format validation are separate owner checks.
 
 `../model-text/service.ts` runs auxiliary text work through native inference and its original receipts.
 Execution-owner equality compares fields, independent of JSON property order. Standalone text and
 knowledge jobs use their own native Run as request context, without a conversation branch/workspace.
-`thread-titles.ts` selects the configured auxiliary model, then replaces only the original input title.
-Startup and kernel-ready discovery reuse completed results or resume linked admissions that never
-reached inference. Sent/uncertain requests require an explicit retry; manual titles remain authoritative.
-Metadata revision races reuse the generated result while rechecking the current title before publication.
+`../model-text/thread-titles.ts` coordinates initial and periodic title checks; Catalog owns the
+original naming generation, checked-turn count and frozen history cut. The default interval is five
+completed user turns; zero keeps initial naming only. `../model-text/thread-title-context.ts` builds the retained
+summary/recent-exchange input, and the model-text owner selects the auxiliary model. Startup and
+kernel-ready discovery reuse original results or resume unsent work, never replay an unknown dispatch.
+Manual naming ends automatic checks; late output must pass the original Catalog publication fence.
 
 Actor-scoped handles bind Host, epoch, Thread/Run, workspace and capability scope. Global management
 is limited to its management operations and cannot silently substitute for an actor grant. Storage resolves
@@ -58,6 +63,7 @@ change time, attributes and directory changes without a second full body read/tr
 
 | Entry | Responsibility |
 | --- | --- |
+| `native-workspaces.ts` | Logical project/branch references, current mount generation and original execution/document leases; Rust owns bytes and mounts |
 | `storage-adapter.ts` | Scoped immutable branches, pins, objects and typed working records |
 | `file-resource-backend.ts` | Documents/Recovery physical leases and conditional file operations |
 | `kernel-recovery-store.ts` | Original checkpoint, mutation and recovery journal adapters |
@@ -175,7 +181,7 @@ HTTP cannot prove remote execution stopped.
 | Explicit notes and prompt edits | `memory-owner.ts`, `thread-context.ts` | Host personalization / Rust typed record |
 | Bot memory and background inference | `bot-memory-owner.ts`, `../memory/bot-history.ts`, `../memory/memory-inference.ts` | Bot binding, Catalog MemoryWork and KnowledgeStore receipts |
 | Plans | `plan-owner.ts`, `plan-service.ts` | KnowledgeStore version/CAS/receipt |
-| Code and language retrieval | `retrieval-source.ts`, `language-owner.ts` | Admitted Source, native compute, language owner and original inference calls |
+| Source queries and language access | `source-query-service.ts`, `source-query.ts`, `language-owner.ts` | Admitted Source, native compute, language owner and original inference calls |
 | Web/documents/materials | `web-runtime.ts`, `document-sources.ts`, material owners | Existing Host material store and original reader grants |
 | Research | `research-runtime.ts`, `research-source.ts`, `managed-research-source.ts` | ExperimentService, source Storage and actual backend |
 | Computer | `computer-runtime.ts` | ComputerService assignments/input lane/target receipts |

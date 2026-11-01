@@ -7,7 +7,7 @@ description: Configurez le serveur Varin, les terminaux, Git, la voix et les tun
 
 Varin lit ces variables d’environnement au démarrage. Pour les services de démarrage, `varin startup enable` capture l’environnement actuel par défaut, donc relancez-le après avoir changé les variables que le service doit utiliser.
 
-Ces variables configurent Application Host et les services de plateforme. Configurez les comptes de modèles dans Paramètres → Canaux de modèles ; changer le répertoire des données n’importe ni ne migre un stockage existant.
+Ces variables configurent Application Host et les services de plateforme. Configurez les comptes de modèles dans Paramètres → Model services ; changer le répertoire des données n’importe ni ne migre un stockage existant.
 
 ## Serveur Varin
 
@@ -55,11 +55,11 @@ Exécutable de shell utilisé pour les sessions terminal Varin.
 
 ### `VARIN_GIT_BINARY`
 
-Exécutable Git utilisé par les fonctionnalités Git de Varin.
+Remplacement de l’exécutable Git sous Windows. Sous macOS et Linux, Varin résout `git` depuis `PATH`.
 
 ### `GIT_BINARY`
 
-Autre remplacement d’exécutable Git. Préférez `VARIN_GIT_BINARY` pour une configuration spécifique à Varin.
+Remplacement Git sous Windows, vérifié avant `VARIN_GIT_BINARY`. Varin utilise le premier exécutable configuré disponible, puis recherche Git.
 
 ## Voix et tunnels
 
@@ -83,10 +83,6 @@ Point de terminaison `ws://` ou `wss://` du [Relais privé](/fr/private-relay/) 
 
 ## Aides runtime
 
-### `BUN_BINARY`
-
-Exécutable Bun que Varin doit utiliser pour lancer des processus daemon.
-
 ### `BUN_INSTALL`
 
-Racine d’installation de Bun. Varin l’utilise pour trouver `bin/bun` au démarrage du daemon et pour les mises à jour.
+Racine d’installation utilisée pour trouver Bun lors des mises à jour par le gestionnaire de paquets. Le daemon CLI et les services de démarrage utilisent l’exécutable ayant lancé Varin (`process.execPath`) ; `BUN_BINARY` n’est pas une option prise en charge.

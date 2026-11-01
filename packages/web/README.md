@@ -32,8 +32,9 @@ Rust executable, and creates the production dependency layout and lockfile.
 
 ## Type and test boundaries
 
-`bun run --cwd packages/web type-check` first validates the private protocol, prepares/checks the
-Application Host and emits its declarations, then checks browser and CLI consumers. Host bodies use
+`bun run --cwd packages/web type-check` prepares shared runtime dependencies and emits/checks the
+Application Host declarations, then runs `type-check:prepared`: private protocol generation check,
+Host test types, browser types and CLI source/test types. Host bodies use
 their Node compiler settings; browser code retains its DOM settings. The existing `#application-host`
 imports let cross-layer tests use those generated signatures without recompiling the Host as browser
 code. Native Vitest resolves those same imports to the original Host source, so it does not substitute
@@ -42,8 +43,10 @@ declarations or a mock implementation at runtime. `*.native.test.ts` still runs 
 
 The root aggregate prepares the same shared outputs and Host declarations once, then uses
 `type-check:prepared` for Web's remaining checks. That entry requires fresh dependencies and declarations.
-Similarly, `build:raw` builds Host, kernel, CLI and browser artifacts from prepared shared packages;
-use the self-contained `build` or `type-check` entries when working on this package directly.
+For this package, `build` and `build:raw` both call `scripts/build-products.mjs web --publish`.
+They prepare or verify reusable shared outputs, Host, kernel, CLI and browser artifacts, then publish
+the completed product directories. The `:raw` name does not bypass dependencies or native build here;
+use `build` or `type-check` as the ordinary package entry.
 
 The ordered extension-routing consumer check uses real settings controls, the original Web client,
 the authenticated Express Router and extension-routing file CAS, without a listener or kernel process.

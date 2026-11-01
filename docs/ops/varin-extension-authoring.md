@@ -463,9 +463,15 @@ stream. Varin injects the current extension ID, so the request cannot address an
 namespace. `context.storage.snapshot` and `update` remain the `application/state` compatibility
 document.
 
-If the manifest storage schema version changes, export `migrate({ data, fromSchemaVersion,
-toSchemaVersion })`. Candidate migration is staged with activation; failed candidate activation keeps
-the selected generation and selected storage state.
+The manifest's `storage.schemaVersion` drives `migrate({ data, fromSchemaVersion,
+toSchemaVersion })` for the `application/state` document. Return a JSON object. Candidate migration
+and activation-time writes are staged; failure before publication preserves the selected storage.
+After durable selection, later cleanup or response failure does not roll the migration back.
+
+Other `storage.open` documents do not automatically invoke that migration callback. Opening with a
+`schemaVersion` selects the version written by subsequent updates; it does not convert existing data.
+Read the snapshot's actual schema version, transform the data explicitly, and update with its revision.
+Reopening the same document with a different schema version within one activation is rejected.
 
 Required services control activation and dependency-safe teardown in their explicit `realms` array.
 Use `["host"]`, `["surface"]`, or both; an omitted realm declaration is invalid. Optional services
@@ -482,6 +488,24 @@ provider through Host `context.services.useAll` or Surface `useServices`. Host `
 `useService` require one exact bound member. A replacement prepares a new combination while accepted
 calls retain the original one. A closed Surface releases its composition stream; backend jobs retain
 their own declared owners.
+
+## Host tool services
+
+Use `provideTool(context, declaration, execute)` from the SDK and share the same service descriptor
+with `provides.services` in the manifest. Its `tool` supplies input/output JSON schemas, `name`,
+`description`, `completion` and `operation`; an independent Job also requires its explicit lifetime
+and a trusted domain adapter. `operation: "read"` is not a permission or a guarantee of no effects.
+`execute(input, call)` receives invocation-scoped capabilities and cancellation; return JSON data,
+including null or empty values, and use `call.output` for ordered Result presentation parts.
+
+Optional `requirements` declare `source: "source" | "physical" | "live"` and `process: boolean`.
+Source availability is checked during preparation, separately from actual resource authorization.
+Optional `disclosure` provides summary, aliases, namespace and paths into original `oneOf`/`anyOf`
+branches; it neither replaces the execution schema nor enables a tool. Both `call.output` and
+`call.tools` require reviewed Host `runtime.tools`; nested tools remain restricted to the original
+invocation's frozen directory.
+See the [SDK tool contract](../../packages/extension-sdk/README.md) and
+[ordinary tool example](../../examples/extensions/nested-tools/README.md).
 
 ## Build mapping
 
@@ -584,8 +608,14 @@ still succeeds (exit 0) because the manifest is structurally valid.
 - managed/native Surface activation, committed contribution/service state, deactivation, and leak
   detection;
 - isolated module activation, contributions, and reverse-order cleanup;
-- brokered Host activation, revisioned storage, service registration, abort, and cleanup with no
-  privileged capability implementations.
+- Host module activation (brokered or native declarations), revisioned storage, service registration,
+  abort, and cleanup in the SDK harness, not a real broker or application-host process.
+
+The CLI has no privileged capability implementations or required Host-service dependency fixtures;
+a required Host dependency fails with an explicit fixture error. Use the public harness directly to
+supply dependencies. Surface conformance selects the first declared supported Surface, not every
+platform. The additional Shell smoke targets the generated editor/primary-sidebar composition and
+uses a minimal DOM substitute; it is not a general browser or arbitrary-Shell acceptance test.
 
 `runEditorExtensionConformance` adds a real mock public document controller. It verifies incremental
 `applied`, `stale`, `conflict`, `invalid-range`, `overlapping-ranges`, and `unsupported` results, then aborts and
@@ -746,12 +776,19 @@ candidate with apply intent acquires this barrier; initial enable and selected-a
 depend on a window. Connected consumers prepare real mounts before publication. With no connected
 consumer, readiness proves modules/resources, not a visible screen.
 
-Review completion never applies an update by itself. A trusted-native Host update records the apply
-request and reports `restart-required`; the application host completes that already-requested update
-on restart. Staged or merely reviewed native candidates do not move on restart. A trusted-native Host
-update with an explicit Surface group cannot prepare alongside its predecessor: disable it, apply the
-reviewed candidate while disabled, restart the Host, then enable it. Hot grouped native restart handoff
-is not implemented. See [update failure ordering](../extensions.md#candidate-updates-and-failure-ordering).
+Review completion never applies an update by itself. An enabled trusted-native Host update cannot
+prepare beside the loaded predecessor. Use the explicit **Restart and apply** action: the Host verifies
+the reviewed candidate and fixed dependency composition, records a durable restart handoff, then asks
+its launch owner to stop and restart normally. Ordinary **Apply update** does not authorize a restart;
+a launch without a restart owner reports unavailability.
+
+The new process prepares the candidate before loading that extension's old selection. A declared
+Surface group still waits for its named members and connected-consumer mount preparation; unrelated
+services can start while it waits. Failed or interrupted handoffs stay failed across later boots.
+Explicit retry creates a new attempt, and recovery of the previous selection requires another clean
+restart. A committed selection remains applied even if its response or subsequent cleanup fails.
+Staging or capability review alone never schedules this handoff. See
+[update failure ordering](../extensions.md#candidate-updates-and-failure-ordering).
 
 ## Inspector and diagnostics
 

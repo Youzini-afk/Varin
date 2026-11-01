@@ -9,6 +9,8 @@
 | --- | --- |
 | 安装包流式会话断线、重开与停止 | 原历史、usage、工具回执追平，不重复执行；旧 Run 回执不能清算新 Run |
 | 原生进程和输出 | 对应平台 shell、PTY、后代停止、回执丢失与原输出恢复；PowerShell 5.1 等具体组合独立判断 |
+| Native Workspace 挂载 | Windows WinFsp、Linux FUSE、macOS FSKit/macFUSE 分别核验实际挂载、普通进程 I/O、checkpoint/fork、缓存／可写 mmap 边界、重启重新绑定、打开句柄排空和失败卸载；组件探测成功不等于挂载或数据恢复成功 |
+| 存储打开与升级 | 真实旧 Catalog 78/79 升至 80 后身份、原正文、队列与回执不变，用量账本从升级时开始；未知格式保留资产。Storage 是独立格式域，不由 Catalog 升级链代证 |
 | 文件来源、草稿和恢复 | 真正的多根、不同文件版本、编辑器冲突、当前 Registry 与真实 Host/Rust 组合 |
 | 多 Host | 真实认证连接、原 Source 路由、恢复参与者、项目排程、服务转发、断线后的原始回执与清理 |
 | Computer Use / VM | 各平台真实观察与输入、控制交还、Linux 应用桥、KVM/libvirt、安装和升级；实现缺口见[资源](resources.md#computer-use-与平台边界) |
@@ -26,4 +28,5 @@ Managed 文件恢复与 Source Host 项目排程已有实现，物理双机仍�
 
 检查以原 owner 和真正的产品消费者为入口。记录所用 commit/产物、平台、来源、实际步骤与结果，区分通过、失败、跳过和未运行。
 受控 provider、真实 kernel、Host IPC、UI、安装包和物理双机证明的是不同层次；不能把测试数量相加成全局验收结论。
+挂载的 opt-in 实机入口见 [kernel README](../kernel/README.md)；它不在默认 Rust 测试中执行。
 命令与验证选择见[开发指南](development.md)。

@@ -69,8 +69,10 @@ The persistent paths are:
 | `workspaces` | `/home/varin/workspaces` | user projects |
 
 Keep the data mount persistent so settings, credentials, installed extension artifacts and native
-conversation/resource stores survive container replacement. Unsupported or corrupt internal stores
-fail without automatic migration or rewriting existing user assets.
+conversation/resource stores survive container replacement. The Catalog upgrades explicitly supported
+older formats at its open boundary before execution; other storage domains follow their own format
+checks. Unsupported, newer or corrupt stores are rejected without overwriting user assets. This is
+not a general conversion guarantee; see [storage ownership](../architecture.md).
 
 Verify the service and its native kernel readiness:
 
@@ -167,7 +169,7 @@ cache/bun/      reusable target-platform dependency cache
 The deploy helper builds and verifies the candidate while the active process keeps serving. It
 atomically switches `current` before stopping that process, so a link-switch failure leaves the
 active runtime untouched. After the switch it stops the old runtime, starts the candidate, and polls
-`/health` for the expected Varin version and a ready native kernel. If startup or health
+`/health` for the expected Varin version, candidate release ID and a ready native kernel. If startup or health
 validation fails, it stops the candidate, restores `current` to the previous release, restarts it,
 and verifies the rollback. Releases are not pruned automatically; the operator retains the full
 rollback history until deliberately removing old, inactive directories.

@@ -21,7 +21,7 @@ Pour un téléphone, voir [Applications mobiles et PWA](/fr/mobile/).
 - La chaîne Rust sélectionnée par `kernel/rust-toolchain.toml` (installez rustup ; le dépôt sélectionne la version requise)
 - Git
 
-Varin compile et démarre son runtime natif Rust Agent avec Application Host. Aucune CLI d’agent séparée n’est nécessaire. Les fichiers existants et les données historiques des conversations ne sont ni migrés ni réécrits automatiquement.
+Varin compile et démarre son runtime natif Rust Agent avec Application Host. Aucune CLI d’agent séparée n’est nécessaire. Les anciens formats natifs du Catalog pris en charge sont mis à niveau à l’ouverture, en préservant les fichiers de travail et le contenu des conversations. Cela n’importe pas les conversations d’un autre harness. Les formats inconnus ou plus récents sont refusés, sans écrasement.
 
 ## Depuis les sources (web)
 

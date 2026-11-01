@@ -21,13 +21,13 @@ Définissez toujours un mot de passe si l’instance est joignable par quelqu’
 
 ## Passkeys
 
-Une fois un mot de passe défini, vous pouvez ajouter des passkeys (Face ID, Touch ID, clé de sécurité) pour vous connecter plus vite. Ajoutez-les dans **Paramètres → Varin → Passkeys**.
+Une fois un mot de passe défini, vous pouvez ajouter des passkeys (Face ID, Touch ID, clé de sécurité) pour vous connecter plus vite. Ajoutez-les dans **Paramètres → Devices and access → Passkeys**.
 
 Les passkeys sont liées au mot de passe actuel. Si vous changez ou supprimez le mot de passe, les passkeys enregistrées sont effacées et vous devrez les ajouter à nouveau.
 
 ## Tokens d’appareil
 
-Les appareils associés via [Connecter un appareil](/fr/connect-devices/) s’authentifient avec leurs propres tokens par appareil, pas avec le mot de passe UI. Les liens d’association sont à usage unique et expirent s’ils ne sont pas utilisés ; chaque appareil associé est listé dans **Paramètres → Instances distantes → Se connecter à ce serveur**, où vous pouvez révoquer n’importe lequel à tout moment. Les connexions hors du domicile passent par le [Relais privé](/fr/private-relay/), qui est chiffré de bout en bout et ne peut pas lire votre trafic.
+Les appareils associés via [Connecter un appareil](/fr/connect-devices/) s’authentifient avec leurs propres tokens par appareil, pas avec le mot de passe UI. Les liens d’association sont à usage unique et expirent s’ils ne sont pas utilisés ; chaque appareil associé est listé dans **Paramètres → Devices and access → Se connecter à ce serveur**, où vous pouvez révoquer n’importe lequel à tout moment. Les connexions hors du domicile passent par le [Relais privé](/fr/private-relay/), qui est chiffré de bout en bout et ne peut pas lire votre trafic.
 
 ## Avant de l’exposer
 
@@ -35,6 +35,15 @@ Les appareils associés via [Connecter un appareil](/fr/connect-devices/) s’au
 - Pour vos propres appareils, préférez l’[association](/fr/connect-devices/) avec le [Relais privé](/fr/private-relay/) — rien n’est exposé publiquement du tout.
 - S’il vous faut une URL publique, préférez un [tunnel](/fr/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
 - Si vous placez Varin derrière votre propre serveur HTTPS, consultez [Reverse proxy](/fr/reverse-proxy/).
+
+## Permissions des outils Agent
+
+Le mot de passe UI et les tokens d’appareil contrôlent l’accès au Host, sans remplacer les permissions des outils de conversation. Lors d’une demande, ouvrez **Paramètres et portée** avant de choisir **Autoriser une fois**, **Toujours autoriser** ou **Refuser**.
+
+**Toujours autoriser** enregistre dans la configuration utilisateur de ce Host une règle pour cet outil avec **tous ses paramètres**, pas seulement le fichier ou la commande affichés. Ce choix n’est disponible que si la demande permet d’enregistrer une règle. Préférez **Autoriser une fois** pour une opération ponctuelle. Le contrôle des permissions du compositeur affiche le mode effectif ; une contrainte de projet peut être plus stricte que le choix global.
+
+Un instantané de workspace ou une copie de travail isolée n’est pas une sandbox du système d’exploitation. Vérifiez séparément les commandes, les accès aux services externes et le Host source choisi.
+
 
 ## Pages liées
 

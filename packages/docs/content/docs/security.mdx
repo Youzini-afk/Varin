@@ -21,13 +21,13 @@ Always set a password if the instance is reachable by anyone else — especially
 
 ## Passkeys
 
-Once a password is set, you can add passkeys (Face ID, Touch ID, a security key) for quicker sign-in. Add them at **Settings → Varin → Passkeys**.
+Once a password is set, you can add passkeys (Face ID, Touch ID, a security key) for quicker sign-in. Add them at **Settings → Devices and access → Passkeys**.
 
 Passkeys are tied to the current password. If you change or remove the password, saved passkeys are cleared and you'll add them again.
 
 ## Device tokens
 
-Devices paired through [Connect a Device](/connect-devices/) authenticate with their own per-device tokens, not the UI password. Pairing links are single-use and expire if unused; every paired device is listed at **Settings → Remote Instances → Connect to this server**, where you can revoke any of them at any time. Away-from-home connections go through the [Private Relay](/private-relay/), which is end-to-end encrypted and cannot read your traffic.
+Devices paired through [Connect a Device](/connect-devices/) authenticate with their own per-device tokens, not the UI password. Pairing links are single-use and expire if unused; every paired device is listed at **Settings → Devices and access → Connect to this server**, where you can revoke any of them at any time. Away-from-home connections go through the [Private Relay](/private-relay/), which is end-to-end encrypted and cannot read your traffic.
 
 ## Before you expose it
 
@@ -35,6 +35,15 @@ Devices paired through [Connect a Device](/connect-devices/) authenticate with t
 - For your own devices, prefer [pairing](/connect-devices/) with the [Private Relay](/private-relay/) — nothing is exposed publicly at all.
 - If you need a public URL, prefer a [tunnel](/tunnels/) or a private network (like a VPN) over opening a port to the internet.
 - If you put Varin behind your own HTTPS server, see [Reverse Proxy](/reverse-proxy/).
+
+## Agent tool permissions
+
+The UI password and device tokens control access to the Host; they do not replace conversation tool permissions. When a permission request appears, expand **Arguments and permission scope** before choosing **Allow once**, **Always allow** or **Deny**.
+
+**Always allow** saves a rule for that tool, with **all arguments**, in this Host’s user configuration — not just the displayed file or command. It is available only when the request supports saving a rule. Use **Allow once** for a one-off operation. The composer’s permission control shows the effective mode; a project constraint may be stricter than the global selection.
+
+A workspace snapshot or isolated working copy is not an operating-system sandbox. Review commands, external-service access and the selected source Host separately.
+
 
 ## Related
 

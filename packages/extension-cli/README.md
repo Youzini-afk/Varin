@@ -47,9 +47,13 @@ script is run.
 
 `test` checks and builds the project, then validates declarative, managed, native, and isolated
 Surface lifecycle behavior. Managed/native modules run through `runSurfaceExtensionConformance`;
-isolated modules run through `runIsolatedExtensionConformance`; brokered Host modules run through `runHostExtensionConformance`
-with revisioned storage and no privileged capabilities. These public harnesses are also available
-from `@varin/extension-sdk/testing` for an extension's own test suite.
+isolated modules run through `runIsolatedExtensionConformance`; Host modules (brokered or native)
+run through `runHostExtensionConformance` with revisioned storage and no privileged capabilities.
+Required Host-service dependencies need explicit fixtures and therefore fail in the default CLI runner;
+use the harness directly from `@varin/extension-sdk/testing` to supply them. Surface conformance uses
+the first supported Surface. The additional Shell smoke exercises the generated editor/primary-sidebar
+composition with a minimal DOM substitute, not arbitrary Shell layouts. These checks do not launch a
+real broker, render a browser, or certify every supported platform.
 
 The complete manifest, lifecycle, update, distribution-profile, and publishing workflow is in the
 [Varin extension authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).

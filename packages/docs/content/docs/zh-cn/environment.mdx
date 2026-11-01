@@ -7,7 +7,7 @@ description: 用环境变量配置 Varin 服务器、终端、Git、语音和隧
 
 Varin 会在启动时读取这些环境变量。对于开机启动服务，`varin startup enable` 默认会保存当前环境的快照，所以如果你改了希望服务使用的变量，请重新运行它。
 
-这些变量配置 Application Host 与平台服务。模型账号在“设置 → 模型渠道”中配置；更改数据目录不会导入或迁移现有存储。
+这些变量配置 Application Host 与平台服务。模型账号在“设置 → 模型服务”中配置；更改数据目录不会导入或迁移现有存储。
 
 ## Varin 服务器
 
@@ -55,11 +55,11 @@ Varin 终端会话使用的 shell 可执行文件。
 
 ### `VARIN_GIT_BINARY`
 
-Varin Git 功能使用的 Git 可执行文件。
+Windows 上的 Git 可执行文件覆盖。在 macOS 和 Linux 上，Varin 从 `PATH` 查找 `git`。
 
 ### `GIT_BINARY`
 
-备用的 Git 可执行文件覆盖。Varin 专用配置请优先使用 `VARIN_GIT_BINARY`。
+Windows 上优先于 `VARIN_GIT_BINARY` 检查的 Git 可执行文件覆盖。Varin 使用首个可用的指定程序，再尝试搜索 Git。
 
 ## 语音和隧道
 
@@ -83,10 +83,6 @@ Varin 隧道命令使用的 ngrok auth token。你也可以用 `ngrok config add
 
 ## 运行时辅助
 
-### `BUN_BINARY`
-
-Varin 在启动守护进程时应使用的 Bun 可执行文件。
-
 ### `BUN_INSTALL`
 
-Bun 安装根目录。Varin 用它查找 `bin/bun`，用于守护进程启动和更新。
+用于包管理器更新操作时查找 Bun 的安装根目录。CLI 守护进程和启动服务使用启动 Varin 的可执行文件（`process.execPath`）；不支持 `BUN_BINARY` 覆盖。

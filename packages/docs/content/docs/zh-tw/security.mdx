@@ -21,13 +21,13 @@ varin --ui-password be-creative-here
 
 ## Passkey
 
-設定密碼後，你可以新增 passkey（Face ID、Touch ID、安全金鑰）以便更快登入。在 **Settings → Varin → Passkeys** 中新增它們。
+設定密碼後，你可以新增 passkey（Face ID、Touch ID、安全金鑰）以便更快登入。在 **Settings → Devices and access → Passkeys** 中新增它們。
 
 passkey 與目前密碼繫結。如果你更改或移除密碼，已儲存的 passkey 會被清除，你需要重新新增它們。
 
 ## 裝置權杖
 
-透過 [連線裝置](/zh-tw/connect-devices/) 配對的裝置使用各自獨立的裝置權杖進行認證，而不是 UI 密碼。配對連結只能使用一次，未使用也會過期；每台已配對的裝置都會列在 **Settings → Remote Instances → 用戶端存取 token** 中，你可以隨時撤銷任何一台。外出時的連線經由 [Private Relay](/zh-tw/private-relay/) 傳輸，它是端到端加密的，無法讀取你的流量。
+透過 [連線裝置](/zh-tw/connect-devices/) 配對的裝置使用各自獨立的裝置權杖進行認證，而不是 UI 密碼。配對連結只能使用一次，未使用也會過期；每台已配對的裝置都會列在 **Settings → Devices and access → 用戶端存取 token** 中，你可以隨時撤銷任何一台。外出時的連線經由 [Private Relay](/zh-tw/private-relay/) 傳輸，它是端到端加密的，無法讀取你的流量。
 
 ## 在暴露它之前
 
@@ -35,6 +35,15 @@ passkey 與目前密碼繫結。如果你更改或移除密碼，已儲存的 pa
 - 對於你自己的裝置，優先使用 [配對](/zh-tw/connect-devices/) 加 [Private Relay](/zh-tw/private-relay/) — 完全不對外暴露任何內容。
 - 如果你需要一個公開 URL，相比向網際網路開放一個埠，更建議使用 [隧道](/zh-tw/tunnels/) 或專用網路（比如 VPN）。
 - 如果你把 Varin 放在你自己的 HTTPS 伺服器後面，請參閱 [反向代理](/zh-tw/reverse-proxy/)。
+
+## Agent 工具權限
+
+UI 密碼和裝置權杖控制主機存取，並不替代對話中的工具權限。出現權限請求時，先展開 **查看參數與作用範圍**，再選擇 **允許一次**、**一律允許** 或 **拒絕**。
+
+**一律允許** 會在目前 Host 的使用者設定中儲存該工具的規則，適用於 **所有參數**，不只限於畫面上的檔案或命令；只有請求支援儲存規則時才能選擇。一次性操作請用 **允許一次**。輸入框的權限控制項顯示實際生效模式，專案限制可能比全域選擇更嚴格。
+
+工作區快照或隔離工作副本不是作業系統沙箱。命令、外部服務存取和所選來源主機仍需分別審查。
+
 
 ## 相關內容
 

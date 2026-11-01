@@ -86,7 +86,8 @@ Thread、branch 的小型身份记录和删除回执保留，支持稳定身份�
 [Catalog](../kernel/crates/varin-runtime/src/catalog.rs) 通过独占 owner 锁管理
 `conversation.sqlite`，使用 SQLite WAL/FULL 短事务。初次安装所有内部域在同一事务完成。
 已有数据先只读检查已知格式和结构，再由原 writer 自动升级到当前结构。升级步骤位于
-[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，目前覆盖格式 78 → 79。
+[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，目前覆盖格式 78 → 79 → 80；可从 78 或 79 打开并转换到 80。
+前一步初始化外部 Agent 结构，后一步初始化空用量账本及开始记账时间，不按缺少结算时间的旧回执伪造历史账单。
 转换、版本号和 `catalog.upgraded` 事件一起提交，随后才推进 epoch、恢复执行；正文对象和历史回执保持原样，
 已派发的效果不能因升级而重放。转换未提交时由 SQLite 回滚，下次打开重新升级，不另存完整数据库副本。
 未知、新于当前或结构损坏的内部格式明确失败并保留数据，不能像处理缓存一样重建用户历史。
@@ -169,7 +170,8 @@ Office、浏览器、材料等复合工具列出原接口的操作，`operation`
 
 真实执行目录独立保留已授权的原始声明与端点。只有本次模型 `tools` 中已声明的函数允许直接调用；
 未声明的目标必须通过已注册的 `tool_invoke`。协议解析与执行前校验共用这一边界，包含扩展模型适配器。
-`tool_describe` 返回名称、参数、是否已声明和调用模板；读取说明不注册新函数。
+`tool_describe` 返回名称、参数、是否已声明和调用模板；读取说明不注册新函数。实现入口为 [tool_disclosure.rs](../kernel/crates/varin-runtime/src/tool_disclosure.rs)，
+[execution.rs](../kernel/crates/varin-runtime/src/execution.rs) 在模型调用受理时仍按原快照核验直接调用集合。
 通用入口按本次请求冻结的完整目录校验目标版本，不能查找后来加入的工具或越过 Agent 的工具选择。
 未声明、目录不可用、版本不匹配、调用格式错误和参数无效使用独立错误码。界面显示工具名和修正方式，
 不复制调用参数或服务端任意错误正文；新错误在会话、工作概览和协作聊天中使用同一组本地化说明。

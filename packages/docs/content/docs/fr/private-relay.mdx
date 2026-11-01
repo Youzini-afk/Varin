@@ -31,12 +31,14 @@ Le relais gère son propre cycle de vie — aucun interrupteur à retenir :
 - **Il démarre à la demande.** Créer une association **Partout** active le relais, et il revient après un redémarrage tant qu’un appareil associé en dépend encore.
 - **Il s’arrête tout seul.** Dès qu’aucun appareil ni aucune association en attente n’utilise le relais — par exemple après avoir révoqué le dernier appareil associé via le relais — il s’éteint automatiquement.
 
-**Paramètres → Instances distantes → Se connecter à ce serveur** affiche chaque appareil associé et indique s’il est connecté via le relais. Révoquez-y un appareil pour couper immédiatement son accès via le relais ; les appareils sur votre réseau local ne sont pas affectés.
+**Paramètres → Devices and access → Se connecter à ce serveur** affiche chaque appareil associé et indique s’il est connecté via le relais. Révoquer un appareil invalide son token pour les connexions directes comme pour le relais. Les autres appareils associés ne sont pas affectés.
 
 ## Relais ou tunnel ?
 
 - Utilisez le **relais** pour joindre votre propre serveur depuis vos propres appareils associés. Une fois le relais du serveur configuré et disponible, aucune redirection de ports ni configuration d’un tunnel séparé n’est nécessaire.
 - Utilisez un [tunnel](/fr/tunnels/) quand il vous faut une simple **URL publique** — par exemple pour ouvrir Varin dans un navigateur ordinaire sur une machine que vous ne pouvez pas associer, ou pour partager l’accès derrière un [mot de passe UI](/fr/security/).
+
+La révocation du token ne change pas la politique d’authentification directe du Host : un Host ouvert ou un autre identifiant valide peut encore autoriser l’accès. Elle ne garantit pas l’arrêt de toutes les connexions ou de tous les processus existants.
 
 ## Pages liées
 

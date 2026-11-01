@@ -9,7 +9,7 @@ Pair another device — the mobile app, the desktop app, or a browser on another
 
 ## Pair a device
 
-1. On the machine running Varin, open **Settings → Remote Instances → Connect to this server** and press **Add a device**.
+1. On the machine running Varin, open **Settings → Devices and access → Connect to this server** and press **Add a device**.
 2. Give the device a name (e.g. *My iPhone*) so you can recognize it later.
 3. Pick where you'll use the device:
    - **This computer only** — for apps running on this same machine
@@ -31,12 +31,14 @@ The dialog closes on its own as soon as the device connects, and the device appe
 
 ## Manage paired devices
 
-**Settings → Remote Instances → Connect to this server** lists every device that can reach this server, with a green dot when it's online and whether it's connected over the local network or the relay.
+**Settings → Devices and access → Connect to this server** lists paired devices, with a green dot when it's online and whether it's connected over the local network or the relay.
 
-- **Revoke** cuts a device off immediately. Pair it again with a new QR code if you change your mind.
+- **Revoke** invalidates that device token for direct and relay authentication. Pair it again with a new QR code if you change your mind.
 - **Clear revoked** tidies up the list.
 
-The same physical device keeps one entry even if it signs in again later — you won't collect duplicates.
+Token revocation does not change the direct Host’s authentication policy: an open Host or another valid credential can still permit access. It is not a guarantee that every existing connection or process has stopped.
+
+Pairing again with the same saved device identity can reuse its entry. Clearing client data or pairing with a new identity may create another entry; inspect names before revoking one.
 
 ## Connect from the command line
 

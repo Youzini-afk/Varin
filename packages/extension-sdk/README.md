@@ -24,6 +24,10 @@ Host extensions open independent namespaced documents with
 snapshot, refresh, revision-checked update, and schema version. Varin injects the extension ID, so
 an extension cannot address another extension's namespace. `context.storage.snapshot/update` remains
 the compatibility client for `application/state`; new code should use `storage.open(...)` explicitly.
+The manifest-driven `migrate` callback applies to that compatibility document only. For other documents,
+`open({ schemaVersion })` selects the version for later writes, not a data conversion. Inspect the
+returned snapshot, explicitly transform older data, and commit with its revision. Activation-time
+writes are staged with the candidate; active writes use the original storage CAS.
 
 `defineSurfaceMount` creates a framework-neutral contribution implementation. Its `mount(container,
 context)` callback receives an ordinary `HTMLElement`, contribution props, owner metadata, a
@@ -114,7 +118,8 @@ and admission remain with the executing Host; the SDK never owns history, Operat
 Return the tool's JSON data directly. Null and empty results are valid; missing/non-JSON results fail.
 For Result callbacks, use `await call.output({ kind: 'text', text })` or
 `await call.output({ kind: 'media', media: { media_type, data_base64 } })` for explicit ordered
-presentation parts. The original completion retains one `{ data, parts }` body; a returned
+presentation parts. `call.output`, like `call.tools`, requires the reviewed Host `runtime.tools`
+capability and a live invocation. The original completion retains one `{ data, parts }` body; a returned
 JSON object that resembles a media descriptor remains ordinary data. Accepted parts survive
 callback or output-schema failure with the actual failure receipt. Producers cannot author
 storage references, source identity, outcome, effect or stop evidence through this callback.

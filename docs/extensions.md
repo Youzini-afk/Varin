@@ -189,6 +189,11 @@ Varin Host tool service 的同一 manifest `tool` descriptor 用于发现、激�
 绑定到原 Run/Operation 的权限及资源事实。Host-only invocation scope 只以 opaque token 跨 broker；
 扩展不能提交一个 scope object 给自己授予另一调用方的权限。
 
+工具的 `requirements` 描述来源与进程依赖。`source` 接受已有来源，`physical` 不接受尚为 FixedBranch 的来源，
+`live` 只接受 LiveRoot；没有来源的工具可以独立准备。普通发现将不满足条件的工具标为 unavailable，
+显式恢复所需绑定则返回来源错误，不为了发现工具而准备目录。此检查只是可用性投影，不能代替实际调用的资源授权；
+具体行为见 [来源准备消费者](../packages/web/application-host/lib/kernel/extension-tool-source.test.ts)。
+
 同一 `tool` 声明可附带 `disclosure`：简短用途、搜索别名、导航分组，以及原参数 schema 中明确分支的阅读路径。
 Host 随原 descriptor 固定这些说明和版本，不建立另一张注册表。操作视图保留原共同约束、引用与互斥关系，
 不会替换实际执行 schema。未提供披露描述的扩展仍可按原名称、描述和完整契约被发现；导航分组不授予权限。

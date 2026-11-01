@@ -55,11 +55,11 @@ Varin 終端機會話使用的 shell 可執行檔案。
 
 ### `VARIN_GIT_BINARY`
 
-Varin Git 功能使用的 Git 可執行檔案。
+Windows 上的 Git 可執行檔覆寫。在 macOS 和 Linux 上，Varin 從 `PATH` 尋找 `git`。
 
 ### `GIT_BINARY`
 
-備用的 Git 可執行檔案覆寫。Varin 專用設定請優先使用 `VARIN_GIT_BINARY`。
+Windows 上優先於 `VARIN_GIT_BINARY` 檢查的 Git 可執行檔覆寫。Varin 使用第一個可用的指定程式，再嘗試搜尋 Git。
 
 ## 語音和隧道
 
@@ -83,10 +83,6 @@ Varin 隧道命令使用的 ngrok auth token。你也可以用 `ngrok config add
 
 ## 執行環境輔助
 
-### `BUN_BINARY`
-
-Varin 在啟動守護程序時應使用的 Bun 可執行檔案。
-
 ### `BUN_INSTALL`
 
-Bun 安裝根目錄。Varin 用它查詢 `bin/bun`，用於守護程序啟動和更新。
+用於套件管理器更新操作時尋找 Bun 的安裝根目錄。CLI 守護程序和啟動服務使用啟動 Varin 的可執行檔（`process.execPath`）；不支援 `BUN_BINARY` 覆寫。

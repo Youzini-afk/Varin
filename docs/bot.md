@@ -49,6 +49,19 @@ Bot 聊天不选择项目，也不挂载普通工作台的工作概览、项目�
 
 界面与动效设计和尚未实施的部分见 [Bot 工作台设计](design/bot-ui.md)。
 
+## 休眠、唤醒与归档
+
+Bot 休眠不同于关闭工作台或让桌宠沉睡：它先关闭本 Bot 的新执行准入，再由原 owner 停止并排空执行、
+远端工作、记忆、脚本、转发和电脑操作。`sleeping`、`asleep`、`sleep-failed` 与唤醒中的状态分别保留；
+停止请求不算停止确认，失败可从原生命周期操作重试。未知副作用和未结算模型请求继续可见，唤醒不会自动重发。
+
+只有确认专属该 Bot 的 VM 才进入关机流程。承载协调 Host、与其他工作共享或由用户控制的机器保留运行；
+原本已关机的机器也不因唤醒而启动。关机等待实际停止，启动等待 guest ready，再继续原本可恢复的工作。
+
+归档先执行休眠，确认 `asleep` 后才完成归档。恢复归档只恢复入口，不等于唤醒；休眠、归档或删除中的 Bot
+不能创建新会话。实现与失败边界见 [Bot service](../packages/web/application-host/lib/bots/bot-service.ts) 和
+[生命周期 owner](../packages/web/application-host/lib/bots/bot-lifecycle-runtime.ts)。
+
 ## 事项和原工作
 
 `matters` 维护事项的自由描述和原 Thread/branch 引用，支持分页发现、读取与 revision/CAS 更新。

@@ -9,7 +9,7 @@ Associez un autre appareil — l’application mobile, l’application desktop o
 
 ## Associer un appareil
 
-1. Sur la machine qui exécute Varin, ouvrez **Paramètres → Instances distantes → Se connecter à ce serveur** et pressez **Ajouter un appareil**.
+1. Sur la machine qui exécute Varin, ouvrez **Paramètres → Devices and access → Se connecter à ce serveur** et pressez **Ajouter un appareil**.
 2. Donnez un nom à l’appareil (par ex. *Mon iPhone*) pour le reconnaître plus tard.
 3. Choisissez où vous utiliserez l’appareil :
    - **Cet ordinateur uniquement** — pour les applications sur cette même machine
@@ -31,12 +31,14 @@ Le dialogue se ferme tout seul dès que l’appareil se connecte, et l’apparei
 
 ## Gérer les appareils associés
 
-**Paramètres → Instances distantes → Se connecter à ce serveur** liste chaque appareil pouvant joindre ce serveur, avec un point vert quand il est en ligne et l’indication d’une connexion via le réseau local ou le relais.
+**Paramètres → Devices and access → Se connecter à ce serveur** liste les appareils associés, avec un point vert quand il est en ligne et l’indication d’une connexion via le réseau local ou le relais.
 
-- **Révoquer** coupe un appareil immédiatement. Associez-le à nouveau avec un nouveau QR code si vous changez d’avis.
+- **Révoquer** invalide ce token d’appareil pour l’authentification directe et via relais. Associez-le à nouveau avec un nouveau QR code si vous changez d’avis.
 - **Effacer les révocations** nettoie la liste.
 
-Le même appareil physique garde une seule entrée même s’il se reconnecte plus tard — vous n’accumulerez pas de doublons.
+La révocation du token ne change pas la politique d’authentification directe du Host : un Host ouvert ou un autre identifiant valide peut encore autoriser l’accès. Elle ne garantit pas l’arrêt de toutes les connexions ou de tous les processus existants.
+
+Une nouvelle association avec la même identité d’appareil enregistrée peut réutiliser son entrée. Effacer les données du client ou utiliser une nouvelle identité peut créer une autre entrée ; vérifiez les noms avant toute révocation.
 
 ## Se connecter depuis la ligne de commande
 

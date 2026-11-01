@@ -12,11 +12,15 @@
   首次索引和高维评分仍有成本；authority/semantic 进程分离保护无关写入。
 - Native compute 复用捕获 digest，每语言只缓存最近完整 tree-sitter recipe。编译失败保留旧缓存；频繁换 recipe 会重编译，
   换来不随历史数量增长的内存。
-- 支持的 Linux namespace 观察复用未变路径 inventory，但仍哈希所有捕获正文，fence 仍遍历 watched directory。
-  Windows/unknown coverage 全量检查，见[Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md#filesystem-observation)。
-- 文件基线先捕获并保存正文，再用原始物理状态作一次完整验证读取；显式范围与普通路径共用这次正文验证。
-  常规文件由四次源读取降为三次，原先重复验证的范围文件由六次降为三次。对象校验、目录枚举和存储写入另计，
-  这不是跨捕获的正文缓存；每次仍读取全部选定正文。
+- 支持的 Linux namespace 观察复用未变路径 inventory，fence 仍遍历 watched directory；
+  Windows/unknown coverage 完整核对目录。此机制只减少命名空间枚举，不决定正文能否复用，见[Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md#filesystem-observation)。
+- 物理基线合并普通路径和显式范围，先捕获，再按原物理状态验证。Rust 在源原生身份/change time、
+  已验证对象及其对象身份仍匹配时复用正文事实；未命中或身份不可用时重新读取、哈希和校验，
+  不只靠 size/mtime 判断未变。复用缓存不持有对象，GC 后不能借旧缓存恢复已释放正文，重启也不保留缓存。
+  入口见 [capture_resources.rs](../kernel/crates/varin-kernel/src/storage/capture_resources.rs)。
+- Native Workspace adoption 另走已打开句柄的 clone/reflink，成功后读取固定副本计算 hash；不支持时流式导入。
+  结束仍核对来源身份、change time、属性和目录变化，控制文件另作内容验证。后续原生分叉共享不可变树与 dirty 区间，
+  不重新捕获原目录。CoW 减少复制不等于免除正文读取、哈希、对象提交或元数据成本，也不构成已测速度结论。
 - Agent 请求按实际协议复用不可变 item 或完整消息组、工具 schema 和精确选定 wire bytes；
   工具结果复用同时核对原调用依赖，末组变化只重编该组。编译复用、provider 前缀缓存、真实计费应分别测量。
 - Agent 压缩按 DAG 的就绪队列并发执行模型节点，归并节点在自身依赖完成后立即启动；

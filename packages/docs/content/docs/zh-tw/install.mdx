@@ -21,7 +21,7 @@ Windows 安裝檔和 macOS 安裝檔目前都沒有簽署，第一次開啟時�
 - 由 `kernel/rust-toolchain.toml` 選定的 Rust 工具鏈（安裝 rustup 後，儲存庫會選擇所需版本）
 - Git
 
-Varin 會隨 Application Host 建置並啟動原生 Rust Agent runtime，無需另裝 Agent CLI。現有工作區檔案與歷史對話資產不會自動遷移或改寫。
+Varin 會隨 Application Host 建置並啟動原生 Rust Agent runtime，無需另裝 Agent CLI。受支援的舊版原生 Catalog 會在開啟時自動升級，保留原始工作區檔案和對話內容；這不等於匯入其他 harness 的對話。未知或更新的儲存格式會被拒絕，而不是被覆寫。
 
 ## 從原始碼（Web）
 

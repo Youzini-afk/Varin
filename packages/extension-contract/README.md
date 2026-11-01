@@ -94,7 +94,9 @@ source text, root, filesystem or model capability through this contract.
 
 A service provision may carry a single `tool` declaration: name, description, input/output JSON
 Schema, `completion: result | job`, and `operation: read | effect`, with optional examples and source
-location. Independent Job declarations require an explicit `lifetime: thread | environment`; Result
+location. Optional `requirements` declare a source dependency (`source`, `physical`, or `live`) and
+`process: boolean`; they do not grant access. Optional `disclosure` retains a summary, aliases, namespace
+and operation paths into the original input schema's `oneOf`/`anyOf` branches, not a replacement schema. Independent Job declarations require an explicit `lifetime: thread | environment`; Result
 declarations omit lifetime. A trusted domain adapter must durably accept the original operation before
 the extension can return that Job reference. A declaration or returned JSON alone cannot bind a domain
 subject or prove executor stop. Its service ID/version remain the stable contract identity. Manifest parsing preserves and
