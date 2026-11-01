@@ -37,7 +37,6 @@ fn sampling_cannot_replace_privacy_continuation_or_stream_controls() {
         }
     }
     for value in [
-        Value::Null,
         json!(0),
         json!(2),
         json!(-1),
@@ -52,6 +51,26 @@ fn sampling_cannot_replace_privacy_continuation_or_stream_controls() {
                 .code,
             "sampling_parameters"
         );
+    }
+}
+
+#[test]
+fn chat_single_choice_defaults_preserve_null_and_zero_sampling_controls() {
+    for count in [None, Some(Value::Null), Some(json!(1))] {
+        let mut sampling = json!({"top_p": 0});
+        if let Some(value) = &count {
+            sampling["n"] = value.clone();
+        }
+        let provider = configured(
+            chat::FAMILY,
+            json!({"temperature": 0, "samplingParams": sampling}),
+            None,
+        )
+        .unwrap();
+        let body = provider.serialize(&view(chat::FAMILY), None).unwrap().to_value();
+        assert_eq!(body.get("n"), Some(&count.unwrap_or(json!(1))));
+        assert_eq!(body["temperature"], 0.0);
+        assert_eq!(body["top_p"], 0);
     }
 }
 

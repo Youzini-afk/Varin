@@ -203,14 +203,16 @@ fn chat_sampling_rejects_multiple_choices_before_dispatch() {
     use serde_json::json;
     let mut config = configuration();
     config.provider_family = "openai-completions".into();
-    for count in [json!(2), json!(0), json!(-1), json!("2"), json!(true)] {
+    for count in [json!(2), json!(0), json!(-1), json!(1.5), json!("2"), json!(true)] {
         config.model_options = Some(json!({"samplingParams":{"n":count}}));
         assert!(matches!(model_session::bind(config.clone()), Err(error) if error.code == "sampling_parameters"), "invalid choice count {count} was accepted");
     }
     // Null uses the API's default single choice. Neither it nor explicit zero-valued
     // sampling controls should be lost while enforcing the adapter's actual contract.
-    for count in [json!(1), json!(null)] {
-        config.model_options = Some(json!({"temperature":0,"samplingParams":{"n":count,"top_p":0}}));
+    for count in [None, Some(json!(1)), Some(json!(null))] {
+        let mut sampling = json!({"top_p":0});
+        if let Some(value) = &count { sampling["n"] = value.clone(); }
+        config.model_options = Some(json!({"temperature":0,"samplingParams":sampling}));
         let start = model_session::bind(config.clone()).unwrap();
         let view = RequestView {
             request_id: "request".into(), run_id: "run".into(),
@@ -218,7 +220,7 @@ fn chat_sampling_rejects_multiple_choices_before_dispatch() {
             binding: start.binding, history: vec![],
         };
         let payload = start.provider.serialize(&view, None).unwrap().to_value();
-        assert_eq!(payload["n"], count);
+        assert_eq!(payload.get("n"), Some(&count.unwrap_or(json!(1))));
         assert_eq!(payload["temperature"], 0.0);
         assert_eq!(payload["top_p"], 0);
     }

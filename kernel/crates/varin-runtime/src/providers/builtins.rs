@@ -374,7 +374,12 @@ fn bind(
             ));
         }
         for (key, value) in parameters {
-            if c.provider_family == chat::FAMILY && key == "n" && value.as_u64() != Some(1) {
+            // Null retains the API default of one choice, as does an omitted n.
+            if c.provider_family == chat::FAMILY
+                && key == "n"
+                && !value.is_null()
+                && value.as_u64() != Some(1)
+            {
                 return Err(ExecutionError::new(
                     "sampling_parameters",
                     "Chat accepts exactly one completion choice",

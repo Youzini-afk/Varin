@@ -174,7 +174,7 @@ it; this does not enable strict schemas or relax execution validation. Tool decl
 fields and full JSON Schema alternatives; server normalization must not turn omitted
 fields into required nullable values. Invocation validation remains with the original tool owner. See
 the [function-calling contract](https://developers.openai.com/api/docs/guides/function-calling#strict-mode).
-Chat sampling options cannot expand the adapter's single-choice contract: only `n:1` is accepted.
+Chat sampling options cannot expand the adapter's single-choice contract: `n` may be omitted, `1`, or `null` (the API default of one); other values are rejected.
 Responses/Chat/Azure sampling fields cannot replace the frozen model, history, tools, output capacity,
 stream controls, `store`, `include`, `previous_response_id` or `conversation`. These conflicts fail
 at binding, before credentials or a potentially billable request are dispatched.
