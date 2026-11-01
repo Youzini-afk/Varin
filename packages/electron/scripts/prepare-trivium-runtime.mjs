@@ -9,8 +9,10 @@ import { patchTriviumArm64Loader } from './patch-trivium-arm64-loader.mjs';
 
 const require = createRequire(import.meta.url);
 const { detectKernelBinaryIdentity, normalizeKernelArchitecture } = require('../../../scripts/kernel-binary-identity.cjs');
-const VERSION = '0.8.10';
-const COMMIT = '221a628209838483e20296d29bcf35fc3e2dd156';
+const packages = [
+  { name: 'triviumdb', version: '0.9.0', commit: '7edf8ceacd85cd71944a3471ac05df377995a172' },
+  { name: 'triviumdb-upgrade-0.8', version: '0.8.10', commit: '221a628209838483e20296d29bcf35fc3e2dd156' },
+];
 const TARGET = 'aarch64-pc-windows-msvc';
 const BINARY = 'triviumdb.win32-arm64-msvc.node';
 const RECIPE = 1;
@@ -27,8 +29,13 @@ export function prepareTriviumRuntime() {
   const platform = process.env.VARIN_TARGET_PLATFORM || process.platform;
   const architecture = normalizeKernelArchitecture(process.env.VARIN_TARGET_ARCH || process.arch);
   if (platform !== 'win32' || architecture !== 'arm64') return;
+  for (const recipe of packages) preparePackage(recipe);
+  patchTriviumArm64Loader();
+}
+
+function preparePackage({ name, version: VERSION, commit: COMMIT }) {
   const webRequire = createRequire(new URL('../../web/package.json', import.meta.url));
-  const packageRoot = path.dirname(webRequire.resolve('triviumdb/package.json'));
+  const packageRoot = path.dirname(webRequire.resolve(`${name}/package.json`));
   const installedVersion = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')).version;
   if (installedVersion !== VERSION) {
     throw new Error(`TriviumDB source recipe is for ${VERSION}, but the installed package is ${installedVersion}.`);
@@ -75,7 +82,6 @@ export function prepareTriviumRuntime() {
     fs.rmSync(temporary, { force: true });
   }
   console.log(`[electron] prepared TriviumDB ${VERSION} win32/arm64 from ${COMMIT}${cached ? ' (verified cache)' : ''}`);
-  patchTriviumArm64Loader();
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) prepareTriviumRuntime();

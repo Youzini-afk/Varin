@@ -1,7 +1,6 @@
 /** Native derived-index owner, loaded only by the private storage process. */
 import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { createRequire } from "node:module";
 import { createStorePersistence, trackStoreMutations } from "../persistence.js";
 import { indexPathAllowed } from "../index-scope.js";
 import { defaultRecipeIdentity, recipeIdOf, semanticGenerationDir, semanticSpaceDir, spaceIdOf, embedTextKey } from "./identity.js";
@@ -14,12 +13,13 @@ import { resolveSemanticSearchOptions, type BlockPayload, type DocumentPayload, 
   type SemanticHit, type SemanticSearchOptions, type SemanticOverlayBlock,
   type SemanticDocumentState, type SemanticSourceMetadataUpdate, type SemanticDocumentExpectation,
   type SemanticDocumentScore, type SemanticDocumentScores, type SemanticPublishedReader } from "./store-contract.js";
-const { TriviumDB } = createRequire(import.meta.url)("triviumdb") as typeof import("triviumdb");
+import { openKnowledgeDatabase } from '../database.js';
+import type { TriviumDB } from 'triviumdb';
 const FLUSH_QUIET_MS = 250;
 const FLUSH_MAX_DEFER_MS = 30_000;
 
 const openDb = (file: string, dim: number, accessMode: "readWrite" | "readOnly" | "immutable") => {
-  const db = new TriviumDB(file, {
+  const db = openKnowledgeDatabase(file, {
     dim,
     syncMode: "normal",
     loadTextIndex: false,

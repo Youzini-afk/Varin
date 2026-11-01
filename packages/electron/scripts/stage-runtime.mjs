@@ -115,7 +115,7 @@ export async function stageRuntime({ repository, destination, hostDirectory, pla
   for (const node of nodes.values()) {
     if (node.physical) physical.add(node.target);
     if (['@varin/script-runtime', '@varin/extension-host', '@varin/extension-builtins', '@varin/protocol',
-      'triviumdb', 'sherpa-onnx-node', '@konbakuyomu/smart-search'].includes(node.name)) unpack(node);
+      'triviumdb', 'triviumdb-upgrade-0.8', 'sherpa-onnx-node', '@konbakuyomu/smart-search'].includes(node.name)) unpack(node);
   }
   // Native package wrappers may themselves import JS helpers from a physical entry.
   for (const node of nodes.values()) if (node.physical && !node.name.startsWith('@varin/')) unpack(node);

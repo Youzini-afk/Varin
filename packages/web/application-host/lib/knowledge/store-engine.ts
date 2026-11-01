@@ -18,15 +18,11 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { normalizeGraphPath, resolveImportSpecifier } from "./import-resolve.js";
 import { pathInRoots } from "../workspace/path-scope.js";
+import { openKnowledgeDatabase } from './database.js';
 
-// triviumdb is a CJS package — use createRequire to avoid ESM named-import
-// issues when running under pure Node (outside vite-node/vitest).
-const require = createRequire(import.meta.url);
-const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
 type Vector = import("triviumdb").Vector;
 type TransactionOperation = import("triviumdb").TransactionOperation;
 
@@ -151,7 +147,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
 
   const recallScope: KnowledgeScope = deps.scope ?? (workspaceId === "user" ? "user" : "workspace");
   const dim = embedding?.dim ?? PLACEHOLDER_DIM;
-  const runtimeDb = new TriviumDB(dbPath, {
+  const runtimeDb = openKnowledgeDatabase(dbPath, {
     dim,
     // User state is acknowledged after native WAL fsync, not a whole-catalog
     // checkpoint. Derived property indexes are rebuilt from those payloads.

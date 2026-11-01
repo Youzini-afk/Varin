@@ -325,14 +325,19 @@ run the real inference check before publication.
 
 The native preparation recipe supplies a binary absent from the pinned npm package:
 
-- Windows ARM64 builds TriviumDB 0.8.10 from commit
-  `221a628209838483e20296d29bcf35fc3e2dd156`. The preparation step patches
-  upstream's x64-only Windows loader to select the added ARM64 binary.
+- Windows ARM64 builds TriviumDB 0.9.0 from commit
+  `7edf8ceacd85cd71944a3471ac05df377995a172`. The separate, one-time 0.8 WAL
+  checkpoint helper uses 0.8.10 at `221a628209838483e20296d29bcf35fc3e2dd156`.
+  Both addons are missing from their npm archives. Only the helper needs the old
+  x64-only Windows loader repair; the 0.9 loader already selects the ARM64 binary.
   The native runner needs Rust and the ARM64 MSVC toolchain.
 The recipe runs during the corresponding application build. It validates the installed
 dependency version, builds from the fixed source revision, and checks the resulting architecture.
 Verified payloads and hash receipts are cached under `~/.cache/varin-native`; release jobs cache
 only those outputs, not source checkouts or build directories.
+The two addon packages are staged outside ASAR so the private checkpoint process can load
+them under Node mode. The helper runs only when an existing uncheckpointed 0.8 WAL requires
+it; normal KnowledgeStore work uses 0.9. See [Knowledge storage](../web/application-host/lib/knowledge/DOCUMENTATION.md).
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 

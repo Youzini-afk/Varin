@@ -7,11 +7,11 @@ const defaultWebManifest = fileURLToPath(new URL('../../web/package.json', impor
 const oldWindowsBranch = "if (platform === 'win32') { nativeBinding = require('./triviumdb.win32-x64-msvc.node'); }";
 const arm64WindowsBranch = "if (platform === 'win32' && arch === 'arm64') { nativeBinding = require('./triviumdb.win32-arm64-msvc.node'); }\n  else " + oldWindowsBranch;
 
-/** TriviumDB 0.8.10 publishes an x64-only Windows loader even when an ARM64 addon
- * is present. Patch the installed dependency after preparing the ARM64 addon. */
+/** Only the one-time 0.8 checkpoint helper needs this historical loader repair.
+ * The current TriviumDB loader already selects Windows ARM64 correctly. */
 export function patchTriviumArm64Loader(webManifest = defaultWebManifest) {
   const webRequire = createRequire(path.resolve(webManifest));
-  const packageRoot = path.dirname(webRequire.resolve('triviumdb/package.json'));
+  const packageRoot = path.dirname(webRequire.resolve('triviumdb-upgrade-0.8/package.json'));
   const packageInfo = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
   if (packageInfo.version !== '0.8.10') {
     throw new Error(`TriviumDB ARM64 loader repair expects 0.8.10, found ${packageInfo.version}`);
@@ -28,7 +28,7 @@ export function patchTriviumArm64Loader(webManifest = defaultWebManifest) {
     fs.writeFileSync(entry, current.replace(oldWindowsBranch, arm64WindowsBranch));
   }
   // On a native ARM64 runner, prove the installed package now loads the addon.
-  if (process.platform === 'win32' && process.arch === 'arm64') webRequire('triviumdb');
+  if (process.platform === 'win32' && process.arch === 'arm64') webRequire('triviumdb-upgrade-0.8');
   console.log('[electron] verified TriviumDB Windows ARM64 loader');
 }
 

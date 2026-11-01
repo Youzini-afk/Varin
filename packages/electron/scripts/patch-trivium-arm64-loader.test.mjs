@@ -33,7 +33,7 @@ test('TriviumDB ARM64 loader selects exactly one native binding and remains idem
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-trivium-loader-'));
   try {
     const web = path.join(root, 'packages', 'web');
-    const dependency = path.join(web, 'node_modules', 'triviumdb');
+    const dependency = path.join(web, 'node_modules', 'triviumdb-upgrade-0.8');
     fs.mkdirSync(dependency, { recursive: true });
     fs.writeFileSync(path.join(web, 'package.json'), '{"name":"fixture"}\n');
     fs.writeFileSync(path.join(dependency, 'package.json'), '{"name":"triviumdb","version":"0.8.10"}\n');

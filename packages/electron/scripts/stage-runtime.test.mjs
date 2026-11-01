@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createRequire } from 'node:module';
 import { stageRuntime } from './stage-runtime.mjs';
 
 test('the production tree excludes checkout artifacts, keeps versioned Node resolution and unpacks worker dependency closures', async t => {
@@ -16,7 +17,11 @@ test('the production tree excludes checkout artifacts, keeps versioned Node reso
   await pkg('packages/electron', '@varin/electron', { '@varin/web': 'workspace:*', '@varin/script-runtime': 'workspace:*', '@varin/extension-host': 'workspace:*', plain: '1.0.0', native: '1.0.0' });
   await write('packages/electron/bootstrap.mjs', ''); await write('packages/electron/dist-bundle/main.mjs', '');
   const modules = 'packages/electron/node_modules';
-  await pkg(`${modules}/@varin/web`, '@varin/web', { plain: '2.0.0' });
+  await pkg(`${modules}/@varin/web`, '@varin/web', { plain: '2.0.0', triviumdb: '0.9.0', 'triviumdb-upgrade-0.8': 'npm:triviumdb@0.8.10' });
+  await pkg(`${modules}/triviumdb`, 'triviumdb');
+  await pkg(`${modules}/triviumdb-upgrade-0.8`, 'triviumdb');
+  await write(`${modules}/triviumdb/index.js`, 'module.exports = "current";');
+  await write(`${modules}/triviumdb-upgrade-0.8/index.js`, 'module.exports = "checkpoint-helper";');
   await pkg(`${modules}/@varin/web/node_modules/plain`, 'plain');
   await write(`${modules}/@varin/web/.application-host-dev-123/stale.js`, 'stale');
   await write(`${modules}/@varin/web/public/companion-assets/atlas.png`, 'art');
@@ -50,5 +55,9 @@ test('the production tree excludes checkout artifacts, keeps versioned Node reso
   await assert.rejects(fs.access(path.join(destination, 'node_modules/@varin/extension-host/src/unpublished.js')));
   assert.ok(result.unpackPatterns.includes('node_modules/@varin/extension-host/**/*'));
   assert.ok(result.unpackPatterns.includes('node_modules/@varin/extension-contract/**/*'));
+  const staged = createRequire(path.join(destination, 'node_modules/@varin/web/package.json'));
+  assert.equal(staged('triviumdb'), 'current');
+  assert.equal(staged('triviumdb-upgrade-0.8'), 'checkpoint-helper');
+  assert.ok(result.unpackPatterns.includes('node_modules/triviumdb-upgrade-0.8/**/*'));
   assert.equal(JSON.parse(await fs.readFile(path.join(destination, 'package.json'), 'utf8')).dependencies['@varin/web'], '1.0.0');
 });

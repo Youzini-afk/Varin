@@ -5,9 +5,21 @@ described in [Memory ownership](../memory/DOCUMENTATION.md). They bypass semanti
 background memory organization. This module still owns plans, observations, symbol indexes,
 and Bot/user long-term knowledge; these are separate from ordinary Agent notes.
 
-The workspace/user KnowledgeStore authority uses TriviumDB 0.8.10. Its existing
-`.tdb` files, node IDs, graph links and sidecars are unchanged. There is no migration,
-second writer, replacement database or in-main fallback.
+The KnowledgeStore authority, derived vector stores and inference ledger use TriviumDB 0.9.0.
+The native engine upgrades supported nonempty 0.8 checkpoints on writable open/close to
+typed v10 checkpoints; node IDs, payloads, graph links and business receipts retain their identity.
+Read-only and immutable opens do not upgrade files.
+
+`database.ts` owns the shared native open. An old WAL-only database has no typed base
+checkpoint and cannot be opened directly by 0.9. For that specific native diagnostic,
+the storage owner starts a short-lived process using the pinned `triviumdb-upgrade-0.8`
+(0.8.10) package to recover the original WAL and close a complete checkpoint, then opens
+the same files with 0.9. Complete legacy WAL frames are CRC-checked in bounded buffers
+before starting the old writer; bad frames preserve the original files and report failure.
+Physically incomplete tails retain the original engine's recovery semantics. This helper
+does not run for ordinary opens, read-only readers or other corruption, and does not serve
+business requests. It exits before the current writer opens; no parallel writer, replacement
+database or in-main fallback is introduced. No full backup copy is made during normal opens.
 
 Native checkpoints retain their previous committed files behind a `.publish`
 undo journal until the new `.tdb/.vec/.pld/.flush_ok` generation commits. A writable
@@ -18,18 +30,16 @@ native writer and must remain intact during active writes or a failed close.
 Pre-existing damage without such a journal continues to surface as a storage error;
 opening a failed store never deletes or replaces its data.
 
-Windows ARM64 builds the missing addon from the exact 0.8.10 release commit and
-patches upstream's Windows loader to select it. Varin's production graph and knowledge
+Windows ARM64 builds the missing 0.9.0 addon and the checkpoint helper addon from
+their exact release commits. Only the old helper needs the historical loader repair;
+0.9's public loader already selects ARM64. Varin's production graph and knowledge
 reads continue to use `indexedLookup` and `substringLookup`; its existing exact/scoped
 semantic queries and generation manifests retain their native owners.
 
-The authority and derived semantic stores retain `payloadCacheMb: 0` as a memory
-and cold-scan choice, rather than as a workaround for the repaired recency bug.
-On an isolated 50,000-node Windows x64 fixture, 0.8.8 read all payloads in
-98 ms cold / 99 ms warm with no cache, versus 123 ms cold / 93 ms warm with
-16 MiB. The indexed all-row lookup took 32 ms versus 22 ms. These single-run
-figures show a workload tradeoff; they do not justify enabling a 16–64 MiB cache
-for every open store without measurements on real mixed catalogs.
+The authority and derived semantic stores retain `payloadCacheMb: 0` to avoid retaining
+parsed payloads in every open catalog. Version 0.9 uses the process-default shared resource
+runtime inside each existing storage process; no new application memory or concurrency
+quota is imposed. Existing indexed and exact/scoped vector queries keep their own owners.
 
 ## Execution ownership
 
@@ -137,7 +147,8 @@ During an ongoing build, provider gaps do not count as a quiet period: checkpoin
 use the existing 30-second deadline, and build completion commits the pending
 snapshot. Ordinary incremental updates retain the quiet-period schedule.
 New databases recover an uncheckpointed WAL even before the first base file exists.
-The database format and full-snapshot cost are unchanged.
+Version 0.9 closes a current-format unchanged store without another full checkpoint;
+explicit flush/publication still follows the existing checkpoint schedule.
 
 Source watch bursts keep one latest-state collection per path. Symbol mutation
 admission applies the same Git eligibility as inventory, including unknown file

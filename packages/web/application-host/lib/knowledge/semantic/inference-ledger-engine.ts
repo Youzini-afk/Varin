@@ -3,7 +3,6 @@
 import { mkdirSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { createRequire } from "node:module";
 import { remoteEmbeddingSpaceParts, type HarnessEmbedResult } from "@varin/protocol";
 import { createStorePersistence, trackStoreMutations } from "../persistence.js";
 import { semanticInferenceOperationKey, type SemanticInferenceAdmission, type SemanticInferenceAdmissionResult,
@@ -11,7 +10,7 @@ import { semanticInferenceOperationKey, type SemanticInferenceAdmission, type Se
   type SemanticInferenceLedgerOpenOptions, type SemanticInferenceOperation, type SemanticInferenceSettlement } from "./inference-ledger-contract.js";
 import type { SemanticInferenceReceipt } from "./runtime-inference.js";
 
-const { TriviumDB } = createRequire(import.meta.url)("triviumdb") as typeof import("triviumdb");
+import { openKnowledgeDatabase } from '../database.js';
 type Entry = SemanticInferenceFact & { type: "semantic-inference" | "semantic-inference-attempt"; token: string; result?: HarnessEmbedResult };
 const invalid = (): never => { throw new Error("Invalid semantic inference ledger record"); };
 const text = (value: unknown): string => typeof value === "string" && value.length > 0 ? value : invalid();
@@ -110,7 +109,7 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
   // Deliberately a sibling of semantic/, not inside the removable derived cache.
   const directory = join(options.dataDir, "knowledge", options.hostId, "semantic-inference");
   mkdirSync(directory, { recursive: true });
-  const native = new TriviumDB(join(directory, "ledger.tdb"), {
+  const native = openKnowledgeDatabase(join(directory, "ledger.tdb"), {
     dim: 1, syncMode: "full", loadTextIndex: false, autoBuildQuiver: false, payloadCacheMb: 0,
   });
   let tail: Promise<unknown> = Promise.resolve();

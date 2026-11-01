@@ -109,7 +109,8 @@
         "sherpa-onnx-node": "2.0.1",
         "simple-git": "^4.0.2",
         "tar": "^7.5.13",
-        "triviumdb": "0.8.10",
+        "triviumdb": "0.9.0",
+        "triviumdb-upgrade-0.8": "npm:triviumdb@0.8.10",
         "turndown": "7.2.4",
         "undici": "8.12.3",
         "web-push": "^3.6.7",
@@ -1109,7 +1110,9 @@
 
     "traverse": ["traverse@0.3.10", "", { "dependencies": { "define-data-property": "^1.1.4", "es-to-primitive": "^1.3.4", "gopd": "^1.2.0", "typedarray.prototype.slice": "^1.0.6", "which-typed-array": "^1.1.24" } }, "sha512-pd6fq5qmiFuPA3TpdqBCqJXlOrSdCSt0l9IZDg83Vbf4x3m/X18prEwMMVM5LXp9vGL9NxjeiDGBrTasqyngXQ=="],
 
-    "triviumdb": ["triviumdb@0.8.10", "", {}, "sha512-lD/fhZbyoawOAxVxluUOQ5S4kXhPzFDn5dsdKiyVRMmyPyDQtrs1Jnb1oGfgDhNvO1hszzh+JrtHR6CEIKJMhg=="],
+    "triviumdb": ["triviumdb@0.9.0", "", {}, "sha512-/7FBuLfKV2LMHyE4lWSp+5cHBIxckCin+8SL3I04A79qWXz2GbkcH/B3jDZY3NVybnDaPeSznicQuJi361bwOA=="],
+
+    "triviumdb-upgrade-0.8": ["triviumdb@0.8.10", "", {}, "sha512-lD/fhZbyoawOAxVxluUOQ5S4kXhPzFDn5dsdKiyVRMmyPyDQtrs1Jnb1oGfgDhNvO1hszzh+JrtHR6CEIKJMhg=="],
 
     "ts-algebra": ["ts-algebra@2.0.0", "", {}, "sha512-FPAhNPFMrkwz76P7cdjdmiShwMynZYN6SgOujD1urY4oNm80Ou9oMdmbR45LotcKOXoy7wSmHkRFE6Mxbrhefw=="],
 
