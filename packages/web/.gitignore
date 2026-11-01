@@ -21,3 +21,4 @@ bin/
 .cli-build/
 .cli-staging-*
 .cli-backup-*
+.cli-tsconfig-*.json

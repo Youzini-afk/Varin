@@ -8,6 +8,10 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
 const webRoot = path.join(repoRoot, 'packages', 'web');
 const outputIndex = process.argv.indexOf('--output');
 const outputDir = outputIndex >= 0 ? path.resolve(process.argv[outputIndex + 1]) : path.join(webRoot, 'bin');
+const hostIndex = process.argv.indexOf('--application-host');
+const hostDirectory = hostIndex >= 0 ? path.resolve(process.argv[hostIndex + 1]) : null;
+const baseConfig = path.join(webRoot, 'tsconfig.cli.json');
+const selectedConfig = hostDirectory ? path.join(webRoot, `.cli-tsconfig-${process.pid}.json`) : baseConfig;
 const stagingDir = path.join(webRoot, `.cli-staging-${process.pid}`);
 const backupDir = path.join(webRoot, `.cli-backup-${process.pid}`);
 
@@ -34,10 +38,20 @@ if (cleanOnly) {
 try {
   clean(stagingDir);
   clean(backupDir);
+  if (hostDirectory) {
+    if (!fs.existsSync(path.join(hostDirectory, 'index.d.ts'))) {
+      throw new Error(`Selected Application Host declarations are missing: ${hostDirectory}`);
+    }
+    const config = JSON.parse(fs.readFileSync(baseConfig, 'utf8'));
+    fs.writeFileSync(selectedConfig, JSON.stringify({ extends: baseConfig, compilerOptions: { paths: {
+      ...config.compilerOptions.paths,
+      '#application-host/*': [path.join(hostDirectory, '*')],
+    } } }));
+  }
   const tscJs = path.join(repoRoot, 'node_modules', 'typescript', 'lib', 'tsc.js');
   const result = spawnSync(process.execPath, [
     tscJs,
-    '-p', path.join(webRoot, 'tsconfig.cli.json'),
+    '-p', selectedConfig,
     '--outDir', stagingDir,
   ], { cwd: webRoot, stdio: 'inherit', shell: false });
   if (result.status !== 0) throw new Error(`tsc exited with status ${result.status}`);
@@ -60,5 +74,7 @@ try {
 } catch (error) {
   clean(stagingDir);
   log(`Build failed: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
+  process.exitCode = 1;
+} finally {
+  if (hostDirectory) fs.rmSync(selectedConfig, { force: true });
 }

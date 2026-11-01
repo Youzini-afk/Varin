@@ -107,8 +107,8 @@ export async function prepareWebProduct() {
   const cliDirectory = path.join(productRoot, 'cli');
   const cli = await cache.task('web-cli', {
     inputs: ['packages/web/cli', 'packages/web/tsconfig.cli.json', 'packages/web/scripts/build-cli.mjs'],
-    values: { runtime: (await prepareRuntime()).digest }, outputs: [cliDirectory],
-    build() { runBuild('packages/web/scripts/build-cli.mjs', ['--output', cliDirectory]); },
+    values: { runtime: (await prepareRuntime()).digest, host: host.digest }, outputs: [cliDirectory],
+    build() { runBuild('packages/web/scripts/build-cli.mjs', ['--output', cliDirectory, '--application-host', host.directory]); },
   });
   await cache.task(`web-product-${process.platform}-${process.arch}`, {
     inputs: ['scripts/build-products.mjs'], values: { host: host.digest, frontend: frontend.digest, kernel: kernel.digest, cli: cli.digest }, outputs: [directory],
