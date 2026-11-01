@@ -185,8 +185,12 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
     const staged = await f.runtime.reloadLocalSource({ extensionId: 'example.delivery-pause-policy', expectedRevision: (await f.runtime.state()).catalog.revision });
     if (staged.outcome !== 'staged') throw new Error('Expected a real installed candidate');
     await f.runtime.requestCandidateApplication({ extensionId: 'example.delivery-pause-policy', candidateIntegrity: staged.candidateIntegrity, expectedRevision: (await f.runtime.state()).catalog.revision });
-    const selecting = f.runtime.selectCandidate({ extensionId: 'example.delivery-pause-policy', candidateIntegrity: staged.candidateIntegrity, expectedRevision: (await f.runtime.state()).catalog.revision });
-    await expect.poll(() => f.runtime.services.getSnapshot().providers.find(provider => provider.extensionId === 'example.delivery-pause-policy' && provider.status === 'active')?.providerId).not.toBe(lease!.binding.reference);
+    // Selection resolves at publication; old pins drain independently. Wait for that
+    // boundary instead of racing real worker startup against expect.poll's timeout.
+    await f.runtime.selectCandidate({ extensionId: 'example.delivery-pause-policy', candidateIntegrity: staged.candidateIntegrity, expectedRevision: (await f.runtime.state()).catalog.revision });
+    const active = f.runtime.services.getSnapshot().providers.find(provider => provider.extensionId === 'example.delivery-pause-policy' && provider.status === 'active');
+    expect(active).toBeDefined();
+    expect(active!.providerId).not.toBe(lease!.binding.reference);
     const restored = await f.prepare({ threadId: 'thread:child-delivery', requiredBinding: lease!.binding.artifact });
     expect(restored!.binding.artifact).toEqual(lease!.binding.artifact);
     restored!.release();
@@ -200,7 +204,7 @@ it('an installed child SDK policy preserves exact retirement/rebind across deliv
     expect((await candidate!.transitionState({ ...resumed, event: { kind: 'input_delivered', input_ids: ['queued'] }, from }, signal)).kind).toBe('incompatible');
     expect((await lease!.decide(resumed, signal)).action.kind).toBe('deliver');
     const leaseIdentity = candidate!.binding.artifact.identity;
-    candidate!.release(); lease!.release(); await selecting;
+    candidate!.release(); lease!.release();
     await expect(f.prepare({ threadId: 'thread:child-delivery', requiredBinding: lease!.binding.artifact })).rejects.toThrow('policy_exact_binding_unavailable');
     // Reacquiring the installed artifact keeps checkpoint identity; it grants no right to resume.
     const rebound = await f.prepare({ threadId: 'thread:child-delivery' });

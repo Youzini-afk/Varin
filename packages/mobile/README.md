@@ -114,6 +114,9 @@ path to the existing keystore), and the three password/alias variables above, th
 `VARIN_ANDROID_BUILD_TOOLS` can select another installed revision. Output is in
 `packages/mobile/release-assets/`. This command syncs Android plugin paths from the actual installation
 and uses the original Gradle wrapper through Java on Windows, Linux and macOS.
+The generated `android/capacitor.settings.gradle` and `android/app/capacitor.build.gradle`
+are ignored build inputs: `cap sync android` recreates them from the locked plugins and
+their installed paths before Gradle runs. They must not contain committed Bun cache paths.
 
 ## Push configuration
 

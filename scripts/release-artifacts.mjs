@@ -136,7 +136,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   else if (command === 'candidate') await candidateCommand(directory);
   else if (command === 'record') {
     const sourceSha = git('rev-parse', 'HEAD');
-    if (sourceSha !== process.env.VARIN_RELEASE_SOURCE_SHA || git('status', '--porcelain', '--untracked-files=no')) throw new Error('The release product was not built from the accepted clean source');
+    if (sourceSha !== process.env.VARIN_RELEASE_SOURCE_SHA) throw new Error(`Release source mismatch: expected ${process.env.VARIN_RELEASE_SOURCE_SHA}, got ${sourceSha}`);
+    const changes = git('status', '--porcelain', '--untracked-files=no');
+    if (changes) throw new Error(`Tracked source files changed during the release build:\n${changes}`);
     await recordAssets(directory, { sourceSha, toolingSha: process.env.VARIN_RELEASE_TOOLING_SHA,
       version: JSON.parse(await fs.readFile('package.json', 'utf8')).version, kind: option('--kind'), platform: option('--platform'), arch: option('--arch') });
   } else if (command === 'verify') await verifyArtifacts(directory, await json(option('--candidate')));
