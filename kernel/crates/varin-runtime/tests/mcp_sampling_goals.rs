@@ -387,6 +387,11 @@ fn sampling_actual_usage_is_measured_once_on_the_existing_goal() {
     f.db = Catalog::open(&root).unwrap();
     assert_eq!(serde_json::to_value(goal(&f).usage).unwrap(), before);
     let rows = ledger(&f.db);
+    // The parent conversation's actual inference is also in the shared ledger.
+    assert_eq!(rows.len(), 2);
+    let parent = rows.iter().find(|row| row.kind == "conversation").unwrap();
+    assert_eq!((parent.requests, parent.output_tokens.known.as_deref()), (1, Some("2")));
+    let rows = rows.iter().filter(|row| row.kind == "mcp_sampling").collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
     assert_eq!((rows[0].kind.as_str(), rows[0].provider_family.as_deref(), rows[0].model_id.as_str(), rows[0].requests),
         ("mcp_sampling", Some("openai-responses"), "fixture", 1));
@@ -447,6 +452,10 @@ fn recovery_measures_only_durable_short_sampling_usage_and_never_replays() {
         assert_eq!(serde_json::to_value(goal(&f).usage).unwrap(), before);
         // The lost request is still one request; only durable checkpoint counts are known.
         let rows = ledger(&f.db);
+        let parent = rows.iter().find(|row| row.kind == "conversation").unwrap();
+        assert_eq!((parent.requests, parent.output_tokens.known.as_deref()), (1, Some("2")));
+        assert_eq!(rows.iter().map(|row| row.requests).sum::<u64>(), 2);
+        let rows = rows.iter().filter(|row| row.kind == "mcp_sampling").collect::<Vec<_>>();
         assert_eq!(rows.iter().map(|row| row.requests).sum::<u64>(), 1);
         assert_eq!(rows[0].measurement, if checkpoint { UsageMeasurement::Actual } else { UsageMeasurement::Missing });
         assert_eq!(rows[0].output_tokens.known.as_deref(), checkpoint.then_some("9"));
