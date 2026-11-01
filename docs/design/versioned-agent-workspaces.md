@@ -14,7 +14,7 @@
 
 Source 保存逻辑 workspace、branch 和可选子目录；mount generation、实际路径及当前 grant 属于本次连接。重启按保存的 Source 重开，旧路径不复用。文件工具、Documents、编辑器、终端、script、workspace MCP、扩展、Office 和外部 Harness 使用同一来源，已有会话保留原选择。显式 FixedBranch 的旧命令物化合同仍保留为独立能力，Native workspace 失败不会回退到它。
 
-当前项目启用先检查实际 Host 后端，再在 worker 完成一次稳定捕获，保留实际属性及 Git 管理状态；进度来自原操作的阶段、条目和字节。原项目不搬移、不覆盖、不双向同步。Windows 安装器集成官方 WinFsp 2026 Beta5（`2.2.26286`，版本与 SHA 固定），明确显示预览版本且默认不勾选；静默更新不安装新系统组件。运行时不安装驱动。项目设置提供实际 Host 状态、帮助和手动刷新。macOS 随包提供自有 FSKit 扩展，按 macOS 26+ 和确切扩展路径的启用事实选择，也可加载已安装 macFUSE 的 libfuse3；不分发 macFUSE。整个应用最低 macOS 13 不变。
+当前项目启用先检查实际 Host 后端，再在 worker 完成一次稳定捕获，保留实际属性及 Git 管理状态；进度来自原操作的阶段、条目和字节。原项目不搬移、不覆盖、不双向同步。Windows 安装器集成官方 WinFsp 2026 Beta5（`2.2.26286`，版本与 SHA 固定），明确显示预览版本；未检测到兼容组件时默认勾选，检测到兼容组件时复用现有安装。静默更新不安装新系统组件。运行时不安装驱动。项目设置提供实际 Host 状态、帮助和手动刷新。macOS 随包提供自有 FSKit 扩展，按 macOS 26+ 和确切扩展路径的启用事实选择，也可加载已安装 macFUSE 的 libfuse3；不分发 macFUSE。整个应用最低 macOS 13 不变。
 
 文件根登记、租约解析、读取、修改、日志恢复、命名恢复点和进程准入均分离 worker I/O 与原 Storage 提交。挂载断连明确失效，不能将空挂载点当作空项目。关闭、取消和删除保留原资源责任；文件观察使用原 Source 重绑定，持有实际挂载引用。
 

@@ -34,23 +34,23 @@
 
 具体 API、参数和命令以代码、schema 与 package scripts 为准。文档说明当前机制及取舍，历史设计保留在 Git 中。
 
-## 已实施、待并入当前文档的设计
+## 设计与交互参考
 
-下面的设计已经实施，当前合同以领域文档为准；其中仍有用的取舍理由会并入领域文档，之后删除原稿。
+以下保留产品取舍、视觉稿或尚待继续讨论的设计。实际行为以领域文档和代码为准；原型使用示例数据，不连接 Host。
 
 - [长期总助手、连续上下文与记忆](design/bot-assistant.md)：当前合同见[长期总助手](bot.md)。
-- [工具契约与执行环境优化](design/tool-contracts-and-execution-environment.md)：已折入[资源](resources.md)、[运行时](runtime.md)和[检索与上下文](retrieval.md)。
-- [通用模式与工具披露](design/general-agent-harness.md)、[科研模式与 Agent 协作](design/research-agent-harness.md)、[办公模式与浏览器、电脑协作](design/office-agent-harness.md)：当前行为见[运行时](runtime.md)的模式工具披露与协作，以及 [Office](../packages/web/application-host/lib/office/DOCUMENTATION.md)。
 - [设置体验](design/chat-settings-experience.md)、[设置设计稿](design/settings-redesign.html)：已接入生产设置页；[聊天与设置的早期设计稿](design/chat-settings-preview.html)中的设置部分已被取代。
+- [用量与价格](design/usage-dashboard.md)、[用量页面交互稿](design/usage-preview/index.html)：已接入设置页；当前统计口径见[运行时](runtime.md)和[工作台](workbench.md)。
+- [上下文准备与替换交互稿](design/context-compaction/index.html)：当前行为见[工作台](workbench.md#上下文准备与替换)和[运行时](runtime.md)。
 - [快速检索、按需隔离与工具可靠性](design/retrieval-isolation-and-tool-reliability.md)：边界见原文第 17 节；隔离的后续架构由下面的版本化工作区设计接续。
 - [外部 Harness 接入与跨 Agent 协作](design/external-harness-integration.md)：当前支持边界见[外部 Agent](external-agents.md)；CLI / Skills / MCP 共享按产品决定暂缓。
 - [Varin 形象：趴窗台](design/varin-figure.md)、[交互设计稿](design/varin-figure-preview/index.html)、[舞台设计稿](design/varin-figure-preview/stage.html)：已实现为 `BotFigure` 和 Bot 区舞台。
 
-## 正在进行的设计
+## 持续演进的设计
 
 - [Bot 工作台：界面、交互与动效](design/bot-ui.md)、[交互稿](design/bot-preview/index.html)：桌面主体、形象和舞台已实施（第 12 节），其余部分见原文。
 - [动效与交互：丝滑到底](design/motion-and-interaction.md)、[可交互原型](design/motion-preview/index.html)：P0–P4 已在 main 上实施；真机、Electron 和读屏验收（第 7 节）仍待进行。
-- [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：引擎和 WinFsp / macFUSE / FUSE 适配器已接入，三个平台的实际安装与挂载尚未验收；目标合同见第 16 节。
+- [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：引擎和 WinFsp / macFUSE / FUSE 适配器已接入，平台安装与挂载的实际行为以对应环境验收为准；目标合同见第 16 节。
 - [Q 版桌宠与主题差分](design/desktop-companion.md)：桌宠设计的总入口，已合入 main 并接入多会话 Bot 归属，美术逐帧验收与 Windows/macOS 原生验证仍待进行。同一系列的当前稿：
   - [主管式桌宠](design/desktop-companion-director.md)、[主管演出](design/desktop-companion-director-performance.md)
   - [动作语言 v5](design/desktop-companion-motion-language-v5.md)、[虚拟案卷与身体接触](design/desktop-companion-prop-contact-v5.md)
