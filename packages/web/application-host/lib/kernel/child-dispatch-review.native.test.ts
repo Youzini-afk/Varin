@@ -96,7 +96,8 @@ function complete(response: ServerResponse, output: unknown[]) {
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
 }
 function tool(name: string, args: unknown, id: string) {
-  const versions: Record<string, string> = { dispatch: '4', wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
+  // dispatch is directly declared; the provider decoder resolves its frozen request schema.
+  const versions: Record<string, string> = { wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
   const exchange = CODE_EXCHANGE_TOOL_DECLARATIONS.find(d => d.tool?.name === name);
   if (exchange) versions[name] = extensionToolSchema(exchange).version;
   if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }

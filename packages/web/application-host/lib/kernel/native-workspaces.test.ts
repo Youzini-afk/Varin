@@ -9,7 +9,7 @@ import type { ProjectEntry } from '@varin/application-client';
 import { nativeGitRoots } from './native-git-roots.js';
 
 it('reuses project authority for internal Git data and admits linked external administration', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'varin-git-roots-'));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'varin-git-roots-')));
   try {
     const project = path.join(root, 'project'), external = path.join(root, 'external-admin');
     await mkdir(path.join(project, 'repo', '.git', 'objects'), { recursive: true });
