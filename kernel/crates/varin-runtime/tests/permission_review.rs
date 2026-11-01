@@ -77,6 +77,15 @@ impl Fixture {
 #[test]
 fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispatch() {
     let mut f = Fixture::new();
+    f.call["outputVisibleBytes"] = Value::Null;
+    for value in [json!(-1), json!(1.5), json!("4096")] {
+        let mut changed = f.call.clone();
+        changed["outputVisibleBytes"] = value;
+        assert!(f.db.prepare_permission(changed, f.scope.clone()).load().is_err());
+    }
+    let mut unknown = f.call.clone();
+    unknown["unexpected"] = json!(true);
+    assert!(f.db.prepare_permission(unknown, f.scope.clone()).load().is_err());
     for (field, value) in [
         ("runId", json!("other-run")),
         (
@@ -112,6 +121,9 @@ fn permission_is_exact_one_use_and_denial_or_cancellation_never_authorizes_dispa
     );
     f.db.decide_permission(&f.op, "permission-1", "allow_once")
         .unwrap();
+    let mut changed = f.call.clone();
+    changed["outputVisibleBytes"] = json!(4096);
+    assert!(f.db.consume_permission(&f.op, "permission-1", changed, f.scope.clone()).is_err());
     let mut changed = f.scope.clone();
     changed["ownerGeneration"] = json!(4);
     assert!(

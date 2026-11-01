@@ -38,12 +38,18 @@ impl PermissionPreparation {
                         | "name"
                         | "schemaVersion"
                         | "arguments"
+                        | "outputVisibleBytes"
                 )
             })
         }) {
             return Err(RuntimeError::Invalid(
                 "permission call contains unknown fields".into(),
             ));
+        }
+        // HostToolCall carries this nullable frozen output budget. It remains
+        // part of the exact approval body, including during one-use consumption.
+        if self.call.get("outputVisibleBytes").is_some_and(|value| !value.is_null() && value.as_u64().is_none()) {
+            return Err(RuntimeError::Invalid("invalid permission output budget".into()));
         }
         if ![
             "ownerReference",

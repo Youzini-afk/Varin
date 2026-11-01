@@ -128,8 +128,13 @@ export async function captureExtensionSource(input: {
       captured = await store.captureDirectory(directory, undefined, { signal });
       const observed = await store.captureDirectory(directory, undefined, { signal, store: false });
       if (!isDeepStrictEqual(captured, observed)) throw new Error('extension_package_source_changed');
-      for (const [relative, state] of Object.entries(captured)) entries.push({ path: relative, state: sourceState(state),
-        originalPath: sourcePath ? `${sourcePath}/${relative}` : relative });
+      // captureDirectory includes the root's own state. The package manifest
+      // contains children relative to that root, just like a fixed-branch capture.
+      for (const [relative, state] of Object.entries(captured)) {
+        if (relative === '.') continue;
+        entries.push({ path: relative, state: sourceState(state),
+          originalPath: sourcePath ? `${sourcePath}/${relative}` : relative });
+      }
     }
     for (const entry of entries) {
       parseVarinPackageSourcePath(entry.path);

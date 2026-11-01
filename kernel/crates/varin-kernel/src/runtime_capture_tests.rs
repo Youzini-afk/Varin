@@ -679,18 +679,22 @@ fn capture_preserves_scoped_symlinks_and_rejects_root_or_parent_retarget() {
         f.finish_capture(),
         Err(KernelError::Authorization(_))
     ));
+    let mut hold = f.capture_hold(CapturePhase::VerifySource);
     f.begin(
         "file.capture",
         f.capture_params("allowed/body", true, "changed-root"),
         "writer",
     );
-    let (request, task, result) = f.receive_capture().unwrap();
+    // Retarget while the worker still owns source verification. Once its
+    // immutable snapshot is complete, publication only checks durable authority.
+    f.continue_capture().unwrap();
+    hold.entered();
     fs::rename(f.work(), f.directory.0.join("old-work")).unwrap();
     fs::create_dir(f.directory.0.join("replacement")).unwrap();
     symlink(f.directory.0.join("replacement"), f.work()).unwrap();
+    hold.release();
     assert!(matches!(
-        f.kernel
-            .complete_file_capture(&request, &task, result, &f.revoked),
+        f.finish_capture(),
         Err(KernelError::Authorization(_))
     ));
     assert!(!object_path(&f, b"before").exists());

@@ -289,7 +289,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             },
         )
         .unwrap();
-        let host_call = json!({"runId":run,"operationId":context.operation_id,"origin":origin,"callId":call.call_id,"name":call.name,"schemaVersion":call.schema_version,"arguments":call.arguments});
+        let host_call = json!({"runId":run,"operationId":context.operation_id,"origin":origin,"callId":call.call_id,"name":call.name,"schemaVersion":call.schema_version,"arguments":call.arguments,"outputVisibleBytes":null});
         let scope = json!({"ownerReference":"installed:host:read@1","ownerGeneration":7,"toolSchemaVersion":"decl-original","policyGeneration":"policy-1","reason":"fixture exact permission"});
         {
             let mut catalog = db.lock().unwrap();

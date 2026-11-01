@@ -106,11 +106,13 @@ async function mountHarness(production = false, loadFailure?: Error) {
   const tick = async (now: number) => { await act(async () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(now)); }); };
   if (loadFailure) return {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick};
   // Bundle digest/decode are async; wait on their actual completion, not wall time.
-  for (let step = 0; step < 30 && !material.mock.calls.length; step++) {
+  let frameTime = 0;
+  await vi.waitFor(async () => {
     await act(async () => new Promise<void>(resolve => setImmediate(resolve)));
-    await tick(step * 16);
-  }
-  expect(material.mock.calls.length).toBeGreaterThan(0);
+    await tick(frameTime);
+    frameTime += 16;
+    expect(material.mock.calls.length).toBeGreaterThan(0);
+  }, { timeout: 5000 });
   await tick(1000); await tick(1200);
   if (!production) expect(material.mock.lastCall?.[1].action).toBe('work-active');
   return {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick};

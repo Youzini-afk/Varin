@@ -747,6 +747,12 @@ pub(super) fn storage_rpc(
             let mut storage = owner.lock().unwrap();
             let (grant, params) =
                 storage.authorize(grant_id, epoch, host, generation, method, &params)?;
+            if method == "workspace.backend.inspect" {
+                // Production routes this authorized query to the workspace
+                // owner rather than Storage's record dispatcher.
+                drop(storage);
+                return Ok(crate::workspace_backend::inspect());
+            }
             if method == "file.lease.wait" {
                 // These capture fixtures have no competing path writer. Exercise
                 // the original owner; queued/event-driven delivery has its own runtime tests.

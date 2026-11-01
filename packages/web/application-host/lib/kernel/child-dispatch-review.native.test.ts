@@ -385,6 +385,7 @@ const job = (body: Record<string, unknown>) => {
 
 it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses its real %s source, returns its report and resumes the parent without a synthetic child Run', async workMode => {
   let operationId = ''; let step = 0; let preset = '';
+  const parentReply = gate();
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
     if (++step === 1) complete(response, [tool('dispatch', { preset, task: 'Write a result and report', workMode }, 'external-dispatch')]);
@@ -397,8 +398,8 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
       expect(JSON.stringify(result(body, 'update'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied');
       return fs.writeFile(path.join(f.workspace, 'parent-result.txt'), 'Parent result for external peer').then(() => complete(response, [tool('submit_code', { target: `external:child:${operationId}`, files: ['parent-result.txt'] }, 'external-submit')]));
     }
-    else if (step === 7) { expect(result(body, 'submit_code'), JSON.stringify(result(body, 'submit_code'))).toMatchObject({ outcome: 'succeeded' }); expect(JSON.stringify(result(body, 'submit_code'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied'); complete(response, [answer('Delegation received', 'external-parent-answer')]); }
-    else { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [answer('Delegation received', 'external-parent-answer')]); }
+    else if (step === 7) { expect(result(body, 'submit_code'), JSON.stringify(result(body, 'submit_code'))).toMatchObject({ outcome: 'succeeded' }); expect(JSON.stringify(result(body, 'submit_code'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied'); complete(response, [answer('Delegation received', 'external-parent-answer')]); parentReply.release(); }
+    else { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [answer('Delegation received', 'external-parent-answer')]); parentReply.release(); }
   });
   const h = await f.openHost({ external: true });
   const profiles = await h.profiles.read({ runtime: 'agent' });
@@ -412,7 +413,10 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
   const workspaceId = (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId;
   const prepared = await h.api.prepareSource({ ...identity, key: 'external-source', resourceOwner: { kind: 'local' }, workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   const parent = await h.api.submit({ ...identity, key: 'external-parent', expectedHead: null, text: 'Delegate this task to the external fixture and wait', model, source: prepared.source });
-  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 30_000 }).toBe('completed').catch(async error => { console.error('External dispatch state', await h.external!.children(), h.errors); throw error; });
+  // The model exchanges and code transfers belong to the test's execution
+  // budget. Check durable completion after the actual final provider response.
+  await parentReply.promise;
+  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state).toBe('completed').catch(async error => { console.error('External dispatch state', await h.external!.children(), h.errors); throw error; });
   const child = (await h.external!.children()).find(child => child.operation_id === operationId)!;
   expect(child.state).toBe('completed'); expect(child.resources_released).toBe(true);
   expect(await h.runtime.childExecutions()).toHaveLength(0);
@@ -819,7 +823,7 @@ it.each(['quick','formal','isolated'] as const)('%s retrieval uses native search
   } else {
     const child=(await h.runtime.children())[0]!;
     expect(child.selected_profile.work_mode).toBe(mode==='isolated'?'isolated_write':'shared');
-    expect(child.code_result.kind).toBe('published');
+    expect(child.code_result.kind).toBe(mode==='isolated'?'published':'shared_source');
     try {
       await expect.poll(async()=>(await h.runtime.child(child.operation_id)).resources_released).toBe(true);
     } catch (error) {
@@ -1153,7 +1157,8 @@ it('the configured retrieval preset returns before preparation and delivers one 
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
   expect(child.report).toMatchObject({ outcome: 'succeeded', sender_thread_id: child.child_thread_id });
-  expect(child.code_result).toEqual({ kind: 'no_changes' });
+  expect(child.selected_profile.work_mode).toBe('shared');
+  expect(child.code_result).toEqual({ kind: 'shared_source' });
   expect((await h.runtime.readChildReport(operationId, child.report!.history_ids.at(-1)!)).text).toContain('CHILD_REPORT');
   expect(child.launch.tools.map(item => item.name).sort()).toEqual([...retrieval.tools.names].sort());
   const childBodies = f.requests.filter(request => !isParent(request.body));

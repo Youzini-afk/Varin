@@ -36,6 +36,10 @@ async function fixture(recoveryWakeBeforeHandshake = false) {
     maximum = Math.max(maximum, outstanding.size);
   };
   let injected = false;
+  // Delay native wakes while testing the independently injected pre-handshake
+  // wake. The real kernel can also emit cursor 0 after startup; that is another
+  // valid notification, not a duplicate delivery of the injected frame.
+  if (recoveryWakeBeforeHandshake) probe.hold = value => value.kind === 'runtime-event';
   probe.onReceive = value => {
     if (typeof value.id === 'string') outstanding.delete(value.id);
     const result = value.result as Record<string, unknown> | undefined;
@@ -109,6 +113,8 @@ it('a durable recovery wake preceding the handshake response is delivered only a
   expect(f.host.isReady).toBe(true);
   expect(f.runtimeEvents.filter(event => event.stream === 'durable' && event.cursor === 0)).toHaveLength(1);
   expect(f.readyOrder[0]).toBe('ready');
+  f.probe.release();
+  expect(f.readyOrder.slice(1).every(event => event === 'event')).toBe(true);
   expect((await f.actor.health()).integrity).toBe('not_checked');
 });
 
