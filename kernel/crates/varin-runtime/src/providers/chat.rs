@@ -287,7 +287,7 @@ impl ChatProvider {
         body.insert_fragments("messages", messages);
         if !view.binding.tools.is_empty() {
             body.insert_frozen("tools", compiler.field("tools", || {
-                view.binding.tools.iter().map(|tool| Ok(json!({"type":"function","function":{"name":tool.name,"description":tool.description,"parameters":tool_schema::parameters(tool)?}})))
+                view.binding.tools.iter().map(|tool| Ok(json!({"type":"function","function":{"name":tool.name,"description":tool.description,"parameters":if self.mistral { tool_schema::parameters(tool)? } else { tool_schema::openai_parameters(tool)? }}})))
                     .collect::<Result<Vec<_>, ExecutionError>>().map(Value::Array)
             })?);
         }

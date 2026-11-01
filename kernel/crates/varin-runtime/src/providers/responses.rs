@@ -124,7 +124,7 @@ impl ResponsesProvider {
             tools.clone()
         } else {
             let tools = view.binding.tools.iter().map(|t| {
-                Ok(crate::request_body::FrozenJson::new(json!({"type":"function","name":t.name,"description":t.description,"parameters":tool_schema::parameters(t)?,"strict":false})))
+                Ok(crate::request_body::FrozenJson::new(json!({"type":"function","name":t.name,"description":t.description,"parameters":tool_schema::openai_parameters(t)?,"strict":false})))
             }).collect::<Result<Vec<_>, ExecutionError>>()?;
             if let Some(reuse) = reuse.as_mut() {
                 reuse.responses_tools = Some(tools.clone());

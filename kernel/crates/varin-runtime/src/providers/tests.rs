@@ -1801,8 +1801,16 @@ fn tool_parameter_schemas_reach_every_protocol_as_objects_without_changing_the_o
         };
         assert_eq!(parameters["type"], "object", "{family}");
         assert!(parameters["properties"].is_object(), "{family}");
-        assert_eq!(parameters["oneOf"][0]["properties"]["op"], json!({"type":"string","enum":["launch"]}), "{family}");
-        assert_eq!(parameters["oneOf"][1]["required"], json!(["op","act"]), "{family}");
+        if matches!(family, responses::FAMILY | azure::FAMILY | codex::FAMILY | chat::FAMILY) {
+            assert!(parameters.get("oneOf").is_none(), "{family}");
+            assert_eq!(parameters["required"], json!(["op"]), "{family}: branch-only arguments stay optional");
+            assert_eq!(parameters["properties"]["binary"]["type"], "string", "{family}");
+            assert_eq!(parameters["properties"]["op"]["anyOf"][0], json!({"type":"string","enum":["launch"]}), "{family}");
+            assert_eq!(parameters["properties"]["act"]["type"], "object", "{family}");
+        } else {
+            assert_eq!(parameters["oneOf"][0]["properties"]["op"], json!({"type":"string","enum":["launch"]}), "{family}");
+            assert_eq!(parameters["oneOf"][1]["required"], json!(["op","act"]), "{family}");
+        }
         assert_eq!(parameters["$defs"]["selection"]["type"], json!(["string","null"]), "{family}");
         assert_eq!(parameters["examples"], schema["examples"], "{family}: examples are not schema nodes");
         assert_eq!(request.binding.tools[0].schema, schema, "{family}: original remains authoritative");
@@ -1810,6 +1818,46 @@ fn tool_parameter_schemas_reach_every_protocol_as_objects_without_changing_the_o
         let error = provider.serialize(&request, None).err().expect("nonobject parameters cannot be sent");
         assert_eq!(error.code, "invalid_tool_schema", "{family}");
         assert!(error.message.contains("computer_browser"), "{family}: identify the invalid declaration");
+    }
+}
+
+#[test]
+fn openai_tool_parameters_project_root_constraints_and_local_references() {
+    let schema = json!({"$ref":"#/$defs/base", "$defs":{"base":{
+        "type":"object", "required":["id"], "properties":{"id":{"type":"string"}}
+    }}, "allOf":[{"properties":{"mode":{"const":"read"}},"required":["mode"]}],
+        "anyOf":[{"required":["path"]},{"required":["snapshotId"]}],
+        "not":{"required":["path","snapshotId"]},
+        "properties":{"path":{"type":"string"},"snapshotId":{"type":"string"},
+            "copiedMode":{"$ref":"#/allOf/0/properties/mode"},
+            "pages":{"anyOf":[{"const":"all"},{"type":"array","items":{"type":"integer"}}]}}
+    });
+    for family in [responses::FAMILY, azure::FAMILY, codex::FAMILY, chat::FAMILY] {
+        let provider = media_provider(family, true);
+        let mut request = view(family);
+        request.binding.tools[0].name = "document_read".into();
+        request.binding.tools[0].schema = schema.clone();
+        let wire = provider.serialize(&request, None).unwrap().to_value();
+        let parameters = if family == chat::FAMILY { &wire["tools"][0]["function"]["parameters"] }
+            else { &wire["tools"][0]["parameters"] };
+        assert_eq!(parameters["type"], "object", "{family}");
+        for key in ["oneOf", "anyOf", "allOf", "enum", "const", "not", "$ref"] {
+            assert!(parameters.get(key).is_none(), "{family}: forbidden root {key}");
+        }
+        assert_eq!(parameters["properties"]["id"]["type"], "string", "{family}");
+        assert_eq!(parameters["properties"]["mode"]["enum"], json!(["read"]), "{family}");
+        let copied = parameters["properties"]["copiedMode"]["$ref"].as_str().unwrap();
+        assert_eq!(parameters.pointer(copied.strip_prefix('#').unwrap()).unwrap()["enum"], json!(["read"]), "{family}: references into removed branches still resolve");
+        assert_eq!(parameters["required"], json!(["id","mode"]), "{family}");
+        assert_eq!(parameters["properties"]["pages"]["anyOf"][0]["enum"], json!(["all"]), "{family}: nested alternatives survive");
+        assert_eq!(request.binding.tools[0].schema, schema, "{family}: execution retains all constraints");
+
+        request.binding.tools[0].schema = json!({"const":{"mode":"read"}});
+        let wire = provider.serialize(&request, None).unwrap().to_value();
+        let parameters = if family == chat::FAMILY { &wire["tools"][0]["function"]["parameters"] }
+            else { &wire["tools"][0]["parameters"] };
+        assert!(parameters.get("enum").is_none(), "{family}");
+        assert_eq!(parameters["properties"]["mode"]["enum"], json!(["read"]), "{family}");
     }
 }
 

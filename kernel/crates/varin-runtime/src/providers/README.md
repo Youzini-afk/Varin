@@ -55,6 +55,15 @@ without depending on static Rust destructors during process exit.
 
 ## Immutable request boundary
 
+OpenAI Responses (including Azure/Codex) and Chat Completions receive a plain object
+parameter root. `tool_schema.rs` collects fields from root unions, intersections and
+local references; only requirements common to alternative branches become globally
+required. Root `oneOf`/`anyOf`/`allOf`/`enum`/`const`/`not` are omitted from this model-facing
+projection because the API rejects them even with `strict: false`. Nested field schemas
+and definitions remain. The original frozen declaration and discovery documentation
+retain all constraints, and tool execution validates that original contract. Other
+protocol families keep their original root alternatives.
+
 `ModelProvider::serialize(view, reuse)` returns [RequestBody](../request_body.rs), containing no
 credentials. Same-family/version originals are replayed only under the same nonempty trusted
 connection identity and applicable model constraints. Cross-family projection drops provider-only
