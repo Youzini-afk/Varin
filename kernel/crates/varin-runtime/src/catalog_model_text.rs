@@ -472,6 +472,42 @@ mod tests {
         assert!(db.list_threads().unwrap().is_empty());
     }
     #[test]
+    fn title_generation_records_one_unowned_auxiliary_request_with_its_frozen_price() {
+        let (_, mut db) = open();
+        let mut p = input("priced-title");
+        p.generation.purpose = "title".into();
+        p.generation.configuration.pricing = Some(serde_json::from_value(json!({"currency":"USD","billing":"subscription",
+            "source":"custom","version":"user:1","inputPerMillion":1.0,"outputPerMillion":4.0})).unwrap());
+        admit(&mut db, &p);
+        let operation = generate(&mut db, &p);
+        db.dispatch_inference_generation(&operation).unwrap();
+        let receipt = InferenceReceipt {
+            request_started: Some(true),
+            provider_completed: true,
+            local_executor_stopped: true,
+            usage: InferenceUsage { measurement: crate::execution::UsageMeasurement::Actual, input_tokens: Some(1_000), output_tokens: Some(10), ..Default::default() },
+            http_status: None,
+            problem: None,
+        };
+        let body = db.prepare_inference_content().write(&json!({"text":"Original title"})).unwrap();
+        db.settle_inference_generation(&operation, body, receipt, None).unwrap();
+        let now = super::threads::now_ms().unwrap();
+        let summary = db
+            .capture_usage_summary(&super::usage_ledger::UsageSummaryParams { from_ms: now - 60_000, to_ms: now + 60_000, utc_offset_minutes: 0, days: vec![], current_prices: vec![] })
+            .unwrap()
+            .load(&|| false)
+            .unwrap();
+        assert_eq!(summary.rows.len(), 1);
+        let row = &summary.rows[0];
+        assert_eq!((row.kind.as_str(), row.purpose.as_deref(), row.provider_id.as_deref(), row.provider_family.as_deref(), row.model_id.as_str()),
+            ("auxiliary", Some("title"), Some("chosen"), Some("openai-responses"), "original"));
+        assert_eq!((row.billing, row.priced, row.price_sources.clone(), row.requests),
+            (Some(super::usage_ledger::UsageBilling::Subscription), true, vec![super::usage_ledger::PriceSource::Custom], 1));
+        assert!((row.reference_usd - (1_000.0 * 1.0 + 10.0 * 4.0) / 1e6).abs() < 1e-12);
+        // A standalone utility Run belongs to no conversation.
+        assert!(summary.threads.is_empty());
+    }
+    #[test]
     fn original_usage_result_and_explicit_retry_wait_for_transport_drain() {
         let (_, mut db) = open();
         let p = input("original");

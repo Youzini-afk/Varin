@@ -145,7 +145,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                 const route = provider.routes.find(value => value.requestUrl === destination && (!selectedRoute || value.requestKind === selectedRoute.requestKind));
                 if (!route || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('decision-request-binding-changed');
                 const selectedBinding: InferenceBinding = { purpose, providerId: binding.providerId, modelId: binding.modelId,
-                  requestKind: route.requestKind, configurationId: binding.configurationId,
+                  requestKind: route.requestKind, configurationId: binding.configurationId, ...(provider.pricing ? { pricing: provider.pricing } : {}),
                   executor: { kind: 'http', api: provider.api, endpoint: destination, credentialScope: provider.credentialScope } };
                 const response = await call.request({ onReceipt: receipt => batchReceipts.push(receipt), binding: selectedBinding, request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
                   prepareHeaders: async active => {

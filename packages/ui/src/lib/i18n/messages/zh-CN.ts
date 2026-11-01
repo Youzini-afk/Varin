@@ -9,8 +9,10 @@ import { followupPanelZhCN } from './followups';
 import { toolMessagesZhCN } from './tool-interactions';
 
 import { companionLibraryMessages } from './companion-library';
+import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...usageMessages('zh-CN'),
   ...companionLibraryMessages('zh-CN'),
   ...companionAttentionZh,
   "companion.observing": "正在联动所选会话",

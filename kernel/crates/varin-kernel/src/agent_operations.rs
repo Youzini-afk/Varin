@@ -29,6 +29,12 @@ pub(super) fn execute(
             .capture_thread_usage(&selection).map_err(domain)?;
         return Ok(serde_json::to_value(read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)?)?);
     }
+    if method == "runtime.usage.summary" {
+        let selection: varin_runtime::catalog::usage_ledger::UsageSummaryParams = serde_json::from_value(params)?;
+        let read = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .capture_usage_summary(&selection).map_err(domain)?;
+        return Ok(serde_json::to_value(read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)?)?);
+    }
     if method == "runtime.events.read" {
         let p: EventsParams = serde_json::from_value(params)?;
         let cursor = u64::try_from(p.cursor)

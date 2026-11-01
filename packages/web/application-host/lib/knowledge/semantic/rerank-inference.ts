@@ -93,7 +93,7 @@ export function createRerankInference(authority: RerankInferenceAuthority, setti
                   const destination = new URL(String(url)).toString();
                   if (destination !== provider.requestUrl || init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('Rerank request binding changed');
                   return call.request({ binding: { requestKind: 'model_compute', purpose: 'code-retrieval-rerank',
-                    providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
+                    providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId, ...(provider.pricing ? { pricing: provider.pricing } : {}),
                     executor: { kind: 'http', api: 'http-rerank', endpoint: destination, credentialScope: provider.credentialScope } },
                     request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
                   prepareHeaders: async active => {

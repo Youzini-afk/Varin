@@ -166,6 +166,10 @@ pub struct ModelStep {
     pub request: Value,
     pub original: Vec<ProviderOriginal>,
     pub usage: Option<Value>,
+    /// Usage-ledger attribution frozen at dispatch, so every settle path can record the
+    /// request without reading its body. Absent for undispatched and mirrored requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_usage: Option<crate::catalog::usage_ledger::FrozenUsage>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Event {

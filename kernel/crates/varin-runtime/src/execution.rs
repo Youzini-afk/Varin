@@ -380,6 +380,9 @@ pub struct ModelRequestContext {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    /// Host price snapshot of the selected configuration, frozen for usage attribution only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<crate::catalog::usage_ledger::UsagePricing>,
     /// The original model's visible output budget, also used by structured discovery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_output_visible_bytes: Option<usize>,

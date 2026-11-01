@@ -49,7 +49,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 79;
+pub(crate) const FORMAT: i64 = 80;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -148,6 +148,9 @@ fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     followups::check_format(db)?;
     calendar::check_format(db)?;
     upgrades::check_external_schema(db, version)?;
+    if version >= 80 {
+        usage_ledger::check_format(db)?;
+    }
     goals::check_format(db)?;
     mcp_interactions::check_format(db)?;
     bot::check_format(db)?;
@@ -212,6 +215,7 @@ fn initialize_metadata(
         goals::initialize_new(&tx)?;
         mcp_interactions::initialize_new(&tx)?;
         bot::initialize_new(&tx)?;
+        usage_ledger::initialize(&tx)?;
     }
     titles::initialize(&tx)?;
     let epoch = tx.query_row(
@@ -1100,6 +1104,7 @@ impl Catalog {
             request: request_ref,
             original: Vec::new(),
             usage: None,
+            frozen_usage: None,
         };
         tx.execute(
             "INSERT INTO model_steps(id,run_id,state,body) VALUES(?1,?2,'prepared',?3)",
@@ -1495,6 +1500,9 @@ impl Catalog {
                 if step.usage.is_none() {
                     let usage = crate::execution::UsageReceipt::default();
                     goals::measured(&tx, step.goal.as_ref(), &usage)?;
+                    if let Some(frozen) = &step.frozen_usage {
+                        usage_ledger::record_step(&tx, &step, frozen, &usage)?;
+                    }
                     step.usage = Some(serde_json::to_value(usage)?);
                 }
                 step.state = ModelStepState::Interrupted;
@@ -1529,6 +1537,7 @@ impl Catalog {
                     goals::measured(&tx, result.goal.as_ref(), &output.usage)?;
                     result.dispatch = crate::execution::PolicyModelDispatch::Interrupted;
                     result.receipt=Some(crate::execution::PolicyModelReceipt{dispatch:crate::execution::PolicyModelDispatch::Interrupted,outcome:Outcome::Indeterminate,output:None,usage:output.usage,finish_reason:None,failure:Some(crate::execution::ModelFailure{tool_name: None,code:"planning_interrupted".into(),message:"dispatch intent was durable; completion is unknown and request will not replay".into(),retry_after_ms:None,provider_request_id:None}),usable:false});
+                    policy_model::record_usage(&tx, &op, &result)?;
                     op.phase = OperationPhase::Terminal;
                     op.outcome = Some(Outcome::Indeterminate);
                     op.revision += 1;
@@ -1793,6 +1802,8 @@ pub mod recovery;
 mod observe;
 #[path = "catalog_usage.rs"]
 pub mod usage;
+#[path = "catalog_usage_ledger.rs"]
+pub mod usage_ledger;
 #[path = "catalog_threads.rs"]
 pub mod threads;
 #[path = "catalog_titles.rs"]

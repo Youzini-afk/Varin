@@ -39,7 +39,8 @@ export function captureKnowledgeLocalLease(source: SemanticEmbedder, check: (sig
         if (lengths.some(count => count > maxTokens)) throw new Error('Local embedding input exceeds the model packing window');
         const vectors = await call.local({
           binding: { requestKind: 'model_compute', purpose: params.purpose === 'query' ? 'knowledge-query-embedding' : 'knowledge-document-embedding',
-            providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId, executor: execution.identity },
+            providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
+            pricing: { currency: 'USD', billing: 'local', source: 'directory', version: binding.configurationId }, executor: execution.identity },
           request: { purpose: params.purpose, texts, dimensions: binding.dimensions }, signal, check: validate,
           execute: (active, beforeDispatch) => execution.batch(texts, { signal: active, beforeDispatch,
             priority: params.purpose === 'query' ? 'foreground' : 'background', tokenLengths: lengths }),

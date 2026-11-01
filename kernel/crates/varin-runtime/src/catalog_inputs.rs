@@ -428,7 +428,7 @@ impl Catalog {
             // Queued Runs own their admission scope now, not when eventually promoted.
             tx.execute("INSERT INTO runs(id,branch_id,body,context_checkpoint_id) VALUES(?1,?2,?3,(SELECT checkpoint_id FROM active_contexts WHERE branch_id=?2))",params![next.id,next.branch_id,encode(&next)?])?;
             if let Some(previous) = predecessor.as_ref().filter(|previous| {
-                previous.configuration == next.configuration || desired.is_some()
+                super::usage_ledger::same_configuration(&previous.configuration, &next.configuration) || desired.is_some()
             }) {
                 if let Some(mut launch) = optional_record::<super::launch_content::LaunchMetadata>(
                     &tx,
@@ -489,7 +489,7 @@ impl Catalog {
             if command
                 .configuration
                 .as_ref()
-                .is_some_and(|value| value != &owner.configuration)
+                .is_some_and(|value| !super::usage_ledger::same_configuration(value, &owner.configuration))
             {
                 return Err(RuntimeError::Invalid(
                     "current-Run input cannot silently change frozen configuration".into(),

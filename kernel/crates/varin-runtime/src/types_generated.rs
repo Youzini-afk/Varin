@@ -312,6 +312,8 @@ pub struct ModelSessionConfiguration {
     pub context_window_tokens: Option<u64>,
     pub thinking_level: Option<String>,
     pub model_options: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<crate::catalog::usage_ledger::UsagePricing>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

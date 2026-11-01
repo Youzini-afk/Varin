@@ -8,11 +8,20 @@ struct Upgrade {
     convert: fn(&Transaction<'_>) -> Result<()>,
 }
 
-const UPGRADES: &[Upgrade] = &[Upgrade {
-    from: 78,
-    to: 79,
-    convert: external::initialize_new,
-}];
+const UPGRADES: &[Upgrade] = &[
+    Upgrade {
+        from: 78,
+        to: 79,
+        convert: external::initialize_new,
+    },
+    // The ledger starts empty: earlier receipts lack settle time and attribution, so they are
+    // not backfilled. Its start time commits with the format marker.
+    Upgrade {
+        from: 79,
+        to: 80,
+        convert: usage_ledger::initialize,
+    },
+];
 
 pub(super) fn supports(mut version: i64) -> bool {
     while version < FORMAT {

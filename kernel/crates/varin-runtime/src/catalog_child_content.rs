@@ -44,7 +44,7 @@ impl ChildAdmissionPreparation {
         let resolved = original.resolve(&self.input)?;
         if resolved.frozen_reference != self.launch.frozen_reference
             || resolved.profile != self.launch.selected_profile
-            || serde_json::to_value(&resolved.model.configuration)? != self.launch.configuration
+            || !super::usage_ledger::same_configuration(&serde_json::to_value(&resolved.model.configuration)?, &self.launch.configuration)
         {
             return Err(RuntimeError::Conflict(
                 "child selection differs from its original invocation".into(),

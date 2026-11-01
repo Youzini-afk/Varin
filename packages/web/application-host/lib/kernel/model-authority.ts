@@ -11,6 +11,7 @@ import type { ModelConnectionOptions, ModelThinkingConfiguration, ThreadModel, T
 import { modelOptions, thinkingLevels } from './model-options.js';
 import type { TokenizerLease } from '../models/tokenizers.js';
 export interface SelectedModel {
+  pricing?: import('./protocol.generated.js').UsagePricing;
   tokenizer?: ModelTokenizer;
   providerId: string; modelId: string; name: string; api: string; baseUrl: string; maxTokens: number;
   input?: readonly string[]; contextWindow?: number; reasoning?: boolean;
@@ -152,7 +153,8 @@ export function createModelAuthority(authority: ModelAuthority, options: { outpu
     const generation = Number.parseInt(createHash('sha256').update(JSON.stringify({ providerId: model.providerId, requestModelId: model.requestModelId, allowAnonymous: model.allowAnonymous, awsRegion,
       adapterId: model.adapterId, adapterVersion: model.adapterVersion, adapterIdentity: model.adapterIdentity, connection: model.connection, family: model.api, model: model.modelId, endpoint, max, deployment, apiVersion, legacy, streamUsage, acceptsImages,
       tokenizer: model.tokenizer, contextWindow: model.contextWindow, toolOutputVisibleBytes, retry, ...resolved, ...(model.api === 'anthropic-messages' ? { anthropicOauth } : {}) })).digest('hex').slice(0, 12), 16);
-    return { retry, ...(tokenizer ? { tokenizer } : {}), providerId: model.providerId, providerFamily: model.api, model: model.requestModelId ?? model.modelId, endpoint,
+    const pricing = model.pricing && { ...model.pricing, ...(anthropicOauth ? { billing: 'subscription' as const } : {}) };
+    return { retry, ...(pricing ? { pricing } : {}), ...(tokenizer ? { tokenizer } : {}), providerId: model.providerId, providerFamily: model.api, model: model.requestModelId ?? model.modelId, endpoint,
       ...(awsRegion ? { awsRegion } : {}),
       ...(model.connection ? { connection: { ...(model.connection.headers ? { headers: model.connection.headers } : {}), ...(model.connection.proxy ? { proxy: model.connection.proxy } : {}) } } : {}),
       credentialEnvironment: null, allowAnonymous: model.allowAnonymous ?? false, acceptsImages, toolOutputVisibleBytes, configurationGeneration: generation, maxOutputTokens: max,

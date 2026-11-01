@@ -10,7 +10,9 @@ import { chatExperienceMessages } from './chat-experience';
 import { toolMessagesEn } from './tool-interactions';
 
 import { companionLibraryMessages } from './companion-library';
+import { usageMessages } from './usage';
 export const dict = {
+  ...usageMessages('en'),
   ...companionLibraryMessages('en'),
   ...companionAttentionEn,
   "companion.observing": "Observing the selected conversation",

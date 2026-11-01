@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { frozenModelPricing, validModelPricing } from './pricing.js';
 import { randomUUID } from 'node:crypto';
 import type { ModelChannel, ModelConnectionDraft, ModelConnectionOptions, ModelDecisionPaths, ChannelModel, DiscoveredModel, ModelConnectionsSnapshot, ModelOperation, ConnectionAuthentication } from '@varin/application-client';
 import { imageModelInfo, imageToolContract, THINKING_LEVELS, type ImageModelInfo, type ImageToolPurpose } from '@varin/protocol';
@@ -29,6 +30,7 @@ import type { CredentialScope, CredentialDispatch } from '../kernel/credential-o
 import type { SelectedModel, ModelExecutionAuthority } from '../kernel/model-authority.js';
 
 export interface InferenceProviderBinding {
+  pricing?: import('../kernel/protocol.generated.js').UsagePricing;
   providerId: string; modelId: string; baseUrl: string; endpoint?: string; requestUrl: string; api: string;
   configurationId: string; credentialRef: string; credentialScope: CredentialScope; allowAnonymous?: boolean;
   routes: readonly { requestUrl: string; requestKind: 'model_compute' | 'preparation' }[];
@@ -159,6 +161,8 @@ export class ModelsService {
         || model.parameters !== undefined && !object(model.parameters) || model.compat !== undefined && !object(model.compat)) return fail('channel-model-invalid', 'Model fields or operations are invalid');
       if (model.tokenizer !== undefined && !validTokenizer(model.tokenizer)) return fail('model-tokenizer-invalid', 'Choose a supported encoding, Hugging Face repository, tokenizer URL or absolute Host file path');
       if (model.catalog !== undefined && !validCatalogOverrides(model.catalog)) return fail('channel-model-invalid', 'Model directory overrides are invalid');
+      if (model.pricing !== undefined && !validModelPricing(model.pricing)) return fail('model-pricing-invalid', 'Prices must be finite, non-negative USD amounts per million tokens');
+      if (model.billing !== undefined && (typeof model.billing !== 'string' || !['metered', 'subscription', 'local'].includes(model.billing))) return fail('model-pricing-invalid', 'Choose a supported billing method');
       if (model.thinking !== undefined && !isModelThinkingConfiguration(model.thinking)) return fail('model-thinking-invalid', 'Choose valid thinking controls and supported levels');
       if (model.decision !== undefined && (!object(model.decision) || Object.keys(model.decision).some(key => key !== 'api' && key !== 'paths')
         || model.decision.api !== undefined && (typeof model.decision.api !== 'string' || !isSupportedClassifierApi(model.decision.api))
@@ -409,6 +413,7 @@ export class ModelsService {
     return { providerId: channel.id, modelId: model.id, requestModelId: model.requestModelId ?? model.id, name: model.name,
       ...(adapter ? { adapterId: adapter.id, adapterVersion: adapter.version, adapterIdentity: adapter.identity, adapterBindingId: adapter.bindingId, endpointPath: adapter.endpointPath } : {}),
       api, baseUrl: basePath ? appendModelPath(channel.baseUrl, basePath) : channel.baseUrl, maxTokens: model.maxOutputTokens ?? 0,
+      pricing: frozenModelPricing(channel, model),
       ...(type.requestProfile ? { requestProfile: type.requestProfile } : {}),
       ...(channel.connection === undefined ? {} : { connection: structuredClone(channel.connection) }),
       ...(model.tokenizer ? { tokenizer: structuredClone(model.tokenizer) } : {}),
@@ -578,10 +583,12 @@ export class ModelsService {
       } finally { active -= 1; dispose(); }
     };
     const { name: _channelName, models: _models, enabled: _channelEnabled, ...connection } = channel;
-    const { name: _modelName, enabled: _modelEnabled, ...selection } = model;
-    const configurationId = revisionOf({ channel: connection, model: selection, routes, ...(operation === 'decision' ? { api } : {}) });
+    const { name: _modelName, enabled: _modelEnabled, pricing: _pricing, billing: _billing, catalog, ...selection } = model;
+    const executionModel = { ...selection, ...(catalog ? { catalog: { ...catalog, overrides: catalog.overrides.filter(field => field !== 'pricing' && field !== 'billing') } } : {}) };
+    const configurationId = revisionOf({ channel: connection, model: executionModel, routes, ...(operation === 'decision' ? { api } : {}) });
     const egressOverride = modelEgressOverride(channel.connection);
     return { providerId, modelId, requestModelId: model.requestModelId ?? model.id, baseUrl, api, routes, requestUrl: routes[0]!.requestUrl, ...(configuredPath === undefined ? {} : { endpoint: configuredPath }), configurationId,
+      pricing: frozenModelPricing(channel, model),
       ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
       ...(tokenizer?.tokenizer ? { tokenizer: tokenizer.tokenizer } : {}),
       ...(operation === 'decision' && model.decision?.paths ? { decisionPaths: structuredClone(model.decision.paths) } : {}),

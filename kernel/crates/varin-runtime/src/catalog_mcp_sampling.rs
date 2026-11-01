@@ -27,6 +27,18 @@ pub struct GenerationState {
 pub fn is_generation(op: &Operation) -> bool {
     op.intent["kind"] == "mcp_sampling_generation_v1"
 }
+/// One ledger row per dispatched sampling request, written with its terminal receipt.
+fn record_usage(tx: &Transaction<'_>, op: &Operation, s: &GenerationState, usage: &crate::execution::UsageReceipt) -> Result<()> {
+    let Some(model) = &s.model else { return Ok(()) };
+    super::usage_ledger::record(tx, super::usage_ledger::UsageEntry {
+        id: super::usage_ledger::operation_record_id(&op.id),
+        kind: super::usage_ledger::UsageKind::McpSampling,
+        purpose: None,
+        run_id: &op.run_id,
+        attribution: &model.usage_attribution(),
+        usage,
+    }, super::usage_ledger::Settlement::Final)
+}
 pub fn intent(op: &Operation) -> Result<GenerationIntent> {
     if !is_generation(op) {
         return Err(conflict());
@@ -459,6 +471,7 @@ impl Catalog {
         let tx = self.db.transaction()?;
         if dispatched {
             goals::measured(&tx, goal.as_ref(), &receipt.usage)?;
+            record_usage(&tx, &op, &s, &receipt.usage)?;
         }
         if receipt.local_executor_stopped { super::execution_persistence::record_kernel_executor_stopped(&tx, &op, self.epoch)?; }
         publish_operation(&tx, &mut op, s, "mcp.sampling.settled")?;
@@ -554,11 +567,9 @@ pub(crate) fn recover(tx: &Transaction<'_>, op: &mut Operation) -> Result<bool> 
     let dispatched = s.dispatch != "not_started";
     if dispatched {
         let goal = intent(op)?.goal;
-        goals::measured(
-            tx,
-            goal.as_ref(),
-            &crate::execution::UsageReceipt::from(&s.usage),
-        )?;
+        let usage = crate::execution::UsageReceipt::from(&s.usage);
+        goals::measured(tx, goal.as_ref(), &usage)?;
+        record_usage(tx, op, &s, &usage)?;
         s.dispatch = "interrupted".into();
     }
     s.problem = Some("mcp_sampling_connection_lost".into());

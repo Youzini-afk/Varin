@@ -109,7 +109,7 @@ impl Catalog {
         if let Some(previous) = tx.query_row("SELECT body FROM model_selections WHERE id=?1", [key], |row| row.get::<_, String>(0)).optional()?.map(|body| decode_selection(&body)).transpose()?
         {
             if previous.run_id == run_id
-                && previous.configuration == configuration
+                && previous.configuration.same_identity(&configuration)
                 && previous.credential_scope == credential_scope
             {
                 return Ok(previous);
@@ -181,7 +181,7 @@ impl Catalog {
             return Ok(false);
         }
         let mut stored: RunModelSelection = selection_record(&tx, &selection.id)?;
-        if stored.configuration != selection.configuration
+        if !stored.configuration.same_identity(&selection.configuration)
             || stored.credential_scope != selection.credential_scope
         {
             return Err(RuntimeError::Conflict(

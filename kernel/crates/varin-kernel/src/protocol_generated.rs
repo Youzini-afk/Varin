@@ -14,6 +14,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "workspace.release",
     "workspace.close",
     "runtime.thread.usage",
+    "runtime.usage.summary",
     "runtime.operation.calls",
     "runtime.model.presentations",
     "runtime.knowledge_inference.finish",
@@ -106,6 +107,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "workspace.release",
     "workspace.close",
     "runtime.thread.usage",
+    "runtime.usage.summary",
     "runtime.operation.calls",
     "runtime.model.presentations",
     "source.authority.seal",
@@ -1223,6 +1225,16 @@ pub(crate) struct LaunchFailedParams {
 pub(crate) struct ThreadUsageParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UsageSummaryParams {
+    pub(crate) from_ms: i64,
+    pub(crate) to_ms: i64,
+    pub(crate) utc_offset_minutes: i64,
+    pub(crate) days: Option<Vec<UsageDay>>,
+    pub(crate) current_prices: Option<Vec<UsageCurrentPrice>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3217,6 +3229,7 @@ pub(crate) struct ModelSessionConfiguration {
     pub(crate) context_window_tokens: Option<i64>,
     pub(crate) thinking_level: Option<String>,
     pub(crate) model_options: Option<Value>,
+    pub(crate) pricing: Option<varin_runtime::catalog::usage_ledger::UsagePricing>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3260,6 +3273,22 @@ pub(crate) struct ContextPersonalization {
     pub(crate) project_id: RequiredNullable<String>,
     pub(crate) original_sections: Vec<SystemSection>,
     pub(crate) instruction_sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UsageDay {
+    pub(crate) day: String,
+    pub(crate) from_ms: i64,
+    pub(crate) to_ms: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UsageCurrentPrice {
+    pub(crate) provider_id: String,
+    pub(crate) model_id: String,
+    pub(crate) pricing: varin_runtime::catalog::usage_ledger::UsagePricing,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4339,6 +4368,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.thread.usage" => serde_json::from_value::<ThreadUsageParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.usage.summary" => serde_json::from_value::<UsageSummaryParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.model.presentations" => {

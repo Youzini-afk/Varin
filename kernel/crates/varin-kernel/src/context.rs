@@ -392,9 +392,9 @@ impl ContextPreparation for CapacityPreparation {
             if run.epoch != epoch
                 || run.cancel_requested
                 || run.state.terminal()
-                || serde_json::from_value::<ModelSessionConfiguration>(run.configuration.clone())
+                || !serde_json::from_value::<ModelSessionConfiguration>(run.configuration.clone())
                     .map_err(failed)?
-                    != configuration
+                    .same_identity(&configuration)
                 || catalog.head(&run.branch_id).map_err(failed)?
                     != view.binding.history_range.leaf_id
             {
@@ -460,7 +460,7 @@ mod tests {
                 compaction: None, step: 0,
                 history_range: range.clone(),
             },
-            binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+            binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,

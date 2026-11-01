@@ -497,8 +497,10 @@ impl RecoveryPreparation {
                     .as_ref()
                     .map(|active| {
                         Ok::<_, RuntimeError>(
-                            serde_json::to_value(&active.configuration)?
-                                == self.execution.run.configuration
+                            super::usage_ledger::same_configuration(
+                                &serde_json::to_value(&active.configuration)?,
+                                &self.execution.run.configuration,
+                            )
                                 && active.configuration.provider_family == binding.provider_family
                                 && active.configuration.model == binding.model
                                 && active.configuration.configuration_generation

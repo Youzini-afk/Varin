@@ -17,6 +17,20 @@ pub struct SamplingModel {
     pub provider_family: String,
     pub model: String,
     pub max_tokens: u64,
+    /// Price snapshot of the configuration this request dispatches with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<crate::catalog::usage_ledger::UsagePricing>,
+}
+impl SamplingModel {
+    pub(crate) fn usage_attribution(&self) -> crate::catalog::usage_ledger::UsageAttribution {
+        crate::catalog::usage_ledger::UsageAttribution {
+            provider_id: self.provider_id.clone(),
+            provider_family: Some(self.provider_family.clone()),
+            model: self.model.clone(),
+            connection_identity: String::new(),
+            pricing: self.pricing.clone(),
+        }
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

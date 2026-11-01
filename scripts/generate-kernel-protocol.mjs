@@ -19,7 +19,9 @@ const structs = Object.entries(schema.runtimeStructs ?? {}).map(([name, spec]) =
     if (value.optional && type && !type.startsWith("Option<")) type = `Option<${type}>`;
     if (!type) throw new Error(`Unsupported runtime field type ${value.type}`);
     const field = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-    return `    pub ${field}: ${type},`;
+    // Added optional facts that must keep earlier serialized bodies byte-identical when absent.
+    const omit = value.omitWhenAbsent ? `    #[serde(default, skip_serializing_if = "Option::is_none")]\n` : "";
+    return `${omit}    pub ${field}: ${type},`;
   });
   return `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub struct ${name} {\n${fields.join("\n")}\n}\n`;
 }).join("\n");
@@ -57,7 +59,7 @@ const extensionToolNames = ['ExecutionError', 'Outcome', 'Effect', 'Lifetime', '
 const extensionToolsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n'
   + extensionToolNames.map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const extensionModelsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nimport type { ExecutionError, Outcome, Effect, Lifetime, OutputBody, ResolvedMedia, ContentProvenance, LaunchTool } from \'./nested-tools.generated.js\';\n\n'
-  + ["HistoryRange", "ModelOpaqueItem", "ModelToolCall", "ModelToolCompletion", "ModelContent", "ModelConversationItem", "RequestBinding", "RequestOrigin", "RequestView", "ModelUsageReceipt", "ProviderEvent", "FinishReason", "ModelProtocolCall", "ModelProtocolResult", "ModelSessionConfiguration", "TokenizerBinding", "ModelHttpConfiguration", "ResourceActivation", "AgentResourceReference"].map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
+  + ["HistoryRange", "ModelOpaqueItem", "ModelToolCall", "ModelToolCompletion", "ModelContent", "ModelConversationItem", "RequestBinding", "RequestOrigin", "RequestView", "ModelUsageReceipt", "ProviderEvent", "FinishReason", "ModelProtocolCall", "ModelProtocolResult", "ModelSessionConfiguration", "UsagePricing", "UsageLongContextPricing", "TokenizerBinding", "ModelHttpConfiguration", "ResourceActivation", "AgentResourceReference"].map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + avatarTypes + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
 const generated = `/**
  * Generated from \`kernel/protocol/schema.json\`.

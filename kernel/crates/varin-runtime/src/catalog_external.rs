@@ -736,6 +736,7 @@ impl Catalog {
                     v["needsReview"] = json!(true);
                 }
                 put(&tx, "external_turns", &turn_id, &t)?;
+                if terminal(&status) { event(&tx, &turn_id, 0, "usage.updated", json!({}))?; }
                 touch(&tx, &mut v)?;
                 t
             }

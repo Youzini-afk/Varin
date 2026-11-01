@@ -22,6 +22,54 @@ pub struct InferenceBinding {
     pub model_id: String,
     pub configuration_id: String,
     pub executor: InferenceExecutor,
+    /// Host price snapshot frozen at admission for usage attribution; never request identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<usage_ledger::UsagePricing>,
+}
+impl InferenceBinding {
+    pub fn same_identity(&self, other: &Self) -> bool {
+        self == other || {
+            let (mut a, mut b) = (self.clone(), other.clone());
+            a.pricing = None;
+            b.pricing = None;
+            a == b
+        }
+    }
+    fn usage_attribution(&self) -> usage_ledger::UsageAttribution {
+        usage_ledger::UsageAttribution {
+            provider_id: Some(self.provider_id.clone()),
+            // HTTP executors name their wire protocol; native generation uses the model family.
+            provider_family: match &self.executor {
+                InferenceExecutor::Http { api, .. } => Some(api.clone()),
+                InferenceExecutor::LocalComponent { .. } => None,
+            },
+            model: self.model_id.clone(),
+            connection_identity: String::new(),
+            pricing: self.pricing.clone(),
+        }
+    }
+}
+/// Each paid attempt owns a row. The public receipt may aggregate retries, while pricing
+/// and request counts use the individual attempt. Refinement keeps the same row identity.
+fn record_usage(tx: &Transaction<'_>, op: &Operation, i: &Intent, s: &State, attempt_usage: Option<&UsageReceipt>) -> Result<()> {
+    let Some(receipt) = s.receipt.as_ref() else { return Ok(()) };
+    if i.binding.request_kind != InferenceRequestKind::ModelCompute || !s.dispatched {
+        return Ok(());
+    }
+    let mut id = usage_ledger::operation_record_id(&op.id);
+    if s.attempt > 0 { id.push_str(&format!(":attempt:{}", s.attempt)); }
+    if receipt.request_started == Some(false) {
+        // A refinement proving that the transport was never entered withdraws the request.
+        return usage_ledger::retract(tx, &id);
+    }
+    usage_ledger::record(tx, usage_ledger::UsageEntry {
+        id,
+        kind: usage_ledger::UsageKind::Auxiliary,
+        purpose: Some(&i.binding.purpose),
+        run_id: &op.run_id,
+        attribution: &i.binding.usage_attribution(),
+        usage: &attempt_usage.cloned().unwrap_or_else(|| receipt.usage.receipt()),
+    }, usage_ledger::Settlement::Refinable)
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
@@ -172,6 +220,8 @@ struct Intent {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct State {
+    #[serde(default)]
+    attempt: u64,
     dispatched: bool,
     accounted: bool,
     recovered: bool,
@@ -382,7 +432,7 @@ impl Catalog {
                 owned(&op, &p.execution_owner)?;
             }
             let i = intent(&op)?;
-            if i.binding != p.binding || i.request_ref != body.reference {
+            if !i.binding.same_identity(&p.binding) || i.request_ref != body.reference {
                 return Err(conflict());
             }
             return self.inference_status_unfenced(&id, &p.execution_owner);
@@ -649,6 +699,7 @@ impl Catalog {
             Effect::None
         };
         publish(&tx, &mut op, &s, "inference.receipt_pending")?;
+        record_usage(&tx, &op, &i, &s, None)?;
         tx.commit()?;
         self.inference_status(&p.operation_id, &p.execution_owner)
     }
@@ -754,6 +805,7 @@ impl Catalog {
             Effect::Unknown
         };
         publish(&tx, &mut op, &s, "inference.settled")?;
+        record_usage(&tx, &op, &i, &s, attempt_usage)?;
         model_text::settle_parent(&tx,&op)?;
         tx.commit()?;
         self.inference_status(&p.operation_id, &p.execution_owner)
@@ -775,6 +827,7 @@ pub(super) fn kernel_executor_stopped(tx:&Transaction<'_>,operation:&Operation,e
     op.outcome=Some(if s.dispatched {Outcome::Indeterminate}else if op.cancel_requested{Outcome::Cancelled}else{Outcome::Failed});
     op.effect=if s.dispatched{Effect::Unknown}else{Effect::None};
     publish(tx,&mut op,&s,"inference.receipt_pending")?;
+    record_usage(tx,&op,&i,&s,None)?;
     model_text::settle_parent(tx,&op)?;
     Ok(())
 }
@@ -813,6 +866,7 @@ pub(crate) fn recover(tx: &Transaction<'_>, op: &mut Operation) -> Result<bool> 
         Effect::None
     };
     publish(tx, op, &s, "inference.recovered")?;
+    record_usage(tx, op, &i, &s, None)?;
     model_text::settle_parent(tx,op)?;
     Ok(true)
 }

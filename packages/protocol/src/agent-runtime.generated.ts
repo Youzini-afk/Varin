@@ -115,6 +115,7 @@ export interface InferenceBinding {
   modelId: string;
   configurationId: string;
   executor: InferenceExecutor;
+  pricing?: UsagePricing;
 }
 
 export interface InferenceUsage {
@@ -164,6 +165,38 @@ export interface UsageTokenCount { known: string | null; missing: number; }
 export interface ThreadUsageRow { kind: 'conversation' | 'context' | 'planning' | 'mcp_sampling' | 'auxiliary'; providerId: string | null; providerFamily: string | null; modelId: string; measurement: 'missing' | 'estimated' | 'actual'; requests: number; pendingRequests: number; inputTokens: UsageTokenCount; outputTokens: UsageTokenCount; cachedInputTokens: UsageTokenCount; cacheWriteTokens: UsageTokenCount; reasoningTokens: UsageTokenCount; }
 
 export interface ThreadUsage { threadId: string; branchId: string; throughCursor: number; notDispatchedRequests: number; rows: ThreadUsageRow[]; }
+
+export interface UsagePricing { currency: 'USD'; billing: 'metered' | 'subscription' | 'local'; source: 'directory' | 'custom'; version: string; inputPerMillion?: number; outputPerMillion?: number; cacheReadPerMillion?: number; cacheWritePerMillion?: number; reasoningPerMillion?: number; longContext?: UsageLongContextPricing; contextTiers?: UsageLongContextPricing[]; }
+
+export interface UsageLongContextPricing { aboveInputTokens: number; inputPerMillion?: number; outputPerMillion?: number; cacheReadPerMillion?: number; cacheWritePerMillion?: number; }
+
+export interface UsageDay {
+  day: string;
+  fromMs: number;
+  toMs: number;
+}
+
+export interface UsageCurrentPrice {
+  providerId: string;
+  modelId: string;
+  pricing: UsagePricing;
+}
+
+export interface UsageExternalRow { harness: string; conversationId: string; turnId: string; atMs: number; status: string; usage: { input?: number; output?: number; cachedInput?: number; cacheCreated?: number; inputIncludesCache?: boolean; scope?: 'turn' | 'last_request' | 'conversation'; } | null; }
+
+export interface UsageSummaryParams {
+  fromMs: number;
+  toMs: number;
+  utcOffsetMinutes: number;
+  days?: UsageDay[];
+  currentPrices?: UsageCurrentPrice[];
+}
+
+export interface UsageSummaryRow { day: string; kind: 'conversation' | 'context' | 'retrieval' | 'planning' | 'mcp_sampling' | 'auxiliary'; purpose: string | null; providerId: string | null; providerFamily: string | null; modelId: string; billing: 'metered' | 'subscription' | 'local' | null; priced: boolean; priceSources: ('directory' | 'custom')[]; measurement: 'missing' | 'estimated' | 'actual'; requests: number; inputTokens: UsageTokenCount; outputTokens: UsageTokenCount; cachedInputTokens: UsageTokenCount; cacheWriteTokens: UsageTokenCount; reasoningTokens: UsageTokenCount; completeInputTokens: UsageTokenCount; costUsd: number; costUnknownRequests: number; cacheSavedUsd: number; referenceUsd: number; currentPriceRequests: number; prices: UsagePricing[]; }
+
+export interface UsageSummaryThread { day: string; threadId: string; title: string | null; deleted: boolean; requests: number; tokens: UsageTokenCount; costUsd: number; costUnknownRequests: number; }
+
+export interface UsageSummary { throughCursor: number; recordingStartedAtMs: number | null; rows: UsageSummaryRow[]; threads: UsageSummaryThread[]; external: UsageExternalRow[]; }
 
 export interface InferenceGenerateParams {
   parentOperationId: string;
@@ -249,7 +282,7 @@ export interface McpSamplingBodies { editedRequest: Record<string, unknown> | nu
 
 export interface McpSamplingResult { role: 'assistant'; model: string; content: { type: 'text'; text: string } | { type: 'text'; text: string }[]; stopReason?: string; }
 
-export interface McpSamplingGeneration { operationId: string; phase: OperationPhase; outcome: Outcome | null; cancelRequested: boolean; dispatch: 'not_started' | 'started' | 'completed' | 'interrupted'; model: { providerId: string | null; providerFamily: string; model: string; maxTokens: number } | null; usage: { measurement: 'missing' | 'estimated' | 'actual'; inputTokens: number | null; outputTokens: number | null; cachedInputTokens: number | null; cacheWriteTokens: number | null; reasoningTokens: number | null; pricingVersion: string | null }; problem: string | null; }
+export interface McpSamplingGeneration { operationId: string; phase: OperationPhase; outcome: Outcome | null; cancelRequested: boolean; dispatch: 'not_started' | 'started' | 'completed' | 'interrupted'; model: { providerId: string | null; providerFamily: string; model: string; maxTokens: number; pricing?: UsagePricing } | null; usage: { measurement: 'missing' | 'estimated' | 'actual'; inputTokens: number | null; outputTokens: number | null; cachedInputTokens: number | null; cacheWriteTokens: number | null; reasoningTokens: number | null; pricingVersion: string | null }; problem: string | null; }
 
 export interface McpSamplingState { generationOperationId: string | null; review: 'request' | 'output' | 'closed'; }
 
@@ -2223,6 +2256,7 @@ export interface ModelSessionConfiguration {
   contextWindowTokens?: number;
   thinkingLevel?: string;
   modelOptions?: unknown;
+  pricing?: UsagePricing;
 }
 
 export interface RunStartReceipt {

@@ -5,6 +5,7 @@ export const BUILTIN_SETTINGS_EXTENSION_ID = 'varin.builtin.settings';
 export type BuiltinSettingsRenderer =
   | 'history'
   | 'storage'
+  | 'usage'
   | 'work-connections'
   | 'network'
   | 'access'
@@ -58,6 +59,7 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
   spec({ slug: 'access', title: 'Devices and access', titleKey: 'settings.page.access.title', group: 'connections', kind: 'single', icon: 'shield-check', order: 3, keywords: ['devices', 'access', 'password', 'passkey', 'security', 'lan', 'pairing', 'revoke'] }, 'access'),
   spec({ slug: 'images', title: 'Image generation and editing', titleKey: 'settings.page.images.title', group: 'harness', kind: 'single', icon: 'file-image', order: 7, keywords: ['image generation and editing'] }, 'images'),
   spec({ slug: 'model-connections', title: 'Model channels', titleKey: 'settings.models.title', group: 'harness', kind: 'single', icon: 'cloud', order: 0, keywords: ['models', 'channels', 'credentials', 'api', '模型', '渠道'] }, 'model-connections'),
+  spec({ slug: 'usage', title: 'Usage', titleKey: 'usage.title', group: 'harness', kind: 'single', icon: 'bar-chart-2', order: 0.5, keywords: ['usage', 'cost', 'tokens', '用量', '费用', 'cache'] }, 'usage'),
   spec({ slug: 'mcp-connections', title: 'MCP', titleKey: 'settings.mcp.title', group: 'connections', kind: 'single', icon: 'plug-2', order: 5, keywords: ['mcp', 'servers', 'tools', 'oauth'] }, 'mcp-connections'),
   spec({ slug: 'agent-memory', title: 'Memory', titleKey: 'assistant.memory.title', group: 'harness', kind: 'single', icon: 'database-2', order: 4, keywords: ['memory', 'global', 'project', 'session'] }, 'agent-memory'),
   spec({ slug: 'agent-prompt', title: 'System prompt', titleKey: 'assistant.prompt.title', group: 'harness', kind: 'single', icon: 'file-text', order: 3, keywords: ['prompt', 'instructions', 'style', 'autonomy'] }, 'agent-prompt'),

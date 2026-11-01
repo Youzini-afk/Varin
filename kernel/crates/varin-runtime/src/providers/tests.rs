@@ -137,7 +137,7 @@ fn view(family: &str) -> RequestView {
                 leaf_id: None,
             },
         },
-        binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

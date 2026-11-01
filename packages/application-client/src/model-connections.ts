@@ -27,6 +27,16 @@ export type ConnectionAuthentication =
   | { kind: 'anthropic-federation'; identityTokenFile: string; organizationId: string; federationRuleId: string; serviceAccountId?: string; workspaceId?: string };
 import type { ModelThinkingConfiguration } from '@varin/protocol';
 export type { ModelThinkingEffort, ModelThinkingConfiguration } from '@varin/protocol';
+/** USD per million tokens. Omitted prices are unknown; zero is an explicit free price. */
+export interface ModelPricing {
+  inputPerMillion?: number;
+  outputPerMillion?: number;
+  cacheReadPerMillion?: number;
+  cacheWritePerMillion?: number;
+  reasoningPerMillion?: number;
+  longContext?: { aboveInputTokens: number; inputPerMillion?: number; outputPerMillion?: number; cacheReadPerMillion?: number; cacheWritePerMillion?: number };
+  contextTiers?: NonNullable<ModelPricing['longContext']>[];
+}
 export interface ChannelModel {
   tokenizer?: ModelTokenizer;
   id: string;
@@ -39,6 +49,8 @@ export interface ChannelModel {
   input?: ('text' | 'image')[];
   contextWindow?: number;
   maxOutputTokens?: number;
+  pricing?: ModelPricing;
+  billing?: 'metered' | 'subscription' | 'local';
   reasoning?: boolean;
   thinking?: ModelThinkingConfiguration;
   thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
@@ -50,12 +62,12 @@ export interface ChannelModel {
   catalog?: { source?: 'service'; overrides: ModelCatalogField[]; match?: { requestModelId: string; protocol?: string } };
 }
 export type ModelCatalogField = Exclude<keyof ChannelModel, 'id' | 'enabled' | 'catalog'>;
-export const MODEL_CATALOG_FIELDS: readonly ModelCatalogField[] = ['name', 'protocol', 'requestModelId', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat', 'image', 'decision', 'tokenizer'];
+export const MODEL_CATALOG_FIELDS: readonly ModelCatalogField[] = ['name', 'protocol', 'requestModelId', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'pricing', 'billing', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat', 'image', 'decision', 'tokenizer'];
 export interface ModelDirectoryStatus { revision: string; updatedAt?: number; refreshing: boolean; issue?: 'cache-unavailable' | 'refresh-failed' | 'partial-refresh' | 'cache-write-failed' }
 export interface ModelDirectorySnapshot { models: ChannelModel[]; status: ModelDirectoryStatus }
 /** Resolve metadata for these model identities without exposing channel credentials. */
 export type ModelMetadataRequest = Pick<ChannelModel, 'id'> & Partial<Pick<ChannelModel, 'requestModelId' | 'protocol' | 'operations'>>;
-const inferredModelFields = ['contextWindow', 'maxOutputTokens', 'input', 'reasoning', 'thinking', 'thinkingLevelMap', 'tokenizer', 'compat'] as const;
+const inferredModelFields = ['contextWindow', 'maxOutputTokens', 'pricing', 'input', 'reasoning', 'thinking', 'thinkingLevelMap', 'tokenizer', 'compat'] as const;
 
 export function applyModelDirectoryDefaults(model: ChannelModel, defaults?: ChannelModel): ChannelModel {
   const match = { requestModelId: model.requestModelId ?? model.id, ...(model.protocol ? { protocol: model.protocol } : {}) };

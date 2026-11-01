@@ -157,7 +157,7 @@ export function createImageRuntime(options: {
           for (const [key, value] of Object.entries(auth?.auth.headers ?? {})) if (value !== null) headers.set(key, value);
           if (auth?.auth.apiKey && !headers.has('authorization')) headers.set('authorization', `Bearer ${auth.auth.apiKey}`);
           const response = await inference.request({ binding: { requestKind: 'model_compute', purpose: `image-${config.purpose}`, providerId: config.model.providerId,
-            modelId: config.model.modelId, configurationId: config.configurationId, executor: { kind: 'http', api: provider.api, endpoint: wire.url, credentialScope: provider.credentialScope } },
+            modelId: config.model.modelId, configurationId: config.configurationId, ...(provider.pricing ? { pricing: provider.pricing } : {}), executor: { kind: 'http', api: provider.api, endpoint: wire.url, credentialScope: provider.credentialScope } },
             request: wire.input, destination: wire.url, init: { ...wire.init, headers, signal: call.signal }, connection: await options.egress.prepare(wire.url, provider.egressOverride),
             check: async signal => { signal.throwIfAborted(); await provider.assertAvailable(); },
             onReceipt: receipt => { started ||= receipt.requestStarted === true; completed ||= receipt.providerCompleted; },

@@ -300,6 +300,7 @@ fn fixture_with_reviews(budget: u64, additional_reviews: bool) -> Fixture {
             provider_family: "openai-responses".into(),
             model: "fixture".into(),
             max_tokens: 32,
+            pricing: None,
         },
         body,
     )
@@ -385,6 +386,16 @@ fn sampling_actual_usage_is_measured_once_on_the_existing_goal() {
     drop(f.db);
     f.db = Catalog::open(&root).unwrap();
     assert_eq!(serde_json::to_value(goal(&f).usage).unwrap(), before);
+    let rows = ledger(&f.db);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].kind.as_str(), rows[0].provider_family.as_deref(), rows[0].model_id.as_str(), rows[0].requests),
+        ("mcp_sampling", Some("openai-responses"), "fixture", 1));
+    assert_eq!((rows[0].output_tokens.known.as_deref(), rows[0].reasoning_tokens.known.as_deref()), (Some("9"), Some("6")));
+}
+fn ledger(db: &Catalog) -> Vec<varin_runtime::catalog::usage_ledger::UsageSummaryRow> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    db.capture_usage_summary(&varin_runtime::catalog::usage_ledger::UsageSummaryParams {
+        from_ms: now - 86_400_000, to_ms: now + 86_400_000, utc_offset_minutes: 0, days: vec![], current_prices: vec![] }).unwrap().load(&|| false).unwrap().rows
 }
 #[test]
 fn recovery_measures_only_durable_short_sampling_usage_and_never_replays() {
@@ -434,6 +445,11 @@ fn recovery_measures_only_durable_short_sampling_usage_and_never_replays() {
         drop(f.db);
         f.db = Catalog::open(&root).unwrap();
         assert_eq!(serde_json::to_value(goal(&f).usage).unwrap(), before);
+        // The lost request is still one request; only durable checkpoint counts are known.
+        let rows = ledger(&f.db);
+        assert_eq!(rows.iter().map(|row| row.requests).sum::<u64>(), 1);
+        assert_eq!(rows[0].measurement, if checkpoint { UsageMeasurement::Actual } else { UsageMeasurement::Missing });
+        assert_eq!(rows[0].output_tokens.known.as_deref(), checkpoint.then_some("9"));
     }
 }
 

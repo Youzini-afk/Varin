@@ -90,8 +90,14 @@ export const mergeModelMetadataWithLiveModel = (
   const liveOutputLimit = getLiveOutputLimit(model);
   const contextLimit = liveContextLimit ?? metadata?.limit?.context;
   const outputLimit = liveOutputLimit ?? metadata?.limit?.output;
+  const pricing = model.pricing && typeof model.pricing === 'object' ? model.pricing as Record<string, unknown> : undefined;
+  const price = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+  const cost = pricing ? {
+    input: price(pricing.inputPerMillion), output: price(pricing.outputPerMillion),
+    cache_read: price(pricing.cacheReadPerMillion), cache_write: price(pricing.cacheWritePerMillion),
+  } : metadata?.cost;
 
-  if (contextLimit === undefined && outputLimit === undefined) return metadata;
+  if (contextLimit === undefined && outputLimit === undefined && !cost) return metadata;
 
   return {
     ...(metadata ?? {
@@ -99,6 +105,7 @@ export const mergeModelMetadataWithLiveModel = (
       providerId,
       name: typeof model.name === 'string' ? model.name : undefined,
     }),
+    ...(cost ? { cost } : {}),
     limit: {
       ...metadata?.limit,
       ...(contextLimit !== undefined ? { context: contextLimit } : {}),

@@ -503,6 +503,21 @@ fn bot_scope_delete_retains_shared_history_atomically_then_removes_only_original
     assert!(db.inspect_thread("unrelated").is_ok());
     db.remove_bot_scope(&suspension(2)).unwrap();
 }
+#[test]
+fn bot_scope_delete_keeps_the_usage_of_its_removed_conversations() {
+    use crate::catalog::usage_ledger::fixture::{completed_conversation, summary};
+    let f = Fixture::new(); let mut db = f.open(); let input = bot_submit(&mut db);
+    completed_conversation(&mut db, &input.run_id, "bot-request");
+    let before = summary(&db);
+    assert_eq!(before.threads.iter().map(|thread| (thread.thread_id.as_str(), thread.deleted)).collect::<Vec<_>>(), [("thread", false)]);
+    db.publish_bot_gate(gate(2, false)).unwrap(); db.suspend_bot_scope(suspension(2)).unwrap();
+    db.remove_bot_scope(&suspension(2)).unwrap();
+    assert!(db.inspect_thread("thread").is_err());
+    let after = summary(&db);
+    assert_eq!(after.rows, before.rows);
+    assert_eq!(after.threads.iter().map(|thread| (thread.thread_id.as_str(), thread.title.clone(), thread.deleted, thread.requests)).collect::<Vec<_>>(),
+        [("thread", None, true, 1)]);
+}
 
 #[test]
 fn bot_session_input_stays_in_its_own_session_and_scope_lists_sessions_in_order() {

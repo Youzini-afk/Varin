@@ -6,8 +6,10 @@ import { settingsDict } from './zh-TW.settings';
 import { toolMessagesZhTW } from './tool-interactions';
 
 import { companionLibraryMessages } from './companion-library';
+import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...usageMessages('zh-TW'),
   ...companionLibraryMessages('zh-TW'),
   "contextManager.resourceVersion": "固定資源版本：{version}",
   "contextManager.checkpointVersion": "上下文檢查點：{id} · 修訂 {revision}",

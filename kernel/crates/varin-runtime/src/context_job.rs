@@ -590,7 +590,9 @@ pub fn text_compaction_launch(
         extension_bindings: Vec::new(),
         mcp_binding: None,
         credential_scope: scope,
-        connection_identity: crate::context_material::hash(configuration)?,
+        connection_identity: crate::context_material::hash(
+            &crate::catalog::usage_ledger::configuration_identity(configuration),
+        )?,
         provider_family: "context_compaction_text".into(),
         model: model.into(),
         configuration_generation: 0,
@@ -603,7 +605,7 @@ pub fn text_compaction_launch(
 pub fn text_compaction_start(selection: &crate::catalog::launches::LaunchSelection) -> RunStart {
     RunStart {
         context_preparation: Arc::new(NoopContextPreparation),
-        binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

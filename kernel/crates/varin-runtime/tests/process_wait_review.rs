@@ -162,7 +162,7 @@ impl Fixture {
             ancestor_id: None,
             leaf_id: self.db.head("branch").unwrap(),
         };
-        let binding = RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        let binding = RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

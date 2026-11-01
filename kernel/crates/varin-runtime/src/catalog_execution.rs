@@ -888,6 +888,8 @@ pub(super) struct PreparedExecutionBodies {
     admitted: std::collections::HashMap<String, ToolIntent>,
     frozen_history_range: Option<HistoryRange>,
     frozen_goal: Option<goals::FrozenGoal>,
+    /// Ledger attribution of the frozen conversation request; None for mirrored origins.
+    request_usage: Option<super::usage_ledger::FrozenRequest>,
     memory_deliveries: Option<super::memory::PreparedMemoryDeliveries>,
     history: std::collections::HashMap<String, Value>,
     originals: Option<Vec<ProviderOriginal>>,
@@ -1125,6 +1127,7 @@ impl ExecutionBodyPreparation {
             calls,
             admitted,
             frozen_goal: snapshot.as_ref().and_then(|s| s.view.binding.goal.clone()),
+            request_usage: snapshot.as_ref().and_then(|s| super::usage_ledger::frozen_request(&s.view)),
             frozen_history_range,
             memory_deliveries,
             history,
@@ -1198,6 +1201,7 @@ impl Catalog {
             admitted: prepared_admitted,
             frozen_history_range,
             frozen_goal,
+            request_usage,
             memory_deliveries,
             history: prepared_history,
             originals: prepared_originals,
@@ -1481,6 +1485,7 @@ impl Catalog {
                     })?,
                     original: vec![],
                     usage: None,
+                    frozen_usage: None,
                 };
                 tx.execute(
                     "INSERT INTO model_steps(id,run_id,state,body,node_id) VALUES(?1,?2,'prepared',?3,?4)",
@@ -1520,6 +1525,10 @@ impl Catalog {
                 if let Some(goal) = &step.goal {
                     goals::dispatched(&tx, goal)?;
                 }
+                step.frozen_usage = request_usage
+                    .as_ref()
+                    .map(|frozen| super::usage_ledger::step_usage(&tx, &run, frozen))
+                    .transpose()?;
                 step.state = ModelStepState::Dispatched;
                 put(&tx, "model_steps", request_id, &step)?;
                 tx.execute(
@@ -1577,6 +1586,11 @@ impl Catalog {
                 })?;
                 goals::measured(&tx, step.goal.as_ref(), usage)?;
                 step.usage = Some(serde_json::to_value(usage)?);
+                if let Some(frozen) = &request_usage {
+                    let frozen = super::usage_ledger::step_usage(&tx, &run, frozen)?;
+                    super::usage_ledger::record_step(&tx, &step, &frozen, usage)?;
+                    step.frozen_usage = Some(frozen);
+                }
                 put(&tx, "model_steps", request_id, &step)?;
                 tx.execute(
                     "UPDATE model_steps SET state=?2 WHERE id=?1",
@@ -2471,6 +2485,9 @@ impl Catalog {
             if step.state == ModelStepState::Dispatched && step.usage.is_none() {
                 let usage = UsageReceipt::default();
                 super::goals::measured(&tx, step.goal.as_ref(), &usage)?;
+                if let Some(frozen) = &step.frozen_usage {
+                    super::usage_ledger::record_step(&tx, &step, frozen, &usage)?;
+                }
                 step.usage = Some(serde_json::to_value(usage)?);
             }
             if step.state == ModelStepState::Prepared {
@@ -2542,6 +2559,10 @@ impl Catalog {
             return Ok(());
         }
         goals::measured(&tx, step.goal.as_ref(), usage)?;
+        // The rejected receipt is still the dispatched request's original usage.
+        if let Some(frozen) = &step.frozen_usage {
+            super::usage_ledger::record_step(&tx, &step, frozen, usage)?;
+        }
         step.original = originals;
         step.usage = Some(serde_json::to_value(usage)?);
         put(&tx, "model_steps", request_id, &step)?;

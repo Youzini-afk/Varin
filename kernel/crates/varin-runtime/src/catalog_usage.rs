@@ -1,4 +1,5 @@
-//! Read-only usage over original branch execution records. No derived billing ledger.
+//! Read-only branch usage over original execution records. Host-wide usage that must outlive
+//! deleted conversations is the separate `usage_ledger`, written when each receipt settles.
 use super::*;
 use crate::execution::{RequestOrigin, UsageMeasurement, UsageReceipt};
 use serde::Deserialize;
@@ -130,16 +131,25 @@ impl Catalog {
     }
 }
 #[derive(Default)]
-struct Counter { known: Option<u128>, missing: u64 }
+pub(super) struct Counter { known: Option<u128>, missing: u64 }
 impl Counter {
-    fn add(&mut self, value: Option<u64>) -> Result<()> {
+    pub(super) fn add(&mut self, value: Option<u64>) -> Result<()> {
         if let Some(value) = value {
             self.known = Some(self.known.unwrap_or(0).checked_add(u128::from(value))
                 .ok_or_else(|| RuntimeError::Invalid("usage counter overflow".into()))?);
         } else { self.missing += 1; }
         Ok(())
     }
-    fn finish(self) -> UsageTokenCount { UsageTokenCount { known: self.known.map(|value| value.to_string()), missing: self.missing } }
+    /// Parts of one request: reported parts still count; any unreported part marks it missing.
+    pub(super) fn add_sum(&mut self, parts: &[Option<u64>]) -> Result<()> {
+        for value in parts.iter().flatten() {
+            self.known = Some(self.known.unwrap_or(0).checked_add(u128::from(*value))
+                .ok_or_else(|| RuntimeError::Invalid("usage counter overflow".into()))?);
+        }
+        if parts.iter().any(Option::is_none) { self.missing += 1; }
+        Ok(())
+    }
+    pub(super) fn finish(self) -> UsageTokenCount { UsageTokenCount { known: self.known.map(|value| value.to_string()), missing: self.missing } }
 }
 struct Aggregate {
     kind: String, provider_id: Option<String>, provider_family: Option<String>, model_id: String,

@@ -261,6 +261,7 @@ fn prepare_and_generate(
         max_tokens: configuration
             .max_output_tokens
             .unwrap_or(request.max_tokens),
+        pricing: configuration.pricing,
     };
     let prep = owner
         .lock()

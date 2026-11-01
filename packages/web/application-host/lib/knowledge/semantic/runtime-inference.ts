@@ -19,6 +19,7 @@ import { ExistingHostCredentialOwner, type CredentialScope, type ExistingModelAu
 import { acquireTokenCounter } from '../../models/token-count.js';
 
 export interface SemanticProviderBinding {
+  pricing?: import('../../kernel/protocol.generated.js').UsagePricing;
   providerId: string;
   modelId: string;
   baseUrl: string;
@@ -290,7 +291,7 @@ export function createSemanticInference(
                 return call.request({ binding: { requestKind: 'model_compute', purpose: params.purpose === 'document'
                   ? params.domain === 'knowledge' ? 'knowledge-document-embedding' : 'code-retrieval-document-embedding'
                   : params.domain === 'knowledge' ? 'knowledge-query-embedding' : 'code-retrieval-query-embedding',
-                  providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
+                  providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId, ...(provider.pricing ? { pricing: provider.pricing } : {}),
                   executor: { kind: 'http', api: binding.protocol, endpoint: destination, credentialScope: identity.credentialScope } },
                   request: { purpose: params.purpose, wire: JSON.parse(init.body) }, destination, init, connection,
                   prepareHeaders: async active => {

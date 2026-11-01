@@ -151,6 +151,26 @@ test('Host channels bind independently to Rust model configuration and anonymous
   } finally { restored.release(); accepted.credentialOwner.release(); }
 });
 
+test('prices bind to new requests without rebinding execution or changing an accepted price snapshot', async () => {
+  const { models } = await fixture();
+  const selected = channel(); selected.models[0]!.pricing = { inputPerMillion: 1, outputPerMillion: 3 }; selected.models[0]!.billing = 'metered';
+  const saved = await models.save(selected, (await models.read()).revision);
+  const authority = createModelAuthority(models), first = await authority.resolveModel({ providerId: selected.id, modelId: 'chat' });
+  try {
+    const before = first.configuration.configurationGeneration;
+    selected.models[0]!.pricing = { inputPerMillion: 2, outputPerMillion: 4 };
+    await models.save(selected, saved.revision);
+    const next = await authority.resolveModel({ providerId: selected.id, modelId: 'chat' });
+    try {
+      expect(next.configuration.configurationGeneration).toBe(before);
+      expect(first.configuration.pricing).toMatchObject({ inputPerMillion: 1, outputPerMillion: 3, source: 'custom' });
+      expect(next.configuration.pricing).toMatchObject({ inputPerMillion: 2, outputPerMillion: 4 });
+      expect(next.configuration.pricing?.version).not.toBe(first.configuration.pricing?.version);
+      const rebound = await authority.rebindModel(first.configuration, await first.credentialOwner.scope()); rebound.release();
+    } finally { next.credentialOwner.release(); }
+  } finally { first.credentialOwner.release(); }
+});
+
 test('one invalid channel stays visible as an issue, leaves independent channels usable and never rewrites the source', async () => {
   const { models, directory } = await fixture();
   await models.save(channel(), (await models.read()).revision);

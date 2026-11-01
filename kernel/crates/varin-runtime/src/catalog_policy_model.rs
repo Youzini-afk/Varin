@@ -31,6 +31,23 @@ pub(crate) fn model_result(op: &Operation) -> Result<PolicyModelResult> {
     }
     Ok(result)
 }
+/// A dispatched planning request is one ledger row, written with its single final receipt.
+pub(crate) fn record_usage(tx: &Transaction<'_>, op: &Operation, result: &PolicyModelResult) -> Result<()> {
+    let (Some(receipt), Some(attribution)) = (&result.receipt, &result.usage_attribution) else {
+        return Ok(());
+    };
+    if receipt.dispatch == PolicyModelDispatch::Prepared {
+        return Ok(());
+    }
+    super::usage_ledger::record(tx, super::usage_ledger::UsageEntry {
+        id: super::usage_ledger::operation_record_id(&op.id),
+        kind: super::usage_ledger::UsageKind::Planning,
+        purpose: None,
+        run_id: &op.run_id,
+        attribution,
+        usage: &receipt.usage,
+    }, super::usage_ledger::Settlement::Final)
+}
 
 /// Captured under Catalog ownership; body reads do not retain the metadata mutex.
 pub(crate) struct PolicyModelRead {
@@ -325,6 +342,7 @@ impl Catalog {
             request_ref: reference,
             original_ref: None,
             receipt: None,
+            usage_attribution: Some(super::usage_ledger::UsageAttribution::of_binding(&snapshot.view.binding)),
         };
         let op = Operation {
             host_job: None,
@@ -605,7 +623,9 @@ impl Catalog {
         op.revision += 1;
         let tx = self.db.transaction()?;
         if let Some(receipt) = receipt {
-            goals::measured(&tx, model_result(&op)?.goal.as_ref(), &receipt.usage)?;
+            let settled = model_result(&op)?;
+            goals::measured(&tx, settled.goal.as_ref(), &receipt.usage)?;
+            record_usage(&tx, &op, &settled)?;
         }
         put(&tx, "operations", action, &op)?;
         if receipt.is_some_and(|receipt| receipt.usable) {

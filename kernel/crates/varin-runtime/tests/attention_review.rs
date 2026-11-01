@@ -357,7 +357,7 @@ fn finish_round(db: &mut Catalog, thread: &str, branch: &str, text: Option<&str>
                     run_id: run.clone(),
                     origin: RequestOrigin::Conversation { compaction: None, step: 1, history_range: range.clone() },
                     binding: RequestBinding {
-                        tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+                        pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                         provider_id: None, tokenizer: None, request_context: None, child_dispatch: None, goal: None,
                         resource_activations: vec![], resource_checkpoint_id: None,
                         connection_identity: "fixture".into(), provider_family: "fixture".into(), model: "fixture".into(),
@@ -485,7 +485,7 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
                     leaf_id: Some(receipt.input_id.clone()),
                 },
             },
-            binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+            binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,

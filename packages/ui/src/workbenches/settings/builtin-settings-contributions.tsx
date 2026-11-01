@@ -2,6 +2,7 @@ import { WorkConnectionsPage } from '@/components/sections/connections/WorkConne
 import { ExternalAgentsPage } from '@/components/sections/external-agents/ExternalAgentsPage';
 import { AccessSettingsPage, HistorySettingsPage, NetworkSettingsPage } from '@/components/sections/connections/SettingsUtilityPages';
 import { StorageSettingsPage } from '@/components/sections/storage/StorageSettingsPage';
+import { UsageSettingsPage } from '@/components/sections/usage/UsageSettingsPage';
 import { HarnessSettingsPage } from '@/components/sections/harness/HarnessSettingsPage';
 import type { SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentMemoryPage } from '@/components/sections/assistant/AgentMemoryPage';
@@ -43,6 +44,7 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'external-agents': implementation = { renderContent: () => <ExternalAgentsPage /> }; break;
       case 'history': implementation = { renderContent: () => <HistorySettingsPage /> }; break;
       case 'storage': implementation = { renderContent: () => <StorageSettingsPage /> }; break;
+      case 'usage': implementation = { renderContent: () => <UsageSettingsPage /> }; break;
       case 'work-connections': implementation = { renderContent: () => <WorkConnectionsPage /> }; break;
       case 'network': implementation = { renderContent: () => <NetworkSettingsPage /> }; break;
       case 'access': implementation = { renderContent: () => <AccessSettingsPage /> }; break;

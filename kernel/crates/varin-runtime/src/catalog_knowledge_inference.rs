@@ -158,7 +158,7 @@ pub(super) fn validate_request(
     };
     if native
         || p.ordinal != 1
-        || p.binding != frozen.binding
+        || !p.binding.same_identity(&frozen.binding)
         || body.input_fingerprint.as_ref() != Some(&frozen.input_fingerprint)
         || p.request["purpose"] != expected_purpose
         || (if matches!(frozen.binding.executor, inference::InferenceExecutor::LocalComponent { .. }) {

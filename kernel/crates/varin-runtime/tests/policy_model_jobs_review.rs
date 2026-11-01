@@ -34,7 +34,7 @@ impl Fixture {
                 configuration: json!({}),
             })
             .unwrap();
-        let binding = RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        let binding = RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -748,6 +748,15 @@ fn usage_missing_is_not_zero_and_provider_usage_fields_survive() {
             assert!(value["input_tokens"].is_null());
             assert!(value["output_tokens"].is_null());
         }
+        // The planning request is one ledger request; unreported usage stays missing.
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let rows = f.db.lock().unwrap().capture_usage_summary(&varin_runtime::catalog::usage_ledger::UsageSummaryParams {
+            from_ms: now - 86_400_000, to_ms: now + 86_400_000, utc_offset_minutes: 0, days: vec![], current_prices: vec![] }).unwrap().load(&|| false).unwrap().rows;
+        let planning: Vec<_> = rows.iter().filter(|row| row.kind == "planning").collect();
+        assert_eq!((planning.len(), planning[0].requests, planning[0].purpose.clone()), (1, 1, None));
+        assert_eq!(planning[0].measurement, if usage { varin_runtime::execution::UsageMeasurement::Actual } else { varin_runtime::execution::UsageMeasurement::Missing });
+        assert_eq!(planning[0].reasoning_tokens.known.as_deref(), usage.then_some("3"));
+        assert_eq!(planning[0].input_tokens.missing, u64::from(!usage));
     }
 }
 

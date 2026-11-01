@@ -76,6 +76,28 @@ mod tests {
     }
 
     #[test]
+    fn deleted_conversation_usage_survives_retirement_and_loses_only_its_title() {
+        use crate::catalog::usage_ledger::fixture::{completed_conversation, summary};
+        let root = Fixture::new(); let mut db = root.open();
+        let removed = submit(&mut db, "removed", "paid question");
+        let kept = submit(&mut db, "kept", "another paid question");
+        completed_conversation(&mut db, &removed.run_id, "removed-request");
+        completed_conversation(&mut db, &kept.run_id, "kept-request");
+        let before = summary(&db);
+        delete(&mut db, "removed");
+        let (retired, pending) = retire(&mut db).unwrap();
+        assert!(retired > 0); assert_eq!(pending, 0);
+        assert!(matches!(db.run(&removed.run_id), Err(RuntimeError::NotFound(_))));
+        let after = summary(&db);
+        assert_eq!(after.rows, before.rows, "the request and its estimated cost remain");
+        let threads: Vec<_> = after.threads.iter().map(|thread| (thread.thread_id.as_str(), thread.title.is_some(), thread.deleted, thread.requests)).collect();
+        assert_eq!(threads, [("kept", true, false, 1), ("removed", false, true, 1)]);
+        assert_eq!(before.threads.iter().filter(|thread| thread.title.is_some() && !thread.deleted).count(), 2);
+        drop(db);
+        assert_eq!(summary(&root.open()).rows, before.rows);
+    }
+
+    #[test]
     fn deletion_waits_for_the_original_run_to_finish() {
         let root = Fixture::new(); let mut db = root.open();
         let receipt = submit(&mut db, "running", "accepted work");

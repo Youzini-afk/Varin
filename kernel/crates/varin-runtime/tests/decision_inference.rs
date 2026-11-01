@@ -14,12 +14,51 @@ struct Fixture {
     run: String,
     context: ToolExecutionContext,
     owner: ExecutorOwner,
+    pricing: Option<catalog::usage_ledger::UsagePricing>,
 }
 fn record(db: &mut Catalog, run: &str, value: ExecutionRecord) {
     db.commit_execution(run, db.epoch(), &value).unwrap();
 }
+fn price_snapshot() -> serde_json::Value {
+    json!({"currency":"USD","billing":"metered","source":"directory","version":"models.dev:fixture","inputPerMillion":2.0,"outputPerMillion":8.0})
+}
+fn decide_call() -> ToolCall {
+    ToolCall {
+        call_id: "decide".into(),
+        name: "classify_material".into(),
+        schema_version: "1".into(),
+        arguments: json!({"goal":"Judge original"}),
+    }
+}
+fn first_model_receipt() -> ExecutionRecord {
+    ExecutionRecord::ModelFinished {
+        request_id: "request".into(),
+        outcome: ModelOutcome::Completed,
+        finish_reason: Some(FinishReason::ToolCalls),
+        items: vec![ProviderItem {
+            id: "tool".into(),
+            opaque: None,
+            content: Content::ToolCall { call: decide_call() },
+        }],
+        interrupted_deltas: vec![],
+        usage: UsageReceipt {
+            measurement: UsageMeasurement::Actual,
+            input_tokens: Some(3),
+            output_tokens: Some(2),
+            ..Default::default()
+        },
+        failure: None,
+    }
+}
 impl Fixture {
     fn new(budget: u64) -> Self {
+        Self::build(budget, None)
+    }
+    /// The Host froze a price snapshot and channel into the conversation and inference bindings.
+    fn priced(budget: u64) -> Self {
+        Self::build(budget, Some(price_snapshot()))
+    }
+    fn build(budget: u64, pricing: Option<serde_json::Value>) -> Self {
         let root =
             std::env::temp_dir().join(format!("varin-decision-ledger-{}", uuid::Uuid::new_v4()));
         let mut db = Catalog::open(&root).unwrap();
@@ -71,15 +110,16 @@ impl Fixture {
             ancestor_id: None,
             leaf_id: db.head("branch").unwrap(),
         };
-        let binding:RequestBinding=serde_json::from_value(json!({"child_dispatch":null,"goal":db.goal_binding(&run).unwrap(),"resource_activations":[],"resource_checkpoint_id":null,
+        let mut binding = json!({"child_dispatch":null,"goal":db.goal_binding(&run).unwrap(),"resource_activations":[],"resource_checkpoint_id":null,
             "connection_identity":"fixture","provider_family":"fixture","model":"fixture","credential_ref":null,"configuration_generation":1,"tool_schema_generation":1,
-            "tools":[schema],"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":range})).unwrap();
-        let call = ToolCall {
-            call_id: "decide".into(),
-            name: "classify_material".into(),
-            schema_version: "1".into(),
-            arguments: json!({"goal":"Judge original"}),
-        };
+            "tools":[schema],"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":range});
+        if let Some(pricing) = &pricing {
+            binding["pricing"] = pricing.clone();
+            binding["provider_id"] = json!("channel:original");
+            binding["provider_family"] = json!("openai-responses");
+        }
+        let binding: RequestBinding = serde_json::from_value(binding).unwrap();
+        let call = decide_call();
         record(
             &mut db,
             &run,
@@ -106,28 +146,7 @@ impl Fixture {
                 request_id: "request".into(),
             },
         );
-        record(
-            &mut db,
-            &run,
-            ExecutionRecord::ModelFinished {
-                request_id: "request".into(),
-                outcome: ModelOutcome::Completed,
-                finish_reason: Some(FinishReason::ToolCalls),
-                items: vec![ProviderItem {
-                    id: "tool".into(),
-                    opaque: None,
-                    content: Content::ToolCall { call: call.clone() },
-                }],
-                interrupted_deltas: vec![],
-                usage: UsageReceipt {
-                    measurement: UsageMeasurement::Actual,
-                    input_tokens: Some(3),
-                    output_tokens: Some(2),
-                    ..Default::default()
-                },
-                failure: None,
-            },
-        );
+        record(&mut db, &run, first_model_receipt());
         let context = ToolExecutionContext {
             run_id: run.clone(),
             operation_id: "request:tool:decide".into(),
@@ -171,6 +190,7 @@ impl Fixture {
             run,
             context,
             owner,
+            pricing: pricing.map(|pricing| serde_json::from_value(pricing).unwrap()),
         }
     }
     fn admit(&mut self, ordinal: u64) -> InferenceOwnerParams {
@@ -185,6 +205,7 @@ impl Fixture {
                 "credentialScope":{"reference":"provider:fixture","authority":"original-store","account":"original-account","generation":1}}},
             "request":{"materials":[{"snapshotId":"original","text":"原始材料".repeat(5000)}],"questions":[{"id":"a"}]}})).unwrap();
         if let Some(executor) = executor { input.binding.executor = executor; }
+        input.binding.pricing = self.pricing.clone();
         let body = self
             .db
             .prepare_inference_content()
@@ -676,5 +697,98 @@ fn thread_usage_ignores_mirrored_model_steps_and_preserves_large_receipt_totals(
     let estimated = usage.rows.iter().find(|row| row.measurement == UsageMeasurement::Estimated).unwrap();
     assert_eq!(estimated.requests, 1); assert_eq!(estimated.input_tokens.known.as_deref(), Some("9"));
     assert_eq!(estimated.output_tokens.known, None);
+    let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
+}
+
+fn usage_summary(db: &Catalog) -> catalog::usage_ledger::UsageSummary {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    db.capture_usage_summary(&catalog::usage_ledger::UsageSummaryParams {
+        from_ms: now - 86_400_000, to_ms: now + 86_400_000, utc_offset_minutes: 0, days: vec![], current_prices: vec![] }).unwrap().load(&|| false).unwrap()
+}
+
+#[test]
+fn usage_ledger_records_each_original_request_once_with_its_frozen_channel_and_price() {
+    let mut f = Fixture::priced(100);
+    let request = f.admit(2);
+    f.db.dispatch_inference(&request).unwrap();
+    let settled = f.settle(&request, true, Some(4));
+    // Receipt replays confirm the original settlements; neither adds a request.
+    let body = f.db.prepare_inference_content().write(&settled.response).unwrap();
+    f.db.settle_inference(&settled, body).unwrap();
+    let run = f.run.clone();
+    f.db.commit_execution(&run, f.db.epoch(), &first_model_receipt()).unwrap();
+    // A request proven never to have entered its transport is not usage.
+    let not_sent = f.admit(3);
+    f.settle(&not_sent, false, None);
+
+    let summary = usage_summary(&f.db);
+    assert_eq!(summary.rows.len(), 2);
+    let conversation = summary.rows.iter().find(|row| row.kind == "conversation").unwrap();
+    assert_eq!((conversation.purpose.as_deref(), conversation.provider_id.as_deref(), conversation.provider_family.as_deref(), conversation.model_id.as_str()),
+        (None, Some("channel:original"), Some("openai-responses"), "fixture"));
+    assert_eq!((conversation.requests, conversation.billing, conversation.priced, conversation.complete_input_tokens.known.as_deref()),
+        (1, Some(catalog::usage_ledger::UsageBilling::Metered), true, Some("3")));
+    assert!((conversation.cost_usd - (3.0 * 2.0 + 2.0 * 8.0) / 1e6).abs() < 1e-12);
+    let auxiliary = summary.rows.iter().find(|row| row.kind == "auxiliary").unwrap();
+    assert_eq!((auxiliary.purpose.as_deref(), auxiliary.provider_id.as_deref(), auxiliary.provider_family.as_deref(), auxiliary.model_id.as_str()),
+        (Some("web"), Some("fixture"), Some("typesafe-system-one"), "classifier"));
+    assert_eq!((auxiliary.requests, auxiliary.input_tokens.known.as_deref(), auxiliary.output_tokens.known.as_deref()), (1, Some("11"), Some("4")));
+    // This classifier protocol has no complete-input rule, so its price cannot be applied.
+    assert_eq!((auxiliary.priced, auxiliary.cost_unknown_requests, auxiliary.complete_input_tokens.missing), (true, 1, 1));
+    // Both requests belong to the conversation that caused them.
+    let threads: Vec<_> = summary.threads.iter().map(|thread| (thread.thread_id.as_str(), thread.requests, thread.deleted, thread.cost_unknown_requests)).collect();
+    assert_eq!(threads, [("thread", 2, false, 1)]);
+    let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn usage_ledger_keeps_lost_usage_missing_until_the_original_receipt_refines_it() {
+    for started in [true, false] {
+        let mut f = Fixture::priced(100);
+        let request = f.admit(2);
+        f.db.dispatch_inference(&request).unwrap();
+        let root = f.root.clone();
+        drop(f.db);
+        f.db = Catalog::open(&root).unwrap();
+        let auxiliary = |db: &Catalog| usage_summary(db).rows.into_iter().filter(|row| row.kind == "auxiliary").collect::<Vec<_>>();
+        let lost = auxiliary(&f.db);
+        assert_eq!(lost.len(), 1);
+        assert_eq!((lost[0].requests, lost[0].measurement, lost[0].input_tokens.known.as_deref(), lost[0].input_tokens.missing), (1, UsageMeasurement::Missing, None, 1));
+        assert_eq!((lost[0].cost_usd, lost[0].cost_unknown_requests), (0.0, 1));
+        f.settle(&request, started, Some(5));
+        let refined = auxiliary(&f.db);
+        if started {
+            assert_eq!(refined.len(), 1);
+            assert_eq!((refined[0].requests, refined[0].measurement, refined[0].output_tokens.known.as_deref()), (1, UsageMeasurement::Actual, Some("5")));
+        } else {
+            assert!(refined.is_empty(), "the original owner proved the request never entered its transport");
+        }
+        let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn usage_ledger_counts_a_mirrored_model_step_only_through_its_original_operation() {
+    let mut f = Fixture::priced(100);
+    let original = f.db.model_step("request").unwrap().request;
+    let finish = |id: &str| ExecutionRecord::ModelFinished {
+        request_id: id.into(), outcome: ModelOutcome::Failed, finish_reason: None, items: vec![], interrupted_deltas: vec![],
+        usage: UsageReceipt { measurement: UsageMeasurement::Actual, input_tokens: Some(100), output_tokens: Some(1), ..Default::default() },
+        failure: None,
+    };
+    let mut mirrored = original.clone();
+    mirrored["view"]["origin"] = serde_json::to_value(RequestOrigin::AuxiliaryInference {
+        operation_id: "original-inference".into(), parent_operation_id: f.context.operation_id.clone(), purpose: "web".into(),
+    }).unwrap();
+    let run = f.run.clone();
+    for (id, request) in [("mirrored", mirrored), ("retry", original)] {
+        f.db.prepare_model_step(id, &run, f.db.epoch(), request).unwrap();
+        f.db.dispatch_model_step(id, f.db.epoch()).unwrap();
+        f.db.commit_execution(&run, f.db.epoch(), &finish(id)).unwrap();
+    }
+    let summary = usage_summary(&f.db);
+    let conversation = summary.rows.iter().filter(|row| row.kind == "conversation").map(|row| row.requests).sum::<u64>();
+    assert_eq!(conversation, 2, "the original request and its own retry attempt");
+    assert!(summary.rows.iter().all(|row| row.kind == "conversation"), "a mirrored step is never a second paid request");
     let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
 }

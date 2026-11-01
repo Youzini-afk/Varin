@@ -1,9 +1,17 @@
 ---
-title: "Branch token usage"
-description: "Inspect original model receipts for the selected branch."
+title: "Usage and estimated cost"
+description: "Review Host-wide usage and inspect original branch receipts."
 ---
 
-# Branch token usage
+# Usage and estimated cost
+
+Open **Settings → Usage**, directly after **Model services**, to review usage on the connected Agent Host. Choose a period, switch between estimated cost and tokens, select a day, and compare models, channels, purposes or conversations. Dates follow your device's local time zone, including daylight-saving changes. Desktop and web clients can export the filtered details as CSV.
+
+The totals include settled native conversation requests, delegated work and auxiliary requests such as titles, context organization and embeddings. Deleted conversations retain usage totals without conversation content. Dated recording begins when this feature is installed; older branch receipts remain available below.
+
+Prices come from the models.dev directory or your own **Model services → model → Prices and billing** settings, including custom channels and context-length tiers. Each request keeps its price snapshot. Previously unpriced requests can be estimated using current prices and are labeled accordingly. Missing prices or token counts remain visible. Subscription API equivalents and external Agent reports are shown separately from per-token costs; local models have no API charge. Estimates use USD list prices and exclude discounts, relay markups and taxes.
+
+## Branch token usage
 
 Open **Usage** in the header services menu. It reports work executed on the selected Thread branch, grouped by model, provider, work kind and measurement status. This includes conversation, context work, planning, MCP sampling and recorded tool inference.
 

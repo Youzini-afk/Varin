@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { ModelCommonSettings } from './ModelCommonSettings';
 import { ModelApiSettings } from './ModelApiSettings';
 import { ModelTokenizerSettings } from './ModelTokenizerSettings';
+import { ModelPricingSettings } from './ModelPricingSettings';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
@@ -74,6 +75,7 @@ export function ModelConfiguration({ model, type, busy, selected, inheritedImage
         <ModelCommonSettings model={model} disabled={disabled} onChange={next => { setResult(null); setFailure(null); onChange(next); }} validity={validity} />
       </SettingsSection>
       <ModelApiSettings model={model} type={type} disabled={disabled} inheritedImageApi={inheritedImageApi} inheritedDecisionApi={inheritedDecisionApi} inheritedPaths={inheritedPaths} onChange={update} />
+      <ModelPricingSettings model={model} disabled={disabled} onChange={update} validity={validity} />
       <SettingsSection title={t('settings.models.advanced')}>
         {chat ? <ModelTokenizerSettings model={model} disabled={disabled} onChange={update} validity={validity} /> : null}
         {chat && (type.protocols?.length ?? 0) > 1 ? <SettingsFieldRow label={t('settings.models.protocol')}><Select value={protocol} disabled={disabled} onValueChange={value => update({ protocol: value })}><SelectTrigger size="settings" aria-label={t('settings.models.protocol')}><SelectValue /></SelectTrigger><SelectContent>{type.protocols!.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></SettingsFieldRow> : null}

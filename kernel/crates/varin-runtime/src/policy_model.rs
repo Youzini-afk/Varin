@@ -152,6 +152,9 @@ pub struct PolicyModelResult {
     pub request_ref: Value,
     pub original_ref: Option<Value>,
     pub receipt: Option<PolicyModelReceipt>,
+    /// Channel and price of the frozen request, so settlement records usage without its body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_attribution: Option<crate::catalog::usage_ledger::UsageAttribution>,
 }
 #[derive(Debug, Clone)]
 pub struct PolicyModelState {

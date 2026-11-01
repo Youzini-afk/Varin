@@ -6,6 +6,7 @@ export const toModelPickerModel = (model: ChannelModel): ModelPickerEntry['model
   capabilities: { attachment: model.input?.includes('image') ?? false, reasoning: model.reasoning === true, toolcall: true },
   id: model.id, input: model.input ?? ['text'], limit: { context: model.contextWindow, output: model.maxOutputTokens },
   name: model.name, requestModelId: model.requestModelId,
+  ...(model.pricing ? { pricing: model.pricing } : {}),
   variants: Object.fromEntries(modelThinkingLevels(model).map(level => [level, {}])),
 });
 export const toModelPickerProvider = (channel: ModelChannel): ModelPickerProvider => ({

@@ -278,7 +278,7 @@ impl Catalog {
             let previous_configuration = self.run(&receipt.run_id)?.configuration;
             if previous != admission
                 || intent.selection != launch
-                || previous_configuration != configuration
+                || !super::usage_ledger::same_configuration(&previous_configuration, &configuration)
             {
                 return Err(RuntimeError::Conflict(
                     "context job identity has different input".into(),
@@ -612,7 +612,7 @@ impl Catalog {
                     .as_ref()
                     .map(|value| (&value.policy_target, &value.selection.policy));
             if same_policy
-                && original.configuration == parent.configuration
+                && super::usage_ledger::same_configuration(&original.configuration, &parent.configuration)
                 && original_launch
                     .as_ref()
                     .and_then(|value| value.selection.credential_scope.as_ref())

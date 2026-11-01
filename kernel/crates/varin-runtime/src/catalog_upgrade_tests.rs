@@ -57,6 +57,26 @@ impl Fixture {
         .unwrap();
         fixture
     }
+    /// The released v79 generation: v78 plus its own committed conversion, with a settled
+    /// original receipt from before the usage ledger existed.
+    fn v79() -> Self {
+        let fixture = Self::v78();
+        let content = crate::content::ContentStore::open(fixture.0.join("content")).unwrap();
+        let request = content.save(&json!({"view":"original request"})).unwrap();
+        let step = json!({"id":"settled","run_id":"run","epoch":17,"state":"completed","request":request,"original":[],
+            "usage":{"measurement":"actual","input_tokens":5,"output_tokens":2,"cached_input_tokens":null,"pricing_version":null}});
+        let mut raw = fixture.raw();
+        let tx = raw.transaction().unwrap();
+        external::initialize_new(&tx).unwrap();
+        tx.execute(
+            "INSERT INTO model_steps(id,run_id,state,body) VALUES('settled','run','completed',?1)",
+            [encode(&step).unwrap()],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", 79).unwrap();
+        tx.commit().unwrap();
+        fixture
+    }
     fn raw(&self) -> Connection {
         Connection::open(self.0.join("conversation.sqlite")).unwrap()
     }
@@ -207,7 +227,7 @@ fn catalog_upgrade_sql_failure_rolls_back_and_reopen_retries() {
         error,
         RuntimeError::Upgrade {
             from: 78,
-            to: 79,
+            to: FORMAT,
             ..
         }
     ));
@@ -216,7 +236,7 @@ fn catalog_upgrade_sql_failure_rolls_back_and_reopen_retries() {
     assert_eq!(inspect_catalog_format(&raw).unwrap(), 78);
     assert_eq!(
         raw.query_row(
-            "SELECT count(*) FROM sqlite_master WHERE name LIKE 'external_%'",
+            "SELECT count(*) FROM sqlite_master WHERE name LIKE 'external_%' OR name LIKE 'usage_%'",
             [],
             |row| row.get::<_, i64>(0)
         )
@@ -290,4 +310,102 @@ fn catalog_upgrade_process_interruption_retries_from_committed_wal() {
     );
     assert_eq!(catalog.operation("effect").unwrap().effect, Effect::Unknown);
     assert_eq!(fixture.bodies(), bodies);
+}
+
+fn ledger_start(db: &Connection) -> u64 {
+    db.query_row(
+        "SELECT recording_started_at_ms FROM usage_ledger WHERE id=1",
+        [],
+        |row| read_number(row, 0),
+    )
+    .unwrap()
+}
+
+#[test]
+fn catalog_upgrade_v79_starts_an_empty_usage_ledger_with_its_format_marker() {
+    let fixture = Fixture::v79();
+    let before = threads::now_ms().unwrap();
+    let catalog = Catalog::open(&fixture.0).unwrap();
+    let after = threads::now_ms().unwrap();
+    assert_eq!(inspect_catalog_format(&catalog.db).unwrap(), FORMAT);
+    let started = ledger_start(&catalog.db);
+    assert!((before..=after).contains(&started));
+    // Earlier receipts have no settle time or attribution, so the ledger is not backfilled.
+    assert_eq!(
+        catalog
+            .db
+            .query_row("SELECT count(*) FROM usage_records", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        catalog
+            .db
+            .query_row(
+                "SELECT json_extract(body,'$.usage.input_tokens') FROM model_steps WHERE id='settled'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        5
+    );
+    let summary = catalog
+        .capture_usage_summary(&usage_ledger::UsageSummaryParams {
+            from_ms: started - 1,
+            to_ms: started + 86_400_000,
+            utc_offset_minutes: 0, days: vec![], current_prices: vec![] })
+        .unwrap()
+        .load(&|| false)
+        .unwrap();
+    assert_eq!(
+        (summary.recording_started_at_ms, summary.rows.len()),
+        (Some(started), 0)
+    );
+    drop(catalog);
+
+    let preflight = Connection::open_with_flags(
+        fixture.0.join("conversation.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    assert_eq!(inspect_catalog_format(&preflight).unwrap(), FORMAT);
+    drop(preflight);
+    let reopened = Catalog::open(&fixture.0).unwrap();
+    assert_eq!(ledger_start(&reopened.db), started);
+    assert_eq!(
+        reopened
+            .db
+            .query_row(
+                "SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=79 AND json_extract(data,'$.to')=80",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn new_catalog_installs_the_usage_ledger_and_rejects_a_store_missing_its_start() {
+    let fixture = Fixture(std::env::temp_dir().join(format!("varin-catalog-new-{}", id())));
+    let catalog = Catalog::open(&fixture.0).unwrap();
+    assert_eq!(inspect_catalog_format(&catalog.db).unwrap(), FORMAT);
+    let started = ledger_start(&catalog.db);
+    drop(catalog);
+    assert_eq!(ledger_start(&Catalog::open(&fixture.0).unwrap().db), started);
+
+    fixture
+        .raw()
+        .execute("DELETE FROM usage_ledger", [])
+        .unwrap();
+    assert!(Catalog::open(&fixture.0).is_err());
+    assert_eq!(
+        fixture
+            .raw()
+            .query_row("SELECT count(*) FROM usage_ledger", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
 }

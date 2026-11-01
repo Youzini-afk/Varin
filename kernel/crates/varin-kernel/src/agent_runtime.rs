@@ -1102,6 +1102,7 @@ pub(crate) fn spawn(
                             method,
                             "runtime.events.read"
                                 | "runtime.thread.usage"
+                                | "runtime.usage.summary"
                                 | "runtime.model.presentations"
                                 | "runtime.operation.inspect"
                                 | "runtime.operation.calls"

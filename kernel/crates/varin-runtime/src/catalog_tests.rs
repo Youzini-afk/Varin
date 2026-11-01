@@ -408,7 +408,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                     leaf_id: Some(receipt.input_id.clone()),
                 },
             },
-            binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+            binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,
@@ -4345,6 +4345,17 @@ fn native_inference_retry_accounts_each_attempt_and_respects_unknown_goal_usage(
             let usage = db.capture_goal("native-inference-goal").unwrap().load().unwrap().usage;
             assert_eq!(usage.pending_inferences, 0);
             assert_eq!(usage.missing_inferences, 1);
+        }
+        // Dashboard request counts and context-tier pricing must see individual attempts,
+        // even though the public final inference receipt aggregates their token counts.
+        let summary = db.capture_usage_summary(&usage_ledger::UsageSummaryParams {
+            from_ms: 0, to_ms: threads::now_ms().unwrap() + 1, utc_offset_minutes: 0,
+            days: vec![], current_prices: vec![],
+        }).unwrap().load(&|| false).unwrap();
+        let requests: Vec<_> = summary.rows.iter().filter(|row| row.purpose.as_deref() == Some("explore")).collect();
+        assert_eq!(requests.iter().map(|row| row.requests).sum::<u64>(), if known { 2 } else { 1 });
+        if known {
+            assert_eq!(requests.iter().filter_map(|row| row.input_tokens.known.as_ref()).map(|n| n.parse::<u64>().unwrap()).sum::<u64>(), 10);
         }
     }
 }

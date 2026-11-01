@@ -6,8 +6,8 @@
 export const KERNEL_PROTOCOL_VERSION = 73 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.context.observations.sources","runtime.context.observations.admit","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.operation.calls","runtime.model.presentations","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.knowledge_inference.status","runtime.knowledge_inference.cancel","runtime.knowledge_inference.finish","runtime.model_text.admit","runtime.model_text.read","runtime.model_text.status","runtime.model_text.cancel","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.context.observations.sources","runtime.context.observations.admit","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.knowledge_inference.status","runtime.knowledge_inference.cancel","runtime.knowledge_inference.finish","runtime.model_text.admit","runtime.model_text.read","runtime.model_text.status","runtime.model_text.cancel","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId","runtime.input.sendNow":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
@@ -154,6 +154,7 @@ export type KernelMethod =
   | "runtime.thread.inspect"
   | "runtime.thread.list"
   | "runtime.thread.usage"
+  | "runtime.usage.summary"
   | "runtime.model.presentations"
   | "runtime.thread.catalog.list"
   | "runtime.thread.attention.read"
@@ -599,7 +600,7 @@ export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind
 
 export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }
 
-export interface RequestBinding {tool_output_visible_bytes?:number|null;execution_environment?:unknown;direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
+export interface RequestBinding {pricing?:UsagePricing;tool_output_visible_bytes?:number|null;execution_environment?:unknown;direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
 
 export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};
 
@@ -809,6 +810,7 @@ export interface InferenceBinding {
   modelId: string;
   configurationId: string;
   executor: InferenceExecutor;
+  pricing?: UsagePricing;
 }
 
 export interface InferenceUsage {
@@ -896,6 +898,38 @@ export interface UsageTokenCount { known: string | null; missing: number; }
 export interface ThreadUsageRow { kind: 'conversation' | 'context' | 'planning' | 'mcp_sampling' | 'auxiliary'; providerId: string | null; providerFamily: string | null; modelId: string; measurement: 'missing' | 'estimated' | 'actual'; requests: number; pendingRequests: number; inputTokens: UsageTokenCount; outputTokens: UsageTokenCount; cachedInputTokens: UsageTokenCount; cacheWriteTokens: UsageTokenCount; reasoningTokens: UsageTokenCount; }
 
 export interface ThreadUsage { threadId: string; branchId: string; throughCursor: number; notDispatchedRequests: number; rows: ThreadUsageRow[]; }
+
+export interface UsagePricing { currency: 'USD'; billing: 'metered' | 'subscription' | 'local'; source: 'directory' | 'custom'; version: string; inputPerMillion?: number; outputPerMillion?: number; cacheReadPerMillion?: number; cacheWritePerMillion?: number; reasoningPerMillion?: number; longContext?: UsageLongContextPricing; contextTiers?: UsageLongContextPricing[]; }
+
+export interface UsageLongContextPricing { aboveInputTokens: number; inputPerMillion?: number; outputPerMillion?: number; cacheReadPerMillion?: number; cacheWritePerMillion?: number; }
+
+export interface UsageDay {
+  day: string;
+  fromMs: number;
+  toMs: number;
+}
+
+export interface UsageCurrentPrice {
+  providerId: string;
+  modelId: string;
+  pricing: UsagePricing;
+}
+
+export interface UsageExternalRow { harness: string; conversationId: string; turnId: string; atMs: number; status: string; usage: { input?: number; output?: number; cachedInput?: number; cacheCreated?: number; inputIncludesCache?: boolean; scope?: 'turn' | 'last_request' | 'conversation'; } | null; }
+
+export interface UsageSummaryParams {
+  fromMs: number;
+  toMs: number;
+  utcOffsetMinutes: number;
+  days?: UsageDay[];
+  currentPrices?: UsageCurrentPrice[];
+}
+
+export interface UsageSummaryRow { day: string; kind: 'conversation' | 'context' | 'retrieval' | 'planning' | 'mcp_sampling' | 'auxiliary'; purpose: string | null; providerId: string | null; providerFamily: string | null; modelId: string; billing: 'metered' | 'subscription' | 'local' | null; priced: boolean; priceSources: ('directory' | 'custom')[]; measurement: 'missing' | 'estimated' | 'actual'; requests: number; inputTokens: UsageTokenCount; outputTokens: UsageTokenCount; cachedInputTokens: UsageTokenCount; cacheWriteTokens: UsageTokenCount; reasoningTokens: UsageTokenCount; completeInputTokens: UsageTokenCount; costUsd: number; costUnknownRequests: number; cacheSavedUsd: number; referenceUsd: number; currentPriceRequests: number; prices: UsagePricing[]; }
+
+export interface UsageSummaryThread { day: string; threadId: string; title: string | null; deleted: boolean; requests: number; tokens: UsageTokenCount; costUsd: number; costUnknownRequests: number; }
+
+export interface UsageSummary { throughCursor: number; recordingStartedAtMs: number | null; rows: UsageSummaryRow[]; threads: UsageSummaryThread[]; external: UsageExternalRow[]; }
 
 export interface ModelTextAdmit {
   key: string;
@@ -1017,7 +1051,7 @@ export interface McpSamplingBodies { editedRequest: Record<string, unknown> | nu
 
 export interface McpSamplingResult { role: 'assistant'; model: string; content: { type: 'text'; text: string } | { type: 'text'; text: string }[]; stopReason?: string; }
 
-export interface McpSamplingGeneration { operationId: string; phase: OperationPhase; outcome: Outcome | null; cancelRequested: boolean; dispatch: 'not_started' | 'started' | 'completed' | 'interrupted'; model: { providerId: string | null; providerFamily: string; model: string; maxTokens: number } | null; usage: { measurement: 'missing' | 'estimated' | 'actual'; inputTokens: number | null; outputTokens: number | null; cachedInputTokens: number | null; cacheWriteTokens: number | null; reasoningTokens: number | null; pricingVersion: string | null }; problem: string | null; }
+export interface McpSamplingGeneration { operationId: string; phase: OperationPhase; outcome: Outcome | null; cancelRequested: boolean; dispatch: 'not_started' | 'started' | 'completed' | 'interrupted'; model: { providerId: string | null; providerFamily: string; model: string; maxTokens: number; pricing?: UsagePricing } | null; usage: { measurement: 'missing' | 'estimated' | 'actual'; inputTokens: number | null; outputTokens: number | null; cachedInputTokens: number | null; cacheWriteTokens: number | null; reasoningTokens: number | null; pricingVersion: string | null }; problem: string | null; }
 
 export interface McpSamplingState { generationOperationId: string | null; review: 'request' | 'output' | 'closed'; }
 
@@ -3336,6 +3370,7 @@ export interface ModelSessionConfiguration {
   contextWindowTokens?: number;
   thinkingLevel?: string;
   modelOptions?: unknown;
+  pricing?: UsagePricing;
 }
 
 export interface RunStartReceipt {
@@ -6599,6 +6634,7 @@ export type KernelMethodParams = {
   "runtime.thread.inspect": ThreadParams;
   "runtime.thread.list": KernelEmptyParams;
   "runtime.thread.usage": ThreadUsageParams;
+  "runtime.usage.summary": UsageSummaryParams;
   "runtime.model.presentations": ModelPresentationParams;
   "runtime.thread.catalog.list": ThreadCatalogQuery;
   "runtime.thread.attention.read": KernelEmptyParams;
@@ -8257,6 +8293,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.thread.usage";
       params: ThreadUsageParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.usage.summary";
+      params: UsageSummaryParams;
       epoch?: string;
       grantId?: string;
     }

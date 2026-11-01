@@ -86,6 +86,7 @@ impl Catalog {
         s.receipt = Some(receipt);
         s.response_ref = Some(body.reference);
         publish(&tx, &mut op, &s, "inference.attempt_finished")?;
+        record_usage(&tx, &op, &i, &s, None)?;
         tx.commit()?;
         Ok(())
     }
@@ -102,6 +103,7 @@ impl Catalog {
         if !matches!(i.caller, InferenceCaller::ModelText | InferenceCaller::Knowledge) { goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?; }
         if let Some(goal) = &i.goal { goals::dispatched(&tx, goal)?; }
         s.accounted = false;
+        s.attempt += 1;
         s.receipt = None;
         s.checkpoint_usage = InferenceUsage::default();
         publish(&tx, &mut op, &s, "inference.retry_dispatched")?;
@@ -137,6 +139,7 @@ impl Catalog {
                     api: p.configuration.provider_family.clone(), endpoint: p.configuration.endpoint.clone(),
                     credential_scope: p.credential_scope.clone(),
                 },
+                pricing: p.configuration.pricing.clone(),
             },
             request: Value::Null,
         };

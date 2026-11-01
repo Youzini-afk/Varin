@@ -573,7 +573,7 @@ fn binding(f: &Fixture) -> RequestBinding {
             .unwrap()
             .unwrap()
             .selection;
-    RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+    RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
