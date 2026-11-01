@@ -11,7 +11,12 @@ export class BuildCache {
   constructor(root, directory = path.join(root, 'artifacts/build/cache')) {
     this.root = root; this.directory = directory; this.pending = new Map();
   }
+  async hasCheckout() {
+    try { await fs.stat(path.join(this.root, '.git')); return true; }
+    catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+  }
   async inputs(paths) {
+    if (!await this.hasCheckout()) throw new Error('Build source identity requires a Git checkout');
     const files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...paths], {
       cwd: this.root, windowsHide: true, maxBuffer: 32 * 1024 * 1024,
     }).toString().split('\0').filter(Boolean).filter(name => !/(?:^|\/)(?:test|tests|__tests__)(?:\/|$)|\.(?:test|spec)\.[^/]+$/u.test(name));
@@ -44,6 +49,13 @@ export class BuildCache {
   }
   async execute(name, { inputs, values = {}, outputs, build }) {
     const start = performance.now();
+    // Docker/source archives carry source files without Git metadata. Their
+    // enclosing build owns reuse; still return real output identities to dependents.
+    if (!await this.hasCheckout()) {
+      console.log(`[build] ${name}: building from source archive`);
+      await build();
+      return { digest: await this.outputs(outputs) };
+    }
     const source = await this.inputs(inputs);
     const key = hash().update(JSON.stringify({ source, values })).digest('hex');
     const receiptPath = path.join(this.directory, `${name}.json`);
@@ -68,6 +80,7 @@ export class BuildCache {
     return receipt;
   }
   async export(name, directory, output) {
+    if (!await this.hasCheckout()) throw new Error('Build artifact export requires a Git checkout');
     const receipt = JSON.parse(await fs.readFile(path.join(this.directory, `${name}.json`), 'utf8'));
     const payload = path.join(directory, 'payload');
     await fs.rm(payload, { recursive: true, force: true });
