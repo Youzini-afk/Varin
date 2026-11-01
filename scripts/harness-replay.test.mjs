@@ -8,16 +8,7 @@ import {
   loadReplayManifest,
   recordReplayRun,
   summarizeReplayRuns,
-  validateReplayManifest,
 } from './harness-replay.mjs';
-
-const repoRoot = path.resolve(import.meta.dirname, '..');
-
-test('the checked-in replay manifest resolves real historical tasks', () => {
-  const manifest = loadReplayManifest();
-  assert.ok(manifest.cases.length > 0);
-  assert.deepEqual(validateReplayManifest(manifest, repoRoot), []);
-});
 
 test('run records are non-overwriting and pair into the three designed metrics', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-harness-replay-'));

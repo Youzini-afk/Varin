@@ -10,8 +10,8 @@ const applicationHostSrc = fileURLToPath(new URL('./application-host', import.me
  * `scripts/test-kernel-authority.mjs` with `vitest.kernel.config.ts`, which
  * verifies a fresh manifest-matched binary before any of them execute. The
  * main suite excludes these acceptance files rather than skipping at runtime.
- * Some Documents fixtures use the kernel's native directory observer, so CI
- * still builds the kernel before running the package suite.
+ * Native directory observation, source capture and language-view integration
+ * use the same filename boundary; the package suite needs no kernel binary.
  */
 export const COMMON_TEST_EXCLUDE = [
   '**/node_modules/**',
