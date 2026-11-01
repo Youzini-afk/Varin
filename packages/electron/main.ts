@@ -23,6 +23,8 @@ import {
   type WebContents,
 } from 'electron';
 import contextMenu from 'electron-context-menu';
+import { normalizeLocale } from '@varin/application-client/locale';
+import { getNativeLocale, localizeNativeMenu, nativeContextMenuLabels, nativeText, setNativeLocale } from './native-i18n.js';
 import { CompanionStoolWindows } from './companion-stool.js';
 import { CompanionAssets, readCompanionAssetCatalog } from './companion-assets.js';
 import { CompanionSceneWindows, readCompanionSceneDescriptor, type CompanionSceneViewport } from './companion-scene.js';
@@ -355,7 +357,7 @@ interface DesktopState {
   sshShutdownPromise: Promise<void> | null;
   sshStatuses: Map<string, unknown>;
   startupResolved: boolean;
-  tray: import('electron').Tray | null;
+  tray: ReturnType<typeof createTray> | null;
   trayController: ReturnType<typeof createTrayController> | null;
   trayEnabled: boolean;
   trayFocusListener: WindowFocusListener | null;
@@ -461,18 +463,18 @@ const shouldRequireQuitConfirmation = () =>
 const quitConfirmationMessage = () => {
   const reasons = [];
   if (quitRisk.hasActiveTunnel) {
-    reasons.push('an active tunnel');
+    reasons.push(nativeText('Active tunnel'));
   }
   if (quitRisk.runningScheduledTasksCount > 0) {
-    reasons.push(`${quitRisk.runningScheduledTasksCount} running scheduled task${quitRisk.runningScheduledTasksCount === 1 ? '' : 's'}`);
+    reasons.push(nativeText('Running scheduled tasks: {count}', { count: quitRisk.runningScheduledTasksCount }));
   }
   if (quitRisk.enabledScheduledTasksCount > 0) {
-    reasons.push(`${quitRisk.enabledScheduledTasksCount} enabled scheduled task${quitRisk.enabledScheduledTasksCount === 1 ? '' : 's'}`);
+    reasons.push(nativeText('Enabled scheduled tasks: {count}', { count: quitRisk.enabledScheduledTasksCount }));
   }
   if (reasons.length === 0) {
-    return 'Background processes (sidecar, SSH sessions) will be stopped.';
+    return nativeText('Background processes (sidecar, SSH sessions) will be stopped.');
   }
-  return `Varin detected ${reasons.join(', ')}. Quitting now will stop background processes and may interrupt pending work.`;
+  return `${nativeText('Quitting will stop background processes and may interrupt pending work.')}\n\n${reasons.join('\n')}`;
 };
 
 const shutdownBackgroundServices = async ({ allowDuringUpdate = false }: { allowDuringUpdate?: boolean } = {}): Promise<void> => {
@@ -637,10 +639,10 @@ const requestQuitWithConfirmation = async () => {
   try {
     const result = await dialog.showMessageBox({
       type: 'warning',
-      title: 'Quit Varin?',
-      message: 'Quit Varin?',
+      title: nativeText('Quit Varin?'),
+      message: nativeText('Quit Varin?'),
       detail: quitConfirmationMessage(),
-      buttons: ['Quit', 'Cancel'],
+      buttons: [nativeText('Quit'), nativeText('Cancel')],
       defaultId: 1,
       cancelId: 1,
     });
@@ -716,6 +718,16 @@ const hostConnections = (): HostSshManager => {
 
 const readSettingsRoot = (): VarinSettingsDocument => settingsStore.readSync();
 const mutateSettingsRoot = (mutator: Parameters<typeof settingsStore.update>[0]) => settingsStore.update(mutator);
+
+const savedDesktopLocale = readSettingsRoot().desktopLocale;
+let desktopLocaleConfigured = typeof savedDesktopLocale === 'string';
+let desktopLocaleChange: Promise<unknown> = Promise.resolve();
+if (desktopLocaleConfigured) {
+  setNativeLocale(savedDesktopLocale as string);
+  // Chromium's own strings are chosen at process startup. App-owned native
+  // menus and controls also support immediate language changes below.
+  app.commandLine.appendSwitch('lang', getNativeLocale());
+}
 
 // Stable per-install identifier for this desktop, persisted in settings. Used as
 // the client dedupe key on remote hosts so re-authenticating (e.g. after a login
@@ -2178,12 +2190,10 @@ const confirmConnectDeepLink = async (payload: ConnectImportPayload): Promise<bo
   }
   const options: MessageBoxOptions = {
     type: 'warning',
-    title: 'Connect to Varin server?',
-    message: `Connect to "${payload.label}"?`,
-    detail:
-      `This will add ${payload.serverUrl} as a remote instance and route this app's activity ` +
-      'through it. Only continue if you trust this server and started the connection yourself.',
-    buttons: ['Connect', 'Cancel'],
+    title: nativeText('Connect to Varin server?'),
+    message: nativeText('Connect to “{label}”?', { label: payload.label || payload.serverUrl }),
+    detail: nativeText('This will add {url} as a remote instance and route this app’s activity through it. Only continue if you trust this server and started the connection yourself.', { url: payload.serverUrl }),
+    buttons: [nativeText('Connect'), nativeText('Cancel')],
     defaultId: 1,
     cancelId: 1,
   };
@@ -2408,7 +2418,7 @@ const createBrowserWindow = ({
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const windowIconPath = getWindowIconPath();
   const options: BrowserWindowConstructorOptions = {
-    title: companion ? 'Varin Companion' : 'Varin',
+    title: companion ? nativeText('Varin Companion') : 'Varin',
     ...(companion ? { transparent: true, frame: false, skipTaskbar: true, resizable: false, hasShadow: false } : {}),
     ...(restoredBounds && Number.isFinite(restoredBounds.x) && Number.isFinite(restoredBounds.y)
       ? { x: restoredBounds.x, y: restoredBounds.y }
@@ -3059,7 +3069,7 @@ const createMiniChatWindow = async ({
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const miniChatIcon = getWindowIconPath();
   const miniChatOptions: BrowserWindowConstructorOptions = {
-    title: 'Varin Mini Chat',
+    title: nativeText('Varin Mini Chat'),
     width: MINI_CHAT_WINDOW_WIDTH,
     height: MINI_CHAT_WINDOW_HEIGHT,
     minWidth: MINI_CHAT_MIN_WINDOW_WIDTH,
@@ -4318,6 +4328,8 @@ const handleInvoke = async (
 
       const content = typeof args.content === 'string' ? args.content : '';
       const saveOptions = {
+        title: nativeText('Save Markdown'),
+        buttonLabel: nativeText('Save'),
         defaultPath,
         filters: [{ name: 'Markdown', extensions: ['md'] }],
       };
@@ -4650,6 +4662,28 @@ const handleInvoke = async (
         trustDevice: args.trustDevice === true,
         requestHeaders: args.requestHeaders || {},
       });
+
+    case 'desktop_set_locale': {
+      if (typeof args.locale !== 'string') throw new Error('Locale is required');
+      const locale = normalizeLocale(args.locale);
+      // Serialize the equality check as well as persistence. Otherwise a quick
+      // A → B → A change can drop the last A while B is still being saved.
+      const change = desktopLocaleChange.then(async () => {
+        if (desktopLocaleConfigured && getNativeLocale() === locale) return getNativeLocale();
+        await mutateSettingsRoot(settings => { settings.desktopLocale = locale; });
+        desktopLocaleConfigured = true;
+        setNativeLocale(locale);
+        Menu.setApplicationMenu(process.platform === 'darwin' ? buildMacMenu() : buildAutoHiddenMenu());
+        state.trayController?.refreshLocale();
+        state.tray?.refreshLocale();
+        desktopComputerControls?.refreshLocale();
+        desktopComputerFeedback?.refreshLocale();
+        emitToAllWindows('varin:locale-changed', { locale });
+        return getNativeLocale();
+      });
+      desktopLocaleChange = change.catch(() => {});
+      return change;
+    }
 
     case 'desktop_set_window_theme': {
       const mode = typeof args.themeMode === 'string' ? args.themeMode : '';
@@ -5064,7 +5098,7 @@ const buildMacMenu = () => {
     dispatchAction('copy');
   };
 
-  return Menu.buildFromTemplate([
+  return Menu.buildFromTemplate(localizeNativeMenu([
     {
       label: app.name,
       submenu: [
@@ -5154,7 +5188,7 @@ const buildMacMenu = () => {
         { label: 'Join Discord', click: () => shell.openExternal(DISCORD_INVITE_URL) },
       ],
     },
-  ]);
+  ]));
 };
 
 const buildAutoHiddenMenu = () => {
@@ -5164,7 +5198,7 @@ const buildAutoHiddenMenu = () => {
     dispatchAction('copy');
   };
 
-  return Menu.buildFromTemplate([
+  return Menu.buildFromTemplate(localizeNativeMenu([
     {
       label: 'Varin',
       submenu: [
@@ -5267,10 +5301,11 @@ const buildAutoHiddenMenu = () => {
         { label: 'Join Discord', click: () => shell.openExternal(DISCORD_INVITE_URL) },
       ],
     },
-  ]);
+  ]));
 };
 
 contextMenu({
+  labels: nativeContextMenuLabels,
   showInspectElement: isDev,
   showSaveImageAs: true,
   showCopyImage: true,
@@ -5341,6 +5376,7 @@ ipcMain.on('varin:bootstrap', (event) => {
     macosMajor: macosMajorVersion(),
     macVibrancy: process.platform !== 'darwin' || readSettingsRoot().desktopVibrancy !== false,
     trayEnabled: process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false,
+    locale: desktopLocaleConfigured ? getNativeLocale() : undefined,
   });
 });
 
@@ -5370,7 +5406,7 @@ ipcMain.handle('varin:dialog:open', async (event: IpcMainInvokeEvent, rawOptions
     ? options.filters.map((rawFilter) => {
         const filter = recordOf(rawFilter);
         return {
-          name: typeof filter.name === 'string' && filter.name.trim() ? filter.name : 'Files',
+          name: typeof filter.name === 'string' && filter.name.trim() ? filter.name : nativeText('Files'),
           extensions: Array.isArray(filter.extensions)
             ? filter.extensions.filter((extension): extension is string => typeof extension === 'string' && Boolean(extension.trim()))
             : [],
@@ -5383,7 +5419,8 @@ ipcMain.handle('varin:dialog:open', async (event: IpcMainInvokeEvent, rawOptions
       'createDirectory',
     ].filter((property): property is NonNullable<OpenDialogOptions['properties']>[number] => typeof property === 'string');
   const dialogOptions: OpenDialogOptions = {
-    ...(title ? { title } : {}),
+    title: title || nativeText(options.directory ? 'Select Folder' : 'Open File'),
+    buttonLabel: nativeText(options.directory ? 'Select Folder' : 'Open'),
     ...(defaultPath ? { defaultPath } : {}),
     ...(filters.length > 0 ? { filters } : {}),
     properties,
@@ -5718,6 +5755,7 @@ app.whenReady().then(async () => {
   screen.on('display-metrics-changed', recoverCompanionPlacement);
   registerPackagedUiProtocol();
   setupAutoUpdater();
+  if (!desktopLocaleConfigured) setNativeLocale(app.getLocale());
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());

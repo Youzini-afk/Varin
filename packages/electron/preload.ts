@@ -89,6 +89,7 @@ if (Number.isFinite(macosMajor) && macosMajor > 0) {
 }
 
 contextBridge.exposeInMainWorld('__VARIN_ELECTRON__', {
+  locale: bootstrap.locale,
   runtime: 'electron',
   arch: process.arch,
   macVibrancy: hasMacVibrancy,

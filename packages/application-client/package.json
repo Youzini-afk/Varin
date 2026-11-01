@@ -19,6 +19,10 @@
       "types": "./dist/desktop.d.ts",
       "import": "./dist/desktop.js"
     },
+    "./locale": {
+      "types": "./dist/locale.d.ts",
+      "import": "./dist/locale.js"
+    },
     "./settings-locales/*": {
       "types": "./dist/settings-locales/*.d.ts",
       "import": "./dist/settings-locales/*.js"

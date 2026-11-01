@@ -16,6 +16,7 @@
 // natively (show-main-window, quit).
 
 import { Tray, Menu, nativeImage, type MenuItemConstructorOptions, type NativeImage } from 'electron';
+import { getNativeLocale, nativeText } from './native-i18n.js';
 
 export interface TrayAction extends Record<string, unknown> {
   type: string;
@@ -63,15 +64,15 @@ const buildRemoteContextMenu = ({ onShowWindow, onQuit, getMode }: {
 }) => {
   const mode = typeof getMode === 'function' ? getMode() : 'local';
   const modeLabel = mode === 'local'
-    ? 'Mode: Local'
-    : `Mode: Remote (${mode})`;
+    ? nativeText('Mode: Local')
+    : nativeText('Mode: Remote ({mode})', { mode });
 
   return Menu.buildFromTemplate([
-    { label: 'Open Varin', click: onShowWindow },
+    { label: nativeText('Open Varin'), click: onShowWindow },
     { type: 'separator' },
     { label: modeLabel, enabled: false },
     { type: 'separator' },
-    { label: 'Quit Varin', click: onQuit },
+    { label: nativeText('Quit Varin'), click: onQuit },
   ]);
 };
 
@@ -117,14 +118,16 @@ export const createTray = ({ onShowWindow, onQuit, getMode }: {
   getMode?: (() => string) | undefined;
   onQuit(): void;
   onShowWindow(): void;
-}): Tray => {
+}) => {
   const tray = new Tray(createTrayIcon());
   tray.setToolTip('Varin');
   tray.setContextMenu(buildRemoteContextMenu({ onShowWindow, onQuit, getMode }));
   if (process.platform !== 'darwin') {
     tray.on('click', onShowWindow);
   }
-  return tray;
+  return Object.assign(tray, {
+    refreshLocale: () => tray.setContextMenu(buildRemoteContextMenu({ onShowWindow, onQuit, getMode })),
+  });
 };
 
 const isMac = process.platform === 'darwin';
@@ -155,13 +158,13 @@ const statusIconKey = (session: TrayThread): 'blank' | 'busy' | 'error' | 'retry
 const sessionLabel = (session: TrayThread): string => {
   // The status is a native left icon (the ✓ already signals unread), so the
   // label is just the session title.
-  return truncate(session.title || 'Untitled session', 40);
+  return truncate(session.title || nativeText('Untitled session'), 40);
 };
 
 const approvalLabel = (approval: TrayApproval): string => {
   const icon = approval.kind === 'permission' ? '⛔' : '❓';
-  const who = truncate(approval.threadTitle || 'Session', 24);
-  const what = truncate(approval.label || (approval.kind === 'permission' ? 'Permission request' : 'Question'), 34);
+  const who = truncate(approval.threadTitle || nativeText('Session'), 24);
+  const what = truncate(approval.label || nativeText(approval.kind === 'permission' ? 'Permission request' : 'Question'), 34);
   return `${icon} ${who} — ${what}`;
 };
 
@@ -186,14 +189,14 @@ const computeIconState = (counts: TrayCounts): 'busy' | 'idle' | 'unseen' => {
 };
 
 const computeTooltip = (counts: TrayCounts, sessionCount: number): string => {
-  if (sessionCount === 0) return 'Varin — no active sessions';
+  if (sessionCount === 0) return `Varin — ${nativeText('No active sessions')}`;
   const bits = [];
-  if (counts.approvals > 0) bits.push(`${counts.approvals} awaiting approval`);
-  if (counts.error > 0) bits.push(`${counts.error} with errors`);
-  if (counts.busy > 0) bits.push(`${counts.busy} working`);
-  if (counts.unseen > 0) bits.push(`${counts.unseen} unread`);
-  const suffix = bits.length ? ` · ${bits.join(', ')}` : ' · idle';
-  return `Varin — ${sessionCount} session${sessionCount === 1 ? '' : 's'}${suffix}`;
+  if (counts.approvals > 0) bits.push(nativeText('{count} awaiting approval', { count: counts.approvals }));
+  if (counts.error > 0) bits.push(nativeText('{count} with errors', { count: counts.error }));
+  if (counts.busy > 0) bits.push(nativeText('{count} working', { count: counts.busy }));
+  if (counts.unseen > 0) bits.push(nativeText('{count} unread', { count: counts.unseen }));
+  const suffix = bits.length ? bits.join(' · ') : nativeText('Idle');
+  return `Varin — ${nativeText(sessionCount === 1 ? '{count} session' : '{count} sessions', { count: sessionCount })} · ${suffix}`;
 };
 
 // Frame cadence for the "breathing" busy animation. With the eased frame set
@@ -232,6 +235,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
   let lastTitle: string | null = null;
   let lastTooltip: string | null = null;
   let lastMenuKey: string | null = null;
+  let lastSnapshot: TraySnapshot = {};
 
   // macOS auto-picks the @2x file next to each path and tints the alpha.
   // Windows uses the regular app icon and ignores template tinting.
@@ -314,7 +318,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     ];
 
     if (approvals.length > 0) {
-      template.push({ label: 'Needs your attention', enabled: false });
+      template.push({ label: nativeText('Needs your attention'), enabled: false });
       const approvalItem = (approval: TrayApproval): MenuItemConstructorOptions => {
         return {
           label: approvalLabel(approval),
@@ -327,7 +331,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
       const approvalOverflow = approvals.slice(MAX_APPROVALS);
       if (approvalOverflow.length > 0) {
         template.push({
-          label: `${approvalOverflow.length} more…`,
+          label: nativeText('{count} more…', { count: approvalOverflow.length }),
           submenu: approvalOverflow.map(approvalItem),
         });
       }
@@ -347,24 +351,24 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     });
 
     if (sessions.length > 0) {
-      template.push({ label: 'Sessions', enabled: false });
+      template.push({ label: nativeText('Sessions'), enabled: false });
       for (const session of sessions.slice(0, MAX_SESSIONS)) {
         template.push(sessionItem(session));
       }
       const overflow = sessions.slice(MAX_SESSIONS);
       if (overflow.length > 0) {
         template.push({
-          label: `${overflow.length} more…`,
+          label: nativeText('{count} more…', { count: overflow.length }),
           submenu: overflow.map(sessionItem),
         });
       }
     } else {
-      template.push({ label: 'No active sessions', enabled: false });
+      template.push({ label: nativeText('No active sessions'), enabled: false });
     }
 
     template.push(
       { type: 'separator' },
-      { label: 'New Session', click: () => onAction({ type: 'new-thread' }) },
+      { label: nativeText('New Session'), click: () => onAction({ type: 'new-thread' }) },
     );
 
     if (isLinux || process.platform === 'win32') {
@@ -372,16 +376,16 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
       // expected AppImage / Windows tray controls.
       template.push(
         { type: 'separator' },
-        { label: 'Show Window', click: () => onAction({ type: 'show-main-window' }) },
-        { label: 'Hide Window', click: () => onAction({ type: 'hide-main-window' }) },
+        { label: nativeText('Show Window'), click: () => onAction({ type: 'show-main-window' }) },
+        { label: nativeText('Hide Window'), click: () => onAction({ type: 'hide-main-window' }) },
         { type: 'separator' },
-        { label: 'Close', click: () => onAction({ type: 'quit' }) },
+        { label: nativeText('Quit Varin'), click: () => onAction({ type: 'quit' }) },
       );
     } else {
       template.push(
-        { label: 'Show Varin', click: () => onAction({ type: 'show-main-window' }) },
+        { label: nativeText('Show Varin'), click: () => onAction({ type: 'show-main-window' }) },
         { type: 'separator' },
-        { label: 'Quit Varin', click: () => onAction({ type: 'quit' }) },
+        { label: nativeText('Quit Varin'), click: () => onAction({ type: 'quit' }) },
       );
     }
 
@@ -394,6 +398,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     const sessions = Array.isArray(snapshot.threads) ? snapshot.threads : [];
     const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
     return JSON.stringify({
+      locale: getNativeLocale(),
       r: snapshot.runtimeConfig?.apiBaseUrl + ':' + snapshot.runtimeConfig?.relayHostId,
       h: typeof snapshot.instanceName === 'string' ? snapshot.instanceName : '',
       s: sessions.map((s) => `${s.threadId}|${s.branchId}|${s.title}|${s.status}|${s.unseen}|${s.hasError}|${s.subtitle}|${s.directory}`),
@@ -403,6 +408,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
 
   const update = (rawSnapshot: TraySnapshot | null | undefined): void => {
     const snapshot: TraySnapshot = rawSnapshot && typeof rawSnapshot === 'object' ? rawSnapshot : {};
+    lastSnapshot = snapshot;
     const sessions = Array.isArray(snapshot.threads) ? snapshot.threads : [];
     const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
 
@@ -444,5 +450,5 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     iconState = null;
   };
 
-  return { update, destroy };
+  return { update, destroy, refreshLocale: () => { if (tray) update(lastSnapshot); } };
 };

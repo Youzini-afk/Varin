@@ -295,6 +295,7 @@ export type DesktopDialogResult =
 // ---------------------------------------------------------------------------
 
 export interface PreloadBootstrapShared {
+  locale?: import('./locale.js').Locale;
   localPage: boolean;
   localOrigin: string;
   apiBaseUrl: string;
@@ -329,6 +330,7 @@ export type DesktopUpdateProgressEvent =
 export type DesktopTrayAction = { type: string } & Record<string, unknown>;
 
 export type VarinDesktopEventMap = {
+  'varin:locale-changed': { locale: import('./locale.js').Locale };
   'varin:companion-library-changed': void;
   'varin:update-progress': DesktopUpdateProgressEvent;
   'varin:open-thread': { directory: string | null; threadId: string; branchId: string; apiBaseUrl?: string | undefined; relayHostId?: string | undefined };
@@ -451,6 +453,7 @@ export interface VarinDesktopCommandMap {
   desktop_companion_passthrough: { args: { enabled: boolean }; result: { supported: boolean; enabled: boolean } };
   desktop_set_window_title: { args: { title: string }; result: null };
   desktop_set_window_theme: { args: { themeMode?: string; themeVariant?: string }; result: null };
+  desktop_set_locale: { args: { locale: import('./locale.js').Locale }; result: import('./locale.js').Locale };
   desktop_is_window_fullscreen: { args: void; result: boolean };
   desktop_minimize_current_window: { args: void; result: null };
   desktop_toggle_current_window_maximized: { args: void; result: DesktopWindowMaximizedState };
@@ -622,6 +625,7 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_companion_passthrough: true,
   desktop_set_window_title: true,
   desktop_set_window_theme: true,
+  desktop_set_locale: true,
   desktop_is_window_fullscreen: true,
   desktop_minimize_current_window: true,
   desktop_toggle_current_window_maximized: true,
@@ -698,6 +702,7 @@ export const isVarinDesktopCommand = (value: unknown): value is VarinDesktopComm
 );
 
 export const VARIN_DESKTOP_EVENT_CATALOG = {
+  'varin:locale-changed': true,
   'varin:companion-library-changed': true,
   'varin:update-progress': true,
   'varin:open-thread': true,
@@ -734,6 +739,7 @@ export const VARIN_REMOTE_SAFE_DESKTOP_COMMANDS = [
   'desktop_new_window_for_host',
   'desktop_set_window_title',
   'desktop_set_window_theme',
+  'desktop_set_locale',
   'desktop_is_window_fullscreen',
   'desktop_start_window_drag',
   'desktop_get_companion',

@@ -1,7 +1,8 @@
 import { create } from 'zustand';
+import type { VarinDesktopBridge, VarinDesktopEventMap } from '@varin/application-client/desktop';
 
 import { dict as enDict, type I18nKey } from './messages/en';
-import { DEFAULT_LOCALE, detectInitialLocale, LOCALE_STORAGE_KEY, readStoredLocale, type Locale, writeStoredLocale } from './runtime';
+import { DEFAULT_LOCALE, detectInitialLocale, LOCALE_STORAGE_KEY, normalizeLocale, readStoredLocale, type Locale, writeStoredLocale } from './runtime';
 
 export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 export type I18nDictionary = Record<I18nKey, string>;
@@ -100,6 +101,35 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
 }));
 
 let localeStorageWindow: Window | undefined;
+let unsubscribeDesktopLocale: (() => void) | undefined;
+let applyingNativeLocale = false;
+let localePublication = 0;
+let pendingLocalePublication: number | undefined;
+const applyNativeLocale = (locale: string): void => {
+  applyingNativeLocale = true;
+  try { void useI18nStore.getState().setLocale(normalizeLocale(locale)); }
+  finally { applyingNativeLocale = false; }
+};
+const syncNativeLocale = (event: Event): void => {
+  const detail = (event as CustomEvent<VarinDesktopEventMap['varin:locale-changed']>).detail;
+  if (typeof detail?.locale !== 'string' || pendingLocalePublication !== undefined) return;
+  applyNativeLocale(detail.locale);
+};
+const publishNativeLocale = (locale: Locale): void => {
+  if (typeof window === 'undefined') return;
+  const bridge = (window as Window & { __VARIN_DESKTOP__?: Partial<VarinDesktopBridge> }).__VARIN_DESKTOP__;
+  if (applyingNativeLocale || !bridge?.invoke) return;
+  const publication = ++localePublication;
+  pendingLocalePublication = publication;
+  void bridge.invoke('desktop_set_locale', { locale }).then(current => {
+    if (pendingLocalePublication !== publication) return;
+    pendingLocalePublication = undefined;
+    if (typeof current === 'string') applyNativeLocale(current);
+  }).catch(error => {
+    if (pendingLocalePublication === publication) pendingLocalePublication = undefined;
+    console.error('[i18n] Native language sync failed', error);
+  });
+};
 const syncStoredLocale = (event: StorageEvent): void => {
   if (event.key !== LOCALE_STORAGE_KEY) return;
   // Read the latest saved value, not an older queued event's payload.
@@ -110,10 +140,19 @@ const syncStoredLocale = (event: StorageEvent): void => {
 export function initializeLocale(): void {
   if (typeof window !== 'undefined' && localeStorageWindow !== window) {
     localeStorageWindow?.removeEventListener('storage', syncStoredLocale);
+    localeStorageWindow?.removeEventListener('varin:locale-changed', syncNativeLocale);
+    unsubscribeDesktopLocale?.();
     localeStorageWindow = window;
     localeStorageWindow.addEventListener('storage', syncStoredLocale);
+    localeStorageWindow.addEventListener('varin:locale-changed', syncNativeLocale);
+    unsubscribeDesktopLocale = useI18nStore.subscribe((next, previous) => {
+      if (next.locale !== previous.locale) publishNativeLocale(next.locale);
+    });
   }
+  const previous = useI18nStore.getState().locale;
   void useI18nStore.getState().setLocale(detectInitialLocale());
+  // setLocale can be a no-op for English or a warmed dictionary.
+  if (typeof window !== 'undefined' && previous === useI18nStore.getState().locale) publishNativeLocale(previous);
 }
 
 export function formatMessage(dictionary: Partial<I18nDictionary>, key: I18nKey, params?: I18nParams): string {

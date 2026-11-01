@@ -2,7 +2,7 @@
 
 Electron desktop runtime for Varin on macOS, Windows, and Linux.
 
-The desktop uses Electron 44 and requires macOS 13 or newer on Mac. Release artifacts target
+The desktop uses Electron 45 and requires macOS 13 or newer on Mac. Release artifacts target
 x64 and ARM64. Electron and `electron-context-menu` are upgraded together because the menu
 package uses Electron's clipboard API.
 
@@ -28,6 +28,21 @@ thread. This does not move the Web server or introduce an Electron-specific back
 Same-origin embedded Thread iframes complete an authenticated parent-frame handshake before binding their Host APIs. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own authenticated transport before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
 
 The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__VARIN_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.
+
+### Native language
+
+The application language also controls native menus (including Electron roles), context menus,
+tray menus/tooltips, Varin dialog titles/buttons and computer-control overlays. `native-i18n.ts`
+contains the small native catalog for all ten application languages; the main process does not
+load the renderer dictionaries. Shared locale normalization lives in `application-client/locale`.
+
+Every renderer entry synchronizes its selected language through `desktop_set_locale`. The shell
+persists `desktopLocale` in its existing settings file, refreshes native presentation and informs
+other windows through `varin:locale-changed`. Bootstrap supplies the saved preference to local,
+remote, Mini Chat and companion windows. On first upgrade, an existing UI language is retained
+and becomes the desktop preference. Without a saved choice, native startup follows the OS locale.
+Chromium receives the saved language at the next process startup; system-owned file browser
+content, OS dialogs and system service entries retain their platform localization behavior.
 
 The early startup document uses the shared loading scene's geometry, cube markup and Canvas renderer.
 It holds the first frame without a playback loop, using the resolved desktop theme and saved splash

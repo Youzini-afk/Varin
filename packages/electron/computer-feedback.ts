@@ -1,4 +1,5 @@
 import { BrowserWindow, screen } from 'electron';
+import { nativeText } from './native-i18n.js';
 import type { ComputerGesture } from '@varin/protocol';
 import { COMPUTER_FEEDBACK_HTML } from '../ui/src/lib/computerFeedback.js';
 
@@ -31,7 +32,7 @@ export function createComputerFeedback() {
         if (!relevant) { entry?.window.hide(); continue; }
         if (!entry) {
           const window = new BrowserWindow({ ...bounds, show: false, transparent: true, frame: false, focusable: false,
-            resizable: false, hasShadow: false, skipTaskbar: true, fullscreenable: false, title: 'Varin Computer feedback',
+            resizable: false, hasShadow: false, skipTaskbar: true, fullscreenable: false, title: nativeText('Varin Computer feedback'),
             webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'varin-computer-feedback' } });
           window.setIgnoreMouseEvents(true); window.setEnabled(false); window.setContentProtection(true); window.setAlwaysOnTop(true, 'floating');
           window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -65,6 +66,7 @@ export function createComputerFeedback() {
         });
       }
     },
+    refreshLocale() { for (const entry of windows.values()) if (!entry.window.isDestroyed()) entry.window.setTitle(nativeText('Varin Computer feedback')); },
     ownsWindow(id: number) { return [...windows.values()].some(entry => entry.window.id === id); },
     dispose() { disposed = true; generation += 1; for (const entry of windows.values()) { clearTimeout(entry.hide); entry.window.destroy(); } windows.clear(); },
   };

@@ -80,4 +80,58 @@ describe('i18n store', () => {
       resetStore();
     }
   });
+
+  test('shares the desktop language across origins, publishes user changes and does not echo native events', async () => {
+    const values = new Map([[LOCALE_STORAGE_KEY, JSON.stringify({ locale: 'es' })]]);
+    const invoke = vi.fn().mockResolvedValue(null);
+    const target = Object.assign(new EventTarget(), {
+      __VARIN_ELECTRON__: { locale: 'zh-TW' },
+      __VARIN_DESKTOP__: { invoke },
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+    vi.stubGlobal('window', target);
+    try {
+      initializeLocale();
+      expect(useI18nStore.getState().locale).toBe('zh-TW');
+      expect(invoke).toHaveBeenLastCalledWith('desktop_set_locale', { locale: 'zh-TW' });
+      await useI18nStore.getState().setLocale('fr');
+      expect(invoke).toHaveBeenLastCalledWith('desktop_set_locale', { locale: 'fr' });
+      invoke.mockClear();
+      target.dispatchEvent(Object.assign(new Event('varin:locale-changed'), { detail: { locale: 'ja' } }));
+      expect(useI18nStore.getState().locale).toBe('ja');
+      expect(JSON.parse(values.get(LOCALE_STORAGE_KEY)!)).toEqual({ locale: 'ja' });
+      expect(invoke).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(useI18nStore.getState().loadingLocale).toBeNull());
+    } finally {
+      vi.unstubAllGlobals();
+      resetStore();
+    }
+  });
+
+  test('keeps the latest user choice while older native language changes are still completing', async () => {
+    const completions: Array<(locale: string) => void> = [];
+    const invoke = vi.fn(() => new Promise<string>(resolve => completions.push(resolve)));
+    const target = Object.assign(new EventTarget(), { __VARIN_ELECTRON__: { locale: 'en' }, __VARIN_DESKTOP__: { invoke } });
+    vi.stubGlobal('window', target);
+    try {
+      initializeLocale();
+      completions.shift()!('en');
+      await Promise.resolve();
+      const loading = useI18nStore.getState().setLocale('fr');
+      void useI18nStore.getState().setLocale('en');
+      target.dispatchEvent(Object.assign(new Event('varin:locale-changed'), { detail: { locale: 'fr' } }));
+      completions.shift()!('fr');
+      await Promise.resolve();
+      expect(useI18nStore.getState().locale).toBe('en');
+      completions.shift()!('en');
+      await loading;
+      expect(useI18nStore.getState().locale).toBe('en');
+    } finally {
+      vi.unstubAllGlobals();
+      resetStore();
+    }
+  });
 });

@@ -1,4 +1,5 @@
 import { recordOf } from './runtime-types.js';
+import { normalizeLocale } from '@varin/application-client/locale';
 import {
   VARIN_REMOTE_SAFE_DESKTOP_COMMANDS,
   type VarinDesktopCommand,
@@ -59,6 +60,7 @@ export const isTrustedLocalRendererUrl = (raw: unknown, options: RendererTrustOp
 };
 
 export interface PreloadBootstrapInput extends RendererTrustOptions {
+  locale?: unknown;
   apiBaseUrl?: unknown;
   clientToken?: unknown;
   homeDirectory?: unknown;
@@ -83,6 +85,7 @@ export const createPreloadBootstrapPayload = (input: PreloadBootstrapInput = {})
     localOrigins: input.localOrigins,
   });
   const shared: PreloadBootstrapShared = {
+    ...(typeof input.locale === 'string' ? { locale: normalizeLocale(input.locale) } : {}),
     localPage,
     localOrigin: asTrimmedString(input.localOrigin),
     apiBaseUrl: asTrimmedString(input.apiBaseUrl),

@@ -1,8 +1,5 @@
-export type Locale = 'en' | 'fr' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja';
-
-export const LOCALES = ['en', 'fr', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja'] as const satisfies readonly Locale[];
-
-export const DEFAULT_LOCALE: Locale = 'en';
+import { DEFAULT_LOCALE, normalizeLocale, type Locale } from '@varin/application-client/locale';
+export { DEFAULT_LOCALE, LOCALES, normalizeLocale, type Locale } from '@varin/application-client/locale';
 
 export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.french' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.japanese'> = {
   en: 'common.language.english',
@@ -22,48 +19,6 @@ export const LOCALE_STORAGE_KEY = 'varin.i18n.v1';
 type StoredLocale = {
   locale?: unknown;
 };
-
-export function normalizeLocale(value: string | undefined | null): Locale {
-  if (!value) {
-    return DEFAULT_LOCALE;
-  }
-
-  const normalized = value.toLowerCase().replace(/_/g, '-');
-  if (normalized === 'zh-cn' || normalized === 'zh-hans' || normalized.startsWith('zh-hans-')) {
-    return 'zh-CN';
-  }
-  if (normalized === 'zh-tw' || normalized === 'zh-hant' || normalized.startsWith('zh-hant-')) {
-    return 'zh-TW';
-  }
-  if (normalized.startsWith('zh')) {
-    return 'zh-CN';
-  }
-  if (normalized.startsWith('en')) {
-    return 'en';
-  }
-  if (normalized === 'fr' || normalized.startsWith('fr-')) {
-    return 'fr';
-  }
-  if (normalized === 'uk' || normalized.startsWith('uk-') || normalized === 'ua' || normalized.startsWith('ua-')) {
-    return 'uk';
-  }
-  if (normalized === 'es' || normalized.startsWith('es-')) {
-    return 'es';
-  }
-  if (normalized === 'pt' || normalized === 'pt-br' || normalized.startsWith('pt-br-')) {
-    return 'pt-BR';
-  }
-  if (normalized === 'ko' || normalized.startsWith('ko-')) {
-    return 'ko';
-  }
-  if (normalized === 'ja' || normalized.startsWith('ja-')) {
-    return 'ja';
-  }
-  if (normalized === 'pl' || normalized.startsWith('pl-')) {
-    return 'pl';
-  }
-  return DEFAULT_LOCALE;
-}
 
 export function readStoredLocale(): Locale | undefined {
   if (typeof window === 'undefined') {
@@ -95,6 +50,12 @@ export function writeStoredLocale(locale: Locale): void {
 }
 
 export function detectInitialLocale(): Locale {
+  // A saved desktop preference is shared across local, remote and Mini Chat
+  // origins. Without one, preserve the existing browser preference on upgrade.
+  if (typeof window !== 'undefined') {
+    const desktop = (window as Window & { __VARIN_ELECTRON__?: { locale?: string } }).__VARIN_ELECTRON__;
+    if (desktop?.locale) return normalizeLocale(desktop.locale);
+  }
   const stored = readStoredLocale();
   if (stored) {
     return stored;

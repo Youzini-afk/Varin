@@ -50,10 +50,13 @@ test('preload bootstrap discloses runtime credentials only to a trusted local re
     macosMajor: 15,
     macVibrancy: true,
     trayEnabled: true,
+    locale: 'zh_Hans_CN',
   };
   const remote = createPreloadBootstrapPayload({ ...common, senderUrl: 'https://remote.example.test/app' });
   assert.equal(remote.localPage, false);
   assert.equal(remote.apiBaseUrl, 'https://remote.example.test');
+  assert.equal(remote.locale, 'zh-CN');
+  assert.equal(REMOTE_SAFE_DESKTOP_COMMANDS.has('desktop_set_locale'), true);
   for (const key of ['clientToken', 'requestHeaders', 'homeDirectory', 'relayHostId']) {
     assert.equal(Object.hasOwn(remote, key), false);
   }
