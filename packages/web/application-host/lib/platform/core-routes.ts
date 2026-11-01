@@ -1124,6 +1124,7 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/resources') ||
       req.path.startsWith('/api/project-trust') ||
       req.path.startsWith('/api/models') ||
+      req.path.startsWith('/api/usage') ||
       req.path.startsWith('/api/mcp') ||
       req.path.startsWith('/api/bot-memory') ||
       req.path.startsWith('/api/computers') ||
