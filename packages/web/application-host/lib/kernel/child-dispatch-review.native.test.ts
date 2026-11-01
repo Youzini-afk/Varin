@@ -16,7 +16,7 @@ import { createRequire } from 'node:module';
 import type { VarinAgentPolicyInput } from '@varin/extension-contract';
 import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createAgentPolicy } from './agent-policy.js';
-import { afterEach, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { configureRuntimeUrlResolver, createAgentProfilesHttpAPI, createThreadsHttpAPI, setRuntimeExtraHeaders, type ThreadIdentity } from '@varin/application-client';
 import { AgentSettingsService } from '../models/settings.js';
 import { createDocumentAuthority } from '../documents/authority.js';
@@ -126,11 +126,13 @@ function assertPairing(body: Record<string, unknown>) {
 
 /** Real Host routing, Rust kernel, Documents/WorkingState and personalization. Only the paid
  * provider is replaced with loopback protocol fixtures. The caller controls precise barriers. */
-async function fixture(reply: (request: RecordedRequest, index: number) => void | Promise<void>, providerFamily: 'openai-responses' | 'anthropic-messages' = 'openai-responses') {
+async function fixture(reply: (request: RecordedRequest, index: number) => void | Promise<void>, providerFamily: 'openai-responses' | 'anthropic-messages' = 'openai-responses', disposers = cleanup, canRemoveRoot = () => true) {
   if (!kernelPath) throw new Error('Review requires an explicit frozen VARIN_TEST_KERNEL_PATH');
   await fs.access(kernelPath);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-child-review-'));
-  cleanup.push(() => fs.rm(root, { recursive: true, force: true }));
+  disposers.push(async () => {
+    if (canRemoveRoot()) await fs.rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  });
   const workspace = path.join(root, 'workspace');
   await fs.mkdir(workspace);
   const agentDir = path.join(root, 'agent');
@@ -145,7 +147,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       requests.push(value); return reply(value, requests.length);
     }));
   }));
-  cleanup.push(provider.close);
+  disposers.push(provider.close);
   const endpoint = `${provider.url}/${providerFamily === 'anthropic-messages' ? 'messages' : 'responses'}`;
   const configuration = { providerId: model.providerId, providerFamily, model: model.modelId, endpoint,
     credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 128 };
@@ -239,7 +241,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') }) : undefined;
     if (extensions) {
       await extensions.start();
-      cleanup.push(() => extensions.stop());
+      disposers.push(() => extensions.stop());
       if (options.policyExample && !(await extensions.state()).catalog.extensions.some(entry => entry.manifest.id === 'example.collaboration-policy')) {
         const folder = path.join(root, 'collaboration-policy'); await fs.mkdir(folder);
         for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/collaboration-policy', file), path.join(folder, file));
@@ -337,7 +339,7 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
       try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
       finally { await documents.dispose(); await kernel.close(); }
     };
-    cleanup.push(close);
+    disposers.push(close);
     const crash = async () => {
       collaboration?.stop();
       if (!kernelProcess || kernelProcess.exitCode !== null || kernelProcess.signalCode !== null) throw new Error('Fixture kernel is not running');
@@ -2037,17 +2039,42 @@ const combinedFormatDefects: Record<string, string> = {
   'partial context index with valid collaboration': 'DROP TABLE context_checkpoints; CREATE TABLE context_checkpoints(id TEXT PRIMARY KEY,branch_id TEXT NOT NULL REFERENCES branches(id),revision INTEGER NOT NULL,through_id TEXT REFERENCES history(id),body TEXT NOT NULL,project_id TEXT); CREATE UNIQUE INDEX combined_partial_context ON context_checkpoints(branch_id,revision) WHERE revision<0',
   'partial collaboration index with valid context': 'DROP TABLE child_tasks; CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL REFERENCES threads(id),body TEXT NOT NULL); CREATE UNIQUE INDEX combined_partial_child ON child_tasks(child_thread_id) WHERE 0',
 };
-for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
-  it(`combined read-only format rejection: ${defect}`, async () => {
+describe.sequential('combined read-only format rejection', () => {
+  const disposers: Array<() => Promise<void>> = [];
+  let f: Awaited<ReturnType<typeof fixture>>;
+  let baseline: string;
+  let seedKernel: ReturnType<typeof createKernelClient> | undefined;
+  let seedClosed = false;
+  let activeKernel: ReturnType<typeof createKernelClient> | undefined;
+
+  afterAll(async () => {
+    const failures: unknown[] = [];
+    // Keep closing safe independent resources (especially the HTTP recorder) even
+    // if an owner fails to drain. The root disposer below then preserves its store.
+    if (activeKernel) {
+      try { await activeKernel.close(); activeKernel = undefined; } catch (error) { failures.push(error); }
+    }
+    for (const dispose of disposers.splice(0).reverse()) {
+      try { await dispose(); } catch (error) { failures.push(error); }
+    }
+    if (!seedClosed && seedKernel) {
+      try { await seedKernel.close(); } catch (error) { failures.push(error); }
+      // Kernel exit alone cannot confirm the other Host/file owners drained.
+    }
+    if (failures.length) throw new AggregateError(failures, 'Format fixture cleanup failed');
+  });
+
+  beforeAll(async () => {
     let step = 0;
-    const f = await fixture(({ body, response }) => {
+    f = await fixture(({ body, response }) => {
       assertPairing(body);
       if (!isParent(body)) complete(response, [answer('FORMAT_CHILD_REPORT', 'format-child-final')]);
       else if (++step === 1) complete(response, [tool('dispatch', dispatch, 'format-dispatch')]);
       else if (step === 2) complete(response, [tool('wait_child', { operationId: job(body) }, 'format-wait')]);
       else complete(response, [answer('FORMAT_PARENT_FINAL', 'format-parent-final')]);
-    });
+    }, 'openai-responses', disposers, () => seedClosed && activeKernel === undefined);
     const h = await f.openHost();
+    seedKernel = h.kernel;
     const identity = await h.api.create('combined-format');
     await h.personalization.saveNote({ scope: { kind: 'thread', id: identity.threadId }, content: 'FORMAT_MEMORY_SENTINEL' });
     const prepared = await h.api.prepareSource({ ...identity, key: 'format-fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
@@ -2058,30 +2085,54 @@ for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
     const history = (await h.api.snapshot(identity)).history;
     expect(history.length).toBeGreaterThan(3);
     await h.close();
-    const catalog = path.join(f.root, 'agent-runtime', 'conversation.sqlite');
-    const database = new DatabaseSync(catalog);
-    try {
-      expect(database.prepare("SELECT name FROM runtime_domains WHERE name IN ('context_checkpoints','collaboration') ORDER BY name").all()).toEqual([
-        { name: 'collaboration' }, { name: 'context_checkpoints' },
-      ]);
-      database.exec(`PRAGMA foreign_keys=OFF; ${mutation}; PRAGMA wal_checkpoint(TRUNCATE)`);
-    } finally { database.close(); }
-    const before = await fs.readFile(catalog);
-    const inspect = () => {
-      const db = new DatabaseSync(catalog, { readOnly: true });
-      try { return { epoch: db.prepare('SELECT epoch FROM runtime_meta').get(), history: db.prepare('SELECT * FROM history ORDER BY rowid').all(), domains: db.prepare('SELECT * FROM runtime_domains ORDER BY name').all() }; }
-      finally { db.close(); }
-    };
-    const facts = inspect();
-    const reopened = createKernelClient({ hostId: 'child-review-host', storageRoot: f.root, buildVersion,
-      kernelPath, allowCargoDevRunner: false });
-    try { await expect(new AgentRuntimeClient(reopened).status()).rejects.toThrow(); }
-    finally { await reopened.close(); }
-    expect(await fs.readFile(catalog)).toEqual(before);
-    expect(inspect()).toEqual(facts);
+    // Only this successful full drain authorizes deleting/restoring the root.
+    // The fixture's idempotent close retry is not evidence after a failed close.
+    seedClosed = true;
     expect(f.requests).toHaveLength(4);
+    // Copy only after every Host/file owner and the kernel have drained. The
+    // independent HTTP recorder stays live to detect any accidental model replay.
+    baseline = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-format-baseline-'));
+    disposers.push(() => fs.rm(baseline, { recursive: true, force: true }));
+    await fs.cp(f.root, baseline, { recursive: true, verbatimSymlinks: true });
   }, 30_000);
-}
+
+  beforeEach(async () => {
+    if (!seedClosed || activeKernel) throw new Error('Format fixture owners have not confirmed drain');
+    // Restore the complete closed store at its ORIGINAL pathname: persisted
+    // source roots and grant identities must not be retargeted to a copied path.
+    await fs.rm(f.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+    await fs.cp(baseline, f.root, { recursive: true, verbatimSymlinks: true });
+  });
+
+  for (const [defect, mutation] of Object.entries(combinedFormatDefects)) {
+    it(`combined read-only format rejection: ${defect}`, async () => {
+      const catalog = path.join(f.root, 'agent-runtime', 'conversation.sqlite');
+      const database = new DatabaseSync(catalog);
+      try {
+        expect(database.prepare("SELECT name FROM runtime_domains WHERE name IN ('context_checkpoints','collaboration') ORDER BY name").all()).toEqual([
+          { name: 'collaboration' }, { name: 'context_checkpoints' },
+        ]);
+        database.exec(`PRAGMA foreign_keys=OFF; ${mutation}; PRAGMA wal_checkpoint(TRUNCATE)`);
+      } finally { database.close(); }
+      const before = await fs.readFile(catalog);
+      const inspect = () => {
+        const db = new DatabaseSync(catalog, { readOnly: true });
+        try { return { epoch: db.prepare('SELECT epoch FROM runtime_meta').get(), history: db.prepare('SELECT * FROM history ORDER BY rowid').all(), domains: db.prepare('SELECT * FROM runtime_domains ORDER BY name').all() }; }
+        finally { db.close(); }
+      };
+      const facts = inspect();
+      const reopened = createKernelClient({ hostId: 'child-review-host', storageRoot: f.root, buildVersion,
+        kernelPath, allowCargoDevRunner: false });
+      activeKernel = reopened;
+      const requestCount = f.requests.length;
+      try { await expect(new AgentRuntimeClient(reopened).status()).rejects.toThrow(); }
+      finally { await reopened.close(); activeKernel = undefined; }
+      expect(await fs.readFile(catalog)).toEqual(before);
+      expect(inspect()).toEqual(facts);
+      expect(f.requests).toHaveLength(requestCount);
+    }, 30_000);
+  }
+});
 
 // These are the same installed SDK package and real child/source owners as the direct-model
 // cases above. A policy receipt is not converted into a fabricated parent model exchange.
