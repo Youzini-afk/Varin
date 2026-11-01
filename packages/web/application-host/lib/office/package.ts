@@ -60,7 +60,12 @@ export class OfficePackage {
     const bytes = entry.getData();
     const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le' : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8';
     const source = new TextDecoder(encoding, { fatal: true }).decode(bytes);
-    const document = new DOMParser({ errorHandler: { warning() {}, error(message) { error = message; }, fatalError(message) { error = message; } } }).parseFromString(source, 'application/xml');
+    let document: Document;
+    try {
+      document = new DOMParser({ onError(level, message) { if (level !== 'warning') error = message; } }).parseFromString(source, 'application/xml');
+    } catch (cause) {
+      throw new Error(`Cannot parse document part ${part}: ${error ?? (cause instanceof Error ? cause.message : String(cause))}`, { cause });
+    }
     if (error || !document.documentElement) throw new Error(`Cannot parse document part ${part}: ${error ?? 'missing document element'}`);
     this.documents.set(part, document);
     return document;

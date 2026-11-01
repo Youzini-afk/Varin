@@ -1,0 +1,64 @@
+diff --git a/dist/commonjs/index.js b/dist/commonjs/index.js
+index c176ffce042b015b8cc5d29ba93ef301c885a237..0236ad025c7da00ebef2fdc4f5fddbe8637d0ca1 100644
+--- a/dist/commonjs/index.js
++++ b/dist/commonjs/index.js
+@@ -448,6 +448,8 @@ class Minimatch {
+     // **/*/<rest> -> */**/<rest> <== not valid because ** doesn't follow
+     // this WOULD be allowed if ** did follow symlinks, or * didn't
+     firstPhasePreProcess(globParts) {
++        // Backport minimatch 11.0.1 (GHSA-g3hv-75wg-m249).
++        const { braceExpandMax = 100_000 } = this.options;
+         let didSomething = false;
+         do {
+             didSomething = false;
+@@ -475,7 +477,8 @@ class Minimatch {
+                         p === '..' ||
+                         !p2 ||
+                         p2 === '.' ||
+-                        p2 === '..') {
++                        p2 === '..' ||
++                        globParts.length >= braceExpandMax) {
+                         continue;
+                     }
+                     didSomething = true;
+@@ -532,6 +535,8 @@ class Minimatch {
+     // {<pre>/**/<rest>,<pre>/**/<p>/<rest>} -> <pre>/**/<rest>
+     // ^-- not valid because ** doens't follow symlinks
+     secondPhasePreProcess(globParts) {
++        // Skipping this optimization preserves matches without quadratic work.
++        if (globParts.length > 1000) return globParts;
+         for (let i = 0; i < globParts.length - 1; i++) {
+             for (let j = i + 1; j < globParts.length; j++) {
+                 const matched = this.partsMatch(globParts[i], globParts[j], !this.preserveMultipleSlashes);
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+index a9e0602187c7fd057de9a92951aeb4840febb0be..c2e6d549a4d8be93ea8d7259357aee668376c56b 100644
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -439,6 +439,8 @@ export class Minimatch {
+     // **/*/<rest> -> */**/<rest> <== not valid because ** doesn't follow
+     // this WOULD be allowed if ** did follow symlinks, or * didn't
+     firstPhasePreProcess(globParts) {
++        // Backport minimatch 11.0.1 (GHSA-g3hv-75wg-m249).
++        const { braceExpandMax = 100_000 } = this.options;
+         let didSomething = false;
+         do {
+             didSomething = false;
+@@ -466,7 +468,8 @@ export class Minimatch {
+                         p === '..' ||
+                         !p2 ||
+                         p2 === '.' ||
+-                        p2 === '..') {
++                        p2 === '..' ||
++                        globParts.length >= braceExpandMax) {
+                         continue;
+                     }
+                     didSomething = true;
+@@ -523,6 +526,8 @@ export class Minimatch {
+     // {<pre>/**/<rest>,<pre>/**/<p>/<rest>} -> <pre>/**/<rest>
+     // ^-- not valid because ** doens't follow symlinks
+     secondPhasePreProcess(globParts) {
++        // Skipping this optimization preserves matches without quadratic work.
++        if (globParts.length > 1000) return globParts;
+         for (let i = 0; i < globParts.length - 1; i++) {
+             for (let j = i + 1; j < globParts.length; j++) {
+                 const matched = this.partsMatch(globParts[i], globParts[j], !this.preserveMultipleSlashes);

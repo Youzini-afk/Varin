@@ -89,7 +89,7 @@ async function buildArchive(root) {
     info: { metadata: {}, emitArtifactBuildCompleted: async (event) => events.push(event) },
   };
   const target = new NsisTarget(packager, root, 'nsis', { refCount: 0 });
-  const result = await target.buildAppPackage(source, 1);
+  const { fileInfo: result } = await target.buildAppPackage(source, 1);
   return { target, result, packager, events, deepPath };
 }
 

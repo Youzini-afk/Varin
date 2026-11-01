@@ -107,6 +107,7 @@ test('kernel staging and Electron packaging consume the owning wire version', ()
     process.env.VARIN_TARGET_ARCH = 'x64'; process.env.VARIN_TARGET_TRIPLE = 'x86_64-unknown-linux-gnu';
     const afterPack = require('./after-pack.cjs');
     const context = { electronPlatformName: 'linux', appOutDir: temporary };
+    fs.mkdirSync(path.join(temporary, 'resources', 'app.asar.unpacked', 'node_modules', '@varin', 'web'), { recursive: true });
     // Reaching the next payload check proves the original staged manifest was accepted.
     assert.throws(() => afterPack(context), /Missing target TriviumDB binary/);
     fs.writeFileSync(manifestPath, JSON.stringify({ ...manifest, protocolVersion: protocolVersion + 1 }));

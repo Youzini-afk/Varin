@@ -1,39 +1,5 @@
-diff --git a/templates/nsis/include/extractAppPackage.nsh b/templates/nsis/include/extractAppPackage.nsh
-index f5470bf..0512f99 100644
---- a/templates/nsis/include/extractAppPackage.nsh
-+++ b/templates/nsis/include/extractAppPackage.nsh
-@@ -90,6 +90,9 @@
- !macroend
- 
- !macro extractUsing7za FILE
-+  !ifmacrodef customExtractUsing7za
-+    !insertmacro customExtractUsing7za "${FILE}"
-+  !else
-   Push $OUTDIR
-   CreateDirectory "$PLUGINSDIR\7z-out"
-   ClearErrors
-@@ -135,4 +138,5 @@
-     Goto LoopExtract7za
- 
-   DoneExtract7za:
-+  !endif
- !macroend
-diff --git a/templates/nsis/include/installUtil.nsh b/templates/nsis/include/installUtil.nsh
---- a/templates/nsis/include/installUtil.nsh
-+++ b/templates/nsis/include/installUtil.nsh
-@@ -206,6 +206,11 @@
-     StrCpy $0 "$0 --updated"
-   ${endif}
- 
-+  !ifmacrodef customUninstallOldVersion
-+    !insertmacro customUninstallOldVersion "$installationDir" "$0" "$R0"
-+    Return
-+  !endif
-+
-   StrCpy $uninstallerFileNameTemp "$PLUGINSDIR\old-uninstaller.exe"
-   !insertmacro copyFile "$uninstallerFileName" "$uninstallerFileNameTemp"
- 
 diff --git a/templates/nsis/assistedInstaller.nsh b/templates/nsis/assistedInstaller.nsh
+index b7f47526554ba07aa0a062c3b0f1810cdc8711b8..dd040ef28d575eae48edd1eddf094102cae6c17e 100644
 --- a/templates/nsis/assistedInstaller.nsh
 +++ b/templates/nsis/assistedInstaller.nsh
 @@ -1,9 +1,18 @@
@@ -65,10 +31,47 @@ diff --git a/templates/nsis/assistedInstaller.nsh b/templates/nsis/assistedInsta
  !macro initMultiUser
    !ifdef INSTALL_MODE_PER_ALL_USERS
      !insertmacro setInstallModePerAllUsers
+diff --git a/templates/nsis/include/extractAppPackage.nsh b/templates/nsis/include/extractAppPackage.nsh
+index f5470bf52e923dc47266cea4684c76ef78ced451..0512f99f53543c4854aba941dde852a14a4d4324 100644
+--- a/templates/nsis/include/extractAppPackage.nsh
++++ b/templates/nsis/include/extractAppPackage.nsh
+@@ -90,6 +90,9 @@
+ !macroend
+ 
+ !macro extractUsing7za FILE
++  !ifmacrodef customExtractUsing7za
++    !insertmacro customExtractUsing7za "${FILE}"
++  !else
+   Push $OUTDIR
+   CreateDirectory "$PLUGINSDIR\7z-out"
+   ClearErrors
+@@ -135,4 +138,5 @@
+     Goto LoopExtract7za
+ 
+   DoneExtract7za:
++  !endif
+ !macroend
+diff --git a/templates/nsis/include/installUtil.nsh b/templates/nsis/include/installUtil.nsh
+index 47367741632726ba0886ac516461dbe98b7aea58..8d0675d8849098abc4f4d9e9d2485303a223e64e 100644
+--- a/templates/nsis/include/installUtil.nsh
++++ b/templates/nsis/include/installUtil.nsh
+@@ -206,6 +206,11 @@ Function uninstallOldVersion
+     StrCpy $0 "$0 --updated"
+   ${endif}
+ 
++  !ifmacrodef customUninstallOldVersion
++    !insertmacro customUninstallOldVersion "$installationDir" "$0" "$R0"
++    Return
++  !endif
++
+   StrCpy $uninstallerFileNameTemp "$PLUGINSDIR\old-uninstaller.exe"
+   !insertmacro copyFile "$uninstallerFileName" "$uninstallerFileNameTemp"
+ 
 diff --git a/templates/nsis/uninstaller.nsh b/templates/nsis/uninstaller.nsh
+index c3f4f11982689baa220de5051bbf144adbd9accc..59ce43e52652afa2fc855c28d72094d5a35ac4b1 100644
 --- a/templates/nsis/uninstaller.nsh
 +++ b/templates/nsis/uninstaller.nsh
-@@ -213,6 +213,9 @@
+@@ -213,6 +213,9 @@ Section "un.${UNINSTALL_SECTION_NAME}"
      !insertmacro unregisterFileAssociations
    !endif
  
@@ -78,7 +81,7 @@ diff --git a/templates/nsis/uninstaller.nsh b/templates/nsis/uninstaller.nsh
    Var /GLOBAL isDeleteAppData
    StrCpy $isDeleteAppData "0"
  
-@@ -247,6 +250,8 @@
+@@ -247,6 +250,8 @@ Section "un.${UNINSTALL_SECTION_NAME}"
      ${endif}
    ${endif}
  
