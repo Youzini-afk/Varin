@@ -90,6 +90,5 @@ const tw: Record<keyof typeof en, string> = { ...zh,
   'usage.longContext': '長上下文分級價', 'usage.threshold': '輸入 Token 超過',
   'usage.addTier': '新增上下文分級價', 'usage.removeTier': '刪除分級', 'usage.tierHint': '分級單價留空時沿用基礎單價。',
   'usage.purpose.image': '圖像', 'usage.purpose.mcp_sampling': 'MCP 採樣',
-  'usage.addTier': '新增上下文分級價', 'usage.removeTier': '刪除分級', 'usage.tierHint': '分級單價留空時沿用基本單價。',
 };
 export const usageMessages = (language: 'en' | 'zh-CN' | 'zh-TW') => language === 'zh-CN' ? zh : language === 'zh-TW' ? tw : en;

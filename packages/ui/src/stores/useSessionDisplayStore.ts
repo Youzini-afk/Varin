@@ -8,6 +8,12 @@ type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 // 'flat' removes parent/child indentation while preserving project ownership.
 type SessionGroupingMode = 'by-worktree' | 'flat';
 
+export type ConversationTreeExpansion = {
+  groups: Record<string, boolean>;
+  sessions: Record<string, boolean>;
+};
+export const EMPTY_CONVERSATION_TREE: ConversationTreeExpansion = { groups: {}, sessions: {} };
+
 type SessionDisplayStore = {
   sessionGroupingMode: SessionGroupingMode;
   setSessionGroupingMode: (mode: SessionGroupingMode) => void;
@@ -21,6 +27,9 @@ type SessionDisplayStore = {
   setShowRecentSection: (show: boolean) => void;
   toggleRecentSection: () => void;
   setProjectSortOrder: (order: ProjectSortOrder) => void;
+  /** Explicit choices only: project groups start open, child task trees start closed. */
+  conversationTreeByHost: Record<string, ConversationTreeExpansion>;
+  setConversationTreeExpansion: (host: string, changes: Partial<ConversationTreeExpansion>) => void;
 };
 
 export const useSessionDisplayStore = create<SessionDisplayStore>()(
@@ -37,6 +46,14 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setShowRecentSection: (show) => set({ showRecentSection: show }),
       toggleRecentSection: () => set((state) => ({ showRecentSection: !state.showRecentSection })),
       setProjectSortOrder: (order) => set({ projectSortOrder: order }),
+      conversationTreeByHost: {},
+      setConversationTreeExpansion: (host, changes) => set(state => {
+        const previous = state.conversationTreeByHost[host] ?? EMPTY_CONVERSATION_TREE;
+        return { conversationTreeByHost: { ...state.conversationTreeByHost, [host]: {
+          groups: { ...previous.groups, ...changes.groups },
+          sessions: { ...previous.sessions, ...changes.sessions },
+        } } };
+      }),
     }),
     {
       name: 'varin.sessionDisplay.v1',

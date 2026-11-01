@@ -9,6 +9,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { captureDialogOrigin, dialogOrigin } from '@/lib/motion/dialogOrigin';
+import { getRuntimeKey } from '@varin/application-client';
 
 const mocks = vi.hoisted(() => ({
   update: vi.fn(),
@@ -156,11 +157,55 @@ beforeEach(async () => {
     updateThread: mocks.update, loadCatalog: async () => {},
   });
   useProjectsStore.setState({ projects: [] });
-  useSessionDisplayStore.setState({ sessionGroupingMode: 'by-worktree', showRecentSection: true, projectsSectionCollapsed: false });
+  useSessionDisplayStore.setState({ sessionGroupingMode: 'by-worktree', showRecentSection: true, projectsSectionCollapsed: false,
+    conversationTreeByHost: { [getRuntimeKey()]: { groups: {}, sessions: { parent: true } } },
+  });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   await act(async () => { root.render(<ConversationSidebar />); });
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+
+it('starts child task trees collapsed, remembers both choices after remount, and keeps newly added trees closed', async () => {
+  await act(async () => useSessionDisplayStore.setState({ conversationTreeByHost: {} }));
+  expect(titleButton('Parent conversation')).toBeDefined();
+  expect(titleButton('Child task')).toBeUndefined();
+  const toggleParent = () => container.querySelector<HTMLButtonElement>('[data-sidebar-row="parent"] [aria-expanded]')!.click();
+  const remount = async () => {
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<ConversationSidebar />));
+  };
+  await act(async () => toggleParent());
+  expect(titleButton('Child task')).toBeDefined();
+  await remount();
+  expect(titleButton('Child task')).toBeDefined();
+  await act(async () => toggleParent());
+  await remount();
+  expect(titleButton('Child task')).toBeUndefined();
+  await act(async () => useThreadStore.setState(state => ({ threads: [...state.threads,
+    summary('another', 'Another conversation', null), summary('another-child', 'New child task', 'another'),
+  ] })));
+  expect(titleButton('Another conversation')).toBeDefined();
+  expect(titleButton('New child task')).toBeUndefined();
+});
+
+it('restores a collapsed project group after remount and search reveals matches without changing its saved state', async () => {
+  const group = () => container.querySelector<HTMLButtonElement>('[data-flip-key="group:recent"] button[aria-expanded]')!;
+  await act(async () => group().click());
+  expect(titleButton('Parent conversation')).toBeUndefined();
+  await act(async () => root.unmount()); root = createRoot(container);
+  await act(async () => root.render(<ConversationSidebar />));
+  expect(group().getAttribute('aria-expanded')).toBe('false');
+  const searchButton = container.querySelector<HTMLButtonElement>('button[aria-label="sessions.sidebar.header.actions.searchSessions"]');
+  expect(searchButton).not.toBeNull();
+  await act(async () => searchButton!.click());
+  const input = container.querySelector('input')!;
+  await act(async () => { input.value = 'Child task'; input.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  expect(titleButton('Child task')).toBeDefined();
+  await act(async () => { input.value = ''; input.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  expect(group().getAttribute('aria-expanded')).toBe('false');
+  expect(titleButton('Child task')).toBeUndefined();
+});
 
 it.each([
   ['settings', 'settings'], ['shortcuts', 'help'], ['aboutVarin', 'settings'],

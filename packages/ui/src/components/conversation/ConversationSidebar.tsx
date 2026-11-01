@@ -72,6 +72,7 @@ import {
   useWorkbenchMatchRenderers,
 } from '@/lib/extensions/workbench-registry';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useConversationTreeExpansion } from '@/hooks/useConversationTreeExpansion';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 
@@ -139,7 +140,7 @@ interface SessionRowProps {
   currentSessionId: string | null;
   editingId: string | null;
   editingName: string;
-  collapsedIds: ReadonlySet<string>;
+  sessionExpansion: Readonly<Record<string, boolean>>;
   revealChildren: boolean;
   node: ConversationSessionNode;
   onArchive(node: ConversationSessionNode): void;
@@ -175,7 +176,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
   const { session } = node;
   const title = conversationSessionTitle(session, props.untitled);
   const hasChildren = node.children.length > 0;
-  const expanded = props.revealChildren || !props.collapsedIds.has(session.id);
+  const expanded = props.revealChildren || (props.sessionExpansion[session.id] ?? false);
   const pinned = props.pinnedIds.has(session.id);
   const timestamp = Date.parse(session.updatedAt);
   const timeLabel = formatSessionCompactDateLabel(Number.isFinite(timestamp) ? timestamp : Date.now());
@@ -466,6 +467,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   const catalogLoading = useThreadStore(state => state.catalogLoading);
   const lastError = useThreadStore(state => state.catalogError);
   const runtimeKey = useThreadStore(state => state.hostKey);
+  const [treeExpansion, setTreeExpansion] = useConversationTreeExpansion();
   const loadCatalog = useThreadStore(state => state.loadCatalog);
   const updateNativeThread = useThreadStore(state => state.updateThread);
   const deleteNativeSession = useThreadStore(state => state.deleteThread);
@@ -510,8 +512,6 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [selectionMode, setSelectionMode] = React.useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = React.useState<Set<string>>(() => new Set());
-  const [collapsedGroupIds, setCollapsedGroupIds] = React.useState<Set<string>>(() => new Set());
-  const [collapsedSessionIds, setCollapsedSessionIds] = React.useState<Set<string>>(() => new Set());
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editingName, setEditingName] = React.useState('');
   const [confirmation, setConfirmation] = React.useState<ConfirmationState | null>(null);
@@ -535,7 +535,6 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     setSearchOpen(false);
     setSelectionMode(false);
     setSelectedSessionIds(new Set());
-    setCollapsedSessionIds(new Set());
   }, [runtimeKey]);
 
   const isPinned = React.useCallback((session: SessionSummary) => (
@@ -590,7 +589,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   // Geometry, not status/usage labels, determines whether sidebar rows move.
   const listLayoutKey = JSON.stringify([
     projectsExpanded, selectionMode, editingId,
-    [...collapsedGroupIds].sort(), [...collapsedSessionIds].sort(),
+    treeExpansion.groups, treeExpansion.sessions,
     groups.map(group => [group.id, forestLayout(group.forest)]),
   ]);
 
@@ -650,13 +649,17 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
 
   const collapseAll = () => {
     setProjectsSectionCollapsed(true);
-    setCollapsedGroupIds(new Set(workspaceGroups.map(group => group.id)));
-    setCollapsedSessionIds(new Set(collectConversationSessionForestIds(workspaceGroups.flatMap(group => group.forest))));
+    setTreeExpansion({
+      groups: Object.fromEntries(workspaceGroups.map(group => [group.id, false])),
+      sessions: Object.fromEntries(collectConversationSessionForestIds(workspaceGroups.flatMap(group => group.forest)).map(id => [id, false])),
+    });
   };
   const expandAll = () => {
     setProjectsSectionCollapsed(false);
-    setCollapsedGroupIds(new Set());
-    setCollapsedSessionIds(new Set());
+    setTreeExpansion({
+      groups: Object.fromEntries(workspaceGroups.map(group => [group.id, true])),
+      sessions: Object.fromEntries(collectConversationSessionForestIds(workspaceGroups.flatMap(group => group.forest)).map(id => [id, true])),
+    });
   };
 
   const selectedSubtreeIds = React.useMemo(
@@ -916,7 +919,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   })();
 
   const renderGroup = (group: (typeof groups)[number]) => {
-    const expanded = query.trim().length > 0 || !collapsedGroupIds.has(group.id);
+    const expanded = query.trim().length > 0 || (treeExpansion.groups[group.id] ?? true);
     const sourceGroup = workspaceGroups.find((candidate) => candidate.id === group.id);
     const projectSessionIds = sourceGroup ? collectConversationSessionForestIds(sourceGroup.forest) : [];
     const project = group.project;
@@ -924,12 +927,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
       ? projects.findIndex((candidate) => candidate.id === project.id)
       : -1;
     const canManageProject = project !== null;
-    const toggleGroup = () => setCollapsedGroupIds((current) => {
-      const next = new Set(current);
-      if (next.has(group.id)) next.delete(group.id);
-      else next.add(group.id);
-      return next;
-    });
+    const toggleGroup = () => setTreeExpansion({ groups: { [group.id]: !(treeExpansion.groups[group.id] ?? true) } });
     const groupHeaderContent = (
       <>
         <button
@@ -1103,7 +1101,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
             currentSessionId={currentSessionId}
             editingId={editingId}
             editingName={editingName}
-            collapsedIds={collapsedSessionIds}
+            sessionExpansion={treeExpansion.sessions}
             revealChildren={query.trim().length > 0}
             pendingDialogCountBySession={pendingDialogCountBySession}
             pinnedIds={pinnedIds}
@@ -1119,12 +1117,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
               if (selectionMode) toggleSelection(session);
               else void handleSelect(session);
             }}
-            onToggleExpanded={(sessionId) => setCollapsedSessionIds((current) => {
-              const next = new Set(current);
-              if (next.has(sessionId)) next.delete(sessionId);
-              else next.add(sessionId);
-              return next;
-            })}
+            onToggleExpanded={(sessionId) => setTreeExpansion({ sessions: { [sessionId]: !(treeExpansion.sessions[sessionId] ?? false) } })}
             onBeginRename={(session) => {
               setEditingId(session.id);
               setEditingName(conversationSessionTitle(session, untitled));
