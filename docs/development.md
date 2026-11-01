@@ -103,11 +103,15 @@ Windows 用 `test:packages:platform` 重跑拥有文件、进程、worker 与原
 打包 helper 与 native 验收。纯协议/解析、SDK conformance、客户端观察和 UI 投影由 Linux 验证一次；
 新增平台敏感 owner 时更新包级入口，不维护第二份逐文件清单。包测试和打包 helper 不依赖 native 构建成功。
 CI 的手动运行会对所选 ref 执行完整 code/Rust 检查，不依赖最近一次提交的差异；普通 push/PR
-仍按改动范围选择检查。全部包测试和 tooling 在原生构建前执行一次；Host 中实际启动原生目录观察器的
+仍按改动范围选择检查。Linux 的包测试和 tooling 独立于原生构建执行；Host 中实际启动原生目录观察器的
 Documents capture、文件观察和语言服务集成归入 `*.native.test.ts`，不混入 portable suite。Windows 仍重跑
 完整 Host portable suite，保留文件系统、Git、凭据与进程差异。各组按依赖安装/类型输出准备的真实结果启动，
 任一独立检查失败不会遮蔽其他组，也不把失败改成成功。原生构建成功后，即使 Host 验收失败，仍收集独立 Rust 测试结果，
-任何失败仍使 CI 失败。Rust 测试编译与执行分开，执行超过十分钟会明确失败，保留日志供排查。
+任何失败仍使 CI 失败。Linux release kernel 由一个 job 构建并导出，native 验收与 production build
+分别通过既有构建回执核验源码、选项和产物摘要后消费，不借用另一个测试组的成功。`Source quality` 保留为
+portable、kernel build 与 Linux native 结果的必需汇总检查；仅文档改动允许跳过两个 native job。
+拆分增加一次依赖安装和 Host 类型输出准备，避免两份独立 release kernel 构建；耗时以实际运行结果为准。
+Rust 测试编译与执行分开，执行超过十分钟会明确失败，保留日志供排查。
 Linux driver 的私有 D-Bus 协议测试使用
 `dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`，
 需要系统 `python3-gi` 与 `dbus`，不连接真实桌面或请求屏幕授权。

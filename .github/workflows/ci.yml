@@ -60,8 +60,8 @@ jobs:
             echo "rust=false" >> "$GITHUB_OUTPUT"
           fi
 
-  source-quality:
-    name: Source quality
+  portable-source:
+    name: Portable source checks
     runs-on: ubuntu-latest
     needs: changes
     concurrency:
@@ -82,15 +82,6 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target
-          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
-          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       # Documentation checks use only Node built-ins; prose-only changes do not
       # need the workspace/native dependency installation or postinstall hooks.
       - if: needs.changes.outputs.code == 'true'
@@ -117,29 +108,112 @@ jobs:
         run: bun run lint
       - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: bun run test:tooling
-      # Pure package consumers do not require a native executable. Collect
-      # their result before expensive native work, not behind its success gate.
+      # Package consumers do not require a native executable; collect their
+      # results independently of the parallel native build and acceptance.
       - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         run: bun run test:packages
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        name: Test desktop driver protocols on a private D-Bus
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi dbus
+          dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
       - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        id: native-build
-        name: Build native kernel authority
-        run: node scripts/test-kernel-authority.mjs --build-only
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        run: bun run --cwd packages/electron test:linux-desktop
+
+  native-build:
+    name: Build shared Linux kernel
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-kernel-{0}', github.run_id) }}
+      queue: max
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: rust-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
+      - run: node scripts/build-products.mjs kernel --export artifacts/shared-kernel
+      - uses: actions/upload-artifact@v7
+        with:
+          name: varin-kernel-linux-x64
+          path: artifacts/shared-kernel/
+          include-hidden-files: true
+          compression-level: 0
+          if-no-files-found: error
+
+  linux-native:
+    name: Linux native verification
+    runs-on: ubuntu-latest
+    needs: [changes, native-build]
+    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && needs.native-build.result == 'success' }}
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-native-{0}', github.run_id) }}
+      queue: max
+    env:
+      VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
+      VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
+      VARIN_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: rust-tests-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
+          restore-keys: rust-tests-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
+      - uses: actions/download-artifact@v8
+        with:
+          name: varin-kernel-linux-x64
+          path: .build-input/kernel
+      - id: native-restore
+        run: node scripts/build-products.mjs kernel
+      - id: dependencies
+        run: bun install --frozen-lockfile
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        id: prepare
+        run: bun run build:type-dependencies
+      - if: ${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
         name: Prepare FUSE for native workspace acceptance
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fuse3
           sudo modprobe fuse
           test -c /dev/fuse
-      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+      - if: ${{ !cancelled() && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
         name: Verify native kernel authority
         run: node scripts/test-kernel-authority.mjs
       # Rust state-machine/unit tests have one Linux owner. The release-binary
       # acceptance above and on Windows exercises the Host/native boundary.
       # An acceptance failure stays red but must not hide independent Rust
       # results when their required native artifact was successfully built.
-      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.native-build.outcome == 'success' }}
+      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.native-restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
         id: rust-build
         name: Build Rust workspace tests
         run: bun run test:rust --no-run
@@ -161,19 +235,35 @@ jobs:
         name: Test Rust workspace
         timeout-minutes: 10
         env:
-          VARIN_TEST_KERNEL_EXECUTABLE: ${{ github.workspace }}/kernel/target/release/varin-kernel
+          VARIN_TEST_KERNEL_EXECUTABLE: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
           RUST_BACKTRACE: 1
         # Report failures from every test binary in one round; Cargo still fails
         # the step if any binary fails, and the execution timeout bounds hangs.
         run: bun run test:rust --no-fail-fast
-      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        name: Test desktop driver protocols on a private D-Bus
+
+  # Preserve the branch-protection contract: portable success alone is not Source quality.
+  source-quality:
+    name: Source quality
+    runs-on: ubuntu-latest
+    needs: [changes, portable-source, native-build, linux-native]
+    if: ${{ always() }}
+    steps:
+      - name: Require every applicable source check
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          PORTABLE: ${{ needs.portable-source.result }}
+          KERNEL: ${{ needs.native-build.result }}
+          NATIVE: ${{ needs.linux-native.result }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-gi dbus
-          dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run --cwd packages/electron test:linux-desktop
+          set -euo pipefail
+          test "$CHANGES" = success
+          test "$PORTABLE" = success
+          case "$CODE" in
+            true) test "$KERNEL" = success; test "$NATIVE" = success ;;
+            false) test "$KERNEL" = skipped; test "$NATIVE" = skipped ;;
+            *) echo "Missing or invalid change surface" >&2; exit 1 ;;
+          esac
 
   windows-runtime:
     name: Windows runtime
@@ -297,11 +387,13 @@ jobs:
   production-build:
     name: Production build
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
+    needs: [changes, native-build]
+    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && needs.native-build.result == 'success' }}
     concurrency:
       group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-build-{0}', github.run_id) }}
       queue: max
+    env:
+      VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -317,15 +409,10 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
+      - uses: actions/download-artifact@v8
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kernel/target
-          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
-          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
+          name: varin-kernel-linux-x64
+          path: .build-input/kernel
       - run: bun install --frozen-lockfile
       - run: bun run build
       # Imports the built server artifact under plain Node: vitest's CJS

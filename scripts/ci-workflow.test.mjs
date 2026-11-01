@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -88,4 +88,43 @@ test('CI workflow changes and unavailable push bases require full validation', t
   f.commit('.github/workflows/ci.yml');
   assert.deepEqual(f.detect('push'), { code: 'true', rust: 'true' });
   assert.deepEqual(f.detect('push', { before: '0'.repeat(40) }), { code: 'true', rust: 'true' });
+});
+
+
+test('the required Source quality gate accepts only complete applicable results', () => {
+  const gate = workflow.jobs['source-quality'].steps[0];
+  const complete = {
+    'needs.changes.result': 'success',
+    'needs.changes.outputs.code': 'true',
+    'needs.portable-source.result': 'success',
+    'needs.native-build.result': 'success',
+    'needs.linux-native.result': 'success',
+  };
+  const docs = { ...complete, 'needs.changes.outputs.code': 'false',
+    'needs.native-build.result': 'skipped', 'needs.linux-native.result': 'skipped' };
+  const cases = [
+    ['code succeeds', complete, true],
+    ['documentation only succeeds', docs, true],
+    ['missing change surface', { ...complete, 'needs.changes.outputs.code': '' }, false],
+    ['invalid change surface', { ...complete, 'needs.changes.outputs.code': 'unknown' }, false],
+    ['documentation still requires portable checks', { ...docs, 'needs.portable-source.result': 'failure' }, false],
+    ['documentation cannot hide a native failure', { ...docs, 'needs.linux-native.result': 'failure' }, false],
+  ];
+  for (const dependency of ['changes', 'portable-source', 'native-build', 'linux-native']) {
+    for (const result of ['failure', 'cancelled', 'skipped', '']) {
+      cases.push([`${dependency}: ${result || 'missing'}`, { ...complete, [`needs.${dependency}.result`]: result }, false]);
+    }
+  }
+  for (const [name, values, accepted] of cases) {
+    const env = Object.fromEntries(Object.entries(gate.env).map(([key, expression]) => {
+      const reference = /^\$\{\{\s*(.*?)\s*\}\}$/.exec(expression)?.[1];
+      assert.ok(Object.hasOwn(values, reference), `Unknown gate input ${expression}`);
+      return [key, values[reference]];
+    }));
+    const result = spawnSync('bash', ['--noprofile', '--norc'], {
+      input: gate.run, env: { ...process.env, ...env }, encoding: 'utf8',
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status === 0, accepted, `${name}: ${result.stderr}`);
+  }
 });
