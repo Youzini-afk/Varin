@@ -79,9 +79,30 @@ export class CredentialBridge {
     } catch (error) { if (matches()) return true; throw error; }
     finally { owner.release(); }
   }
+  /** The selected model is retained by the original delegated duty, not the parent Run. */
+  async retainSelectedChildModel(binding: SourceMcpChildBinding, owner: ExistingHostCredentialOwner,
+    selection: ChildModelHandoffSelection, signal?: AbortSignal): Promise<CredentialScope> {
+    if (!owner.bindingIdentity) throw new CredentialOwnerError('credential-model-identity-unavailable');
+    const bindingId = `child:selected-model:${binding.operationId}`;
+    const key = ownerKey(binding.parentRunId, bindingId);
+    const scope = await waitWithSignal(owner.scope(), signal);
+    signal?.throwIfAborted();
+    const matchingScope = (): CredentialScope | undefined => {
+      const entry = this.#owners.get(key);
+      return entry && entry.epoch === this.currentEpoch() && entry.lifetime.kind === 'child-operation'
+        && isDeepStrictEqual(entry.lifetime.binding, binding) && isDeepStrictEqual(entry.lifetime.selection, selection)
+        && entry.owner.bindingIdentity === owner.bindingIdentity && same(entry.scope, scope) ? { ...entry.scope } : undefined;
+    };
+    const retained = matchingScope();
+    if (retained) return retained;
+    try { return await this.register(binding.parentRunId, owner, signal, bindingId,
+      { kind: 'child-operation', binding: structuredClone(binding), selection: structuredClone(selection) }); }
+    catch (error) { const retained = matchingScope(); if (retained) return retained; throw error; }
+  }
   releaseChildModel(parentRunId: string, operationId: string): void {
-    const bindingId = `child:model:${operationId}`;
-    if (this.#owners.get(ownerKey(parentRunId, bindingId))?.lifetime.kind === 'child-operation') this.unregister(parentRunId, bindingId);
+    for (const bindingId of [`child:model:${operationId}`, `child:selected-model:${operationId}`]) {
+      if (this.#owners.get(ownerKey(parentRunId, bindingId))?.lifetime.kind === 'child-operation') this.unregister(parentRunId, bindingId);
+    }
   }
   reconcileChildModels(children: readonly { operation_id: string; report: unknown }[]): void {
     const facts = new Map(children.map(child => [child.operation_id, child]));

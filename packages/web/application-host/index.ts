@@ -60,6 +60,7 @@ import { FileObservationService } from './lib/kernel/file-observation-service.js
 import { createScheduleToolOwner, SCHEDULE_CAPABILITY } from './lib/kernel/schedule-tool-owner.js';
 import { CalendarOwner } from './lib/scheduled-tasks/calendar-owner.js';
 import { createChildProjectSourcePreparer } from './lib/kernel/child-project-source.js';
+import { createDelegationModelSelection } from './lib/kernel/delegation-model-selection.js';
 import { createChildProfilePreparer } from './lib/kernel/child-profiles.js';
 import { createCodeExchangeOwner, CODE_EXCHANGE_CAPABILITY } from './lib/kernel/code-exchange.js';
 import { createManagedCodeExchangeService } from './lib/kernel/managed-code-exchange.js';
@@ -2326,7 +2327,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') });
   const reconcileMaterialReceipts = createMaterialReceiptReconciler({ runtime: agentRuntime, kernel: kernelClient, collections: materialCollectionsService,
     onError: (_operationId, _error) => console.error('[Materials] Original mutation receipt requires attention') });
-  const collaboration = new ThreadCollaboration({ runtime: agentRuntime, prepareProjectSource,
+  const delegationModels = createDelegationModelSelection({ kernel: kernelClient, runtime: agentRuntime, models: modelAuthority, authority: modelsService,
+    inference: { kernel: kernelClient, runtime: agentRuntime, egress: egressRuntime,
+      readRetrySettings: () => modelsService.readGlobalInferenceSettings().then(value => value.retry),
+      onError: () => console.error('[Delegation] Original selection inference requires attention') } });
+  const collaboration = new ThreadCollaboration({ runtime: agentRuntime, prepareProjectSource, prepareModel: delegationModels.prepare,
     canExecuteThread: async threadId => {
       const botId = (await agentRuntime.thread(threadId)).bot_id;
       return !botId || (await botService.executionGate(botId)).permitted;
@@ -3065,6 +3070,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unsubscribeKnowledgeEmbedding();
       await shutdown.run('localKnowledgeComponent.dispose', () => localKnowledgeComponent.dispose());
       await shutdown.run('knowledgeEmbedding.close', () => knowledgeEmbedding.close());
+      await shutdown.run('delegationModels.close', () => delegationModels.close());
       await shutdown.run('semanticInference.close', () => semanticInference.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.

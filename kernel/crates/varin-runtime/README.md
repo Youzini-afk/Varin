@@ -13,6 +13,8 @@ This document is the local code map and maintenance boundary, not an implementat
 | --- | --- |
 | Single durable owner, short metadata transactions, format preflight | [catalog.rs](src/catalog.rs) |
 | One-time supported-generation conversion before recovery | [catalog_upgrade.rs](src/catalog_upgrade.rs) |
+| Original delegated model selection, short history and frozen binding commit | [catalog_delegation_model.rs](src/catalog_delegation_model.rs) |
+| Sparse Unicode ranges into original stored history bodies | [content_text.rs](src/content_text.rs) |
 | Thread titles, archive/pin, read positions and visibility tombstones | [catalog_threads.rs](src/catalog_threads.rs) |
 | Transaction-consistent, metadata-only Host attention (including hidden unsettled work) | [catalog_attention.rs](src/catalog_attention.rs) |
 | Deleted conversation metadata retirement and surviving reference protection | [catalog_retention.rs](src/catalog_retention.rs) |
@@ -40,10 +42,11 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. The owner upgrades supported formats 78 and 79 to 80
+  malformed stores before writable recovery. The owner upgrades supported formats 78, 79 and 80 to 82
   in place: 78 → 79 adds external-agent records; 79 → 80 initializes the usage ledger and its recording
   start time. Older receipts lack reliable
-  settlement time/attribution and are not backfilled. Conversion, final version marker and upgrade event
+  settlement time/attribution and are not backfilled. The 80 → 82 step indexes original history text ranges
+  without copying bodies or changing prior execution bindings; unverified format 81 is rejected. Conversion, final version marker and upgrade event
   commit atomically before epoch changes or recovery.
   Failure or process interruption before commit rolls back the conversion; reopening retries it.
   Existing immutable bodies, identities and original receipts remain in place without a full database copy.

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import {
   mergeHarnessSettings, parseHarnessEmbeddingSettings, parseHarnessRerankSettings, parseHarnessFastDecisionSettings,
-  parseHarnessImageSettings, resolveHarnessCodeRetrievalSettings, resolveHarnessDocumentReadingSettings,
+  parseHarnessImageSettings, resolveHarnessDelegationModelSelectionSettings, resolveHarnessCodeRetrievalSettings, resolveHarnessDocumentReadingSettings,
   type HarnessSettingsInput, type JsonValue, parseModelRetrySettings, THINKING_LEVELS, type ThinkingLevel,
 } from '@varin/protocol';
 import type { AgentSettingsSnapshot } from '@varin/application-client';
@@ -34,6 +34,7 @@ export function validateAgentSettings(document: Record<string, unknown>): Record
   parseHarnessFastDecisionSettings(harness.fastDecision);
   parseHarnessImageSettings(harness.images);
   resolveHarnessCodeRetrievalSettings(harness.codeRetrieval);
+  resolveHarnessDelegationModelSelectionSettings(harness.delegationModelSelection);
   resolveHarnessDocumentReadingSettings(harness.documentReading);
   return document as Record<string, JsonValue>;
 }

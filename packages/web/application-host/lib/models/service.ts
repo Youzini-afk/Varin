@@ -6,6 +6,7 @@ import { imageModelInfo, imageToolContract, THINKING_LEVELS, type ImageModelInfo
 import { isModelThinkingConfiguration } from '@varin/protocol';
 import { embeddingRequestUrl } from '@varin/protocol/node/embeddings';
 import { ChannelTypes, type ChannelType } from './channel-types.js';
+import { delegationModelConfigurationFingerprint } from './delegation-catalog.js';
 import { enrichModel } from './discovery.js';
 import { ConfigurationFile, ModelConfigurationError, object, revisionOf } from './configuration.js';
 import { CredentialService, fileSecretStore, type ResolvedCredential } from './credentials.js';
@@ -145,6 +146,7 @@ export class ModelsService {
     for (const model of value.models) {
       if (!object(model) || !nonempty(model.id) || !nonempty(model.name) || typeof model.enabled !== 'boolean'
         || !Array.isArray(model.operations) || model.operations.length === 0 || model.operations.some(op => !type.operations.includes(op))
+        || model.description !== undefined && typeof model.description !== 'string'
         || model.requestModelId !== undefined && !nonempty(model.requestModelId)
         || model.protocol !== undefined && !(type.protocols ?? [type.protocol]).includes(model.protocol as string)
         || model.contextWindow !== undefined && !positive(model.contextWindow)
@@ -420,6 +422,11 @@ export class ModelsService {
       ...(model.parameters === undefined ? {} : { samplingParams: model.parameters }),
       ...(model.compat === undefined && channel.type !== 'github-copilot' ? {} : { compat: { ...model.compat, ...(channel.type === 'github-copilot' ? { copilot: true } : {}) } }), allowAnonymous: channel.authentication.kind === 'none' };
   }
+  /** Metadata-only projection of an already resolved catalog snapshot; no credential or tokenizer lease. */
+  describeConfiguredModel(channel: ModelChannel, model: ChannelModel): SelectedModel {
+    if (!this.types.get(channel.type)) return fail('channel-type-unavailable', 'The configured channel type is unavailable');
+    return this.#selected(channel, model);
+  }
   async prepareTokenizer(source: import('@varin/application-client').ModelTokenizer) { return this.tokenizers.resolve(source); }
   async cachedTokenizer(source: import('@varin/application-client').ModelTokenizer) { return this.tokenizers.cached(source); }
   acquireTokenizer(source?: import('@varin/application-client').ModelTokenizer, inherited?: Pick<import('../kernel/protocol.generated.js').ModelSessionConfiguration, 'tokenizer'>) {
@@ -429,9 +436,12 @@ export class ModelsService {
     return (await this.read()).channels.filter(channel => channel.enabled)
       .flatMap(channel => channel.models.filter(model => model.enabled && model.operations.includes('chat')).map(model => this.#selected(channel, model)));
   }
-  async captureModel(providerId: string, modelId: string, original?: import('../kernel/protocol.generated.js').ModelSessionConfiguration): Promise<{ model: SelectedModel; authority: ModelExecutionAuthority; release(): void }> {
+  async captureModel(providerId: string, modelId: string, original?: import('../kernel/protocol.generated.js').ModelSessionConfiguration, expectedFingerprint?: string): Promise<{ model: SelectedModel; authority: ModelExecutionAuthority; release(): void }> {
     const channel = await this.#channel(providerId);
     const model = this.#model(channel, modelId, 'chat');
+    if (expectedFingerprint !== undefined && delegationModelConfigurationFingerprint(this, channel, model, 'chat') !== expectedFingerprint) {
+      return fail('delegation-model-configuration-changed', 'The selected model configuration changed before delegation preparation');
+    }
     const selected = this.#selected(channel, model);
     const type = this.types.get(channel.type)!;
     const scope = await this.#scope(channel);
@@ -527,11 +537,14 @@ export class ModelsService {
   }
   resolveEmbeddingBinding(providerId: string, modelId: string) { return this.#binding(providerId, modelId, 'embedding'); }
   resolveRerankBinding(providerId: string, modelId: string, endpoint?: string) { return this.#binding(providerId, modelId, 'rerank', endpoint); }
-  resolveDecisionBinding(providerId: string, modelId: string, endpoint?: string) { return this.#binding(providerId, modelId, 'decision', endpoint); }
+  resolveDecisionBinding(providerId: string, modelId: string, endpoint?: string, expectedFingerprint?: string) { return this.#binding(providerId, modelId, 'decision', endpoint, expectedFingerprint); }
   resolveImageBinding(providerId: string, modelId: string, purpose: ImageToolPurpose) { return this.#binding(providerId, modelId, purpose === 'editing' ? 'image-editing' : 'image-generation'); }
-  async #binding(providerId: string, modelId: string, operation: ModelOperation, override?: string): Promise<InferenceProviderBinding> {
+  async #binding(providerId: string, modelId: string, operation: ModelOperation, override?: string, expectedFingerprint?: string): Promise<InferenceProviderBinding> {
     const channel = await this.#channel(providerId);
     const model = this.#model(channel, modelId, operation);
+    if (expectedFingerprint !== undefined && operation === 'decision' && delegationModelConfigurationFingerprint(this, channel, model, 'decision') !== expectedFingerprint) {
+      return fail('delegation-model-configuration-changed', 'The selected model configuration changed before delegation preparation');
+    }
     const type = this.types.get(channel.type)!;
     const image = operation === 'image-generation' || operation === 'image-editing';
     const api = image ? this.#imageInfo(channel, model).api : operation === 'decision' ? decisionProtocol(model.decision?.api, channel.parameters, type) : type.protocol;
@@ -579,8 +592,8 @@ export class ModelsService {
       } finally { active -= 1; dispose(); }
     };
     const { name: _channelName, models: _models, enabled: _channelEnabled, ...connection } = channel;
-    const { name: _modelName, enabled: _modelEnabled, pricing: _pricing, billing: _billing, catalog, ...selection } = model;
-    const executionModel = { ...selection, ...(catalog ? { catalog: { ...catalog, overrides: catalog.overrides.filter(field => field !== 'pricing' && field !== 'billing') } } : {}) };
+    const { name: _modelName, description: _description, enabled: _modelEnabled, pricing: _pricing, billing: _billing, catalog, ...selection } = model;
+    const executionModel = { ...selection, ...(catalog ? { catalog: { ...catalog, overrides: catalog.overrides.filter(field => field !== 'pricing' && field !== 'billing' && field !== 'description') } } : {}) };
     const configurationId = revisionOf({ channel: connection, model: executionModel, routes, ...(operation === 'decision' ? { api } : {}) });
     const egressOverride = modelEgressOverride(channel.connection);
     return { providerId, modelId, requestModelId: model.requestModelId ?? model.id, baseUrl, api, routes, requestUrl: routes[0]!.requestUrl, ...(configuredPath === undefined ? {} : { endpoint: configuredPath }), configurationId,

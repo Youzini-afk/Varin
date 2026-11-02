@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.modelDescription": "简介",
+  "settings.models.modelDescriptionHint": "在这里记录模型特点、使用经验和渠道偏好。目录更新不会覆盖你的修改。",
+  "settings.delegationModelSelection.title": "派发模型选择",
+  "settings.delegationModelSelection.description": "通过一次辅助请求，为新建的原生派发选择执行模型和思考设置。保留已明确指定的配置和选定的预设，默认不启用。",
+  "settings.delegationModelSelection.enabled": "启用自动选择",
+  "settings.delegationModelSelection.model": "选择模型",
+  "settings.delegationModelSelection.thinking": "选择者的思考设置",
+  "settings.delegationModelSelection.thinkingHint": "只影响选择者自身，与执行者的思考设置相互独立。默认使用所选模型配置。",
+  "settings.delegationModelSelection.chooseModel": "请先选择一个已启用的对话或决策模型。",
+  "settings.delegationModelSelection.unavailable": "保存的模型不可用或已停用。请选择其他配置，系统不会自动替换。",
+
   'bot.work.background': '参考会话 · {count} 处原文',
   'bot.follow.title': '交给总助手跟进',
   'bot.follow.description': '保留原会话和工作区。总助手可以读取这个分支；你可以分别选择是否允许发送消息、是否将交流纳入长期记忆。',

@@ -57,6 +57,14 @@ pub struct DispatchInput {
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub background: Vec<super::background::BackgroundReference>,
     pub task: String,
+    /// Stable configured channel-model identity from the disclosed catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Omission is undecided; default is an explicit choice of the configuration default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_types: Vec<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inherit_context: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,10 +106,18 @@ impl DispatchInput {
             task.push_str("\n\nSearch scope (relative to the admitted source): ");
             task.push_str(&serde_json::to_string(&paths)?);
         }
-        Ok(Self { project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
+        Ok(Self { model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.preset.is_some() && (self.model.is_some() || self.thinking.is_some()) {
+            return Err(RuntimeError::Invalid("A preset retains its own model and thinking configuration; omit preset for free model selection".into()));
+        }
+        if self.model.as_deref().is_some_and(|id| id.trim().is_empty())
+            || self.thinking.as_deref().is_some_and(|v| !["default", "off", "on", "budget", "minimal", "low", "medium", "high", "xhigh", "max"].contains(&v))
+            || self.input_types.iter().any(|v| !["text", "image"].contains(&v.as_str())) {
+            return Err(RuntimeError::Invalid("Invalid delegated model, thinking or input requirement".into()));
+        }
         if self.task.trim().is_empty() || self.name.as_deref().is_some_and(|name| name.trim().is_empty())
             || self.source_agent.as_deref().is_some_and(|source|source.trim().is_empty())
             || self.preset.as_ref().is_some_and(|id| id.trim().is_empty())
@@ -217,6 +233,8 @@ pub struct ExternalLaunch { pub command: String, pub args: Vec<String> }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildDispatchCatalog {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub model_selection_preparation: bool,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub projects: Vec<ChildProjectSource>,
     pub identity: String,
@@ -329,6 +347,8 @@ pub struct ChildProjectMcp {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildSelectedProfile {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub model_selection_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_mcp: Option<ChildProjectMcp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -604,6 +624,10 @@ impl ChildDispatchSelection {
     pub fn resolve(&self, input: &DispatchInput) -> Result<ResolvedChildSelection> {
         input.validate()?;
         self.project(input)?;
+        let model_selection_required = input.preset.is_none() && self.catalog.model_selection_preparation;
+        if !model_selection_required && (input.model.is_some() || input.thinking.is_some()) {
+            return Err(RuntimeError::Invalid("Delegated model preparation unavailable; start a new request".into()));
+        }
         let available = self.catalog.presets.iter().filter(|preset| preset.unavailable.is_none() && preset.id != "code_retrieval")
             .map(|preset| preset.id.as_str()).collect::<Vec<_>>().join(", ");
         let available = if available.is_empty() { "none" } else { &available };
@@ -754,6 +778,7 @@ impl ChildDispatchSelection {
                 .cloned()
                 .collect(),
             profile: ChildSelectedProfile {
+                model_selection_required,
                 project_mcp: self.project(input)?.map(|project| ChildProjectMcp { project, tools: input.tools.clone() }),
                 avatar,
                 preset_id: input.preset.clone(),
@@ -832,21 +857,26 @@ pub struct ChildInvocationRead {
     _publication: crate::content::ContentPublication,
 }
 impl ChildInvocationRead {
-    pub fn load(self) -> Result<ChildDispatchSelection> {
+    pub fn load(self) -> Result<ChildDispatchSelection> { self.load_for(true) }
+    pub fn load_for(self, inherit_history: bool) -> Result<ChildDispatchSelection> {
         use crate::execution::{RequestSnapshot, ToolOrigin};
         let mut history = None;
         let reference = match &self.context.origin {
             ToolOrigin::ModelStep { request_id } => {
-                let snapshot: RequestSnapshot = self.content.load_snapshot(&self.body)?;
-                if snapshot.view.request_id != *request_id
-                    || snapshot.view.run_id != self.context.run_id
-                {
-                    return Err(RuntimeError::Invalid(
-                        "dispatch request belongs to another origin".into(),
-                    ));
+                if !inherit_history && self.body.get("dispatch").is_some() {
+                    let metadata = &self.body["dispatch"];
+                    if metadata["requestId"] != *request_id || metadata["runId"] != self.context.run_id {
+                        return Err(RuntimeError::Invalid("dispatch request belongs to another origin".into()));
+                    }
+                    metadata.get("childDispatch").filter(|v| !v.is_null()).cloned()
+                } else {
+                    let snapshot: RequestSnapshot = self.content.load_snapshot(&self.body)?;
+                    if snapshot.view.request_id != *request_id || snapshot.view.run_id != self.context.run_id {
+                        return Err(RuntimeError::Invalid("dispatch request belongs to another origin".into()));
+                    }
+                    history = Some(snapshot.view.history);
+                    snapshot.view.binding.child_dispatch
                 }
-                history = Some(snapshot.view.history);
-                snapshot.view.binding.child_dispatch
             }
             ToolOrigin::PolicyAction { action_id, node_id } => {
                 let body: super::policy_body::PolicyGraphBody = serde_json::from_value(self.content.load(&self.body)?)?;
@@ -855,7 +885,7 @@ impl ChildInvocationRead {
                         "dispatch graph belongs to another origin".into(),
                     ));
                 }
-                if let Some(reference) = body.dispatch_history.as_ref() {
+                if let Some(reference) = body.dispatch_history.as_ref().filter(|_| inherit_history) {
                     history = Some(self.content.load_items(reference, &|| false)?);
                 }
                 body.nodes
@@ -1228,6 +1258,22 @@ impl Catalog {
                     .collect::<Result<_>>()?
             };
             for mut execution in executions {
+                let selection: Option<String> = tx.query_row(
+                    "SELECT id FROM operations WHERE json_extract(body,'$.intent.kind')='delegation_model_selection_v1' AND json_extract(body,'$.intent.executionId')=?1",
+                    [&execution.execution_id], |row| row.get(0),
+                ).optional()?;
+                if let Some(selection) = selection {
+                    let mut selection = super::request_cancel_operation_in(&tx, &selection)?;
+                    // This root owns preparation, not transport. End its publication authority
+                    // while original inference receipts retain independent drain/usage duties.
+                    if selection.phase != OperationPhase::Terminal {
+                        selection.phase = OperationPhase::Terminal;
+                        selection.outcome = Some(Outcome::Cancelled);
+                        selection.revision += 1;
+                        put(&tx, "operations", &selection.id, &selection)?;
+                        event(&tx, &selection.id, selection.revision, "child.model_selection_cancelled", Value::Null)?;
+                    }
+                }
                 if execution.cancel_requested {
                     continue;
                 }

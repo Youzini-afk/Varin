@@ -2,6 +2,17 @@ import { settingsDict as englishSettingsDict } from './en.js';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.models.modelDescription": "Description",
+  "settings.models.modelDescriptionHint": "Décrivez le modèle, votre expérience et vos préférences de canal au même endroit. Les mises à jour du catalogue conservent vos modifications.",
+  "settings.delegationModelSelection.title": "Sélection du modèle de délégation",
+  "settings.delegationModelSelection.description": "Une seule requête auxiliaire choisit le modèle d’exécution et son raisonnement pour les nouvelles délégations natives. Les choix explicites et les préréglages sélectionnés sont conservés. Désactivé par défaut.",
+  "settings.delegationModelSelection.enabled": "Activer la sélection automatique",
+  "settings.delegationModelSelection.model": "Modèle de sélection",
+  "settings.delegationModelSelection.thinking": "Raisonnement du sélecteur",
+  "settings.delegationModelSelection.thinkingHint": "S’applique uniquement au sélecteur, indépendamment de l’exécutant. Par défaut, la configuration du modèle sélectionné est utilisée.",
+  "settings.delegationModelSelection.chooseModel": "Choisissez un modèle de conversation ou de décision activé avant d’activer cette fonction.",
+  "settings.delegationModelSelection.unavailable": "Le modèle enregistré est indisponible ou désactivé. Choisissez une autre configuration ; aucun remplacement n’est automatique.",
+
   "settings.projects.workspace.extensionSettings": "Activer l’extension intégrée sur l’hôte",
   "settings.projects.workspace.backend": "Système de fichiers du Host",
   "settings.projects.workspace.backendReady": "Dépendances disponibles",

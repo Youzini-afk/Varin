@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.modelDescription": "소개",
+  "settings.models.modelDescriptionHint": "모델의 특징, 사용 경험, 채널 선호도를 한곳에 기록하세요. 카탈로그가 업데이트되어도 수정 내용은 유지됩니다.",
+  "settings.delegationModelSelection.title": "위임 모델 선택",
+  "settings.delegationModelSelection.description": "새 네이티브 위임의 실행 모델과 사고 설정을 한 번의 보조 요청으로 선택합니다. 명시적 선택과 지정한 프리셋은 유지됩니다. 기본적으로 꺼져 있습니다.",
+  "settings.delegationModelSelection.enabled": "자동 선택 사용",
+  "settings.delegationModelSelection.model": "선택용 모델",
+  "settings.delegationModelSelection.thinking": "선택 모델의 사고 설정",
+  "settings.delegationModelSelection.thinkingHint": "선택 모델 자체에만 적용되며 실행 모델의 사고 설정과는 독립적입니다. 기본값은 선택한 모델의 설정을 사용합니다.",
+  "settings.delegationModelSelection.chooseModel": "사용하기 전에 활성화된 채팅 또는 판단 모델을 선택하세요.",
+  "settings.delegationModelSelection.unavailable": "저장된 모델을 사용할 수 없거나 비활성화되어 있습니다. 다른 설정을 선택하세요. 자동으로 대체하지 않습니다.",
+
   "settings.projects.workspace.extensionSettings": "Host에서 내장 확장 활성화",
   "settings.projects.workspace.backend": "실행 Host 파일 시스템",
   "settings.projects.workspace.backendReady": "종속성 준비 완료",

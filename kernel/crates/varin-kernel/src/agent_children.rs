@@ -12,6 +12,35 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     let owner = runtime.catalog();
+    if method == "runtime.child.model.read" {
+        let p: ChildExecutionParams = serde_json::from_value(params)?;
+        let read = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
+            .find_delegation_model(&p.execution_id).map_err(domain)?;
+        return Ok(serde_json::to_value(read.map(|value| value.load()).transpose().map_err(domain)?)?);
+    }
+    if method == "runtime.child.model.prepare" {
+        let p: varin_runtime::catalog::delegation_model::PrepareParams = serde_json::from_value(params)?;
+        let executor = p.execution_owner.clone();
+        let prepared = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
+            .capture_delegation_model(p).map_err(domain)?;
+        let prepared = prepared.load().map_err(domain)?;
+        if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        let id = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
+            .admit_delegation_model(prepared, executor).map_err(domain)?;
+        let read = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
+            .read_delegation_model(&id).map_err(domain)?;
+        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
+    if method == "runtime.child.model.commit" {
+        let p: varin_runtime::catalog::delegation_model::CommitParams = serde_json::from_value(params)?;
+        let prepared = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
+            .prepare_delegation_model_commit(p).map_err(domain)?;
+        let prepared = prepared.load().map_err(domain)?;
+        if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
+            .commit_delegation_model(prepared).map_err(domain)?;
+        return Ok(json!({"selected":true}));
+    }
     if method == "runtime.child.progress" {
         let p: ChildProgressParams = serde_json::from_value(params)?;
         let updated = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?

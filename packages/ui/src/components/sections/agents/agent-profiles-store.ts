@@ -13,7 +13,7 @@ interface AgentProfilesState {
   error: string | null;
   selectedId: string | null;
   creating: boolean;
-  view: 'profiles' | 'plugins';
+  view: 'profiles' | 'plugins' | 'delegation-model-selection';
   query: string;
   showAllFocuses: boolean;
 }
@@ -47,6 +47,7 @@ export function beginAgentProfilesHost(host: string) {
 export function selectAgentProfile(id: string | null) { publish({ selectedId: id, creating: false, view: 'profiles', error: null }); }
 export function createAgentProfile() { publish({ creating: true, view: 'profiles', error: null }); }
 export function cancelAgentProfileCreation() { publish({ creating: false, error: null }); }
+export function selectDelegationModelSelection() { publish({ creating: false, view: 'delegation-model-selection' }); }
 export function selectAgentPlugin() { publish({ creating: false, view: 'plugins' }); }
 export function setAgentProfilesQuery(query: string) { publish({ query }); }
 export function setAgentProfilesShowAllFocuses(showAllFocuses: boolean) { publish({ showAllFocuses }); }

@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { DelegatedExecution, LaunchSource } from './protocol.generated.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
+import { KernelClientError } from './kernel-error.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { preparationFailure } from './preparation-failure.js';
 import { SourceAdmissionError } from './source-admission-error.js';
@@ -83,8 +84,9 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
     revokeGrant: vi.fn(async () => { trace.push('cleanup-authority-retired'); }) };
   const continueRun = vi.fn(async () => {});
   const prepareContext = vi.fn();
+  const prepareModel = vi.fn(async (value: DelegatedExecution, _signal: AbortSignal) => value);
   const open = (reconcileDomainReceipts?: (signal: AbortSignal) => Promise<void>) => new ThreadCollaboration({ kernel: kernel as never, runtime: runtime as unknown as AgentRuntimeClient,
-    storageAdapter: {} as never, sourceCaptureOwners: {} as never, prepareContext: prepareContext as never,
+    storageAdapter: {} as never, sourceCaptureOwners: {} as never, prepareContext: prepareContext as never, prepareModel,
     resolveLiveSource: async () => { throw new Error('Must not reacquire a live source'); }, continueRun,
     ...(reconcileDomainReceipts ? { reconcileDomainReceipts } : {}),
     recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
@@ -95,7 +97,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
       workspace_id: source.workspace_id, branch_id: childSource.branch_id!, result_revision: 4,
       root: 'original-published-result', base_root: pin.root, record_id: 'original-result-record' } };
   };
-  return { child, source, trace, errors, service, runtime, kernel, scoped, continueRun, prepareContext, open, complete };
+  return { child, source, trace, errors, service, runtime, kernel, scoped, continueRun, prepareContext, prepareModel, open, complete };
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -283,5 +285,57 @@ it('retries original domain receipts on Source recovery and retains a wake arriv
     finish(); await tick(); await tick(); expect(reconcile).toHaveBeenCalledTimes(2);
     collaboration.sourceReached(); await tick(); expect(reconcile).toHaveBeenCalledTimes(3);
     collaboration.stop(); collaboration.sourceReached(); await tick(); expect(reconcile).toHaveBeenCalledTimes(3);
+  } finally { collaboration.stop(); }
+});
+
+
+it('awaits original model preparation before child source or context and uses the committed binding', async () => {
+  const f = fixture('local'); f.child.state = 'preparing'; f.child.receipt = null;
+  f.child.selected_profile.model_selection_required = true;
+  let finish!: (child: DelegatedExecution) => void;
+  f.prepareModel.mockImplementationOnce(async () => new Promise(resolve => { finish = resolve; }));
+  f.prepareContext.mockRejectedValue(new Error('stop after proving model-before-context ordering'));
+  const collaboration = f.open();
+  const source = vi.spyOn(collaboration as unknown as { prepareSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> }, 'prepareSource');
+  try {
+    await collaboration.recover();
+    await vi.waitFor(() => expect(f.prepareModel).toHaveBeenCalledOnce());
+    expect(source).not.toHaveBeenCalled(); expect(f.prepareContext).not.toHaveBeenCalled();
+    expect(f.runtime.childPreparationProgress).toHaveBeenCalledWith(f.child.execution_id, { phase: 'model_selection' }, expect.any(AbortSignal));
+    const selected = structuredClone(f.child); selected.configuration = { model: 'selected-channel-model', thinkingLevel: 'low' };
+    finish(selected);
+    await vi.waitFor(() => expect(f.prepareContext).toHaveBeenCalledOnce());
+    expect(source.mock.calls[0]![0].configuration).toEqual(selected.configuration);
+    expect(f.continueRun).not.toHaveBeenCalled();
+  } finally { collaboration.stop(); }
+});
+
+it('does not advance late model preparation after the original observer stops', async () => {
+  const f = fixture('local'); f.child.state = 'preparing'; f.child.receipt = null;
+  f.child.selected_profile.model_selection_required = true;
+  let finish!: (child: DelegatedExecution) => void;
+  f.prepareModel.mockImplementationOnce(async () => new Promise(resolve => { finish = resolve; }));
+  const collaboration = f.open();
+  const source = vi.spyOn(collaboration as unknown as { prepareSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> }, 'prepareSource');
+  try {
+    await collaboration.recover(); await vi.waitFor(() => expect(f.prepareModel).toHaveBeenCalledOnce());
+    collaboration.stop(); finish(structuredClone(f.child)); await tick();
+    expect(source).not.toHaveBeenCalled(); expect(f.prepareContext).not.toHaveBeenCalled();
+    expect(f.continueRun).not.toHaveBeenCalled(); expect(f.runtime.failChild).not.toHaveBeenCalled();
+    expect(f.child.receipt).toBeNull();
+  } finally { collaboration.stop(); }
+});
+
+
+it.each(['activation-held', 'bot-suspended'])('selector pre-admission %s keeps the original child pending without reporting failure or preparing source', async code => {
+  const f = fixture('local'); f.child.state = 'preparing'; f.child.receipt = null; f.child.selected_profile.model_selection_required = true;
+  const held = new KernelClientError({ code, message: 'Original selector admission is held' });
+  f.prepareModel.mockRejectedValue(held);
+  const collaboration = f.open();
+  try {
+    await collaboration.recover(); await vi.waitFor(() => expect(f.prepareModel).toHaveBeenCalledOnce()); await tick();
+    expect(f.runtime.failChild).not.toHaveBeenCalled(); expect(f.prepareContext).not.toHaveBeenCalled();
+    expect(f.kernel.releaseChildToolHandoff).not.toHaveBeenCalled(); expect(f.continueRun).not.toHaveBeenCalled();
+    expect(f.child.state).toBe('preparing'); expect(f.child.report).toBeNull(); expect(f.errors).toEqual([]);
   } finally { collaboration.stop(); }
 });

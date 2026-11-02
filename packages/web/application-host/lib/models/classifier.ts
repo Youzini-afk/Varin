@@ -21,6 +21,8 @@ export interface ClassifierRequest {
   model: string;
   nativeModel?: ClassifierModel<ClassifierApi>;
   classify?: ClassifierFunction;
+  /** False admits one normal probability readout, never a semantic retry. */
+  adaptiveReadout?: boolean;
   /** Provider state value: string, object, or array. */
   state: unknown;
   questions: readonly FastDecisionQuestion[];
@@ -366,6 +368,7 @@ export async function requestClassifier(request: ClassifierRequest): Promise<Cla
       ...(request.apiKey === undefined ? {} : { apiKey: request.apiKey }),
       ...(request.headers ? { headers: request.headers } : {}),
       signal,
+      ...(request.adaptiveReadout === undefined ? {} : { adaptiveReadout: request.adaptiveReadout }),
       fetch: (url, init) => {
         const work = (async () => {
           signal.throwIfAborted();

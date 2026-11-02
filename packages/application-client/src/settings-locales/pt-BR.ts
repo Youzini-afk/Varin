@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.modelDescription": "Descrição",
+  "settings.models.modelDescriptionHint": "Descreva o modelo, sua experiência e suas preferências de canal em um só lugar. As atualizações do catálogo preservam suas edições.",
+  "settings.delegationModelSelection.title": "Seleção de modelo para delegação",
+  "settings.delegationModelSelection.description": "Uma única solicitação auxiliar escolhe o modelo de execução e seu raciocínio para novas delegações nativas. As escolhas explícitas e as predefinições selecionadas são preservadas. Desativado por padrão.",
+  "settings.delegationModelSelection.enabled": "Ativar seleção automática",
+  "settings.delegationModelSelection.model": "Modelo seletor",
+  "settings.delegationModelSelection.thinking": "Raciocínio do seletor",
+  "settings.delegationModelSelection.thinkingHint": "Aplica-se apenas ao seletor, independentemente do executor. O padrão usa a configuração do modelo selecionado.",
+  "settings.delegationModelSelection.chooseModel": "Escolha um modelo de conversa ou de decisão habilitado antes de ativar.",
+  "settings.delegationModelSelection.unavailable": "O modelo salvo está indisponível ou desativado. Escolha outra configuração; nenhuma substituição é feita automaticamente.",
+
   "settings.projects.workspace.extensionSettings": "Ativar extensão integrada no Host",
   "settings.projects.workspace.backend": "Sistema de arquivos do Host",
   "settings.projects.workspace.backendReady": "Dependências disponíveis",

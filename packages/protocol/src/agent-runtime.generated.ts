@@ -1642,7 +1642,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 73; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 75; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -2778,6 +2778,15 @@ export interface ChildResultPublishedParams {
   publicationId: string;
 }
 
+export interface DelegationModelCandidate { id: string; providerId: string; modelId: string; configurationFingerprint: string; name: string; channelName: string; description?: string; input: string[]; thinkingLevels: string[]; defaultThinkingLevel: string; contextWindow?: number; maxOutputTokens?: number; pricing?: unknown; billing?: string; thinking?: unknown; }
+
+export interface DelegationModelSelector { providerId: string; modelId: string; operation: 'chat' | 'decision'; configurationFingerprint: string; thinkingLevel?: string; contextWindow?: number; maxOutputTokens?: number; }
+
+export interface DelegationModelCatalog {
+  candidates: DelegationModelCandidate[];
+  selector: DelegationModelSelector | null;
+}
+
 export interface ChildPrepareParams {
   executionId: string;
   source: LaunchSourceParams | null;
@@ -2786,7 +2795,7 @@ export interface ChildPrepareParams {
   inputPreparation?: InputResourcePreparation;
 }
 
-export interface ChildPreparationProgress { phase: 'source' | 'source_wait' | 'inventory' | 'capture' | 'verify' | 'publish' | 'context' | 'admission'; completed?: number; total?: number; }
+export interface ChildPreparationProgress { phase: 'source' | 'source_wait' | 'inventory' | 'capture' | 'verify' | 'publish' | 'context' | 'admission' | 'model_selection'; completed?: number; total?: number; }
 
 export interface ChildProgressParams {
   executionId: string;
@@ -2880,6 +2889,7 @@ export interface ChildDispatchCatalog {
   identity: string;
   presets: ChildPreset[];
   normal_unavailable: ChildCapabilityFailure | null;
+  model_selection_preparation?: boolean;
 }
 
 export interface ChildSelectedProfile {
@@ -2890,6 +2900,7 @@ export interface ChildSelectedProfile {
   instructions: string;
   avatar?: string;
   project_mcp?: { project: ChildProjectSource; tools: string[] | null };
+  model_selection_required?: boolean;
 }
 
 export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string };
@@ -2918,6 +2929,9 @@ export interface ChildInput {
   preset?: string;
   workMode?: ChildWorkMode;
   tools?: string[];
+  model?: string;
+  thinking?: string;
+  inputTypes?: string[];
 }
 
 export interface ChildSourcePin {
