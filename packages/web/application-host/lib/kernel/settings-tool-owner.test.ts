@@ -40,7 +40,7 @@ describe('native settings invocation owner', () => {
     const handler = createSettingsToolOwner({ service: {} as SettingsService, runtime: {} as AgentRuntimeClient });
     expect(() => handler('update', { id: 'harness.shell', threadId: 'forged' }, {} as never)).toThrow(/caller authority/);
   });
-  it('uses actual writer facts for validation, CAS rebasing and lost write replies', async () => {
+  it('uses actual writer facts for validation, explicit CAS retry and lost write replies', async () => {
     let document:VarinSettingsDocument={};
     let loseReply=false;
     const persist=vi.fn<SettingsServiceDeps['persistAppSettings']>(async changes=>{
@@ -67,6 +67,10 @@ describe('native settings invocation owner', () => {
       .toMatchObject({completion:{outcome:'failed',effect:'none'}});
     expect(persist).not.toHaveBeenCalled();
     expect(await invoke({id:'appearance.time-format',set:{timeFormatPreference:'24h'}}))
+      .toMatchObject({completion:{outcome:'failed',effect:'none'}});
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(document.timeFormatPreference).toBeUndefined();
+    expect(await invoke({id:'appearance.time-format',set:{timeFormatPreference:'24h'},expectedRevision:settingsDocumentRevision(document)}))
       .toMatchObject({completion:{outcome:'succeeded',effect:'confirmed'}});
     expect(persist).toHaveBeenCalledTimes(2);
     expect(document).toMatchObject({uiFont:'concurrent UI change',timeFormatPreference:'24h'});

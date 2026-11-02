@@ -152,6 +152,7 @@ function fakeBridge(
         surface,
         results: op.entries.map((entry) => ({
           id: entry.id,
+          ...(entry.itemIndex !== undefined ? { itemIndex: entry.itemIndex } : {}),
           status: "applied" as const,
           values: entry.values ?? { enabled: false },
         })),
@@ -200,14 +201,14 @@ describe("settings service catalog search", () => {
     const search = await service.search(caller, { id: "harness.document-reading" });
     assert.equal(search.total, 1);
     assert.equal(search.items[0]?.writable, true);
-    assert.deepEqual(search.items[0]?.paths, ["harness.documentReading"]);
+    assert.deepEqual(search.items[0]?.paths, ["harness.documentReading.doclingCommand", "harness.documentReading.tesseractCommand", "harness.documentReading.ocrLanguage"]);
 
     const read = await service.read(caller, { id: "harness.document-reading" });
     assert.equal(read.fields?.[0]?.isSet, false);
-    assert.deepEqual(read.effective, {
-      value: { doclingCommand: "docling", tesseractCommand: "tesseract", ocrLanguage: "eng" },
-      source: "default",
+    assert.deepEqual(Object.fromEntries(read.fields!.map(field => [field.path.split('.').at(-1), field.effective?.value])), {
+      doclingCommand: "docling", tesseractCommand: "tesseract", ocrLanguage: "eng",
     });
+    assert.ok(read.fields?.every(field => field.effective?.source === 'default'));
   });
 
   it("does not expose a trusted project document parser override as effective or saved user state", async () => {
@@ -215,15 +216,12 @@ describe("settings service catalog search", () => {
       project: { harness: { documentReading: { doclingCommand: "project-docling" } } },
     } });
     const search = await service.search(caller, { id: "harness.document-reading" });
-    assert.equal(search.items[0]?.summary?.source, "default");
-    assert.deepEqual(search.items[0]?.summary?.value, {
-      doclingCommand: "docling", tesseractCommand: "tesseract", ocrLanguage: "eng",
-    });
+    assert.equal(search.items[0]?.summary, undefined, 'multi-field rows disclose per-field values through read');
 
     const read = await service.read(caller, { id: "harness.document-reading" });
     assert.equal(read.fields?.[0]?.isSet, false);
-    assert.equal(read.effective?.source, "default");
-    assert.deepEqual(read.effective?.value, {
+    assert.ok(read.fields?.every(field => field.effective?.source === 'default'));
+    assert.deepEqual(Object.fromEntries(read.fields!.map(field => [field.path.split('.').at(-1), field.effective?.value])), {
       doclingCommand: "docling", tesseractCommand: "tesseract", ocrLanguage: "eng",
     });
   });
@@ -282,7 +280,9 @@ describe("settings read", () => {
     });
     const result = await service.read(caller, { id: "harness.shell" });
     const shell = result.fields?.find((field) => field.path === "harness.shell");
-    assert.equal(shell?.saved, "powershell");
+    assert.equal(shell?.layers?.global, "powershell");
+    assert.equal(shell?.effective?.value, "powershell");
+    assert.equal(shell?.saved, undefined);
     // effective read for multi-field entries comes through fields; single-field
     // entries populate `effective` — check domains (single-field json).
     const domains = await service.read(caller, { id: "harness.web.domains" });
@@ -314,7 +314,7 @@ describe("settings read", () => {
     const { service } = fixture();
     const result = await service.read(caller, { id: "appearance.language" });
     assert.equal(result.state, "unavailable");
-    assert.equal(result.entry.writable, false);
+    assert.equal(result.entry.writable, true);
   });
 
   it("returns the real action target for domain-managed rows", async () => {
@@ -427,9 +427,7 @@ describe("settings update", () => {
     const userWrite = await service.update(caller, {
       id: "harness.document-reading",
       scope: "global",
-      set: { "harness.documentReading": {
-        doclingCommand: "C:/tools/docling.exe", tesseractCommand: "tesseract", ocrLanguage: "fra",
-      } },
+      set: { "harness.documentReading.doclingCommand": "C:/tools/docling.exe", "harness.documentReading.tesseractCommand": "tesseract", "harness.documentReading.ocrLanguage": "fra" },
     });
     assert.equal(userWrite.status, "applied");
     assert.deepEqual((pi.global.harness as Record<string, unknown>).documentReading, {
@@ -439,7 +437,7 @@ describe("settings update", () => {
     const result = await service.update(caller, {
       id: "harness.document-reading",
       scope: "project",
-      set: { "harness.documentReading": { doclingCommand: "project-command" } },
+      set: { "harness.documentReading.doclingCommand": "project-command" },
     });
     assert.equal(result.status, "failed");
     assert.match(result.fields[0]?.error ?? "", /user-owned/);
@@ -600,7 +598,8 @@ describe("client surface bridge (D-309)", () => {
     });
     const result = await service.read(caller, { id: "chat.persist-drafts" });
     assert.equal(result.state, "ok");
-    assert.equal(result.revision, "surface:surf-1");
+    assert.equal(result.revision, undefined);
+    assert.equal(result.consistency, "last-write-wins");
   });
 });
 
@@ -635,7 +634,6 @@ describe("compound settings.update (D-309)", () => {
     const service = createSettingsService(base.deps);
     const result = await service.update(caller, {
       id: "appearance.time-format",
-      expectedRevision: "unrelated-top-level-revision",
       items: [
         { id: "appearance.time-format", expectedRevision: "stale", set: { timeFormatPreference: "24h" } },
         { id: "appearance.week-start", expectedRevision: current, set: { weekStartPreference: "monday" } },
@@ -665,4 +663,139 @@ describe("compound settings.update (D-309)", () => {
     assert.equal((pi.global.harness as Record<string, unknown>).shell, "bash");
     assert.equal(pi.updates.length, 1);
   });
+});
+
+describe('truthful owner contracts', () => {
+  it('uses the real merge for search, scoped reads, multi-field defaults and post-write values', async () => {
+    const { service } = fixture({ pi: { global: { harness: { tools: { bash: false, read: false } }, defaultProvider: 'global', defaultModel: 'g' },
+      project: { harness: { tools: { read: true } }, defaultProvider: 'project', defaultModel: 'p' } } });
+    const read = await service.read(caller, { id: 'harness.tools', scope: 'global' });
+    const value = read.fields?.[0]?.effective?.value as Record<string, unknown>;
+    assert.equal(value.bash, false);
+    assert.equal(value.read, true);
+    assert.deepEqual(read.fields?.[0]?.saved, { bash: false, read: false });
+    const search = await service.search(caller, { id: 'harness.tools' });
+    assert.deepEqual(search.items[0]?.summary?.value, value);
+    const defaults = await service.read(caller, { id: 'sessions.default-model' });
+    assert.equal(defaults.fields?.find(field => field.path === 'defaultModel')?.effective?.value, 'p');
+    const updated = await service.update(caller, { id: 'harness.tools', set: { 'harness.tools': { bash: true, read: false } } });
+    assert.equal((updated.effective?.['harness.tools'] as Record<string, unknown>).read, true);
+    assert.deepEqual(updated.fields[0]?.saved, { bash: true, read: false });
+  });
+
+  it('discloses executable constraints and rejects malformed JSON before the owner writes', async () => {
+    const base = baseDeps(); let writes = 0;
+    const service = createSettingsService({ ...base.deps, persistAppSettings: async (...args) => { writes++; return base.deps.persistAppSettings(...args); } });
+    const search = await service.search(caller, { id: 'providers.models' });
+    assert.ok(search.items[0]?.fields?.find(field => field.path === 'favoriteModels')?.schema);
+    const result = await service.update(caller, { id: 'providers.models', set: { favoriteModels: 'not-an-array' } });
+    assert.equal(result.status, 'failed'); assert.equal(writes, 0);
+    const compaction = await service.update(caller, { id: 'harness.compaction', set: { 'compaction.reserveRatio': 1 } });
+    assert.equal(compaction.status, 'failed');
+  });
+
+  it('does not label a dropped or normalized owner value as the requested success', async () => {
+    const base = baseDeps();
+    const service = createSettingsService({ ...base.deps, persistAppSettings: async () => ({ conflict: false, revision: 'same', document: { timeFormatPreference: '12h' } }) });
+    const result = await service.update(caller, { id: 'appearance.time-format', set: { timeFormatPreference: '24h' } });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.fields[0]?.saved, '12h');
+    assert.equal(result.effective?.timeFormatPreference, '12h');
+  });
+
+  it('retains committed receipts, rejects per-item scope misuse, and reaches later owners after an owner read fails', async () => {
+    const base = baseDeps(); const calls: unknown[] = [];
+    const service = createSettingsService({ ...base.deps,
+      agentSettings: () => ({ snapshot: async () => { throw new Error('temporary owner unavailable'); }, update: async () => { throw new Error('not called'); } }),
+      clientSurfaces: fakeBridge(calls, [{ id: 'surface', kind: 'web' }]),
+    });
+    const result = await service.update(caller, { id: 'appearance.time-format', items: [
+      { id: 'appearance.time-format', set: { timeFormatPreference: '24h' } },
+      { id: 'harness.tools', set: { 'harness.tools': { read: false } } },
+      { id: 'appearance.week-start', scope: 'project', set: { weekStartPreference: 'monday' } },
+      { id: 'appearance.dock-badge', set: { enabled: true } },
+      { id: 'chat.persist-drafts', set: { enabled: false } },
+    ] });
+    assert.equal(result.status, 'partial'); assert.equal(result.scope, 'mixed'); assert.equal(result.appliedAt, 'per-item');
+    assert.deepEqual(result.items?.map(item => item.status), ['applied', 'unavailable', 'failed', 'applied', 'applied']);
+    assert.equal(result.items?.[1]?.mutation, 'none');
+    assert.equal(calls.length, 1, 'all client preferences resolve one Surface once');
+    assert.equal((calls[0] as { entries: unknown[] }).entries.length, 2);
+    assert.equal(base.getApp().timeFormatPreference, '24h');
+  });
+
+  it('returns a next-run receipt rather than immediate/host for an Agent-only compound update', async () => {
+    const { service } = fixture();
+    const result = await service.update(caller, { id: 'harness.tools', items: [{ id: 'harness.tools', set: { 'harness.tools': { read: false } } }] });
+    assert.equal(result.scope, 'global'); assert.equal(result.appliedAt, 'next-run');
+  });
+
+  it('keeps a temporarily unobservable operation queryable and never replays its effect', async () => {
+    const base = baseDeps(); let queries = 0; let invokes = 0;
+    let operation = { id: 'op', entryId: 'providers.auth', verb: 'login', state: 'running' as 'running' | 'succeeded', recordRevision: 3 };
+    const service = createSettingsService({ ...base.deps,
+      actionOperations: { get: async () => operation, put: async (_caller, next) => { assert.equal(next.expectedRecordRevision, 3); operation = { ...operation, state: next.state as 'succeeded' }; } },
+      actions: { adapterFor: () => ({ verbs: ['status'], describe: async () => ({}), invoke: async () => { invokes++; return { status: 'failed' }; }, getOperation: async () => {
+        if (++queries === 1) throw new Error('owner temporarily offline');
+        return { status: 'applied', operation: { id: 'op', state: 'succeeded' } };
+      } }) },
+    });
+    const first = await service.action(caller, { id: 'providers.auth', verb: 'status', operationId: 'op' });
+    assert.equal(first.status, 'unavailable'); assert.equal(first.operation?.state, 'running'); assert.equal(operation.state, 'running');
+    const second = await service.action(caller, { id: 'providers.auth', verb: 'status', operationId: 'op' });
+    assert.equal(second.operation?.state, 'succeeded'); assert.equal(queries, 2); assert.equal(invokes, 0);
+  });
+
+  it('does not announce a mutation for domain list/read actions', async () => {
+    const service = createSettingsService(depsWithActions([])); const mutations: string[] = [];
+    const result = await service.action({ ...caller, onMutationState: state => mutations.push(state) }, { id: 'extensions.packages', verb: 'list' });
+    assert.equal(result.mutation, 'none'); assert.deepEqual(mutations, []);
+  });
+});
+
+describe('compound original item identity', () => {
+  it('does not assign a later invalid same-id receipt to an earlier valid item', async () => {
+    const { service } = fixture();
+    const result = await service.update(caller, { id: 'appearance.time-format', items: [
+      { id: 'appearance.time-format', set: { timeFormatPreference: '24h' } },
+      { id: 'appearance.time-format', scope: 'project', set: { timeFormatPreference: '12h' } },
+    ] });
+    assert.deepEqual(result.items?.map(item => [item.index, item.status]), [[0, 'applied'], [1, 'failed']]);
+  });
+  it('retains input identity across interleaved global/project/global writes with different fields', async () => {
+    const { service } = fixture();
+    const result = await service.update(caller, { id: 'sessions.default-model', items: [
+      { id: 'sessions.default-model', scope: 'global', set: { defaultProvider: 'global' } },
+      { id: 'sessions.default-model', scope: 'project', set: { defaultProvider: 'project' } },
+      { id: 'sessions.default-model', scope: 'global', set: { defaultModel: 'model' } },
+    ] });
+    assert.deepEqual(result.items?.map(item => [item.index, item.scope, item.status]), [[0, 'global', 'applied'], [1, 'project', 'applied'], [2, 'global', 'applied']]);
+    assert.equal(result.items?.[2]?.fields?.[0]?.saved, 'model');
+  });
+  it('compares each same-id app patch against its own requested fields', async () => {
+    const { service } = fixture();
+    const result = await service.update(caller, { id: 'providers.models', items: [
+      { id: 'providers.models', set: { favoriteModels: [{ providerID: 'p', modelID: 'one' }] } },
+      { id: 'providers.models', set: { hiddenModels: [{ providerID: 'p', modelID: 'two' }] } },
+    ] });
+    assert.deepEqual(result.items?.map(item => item.status), ['applied', 'applied']);
+    assert.deepEqual(result.items?.[1]?.fields?.[0]?.saved, [{ providerID: 'p', modelID: 'two' }]);
+  });
+  it('returns a CAS conflict without an unbounded implicit re-read/write loop', async () => {
+    const base = baseDeps(); let writes = 0;
+    const service = createSettingsService({ ...base.deps, persistAppSettings: async () => {
+      writes++; return { conflict: true, revision: 'newer', document: { timeFormatPreference: '12h' } };
+    } });
+    const result = await service.update(caller, { id: 'appearance.time-format', set: { timeFormatPreference: '24h' } });
+    assert.equal(result.status, 'failed'); assert.equal(writes, 1); assert.equal(result.revision, 'newer');
+  });
+});
+
+it('keeps unsupported legacy recovery saved values readable without claiming an active write capability', async () => {
+  const { service } = fixture({ pi: { global: { harness: { context: { compactionRecovery: { enabled: true, maxRetries: 4 } } } } } });
+  const read = await service.read(caller, { id: 'harness.context.compactionRecovery' });
+  assert.equal(read.entry.writable, false);
+  assert.equal(read.entry.apply, 'unsupported');
+  assert.equal(read.fields?.find(field => field.path.endsWith('.maxRetries'))?.layers?.global, 4);
+  await assert.rejects(service.update(caller, { id: 'harness.context.compactionRecovery', set: { 'harness.context.compactionRecovery': { enabled: false } } }), /read-only/);
 });

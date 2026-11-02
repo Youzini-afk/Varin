@@ -195,7 +195,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
 // These domain keys are TEXT primary keys or an explicit compound UNIQUE, so each
 // has a physical index. Partial uniqueness is insufficient; collation and direction
 // are part of this format's canonical DDL (DESC alone does not weaken uniqueness).
-fn has_canonical_unique_index(
+pub(super) fn has_canonical_unique_index(
     db: &Connection,
     table: &str,
     columns: &[&str],

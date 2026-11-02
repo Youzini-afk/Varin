@@ -38,7 +38,9 @@ import type {
   SettingsUpdateParams,
   SettingsUpdateResult,
 } from '@varin/protocol';
-import { mergeHarnessSettings } from '@varin/protocol';
+import { compileToolJsonSchema, describeToolSchemaFailure } from '../models/schema.js';
+import { resolveAgentSettingsField } from './settings-resolution.js';
+import { getSettingsActionContracts } from './settings-action-contracts.js';
 import { ModelConfigurationError } from '../models/configuration.js';
 import type { AgentSettingsService } from '../models/settings.js';
 import { HarnessServiceError } from './service-error.js';
@@ -58,6 +60,8 @@ export interface SettingsServiceCaller {
   operationId?: string;
   signal?: AbortSignal;
   invocation?: import('../kernel/tool-invocation.js').ToolInvocationAuthority;
+  /** Original Host permission persistence only; never accepted from model arguments. */
+  permissionSettingsRevision?: { before: string; after: string };
   /** Facts from the existing writer call, without a separate verification read. */
   onMutationState?(state: 'started' | 'unchanged' | 'applied'): void;
 }
@@ -82,6 +86,7 @@ export interface SettingsActionOperationStore {
     state: NonNullable<SettingsActionResult['operation']>['state'];
     detail?: string;
     cancelVerb?: string;
+    expectedRecordRevision?: number;
   }): Promise<void>;
 }
 
@@ -138,10 +143,14 @@ export interface ClientSurfaceInfo {
 
 export interface ClientSurfaceFieldResult {
   id: string;
+  itemIndex?: number;
   status: 'applied' | 'failed' | 'unavailable';
   error?: string;
   /** Current values after apply/read (surface-reported fact). */
   values?: Record<string, unknown>;
+  revision?: string;
+  consistency?: 'compare-and-swap' | 'last-write-wins';
+  mutation?: 'none' | 'applied' | 'unknown';
 }
 
 export interface ClientSurfaceBridge {
@@ -154,7 +163,7 @@ export interface ClientSurfaceBridge {
    */
   request(op: {
     type: 'read' | 'apply';
-    entries: { id: string; values?: Record<string, unknown>; reset?: string[] }[];
+    entries: { id: string; itemIndex?: number; values?: Record<string, unknown>; reset?: string[]; expectedRevision?: string }[];
   }, target: Pick<SettingsServiceCaller, 'threadId' | 'branchId'>): Promise<{
     surface: ClientSurfaceInfo;
     results: ClientSurfaceFieldResult[];
@@ -211,13 +220,17 @@ const deletePath = (document: Record<string, unknown>, path: string): void => {
 const entryFields = (entry: SettingsCatalogEntry): readonly SettingsFieldSpec[] =>
   entry.fields ?? (entry.field ? [entry.field] : []);
 
-const toSearchItem = (entry: SettingsCatalogEntry): SettingsSearchItem => ({
+const catalogSearchItem = (entry: SettingsCatalogEntry): SettingsSearchItem => ({
   id: entry.id,
   category: entry.category,
   owner: entry.owner,
   titleKey: entry.ui.titleKey,
   paths: entryFields(entry).map((field) => field.path),
-  writable: entry.owner === 'app' || entry.owner === 'agent-settings',
+  writable: entry.writable ?? entry.owner !== 'action',
+  fields: entryFields(entry).map(field => ({ ...field })),
+  ...(entry.authority ? { authority: entry.authority } : {}),
+  ...(entry.scope ? { scope: entry.scope } : {}),
+
   ...(entry.apply ? { apply: entry.apply } : {}),
   page: entry.ui.page,
   ...(entry.ui.keywords ? { keywords: [...entry.ui.keywords] } : {}),
@@ -228,6 +241,10 @@ const validateFieldValue = (field: SettingsFieldSpec, value: unknown): string | 
   if (value === null || value === undefined) {
     return field.nullable ? null : 'value is not nullable; use reset to clear';
   }
+  if (field.schema) {
+    const validate = compileToolJsonSchema(field.schema);
+    if (!validate(value)) return describeToolSchemaFailure(validate, value);
+  }
   switch (field.kind) {
     case 'boolean':
       return typeof value === 'boolean' ? null : 'expected a boolean';
@@ -236,6 +253,8 @@ const validateFieldValue = (field: SettingsFieldSpec, value: unknown): string | 
       if (field.integer && !Number.isInteger(value)) return 'expected an integer';
       if (field.min !== undefined && value < field.min) return `must be >= ${field.min}`;
       if (field.max !== undefined && value > field.max) return `must be <= ${field.max}`;
+      if (field.exclusiveMin !== undefined && value <= field.exclusiveMin) return `must be > ${field.exclusiveMin}`;
+      if (field.exclusiveMax !== undefined && value >= field.exclusiveMax) return `must be < ${field.exclusiveMax}`;
       return null;
     }
     case 'enum': {
@@ -267,6 +286,7 @@ interface OwnerWrite {
   entry: SettingsCatalogEntry;
   set: Record<string, unknown>;
   reset: string[];
+  itemIndex?: number;
   expectedRevision?: string | undefined;
 }
 
@@ -304,6 +324,7 @@ const rejectConflictingDuplicatePaths = <T extends OwnerWrite>(writes: T[]): {
       const paths = [...conflicts.get(write)!];
       return {
         id: write.entry.id,
+        ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}),
         status: 'failed',
         error: `conflicting duplicate path(s) in owner batch: ${paths.join(', ')}`,
         fields: paths.map((path) => ({
@@ -325,6 +346,11 @@ export interface SettingsService {
 }
 
 export function createSettingsService(deps: SettingsServiceDeps): SettingsService {
+  const toSearchItem = (entry: SettingsCatalogEntry): SettingsSearchItem => {
+    const item = catalogSearchItem(entry);
+    const adapter = deps.actions?.adapterFor(entry.actionRef?.domain);
+    return adapter ? { ...item, actions: Object.fromEntries(Object.entries(getSettingsActionContracts(entry)).filter(([verb]) => adapter.verbs.includes(verb))) } : item;
+  };
   const search = async (
     caller: SettingsServiceCaller,
     params: SettingsSearchParams,
@@ -434,20 +460,10 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         return summary;
       }
       if (entry.owner === 'agent-settings' && agentSnapshot) {
-        const projectValue = single.scope === 'user' || !agentSnapshot.projectTrusted
-          ? undefined
-          : getPath(agentSnapshot.project, single.path);
-        const globalValue = getPath(agentSnapshot.global, single.path);
-        const effective = projectValue ?? globalValue ?? single.default;
-        if (single.kind === 'secret') {
-          summary.isSet = effective !== undefined && effective !== null && effective !== '';
-          summary.source = projectValue !== undefined ? 'project' : globalValue !== undefined ? 'user' : 'none';
-        } else {
-          summary.value = effective;
-          summary.source = projectValue !== undefined ? 'project'
-            : globalValue !== undefined ? 'user'
-            : single.default !== undefined ? 'default' : 'none';
-        }
+        const effective = resolveAgentSettingsField(agentSnapshot, single);
+        if (single.kind === 'secret') summary.isSet = effective.value !== undefined && effective.value !== null && effective.value !== '';
+        else summary.value = effective.value;
+        summary.source = effective.source;
         return summary;
       }
       // Owner unreachable — kind/options still help the caller shape a read.
@@ -491,7 +507,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       if (field.kind === 'secret') {
         return { path: field.path, kind: field.kind, isSet: saved !== undefined && saved !== null && saved !== '' };
       }
-      return { path: field.path, kind: field.kind, saved, isSet: saved !== undefined };
+      return { path: field.path, kind: field.kind, saved, isSet: saved !== undefined, effective: { value: saved !== undefined ? saved : field.default, source: saved !== undefined ? 'user' : field.default !== undefined ? 'default' : 'none', basis: 'configured' } };
     });
     const effectiveFields = fields.filter((field) => field.kind !== 'secret');
     const effective = effectiveFields.length === 1
@@ -510,6 +526,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       fields: values,
       ...(effective ? { effective } : {}),
       revision: settingsDocumentRevision(document),
+      consistency: 'compare-and-swap',
+      appliedAt: entry.apply ?? 'immediate',
       ...(detail ? { related: relatedIds(entry) } : {}),
       ...(detail && entry.helpRef ? { help: entry.helpRef } : {}),
       ...(await optionBlock(caller, fields, detail)),
@@ -550,52 +568,33 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         entry: toSearchItem(entry), reason: error instanceof Error ? error.message : String(error),
       };
     }
+    const effectiveSnapshot = scope === 'global' && root
+      ? await deps.agentSettings().snapshot(root).catch(() => null) : snapshot;
+    const resolution = effectiveSnapshot ? { ...effectiveSnapshot, global: snapshot.global, globalRevision: snapshot.globalRevision } : null;
     const fields = entryFields(entry);
-    const trustedProject = snapshot.projectTrusted ? snapshot.project : {};
-    const pickScope = (path: string, layer: 'global' | 'project') =>
-      getPath(layer === 'global' ? snapshot.global : trustedProject, path);
     const values: SettingsFieldValue[] = fields.map((field) => {
-      const layer = scope === 'effective' ? undefined : scope;
-      const saved = layer ? pickScope(field.path, layer) : undefined;
-      const projectIsSet = field.scope !== 'user' && pickScope(field.path, 'project') !== undefined;
-      return layer
-        ? { path: field.path, kind: field.kind, saved, isSet: saved !== undefined }
-        : {
-            path: field.path,
-            kind: field.kind,
-            saved: pickScope(field.path, 'global'),
-            isSet: pickScope(field.path, 'global') !== undefined || projectIsSet,
-          };
+      const global = getPath(snapshot.global, field.path);
+      const project = resolution?.projectTrusted && field.scope !== 'user' ? getPath(resolution.project, field.path) : undefined;
+      const saved = scope === 'project' ? project : scope === 'global' ? global : undefined;
+      if (field.kind === 'secret') return { path: field.path, kind: field.kind, isSet: saved !== undefined };
+      return {
+        path: field.path, kind: field.kind,
+        ...(scope !== 'effective' ? { saved } : {}),
+        isSet: scope === 'effective' ? global !== undefined || project !== undefined : saved !== undefined,
+        layers: { ...(global !== undefined ? { global } : {}), ...(project !== undefined ? { project } : {}) },
+        ...(resolution ? { effective: resolveAgentSettingsField(resolution, field) } : {}),
+      };
     });
-    // Effective value: project override beats global for project-writable
-    // fields; harness.* resolves through the owner's merge so user-only fields
-    // behave exactly like the running product.
-    const merged = mergeHarnessSettings(
-      isRecord(snapshot.global.harness) ? snapshot.global.harness as never : {},
-      isRecord(trustedProject.harness) ? trustedProject.harness as never : {},
-    ) as unknown as Record<string, unknown>;
-    const effectiveOf = (path: string): { value: unknown; source: 'user' | 'project' | 'default' | 'none' } => {
-      const userOwned = fields.find((field) => field.path === path)?.scope === 'user';
-      const project = userOwned ? undefined : pickScope(path, 'project');
-      if (project !== undefined) return { value: project, source: 'project' };
-      const global = pickScope(path, 'global');
-      if (global !== undefined) return { value: global, source: 'user' };
-      if (path.startsWith('harness.')) {
-        const mergedValue = getPath(merged, path.slice('harness.'.length));
-        if (mergedValue !== undefined) return { value: mergedValue, source: 'default' };
-      }
-      return { value: undefined, source: 'none' };
-    };
-    const fields0 = fields[0];
-    const effective = fields.length === 1 && fields0
-      ? effectiveOf(fields0.path)
-      : undefined;
+    const effective = fields.length === 1 && fields[0]?.kind !== 'secret' ? values[0]?.effective : undefined;
     const deniedProject = scope === 'project' && !snapshot.projectTrusted;
     return {
       state: deniedProject ? 'denied' : 'ok',
       entry: toSearchItem(entry),
       fields: values,
       ...(effective ? { effective } : {}),
+      consistency: 'compare-and-swap',
+      appliedAt: entry.apply ?? 'next-run',
+      ...(!resolution ? { effectiveUnavailable: 'admitted project settings could not be resolved; saved global values remain available' } : {}),
       revisions: {
         global: snapshot.globalRevision,
         ...(snapshot.projectTrusted ? { project: snapshot.projectRevision } : {}),
@@ -613,6 +612,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
   ): Promise<SettingsReadResult> => {
     const entry = requireEntry(params.id);
     const detail = params.detail === true;
+    if (entry.scope && params.scope && params.scope !== entry.scope && params.scope !== 'effective') throw new HarnessServiceError('denied', `"${entry.id}" targets ${entry.scope} settings`);
     switch (entry.owner) {
       case 'app':
         if (params.scope === 'global' || params.scope === 'project') {
@@ -623,7 +623,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         }
         return readApp(entry, detail, caller);
       case 'agent-settings':
-        return readAgent(entry, params.scope ?? 'effective', detail, caller);
+        return readAgent(entry, params.scope ?? entry.scope ?? 'effective', detail, caller);
       case 'client':
         return readClient(entry, caller, params);
       case 'action':
@@ -691,11 +691,13 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     return {
       state: 'ok',
       entry: toSearchItem(entry),
-      fields: paths.map((path) => ({ path, kind: 'json', saved: values[path], isSet: values[path] !== undefined })),
+      fields: paths.map((path) => ({ path, kind: 'json', saved: values[path], isSet: values[path] !== undefined, effective: { value: values[path], source: 'runtime', basis: 'active' } })),
       ...(paths.length === 1
-        ? { effective: { value: values[paths[0]!], source: 'user' as const } }
+        ? { effective: { value: values[paths[0]!], source: 'runtime' as const, basis: 'active' as const } }
         : {}),
-      revision: `surface:${response.surface.id}`,
+      ...(result.revision ? { revision: result.revision } : {}),
+      consistency: result.consistency ?? 'last-write-wins',
+      appliedAt: entry.apply ?? 'immediate',
     };
   };
 
@@ -747,10 +749,11 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       entry: toSearchItem(entry),
       action: {
         domain: entry.actionRef?.domain ?? 'unknown',
+        actions: Object.fromEntries(Object.entries(getSettingsActionContracts(entry)).filter(([verb]) => liveVerbs.includes(verb) && (!status.verbs || status.verbs.includes(verb)))),
         verbs: status.verbs ? status.verbs.filter((verb) => liveVerbs.includes(verb)) : liveVerbs,
         ...(entry.actionRef?.note ? { note: entry.actionRef.note } : {}),
         ...(status.summary ? { status: status.summary } : {}),
-        ...(detail && status.data !== undefined ? { data: status.data } : {}),
+        ...(status.data !== undefined ? { data: status.data } : {}),
       },
       ...(detail && entry.helpRef ? { help: entry.helpRef } : {}),
     };
@@ -809,6 +812,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       operation: NonNullable<ActionInvocation['operation']>,
       detail?: string,
       ownerVerb = params.verb,
+      expectedRecordRevision?: number,
     ): Promise<boolean> => {
       if (!deps.actionOperations) return false;
       try {
@@ -819,6 +823,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           state: operation.state,
           ...(detail ?? operation.detail ? { detail: detail ?? operation.detail } : {}),
           ...(operation.cancelVerb ? { cancelVerb: operation.cancelVerb } : {}),
+          ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
         });
         return true;
       } catch {
@@ -837,7 +842,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         return { status: 'denied', entry: toSearchItem(entry), verb: params.verb, detail: 'operation does not belong to this settings entry' };
       }
       if (params.verb === 'status') {
-        if (stored.state !== 'running') return operationResult(stored);
+        if (stored.state !== 'running' && stored.state !== 'unavailable') return operationResult(stored);
         if (!adapter.getOperation) {
           const detail = 'owner has no durable operation status API; completion cannot be inferred after this boundary';
           const unavailable = makeOperation(
@@ -845,7 +850,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
             'unavailable',
             detail,
           );
-          await persistOperation(unavailable, detail, stored.verb);
+          // Absence of an observer is not evidence that the owner's work stopped.
           return {
             status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
             detail, operation: unavailable,
@@ -856,12 +861,22 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           detail: error instanceof Error ? error.message : String(error),
           operation: { id: stored.id, state: 'unavailable' },
         }));
+        if (observed.status === 'unavailable' || observed.operation?.state === 'unavailable') {
+          return { status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+            detail: observed.detail ?? 'owner status temporarily unavailable; query this same operation again',
+            operation: makeOperation(stored.id, stored.state, stored.detail, stored.cancelVerb) };
+        }
+        if (observed.operation && observed.operation.id !== stored.id) {
+          return { status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+            detail: 'owner returned a different operation identity; no state was inferred',
+            operation: makeOperation(stored.id, stored.state, stored.detail, stored.cancelVerb) };
+        }
         const operation = observed.operation && observed.operation.id === stored.id
           ? observed.operation
           : observed.status === 'pending'
             ? makeOperation(stored.id, 'running', observed.detail, stored.cancelVerb)
-            : makeOperation(stored.id, observed.status === 'applied' ? 'succeeded' : observed.status === 'unavailable' ? 'unavailable' : 'failed', observed.detail, stored.cancelVerb);
-        if (!await persistOperation(operation, observed.detail, stored.verb)) {
+            : makeOperation(stored.id, observed.status === 'applied' ? 'succeeded' : 'failed', observed.detail, stored.cancelVerb);
+        if (!await persistOperation(operation, observed.detail, stored.verb, stored.recordRevision)) {
           return {
             status: 'unavailable',
             entry: toSearchItem(entry),
@@ -879,7 +894,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           operation,
         };
       }
-      if (stored.state !== 'running') return operationResult(stored);
+      if (stored.state !== 'running' && stored.state !== 'unavailable') return operationResult(stored);
       if (!stored.cancelVerb) {
         return {
           status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
@@ -900,11 +915,18 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         detail: error instanceof Error ? error.message : String(error),
         operation: { id: stored.id, state: 'unavailable' },
       }));
-      if (cancelled.status === 'applied' || cancelled.status === 'pending') caller.onMutationState?.('applied');
+      if (cancelled.mutation === 'none') caller.onMutationState?.('unchanged');
+      else if (cancelled.mutation === 'applied' || cancelled.mutation === undefined && (cancelled.status === 'applied' || cancelled.status === 'pending')) caller.onMutationState?.('applied');
+      if (cancelled.status === 'unavailable' || cancelled.operation?.state === 'unavailable'
+        || cancelled.operation && cancelled.operation.id !== stored.id) {
+        return { status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: cancelled.detail ?? 'cancellation outcome is unknown; query this same operation again',
+          operation: makeOperation(stored.id, stored.state, stored.detail, stored.cancelVerb) };
+      }
       const cancellation = cancelled.operation && cancelled.operation.id === stored.id
         ? cancelled.operation
-        : makeOperation(stored.id, cancelled.status === 'applied' ? 'cancelled' : cancelled.status === 'unavailable' ? 'unavailable' : 'running', cancelled.detail, stored.cancelVerb);
-      if (!await persistOperation(cancellation, cancelled.detail, stored.verb)) {
+        : makeOperation(stored.id, cancelled.status === 'applied' ? 'cancelled' : 'running', cancelled.detail, stored.cancelVerb);
+      if (!await persistOperation(cancellation, cancelled.detail, stored.verb, stored.recordRevision)) {
         return {
           status: 'unavailable',
           entry: toSearchItem(entry),
@@ -978,7 +1000,9 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         };
       }
     }
-    caller.onMutationState?.('started');
+    const contract = getSettingsActionContracts(entry)[params.verb];
+    const mutating = contract?.mutation !== 'none';
+    if (mutating) caller.onMutationState?.('started');
     const outcome: ActionInvocation = await adapter.invoke(
       actionContext,
       entry,
@@ -988,7 +1012,10 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       status: 'failed' as const,
       detail: error instanceof Error ? error.message : String(error),
     }));
-    if (outcome.status === 'applied' || outcome.status === 'pending') caller.onMutationState?.('applied');
+    if (mutating) {
+      if (outcome.mutation === 'none') caller.onMutationState?.('unchanged');
+      else if (outcome.mutation === 'applied' || outcome.mutation === undefined && (outcome.status === 'applied' || outcome.status === 'pending')) caller.onMutationState?.('applied');
+    }
     if (outcome.status === 'pending' && !outcome.operation) {
       return {
         status: 'unavailable',
@@ -1026,7 +1053,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           status: 'unavailable',
           entry: toSearchItem(entry),
           verb: params.verb,
-          detail: 'owner returned an operation identity but Host could not durably record it for this Thread/branch',
+          detail: 'owner returned an operation identity but Host could not durably record it for this Thread/branch; keep this identity and do not repeat the effect',
+          operation: outcome.operation,
           ...(outcome.data !== undefined ? { data: outcome.data } : {}),
         };
       }
@@ -1038,6 +1066,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
       ...(outcome.data !== undefined ? { data: outcome.data } : {}),
       ...(outcome.operation ? { operation: outcome.operation } : {}),
+      mutation: mutating ? outcome.mutation ?? (outcome.status === 'applied' || outcome.status === 'pending' ? 'applied' : 'unknown') : 'none',
+      ...(contract?.apply ? { appliedAt: contract.apply } : {}),
     };
   };
 
@@ -1046,6 +1076,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     entry: SettingsCatalogEntry;
     set: Record<string, unknown>;
     reset: string[];
+    itemIndex?: number;
     expectedRevision?: string | undefined;
   }
 
@@ -1065,7 +1096,6 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     effective?: Record<string, unknown>;
     document?: VarinSettingsDocument;
   }> => {
-    const originalWrites = writes;
     const duplicateCheck = rejectConflictingDuplicatePaths(writes);
     writes = duplicateCheck.accepted;
     const itemResults: SettingsItemResult[] = [...duplicateCheck.rejected];
@@ -1080,6 +1110,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       if (guard !== undefined && guard !== currentRevision) {
         itemResults.push({
           id: write.entry.id,
+        ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}),
           status: 'failed',
           error: `revision conflict — re-read and retry (current ${currentRevision})`,
           fields: [...Object.keys(write.set), ...write.reset].map((path) => ({
@@ -1124,6 +1155,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       if (itemSets.length === 0 && itemResets.length === 0) {
         itemResults.push({
           id: write.entry.id,
+        ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}),
           status: 'failed',
           fields: fieldResults,
           error: 'no valid fields to write',
@@ -1136,6 +1168,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       allFields.push(...entryFields(write.entry));
       itemResults.push({
         id: write.entry.id,
+        ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}),
         status: fieldResults.length > 0 ? 'partial' : 'applied',
         fields: [
           ...itemSets.map(([path]): SettingsFieldResult => ({ path, status: 'applied' })),
@@ -1187,12 +1220,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       removals,
       currentRevision,
     );
-    caller.onMutationState?.(outcome.conflict ? 'unchanged' : 'applied');
+    caller.onMutationState?.(outcome.conflict || isDeepStrictEqual(current, outcome.document) ? 'unchanged' : 'applied');
     if (outcome.conflict) {
-      if (expectedRevision === undefined && writes.every(write => write.expectedRevision === undefined)) {
-        caller.signal?.throwIfAborted();
-        return updateAppBatch(caller, originalWrites);
-      }
       for (const item of itemResults) {
         if (item.status !== 'applied' && item.status !== 'partial') continue;
         item.status = 'failed';
@@ -1205,6 +1234,26 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         }
       }
       return { items: itemResults, revision: outcome.revision };
+    }
+    for (const item of itemResults) {
+      const write = writes.find(write => item.index === undefined ? write.entry.id === item.id : write.itemIndex === item.index);
+      for (const field of item.fields ?? []) {
+        if (field.status !== 'applied' || !write) continue;
+        const saved = getPath(outcome.document, field.path);
+        field.saved = saved;
+        field.isSet = saved !== undefined;
+        const spec = entryFields(write.entry).find(spec => spec.path === field.path);
+        field.effective = { value: saved !== undefined ? saved : spec?.default,
+          source: saved !== undefined ? 'user' : spec?.default !== undefined ? 'default' : 'none', basis: 'configured' };
+        const requested = Object.hasOwn(write.set, field.path) ? write.set[field.path] : undefined;
+        if (!isDeepStrictEqual(saved, requested)) {
+          field.status = 'failed';
+          field.error = 'owner did not persist the requested value; saved contains the authoritative result';
+        }
+      }
+      const applied = item.fields?.filter(field => field.status === 'applied').length ?? 0;
+      if (item.fields?.length) item.status = applied === item.fields.length ? 'applied' : applied ? 'partial' : 'failed';
+      item.mutation = isDeepStrictEqual(current, outcome.document) ? 'none' : 'applied';
     }
     const effective: Record<string, unknown> = {};
     for (const field of allFields) {
@@ -1219,7 +1268,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       revision: outcome.revision,
     });
     for (const item of itemResults) {
-      if (item.status === 'applied' || item.status === 'partial') item.revision = outcome.revision;
+      if (item.mutation === 'applied' || item.fields?.some(field => Object.hasOwn(field, 'saved'))) item.revision = outcome.revision;
     }
     void caller;
     return { items: itemResults, revision: outcome.revision, effective, document: outcome.document };
@@ -1254,6 +1303,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       ...(revision ? { revision } : {}),
       appliedAt: entry.apply ?? 'immediate',
       ...(effective ? { effective } : {}),
+      mutation: item.mutation ?? 'none',
+      consistency: 'compare-and-swap',
     };
   };
 
@@ -1261,12 +1312,13 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     entry: SettingsCatalogEntry;
     set: Record<string, unknown>;
     reset: string[];
+    itemIndex?: number;
     expectedRevision?: string | undefined;
   }
 
   /**
    * Commit one or more Agent-owner write specs at one scope in a single
-   * `settings.update` call — the the native model credential ownerority's revision CAS covers the merged
+   * `settings.update` call — the native settings owner's revision CAS covers the merged
    * top-level keys atomically.
    */
   const updateAgentBatch = async (
@@ -1275,7 +1327,6 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     writes: AgentWrite[],
     expectedRevision?: string,
   ): Promise<{ items: SettingsItemResult[]; revision?: string; effective?: Record<string, unknown> }> => {
-    const originalWrites = writes;
     const root = caller.workspaceId ? await deps.resolveWorkspaceRoot(caller.workspaceId) : null;
     if (scope === 'project' && !root) throw new HarnessServiceError('unavailable', 'project settings require an admitted workspace');
     const duplicateCheck = rejectConflictingDuplicatePaths(writes);
@@ -1287,10 +1338,14 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     let snapshot = await deps.agentSettings().snapshot(scope === 'global' ? undefined : root ?? undefined);
     const currentRevision = scope === 'project' ? snapshot.projectRevision : snapshot.globalRevision;
     for (const write of writes) {
-      const guard = write.expectedRevision ?? expectedRevision;
+      const submittedGuard = write.expectedRevision ?? expectedRevision;
+      const transition = caller.permissionSettingsRevision;
+      const guard = scope === 'global' && transition && submittedGuard === transition.before && currentRevision === transition.after
+        ? transition.after : submittedGuard;
       if (guard !== undefined && guard !== currentRevision) {
         itemResults.push({
           id: write.entry.id,
+        ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}),
           status: 'failed',
           error: `revision conflict — re-read and retry (current ${currentRevision})`,
           fields: [...Object.keys(write.set), ...write.reset].map((path) => ({
@@ -1344,13 +1399,14 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       }
       if (itemSetPaths.length === 0 && itemResetPaths.length === 0) {
         itemResults.push({
-          id: write.entry.id, status: 'failed', fields: fieldResults, error: 'no valid fields to write',
+          id: write.entry.id, ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}), status: 'failed', fields: fieldResults, error: 'no valid fields to write',
         });
         continue;
       }
       validEntryIds.push(write.entry.id);
       itemResults.push({
         id: write.entry.id,
+        ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}),
         status: fieldResults.length > 0 ? 'partial' : 'applied',
         fields: [
           ...itemSetPaths.map((path): SettingsFieldResult => ({ path, status: 'applied' })),
@@ -1414,20 +1470,40 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     } catch (error) {
       if (error instanceof ModelConfigurationError && error.code === 'config_conflict') {
         caller.onMutationState?.('unchanged');
-        if (expectedRevision === undefined && writes.every(write => write.expectedRevision === undefined)) {
-          caller.signal?.throwIfAborted();
-          return updateAgentBatch(caller, scope, originalWrites);
+      }
+      if (error instanceof ModelConfigurationError) {
+        if (error.code !== 'config_conflict') caller.onMutationState?.('unchanged');
+        const detail = error.message;
+        for (const item of itemResults) {
+          if (item.status !== 'applied' && item.status !== 'partial') continue;
+          item.status = 'failed'; item.error = detail; item.mutation = 'none';
+          for (const field of item.fields ?? []) if (field.status === 'applied') { field.status = 'failed'; field.error = detail; }
         }
+        return { items: itemResults, revision: currentRevision };
       }
       throw new HarnessServiceError('failed', error instanceof Error ? error.message : String(error));
     }
     caller.onMutationState?.('applied');
     snapshot = updated;
     const revision = scope === 'project' ? snapshot.projectRevision : snapshot.globalRevision;
+    // Saved values come from the exact commit. Resolve the admitted context
+    // separately; an unavailable layer never becomes a guessed effective value.
+    const effectiveSnapshot = root
+      ? await deps.agentSettings().snapshot(root).catch(() => null) : snapshot;
     const effective: Record<string, unknown> = {};
-    for (const path of [...Object.keys(set), ...remove]) {
-      const nextLayer = scope === 'project' ? snapshot.project : snapshot.global;
-      effective[path] = getPath(nextLayer, path);
+    for (const item of itemResults) {
+      const write = writes.find(write => item.index === undefined ? write.entry.id === item.id : write.itemIndex === item.index);
+      item.mutation = item.status === 'applied' || item.status === 'partial' ? 'applied' : 'none';
+      for (const result of item.fields ?? []) {
+        if (result.status !== 'applied') continue;
+        result.saved = getPath(scope === 'project' ? snapshot.project : snapshot.global, result.path);
+        result.isSet = result.saved !== undefined;
+        const field = write && entryFields(write.entry).find(field => field.path === result.path);
+        if (field && effectiveSnapshot) {
+          result.effective = resolveAgentSettingsField(effectiveSnapshot, field);
+          effective[result.path] = result.effective.value;
+        }
+      }
     }
     deps.onChanged?.({
       owner: 'agent-settings',
@@ -1446,7 +1522,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     caller: SettingsServiceCaller,
     params: SettingsUpdateParams,
   ): Promise<SettingsUpdateResult> => {
-    const scope = params.scope ?? 'global';
+    if (entry.scope && params.scope && params.scope !== entry.scope) throw new HarnessServiceError('denied', `"${entry.id}" targets ${entry.scope} settings`);
+    const scope = params.scope ?? entry.scope ?? 'global';
     const { items, revision, effective } = await updateAgentBatch(
       caller,
       scope,
@@ -1462,6 +1539,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       fields,
       ...(revision ? { revision } : {}),
       appliedAt: entry.apply ?? 'next-run',
+      mutation: item.mutation ?? 'none',
+      consistency: 'compare-and-swap',
       ...(effective ? { effective } : {}),
     };
   };
@@ -1470,88 +1549,79 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
    * `client` entries apply on the connected surface through the targeted
    * bridge — the surface's own store writes the value and reports the fact.
    */
-  const updateClient = async (
-    entry: SettingsCatalogEntry,
-    caller: SettingsServiceCaller,
-    params: SettingsUpdateParams | SettingsUpdateItem,
-  ): Promise<SettingsUpdateResult> => {
+  const updateClientBatch = async (caller: SettingsServiceCaller, originalWrites: OwnerWrite[]): Promise<{
+    items: SettingsItemResult[]; effective?: Record<string, unknown>; surface?: SettingsUpdateResult['surface'];
+  }> => {
     const bridge = deps.clientSurfaces;
-    if (!bridge) {
-      throw new HarnessServiceError(
-        'unavailable',
-        `"${entry.id}" is device-local and no surface channel is registered on this host`,
-      );
+    if (!bridge) throw new HarnessServiceError('unavailable', 'no client surface channel is registered on this Host');
+    const grouped = new Map<string, OwnerWrite[]>();
+    for (const write of originalWrites) grouped.set(write.entry.id, [...(grouped.get(write.entry.id) ?? []), write]);
+    const checks = [...grouped.values()].map(writes => rejectConflictingDuplicatePaths(writes));
+    const duplicateCheck = { accepted: checks.flatMap(check => check.accepted), rejected: checks.flatMap(check => check.rejected) };
+    const items: SettingsItemResult[] = [...duplicateCheck.rejected];
+    const entries: Parameters<ClientSurfaceBridge['request']>[0]['entries'] = [];
+    for (const write of duplicateCheck.accepted) {
+      const byPath = new Map(entryFields(write.entry).map(field => [field.path, field]));
+      const fields: SettingsFieldResult[] = [];
+      const values: Record<string, unknown> = {};
+      const reset: string[] = [];
+      for (const [path, value] of Object.entries(write.set)) {
+        const field = byPath.get(path);
+        const error = !field ? `field "${path}" is not part of ${write.entry.id}` : validateFieldValue(field, value);
+        fields.push({ path, status: error ? 'failed' : 'applied', ...(error ? { error } : {}) });
+        if (!error) values[path] = value;
+      }
+      for (const path of write.reset) {
+        const error = !byPath.has(path) ? `field "${path}" is not part of ${write.entry.id}` : Object.hasOwn(write.set, path) ? 'a field cannot be set and reset together' : undefined;
+        fields.push({ path, status: error ? 'failed' : 'applied', ...(error ? { error } : {}) });
+        if (!error) reset.push(path);
+      }
+      const valid = Object.keys(values).length > 0 || reset.length > 0;
+      items.push({ id: write.entry.id, ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}), status: 'failed', fields, mutation: 'none' });
+      if (valid) entries.push({ id: write.entry.id, ...(write.itemIndex !== undefined ? { itemIndex: write.itemIndex } : {}), values, reset,
+        ...(write.expectedRevision !== undefined ? { expectedRevision: write.expectedRevision } : {}) });
     }
-    const byPath = new Map(entryFields(entry).map((field) => [field.path, field]));
-    const values: Record<string, unknown> = {};
-    const resets: string[] = [];
-    const validation: SettingsFieldResult[] = [];
-    for (const [path, value] of Object.entries(params.set ?? {})) {
-      const field = byPath.get(path);
-      const error = !field ? `field "${path}" is not part of ${entry.id}` : validateFieldValue(field, value);
-      if (error) validation.push({ path, status: 'failed', error });
-      else values[path] = value;
+    if (!entries.length) return { items };
+    entries.forEach(() => caller.onMutationState?.('started'));
+    // Resolve and pin exactly one Surface/connection for the whole owner batch.
+    const response = await bridge.request({ type: 'apply', entries }, caller);
+    const effective: Record<string, unknown> = {};
+    for (const entry of entries) {
+      const result = response.results.find(result => result.id === entry.id && result.itemIndex === entry.itemIndex);
+      const item = items.find(item => item.id === entry.id && item.index === entry.itemIndex)!;
+      const mutation = result?.mutation ?? (result?.status === 'applied' ? 'applied' : 'unknown');
+      item.mutation = mutation;
+      if (mutation !== 'unknown') caller.onMutationState?.(mutation === 'applied' ? 'applied' : 'unchanged');
+      if (result?.revision) item.revision = result.revision;
+      item.consistency = result?.consistency ?? 'last-write-wins';
+      for (const field of item.fields ?? []) {
+        if (field.status !== 'applied') continue;
+        field.status = result?.status === 'applied' ? 'applied' : 'failed';
+        if (result?.error) field.error = result.error;
+        if (result?.values && Object.hasOwn(result.values, field.path)) {
+          field.saved = result.values[field.path];
+          field.isSet = result.values[field.path] !== undefined;
+          effective[field.path] = result.values[field.path];
+          field.effective = { value: result.values[field.path], source: 'runtime', basis: 'active' };
+        }
+      }
+      const applied = item.fields?.filter(field => field.status === 'applied').length ?? 0;
+      item.status = applied === item.fields?.length ? 'applied' : applied > 0 ? 'partial' : result?.status === 'unavailable' || !result ? 'unavailable' : 'failed';
+      if (result?.error || !result) item.error = result?.error ?? 'Surface did not acknowledge this entry';
+      if (mutation === 'applied') deps.onChanged?.({ owner: 'client', ids: [entry.id], scope: 'client', revision: result?.revision ?? '' });
     }
-    for (const path of params.reset ?? []) {
-      const field = byPath.get(path);
-      if (!field) validation.push({ path, status: 'failed', error: `field "${path}" is not part of ${entry.id}` });
-      else if (Object.prototype.hasOwnProperty.call(values, path)) {
-        validation.push({ path, status: 'failed', error: 'a field cannot be set and reset in the same update' });
-        delete values[path];
-      } else resets.push(path);
-    }
-    if (Object.keys(values).length === 0 && resets.length === 0) {
-      return {
-        status: 'failed', entry: toSearchItem(entry), scope: 'client', fields: validation,
-        appliedAt: entry.apply ?? 'immediate',
-      };
-    }
-    let response;
-    try {
-      caller.onMutationState?.('started');
-      response = await bridge.request({
-        type: 'apply',
-        entries: [{
-          id: entry.id,
-          values,
-          ...(resets.length > 0 ? { reset: resets } : {}),
-        }],
-      }, { threadId: caller.threadId, branchId: caller.branchId });
-    } catch (error) {
-      const code = error instanceof HarnessServiceError ? error.harnessCode : undefined;
-      throw new HarnessServiceError(
-        code === 'ambiguous' ? 'denied' : 'unavailable',
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-    const result = response.results.find((item) => item.id === entry.id);
-    const status = result?.status ?? 'unavailable';
-    if (status === 'applied') caller.onMutationState?.('applied');
-    if (status === 'applied') {
-      deps.onChanged?.({
-        owner: 'client',
-        ids: [entry.id],
-        scope: 'client',
-        revision: `surface:${response.surface.id}`,
-      });
-    }
-    const appliedFields = [...Object.keys(values), ...resets].map((path): SettingsFieldResult => ({
-      path,
-      status: status === 'applied' ? 'applied' : 'failed',
-      ...(result?.error ? { error: result.error } : {}),
-    }));
-    return {
-      status: status === 'applied' ? (validation.length > 0 ? 'partial' : 'applied') : 'failed',
-      entry: toSearchItem(entry),
-      scope: 'client',
-      fields: [...appliedFields, ...validation],
-      appliedAt: entry.apply ?? 'immediate',
-      surface: {
-        id: response.surface.id,
-        kind: response.surface.kind,
-        results: (result ? [{ path: entry.id, status, ...(result.error ? { error: result.error } : {}) }] : []),
-      },
-      revision: `surface:${response.surface.id}`,
+    return { items, effective, surface: { ...response.surface, results: response.results.map(result => ({ path: result.id, status: result.status, ...(result.error ? { error: result.error } : {}) })) } };
+  };
+
+  const updateClient = async (entry: SettingsCatalogEntry, caller: SettingsServiceCaller, params: SettingsUpdateParams | SettingsUpdateItem): Promise<SettingsUpdateResult> => {
+    if (params.scope !== undefined || params.surface) throw new HarnessServiceError('denied', 'client scope and Surface are resolved from the admitted caller; global/project/surface selectors are not accepted');
+    const batch = await updateClientBatch(caller, [{ entry, set: params.set ?? {}, reset: params.reset ?? [], expectedRevision: params.expectedRevision }]);
+    const item = batch.items[0]!;
+    return { status: item.status === 'applied' ? 'applied' : item.status === 'partial' ? 'partial' : 'failed',
+      entry: toSearchItem(entry), scope: 'client', fields: item.fields ?? [], appliedAt: entry.apply ?? 'immediate',
+      mutation: item.mutation ?? 'none', consistency: item.consistency ?? 'last-write-wins',
+      ...(item.revision ? { revision: item.revision } : {}), ...(batch.effective ? { effective: batch.effective } : {}),
+      ...(batch.surface ? { surface: batch.surface } : {}),
     };
   };
 
@@ -1567,95 +1637,68 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     params: SettingsUpdateParams,
   ): Promise<SettingsUpdateResult> => {
     const items = params.items ?? [];
+    if (params.scope !== undefined || params.expectedRevision !== undefined || params.set !== undefined || params.reset !== undefined) {
+      throw new HarnessServiceError('denied', 'compound writes carry scope, revision, set and reset on each item, not on the envelope');
+    }
     const itemResults: SettingsItemResult[] = [];
-    const appWrites: AppWrite[] = [];
-    const agentByScope = new Map<'global' | 'project', AgentWrite[]>();
-    const clientEntries: { entry: SettingsCatalogEntry; params: SettingsUpdateItem }[] = [];
-
-    for (const item of items) {
+    type Group = { owner: 'app' | 'agent-settings' | 'client'; scope: 'host' | 'global' | 'project' | 'client'; writes: OwnerWrite[] };
+    const groups = new Map<string, Group>();
+    for (const [index, item] of items.entries()) {
       const entry = getSettingsCatalogEntry(item.id);
-      if (!entry) {
-        itemResults.push({ id: item.id, status: 'failed', error: `unknown settings id "${item.id}"` });
-        continue;
-      }
-      switch (entry.owner) {
-        case 'app':
-          appWrites.push({ entry, set: item.set ?? {}, reset: item.reset ?? [], expectedRevision: item.expectedRevision });
-          break;
-        case 'agent-settings': {
-          const scope = item.scope ?? 'global';
-          const list = agentByScope.get(scope) ?? [];
-          list.push({ entry, set: item.set ?? {}, reset: item.reset ?? [], expectedRevision: item.expectedRevision });
-          agentByScope.set(scope, list);
-          break;
-        }
-        case 'client': {
-          if (item.surface || params.surface) {
-            itemResults.push({ id: item.id, status: 'failed', error: 'surface selection is Host-resolved from the caller Thread/branch; model supplied surface ids are not accepted' });
-            break;
-          }
-          clientEntries.push({ entry, params: item });
-          break;
-        }
-        case 'action':
-        default:
-          itemResults.push({
-            id: item.id,
-            status: 'failed',
-            error: `"${item.id}" is a domain action — invoke it through settings.action`,
-          });
-      }
+      const fail = (error: string) => itemResults.push({ id: item.id, index, status: 'failed', error, mutation: 'none' });
+      if (!entry) { fail(`unknown settings id "${item.id}"`); continue; }
+      if (entry.writable === false) { fail(`"${item.id}" is read-only: the saved compatibility setting has no active consumer`); continue; }
+      if (item.surface || params.surface) { fail('surface selection is Host-resolved from the caller Thread/branch'); continue; }
+      if (entry.owner === 'action') { fail(`"${item.id}" is a domain action — invoke it through settings.action`); continue; }
+      if (entry.owner !== 'agent-settings' && item.scope !== undefined) { fail(`"${item.id}" does not accept global/project scope`); continue; }
+      if (entry.scope && item.scope && item.scope !== entry.scope) { fail(`"${item.id}" targets ${entry.scope} settings`); continue; }
+      const scope = entry.owner === 'agent-settings' ? item.scope ?? entry.scope ?? 'global' : entry.owner === 'app' ? 'host' : 'client';
+      const key = `${entry.owner}:${scope}`;
+      const group = groups.get(key) ?? { owner: entry.owner, scope, writes: [] };
+      group.writes.push({ entry, itemIndex: index, set: item.set ?? {}, reset: item.reset ?? [], expectedRevision: item.expectedRevision });
+      groups.set(key, group);
     }
-
-    if (appWrites.length > 0) {
-      const batch = await updateAppBatch(
-        caller,
-        appWrites,
-      );
-      itemResults.push(...batch.items);
-    }
-    for (const [scope, writes] of agentByScope) {
-      const batch = await updateAgentBatch(caller, scope, writes);
-      itemResults.push(...batch.items);
-    }
-    for (const clientEntry of clientEntries) {
+    // Each owner remains its own transaction. A later exception cannot erase
+    // committed earlier receipts or prevent unrelated owners from answering.
+    for (const group of groups.values()) {
+      let pending = 0;
+      let changed = false;
+      const groupCaller: SettingsServiceCaller = { ...caller, onMutationState(state) {
+        if (state === 'started') pending++;
+        else { pending = Math.max(0, pending - 1); if (state === 'applied') changed = true; }
+        caller.onMutationState?.(state);
+      } };
       try {
-        const result = await updateClient(clientEntry.entry, caller, clientEntry.params);
-        itemResults.push({
-          id: clientEntry.entry.id,
-          status: result.status === 'applied' ? 'applied' : result.status === 'partial' ? 'partial' : 'failed',
-          fields: result.fields,
-          ...(result.revision ? { revision: result.revision } : {}),
-        });
+        const batch = group.owner === 'app' ? await updateAppBatch(groupCaller, group.writes)
+          : group.owner === 'agent-settings' ? await updateAgentBatch(groupCaller, group.scope as 'global' | 'project', group.writes)
+          : await updateClientBatch(groupCaller, group.writes);
+        for (const result of batch.items) {
+          const entry = group.writes.find(write => write.itemIndex === result.index)!.entry;
+          itemResults.push({ ...result, scope: group.scope, appliedAt: entry.apply ?? (group.owner === 'agent-settings' ? 'next-run' : 'immediate'),
+            mutation: result.mutation ?? (result.status === 'applied' || result.status === 'partial' ? 'applied' : 'none'),
+            ...(batch.effective ? { effective: Object.fromEntries(entryFields(entry).filter(field => Object.hasOwn(batch.effective!, field.path)).map(field => [field.path, batch.effective![field.path]])) } : {}),
+          });
+        }
       } catch (error) {
-        itemResults.push({
-          id: clientEntry.entry.id,
-          status: 'unavailable',
-          error: error instanceof Error ? error.message : String(error),
-        });
+        for (const write of group.writes) itemResults.push({ id: write.entry.id, ...(write.itemIndex !== undefined ? { index: write.itemIndex } : {}), status: 'unavailable', scope: group.scope,
+          appliedAt: write.entry.apply ?? (group.owner === 'agent-settings' ? 'next-run' : 'immediate'),
+          mutation: pending > 0 ? 'unknown' : changed ? 'applied' : 'none',
+          error: error instanceof Error ? error.message : String(error) });
       }
     }
-
-    const firstKnown = getSettingsCatalogEntry(items[0]?.id ?? params.id)
-      ?? items.map((item) => getSettingsCatalogEntry(item.id)).find((entry) => entry !== undefined);
-    if (!firstKnown && itemResults.length === 0) {
-      throw new HarnessServiceError('not-found', 'compound update had no known settings ids');
-    }
-    const failed = itemResults.filter((item) => item.status === 'failed' || item.status === 'unavailable');
-    const partial = itemResults.filter((item) => item.status === 'partial');
+    const ordered = itemResults.sort((a, b) => a.index! - b.index!);
+    const firstKnown = items.map(item => getSettingsCatalogEntry(item.id)).find(entry => entry !== undefined);
+    const failed = ordered.filter(item => item.status === 'failed' || item.status === 'unavailable').length;
+    const scopes = new Set(ordered.flatMap(item => item.scope ? [item.scope] : []));
+    const timings = new Set(ordered.flatMap(item => item.appliedAt ? [item.appliedAt] : []));
     return {
-      status: itemResults.length === 0
-        ? 'failed'
-        : failed.length === itemResults.length
-          ? 'failed'
-          : failed.length > 0 || partial.length > 0 ? 'partial' : 'applied',
-      entry: firstKnown
-        ? toSearchItem(firstKnown)
-        : { id: items[0]?.id ?? params.id, category: '', owner: 'app', titleKey: '', paths: [], writable: false, page: '' },
-      scope: 'host',
-      fields: [],
-      appliedAt: 'immediate',
-      items: itemResults,
+      status: !ordered.length || failed === ordered.length ? 'failed' : failed > 0 || ordered.some(item => item.status === 'partial') ? 'partial' : 'applied',
+      entry: firstKnown ? toSearchItem(firstKnown)
+        : { id: items[0]?.id ?? params.id ?? '', category: '', owner: 'app', titleKey: '', paths: [], writable: false, page: '' },
+      scope: scopes.size === 1 ? [...scopes][0]! : 'mixed', fields: [],
+      appliedAt: timings.size === 1 ? [...timings][0]! : 'per-item',
+      mutation: ordered.some(item => item.mutation === 'unknown') ? 'unknown' : ordered.some(item => item.mutation === 'applied') ? 'applied' : 'none',
+      items: ordered,
     };
   };
 
@@ -1666,7 +1709,9 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     if (params.items && params.items.length > 0) {
       return updateCompound(caller, params);
     }
+    if (!params.id) throw new HarnessServiceError('invalid-params', 'single-entry updates require id');
     const entry = requireEntry(params.id);
+    if (entry.writable === false) throw new HarnessServiceError('unavailable', `"${entry.id}" is read-only: the saved compatibility setting has no active consumer`);
     switch (entry.owner) {
       case 'app':
         return updateApp(entry, caller, params);

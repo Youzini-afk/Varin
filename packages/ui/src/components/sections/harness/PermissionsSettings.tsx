@@ -1,5 +1,5 @@
 import React from 'react';
-import { resolveHarnessModelSlot, validatePermissionRule, type PermissionMode, type PermissionRule } from '@varin/protocol';
+import { resolvePermissionMode, validatePermissionRule, type PermissionMode, type PermissionRule } from '@varin/protocol';
 import { SettingsSection, SettingsRadioGroup, SettingsRadioOption } from '../shared/SettingsSection';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { HarnessModelField } from './HarnessModelField';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
 type RuleRow = { id: string; rule: PermissionRule };
@@ -49,17 +48,18 @@ export function PermissionsSettings({ harness, update, onSaveRules, saving, erro
     } finally { if (alive.current) setSubmitting(false); }
   };
   const busy = saving || submitting;
+  const permissionMode = resolvePermissionMode(harness.permissions?.mode ?? 'normal');
   return <>
     <SettingsSection title={t('settings.page.harness.permissions.mode.label')} settingsItem="harness.permissions.mode" divider={false}>
       <SettingsRadioGroup aria-label={t('settings.page.harness.permissions.mode.label')} className="settings-permission-modes">
-        {(['normal', 'accept-edits', 'smart', 'bypass'] as const).map((mode: PermissionMode) => <SettingsRadioOption key={mode}
+        {(['normal', 'bypass'] as const).map((mode: PermissionMode) => <SettingsRadioOption key={mode}
           label={t(`settings.page.harness.permissions.mode.${mode}`)} selected={(harness.permissions?.mode ?? 'normal') === mode}
-          disabled={mode === 'smart' && !resolveHarnessModelSlot('permissionJudge', harness.models, null)}
           onSelect={() => update({ permissions: { mode } })} />)}
+        {permissionMode.unavailable && <SettingsRadioOption label={t('settings.permissions.savedUnavailable', { mode: permissionMode.configured })}
+          selected disabled onSelect={() => {}} />}
       </SettingsRadioGroup>
-      <div className="mt-4"><HarnessModelField harness={harness} update={update} slot="permissionJudge" />
-        {!resolveHarnessModelSlot('permissionJudge', harness.models, null) ? <p className="mt-2 typography-meta text-muted-foreground">{t('settings.page.harness.permissions.smartUnavailable')}</p> : null}
-      </div>
+      <p className="mt-4 typography-meta text-muted-foreground">{t('settings.permissions.ownerScope')}</p>
+      {permissionMode.unavailable && <p className="mt-2 typography-meta text-muted-foreground">{t('settings.permissions.modeUnavailable')}</p>}
     </SettingsSection>
     <SettingsSection title={t('settings.harness.rules.title')} description={t('settings.experience.rulesHint')} settingsItem="harness.permissions.rules"
       headerAction={<Button size="sm" variant="outline" disabled={busy} onClick={() => {
@@ -72,6 +72,7 @@ export function PermissionsSettings({ harness, update, onSaveRules, saving, erro
           <button type="button" className="min-w-0 flex-1 text-left" aria-expanded={editing === id} onClick={() => setEditing(editing === id ? null : id)}>
             <span className="block break-words font-mono typography-meta">{rule.tool || t('settings.harness.rules.tool')}</span>
             {rule.match ? <span className="block break-words typography-micro text-muted-foreground">{rule.match.param} · {rule.match.pattern}</span> : null}
+            {rule.authority && <span className="block break-words typography-micro text-muted-foreground">{t('settings.permissions.authority')} · {rule.authority}</span>}
           </button>
           <span className="shrink-0 typography-meta text-muted-foreground">{t(`settings.harness.rules.${rule.decision}`)}</span>
           <Button variant="ghost" size="icon" disabled={busy || index === 0} aria-label={t('settings.harness.rules.up')} onClick={() => move(index, -1)}><Icon name="arrow-up" className="size-4" /></Button>

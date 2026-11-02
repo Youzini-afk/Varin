@@ -30,6 +30,7 @@ interface Transport {
 export interface HarnessSettingsState {
   harness: HarnessSettings | null;
   effectivePermissionMode: PermissionMode | null;
+  effectiveUnavailable: string | null;
   reserveRatio: number;
   status: 'loading' | 'idle' | 'saving' | 'saved' | 'error';
   error: string | null;
@@ -43,7 +44,7 @@ export class HarnessSettingsController {
   private explicitTail: Promise<unknown> = Promise.resolve();
   private refreshRequested = false;
   private listeners = new Set<() => void>();
-  private state: HarnessSettingsState = { harness: null, effectivePermissionMode: null, reserveRatio: DEFAULT_COMPACTION_RESERVE_RATIO, status: 'loading', error: null };
+  private state: HarnessSettingsState = { harness: null, effectivePermissionMode: null, effectiveUnavailable: null, reserveRatio: DEFAULT_COMPACTION_RESERVE_RATIO, status: 'loading', error: null };
 
   constructor(private readonly transport: Transport) {}
   getSnapshot = (): HarnessSettingsState => this.state;
@@ -60,7 +61,7 @@ export class HarnessSettingsController {
       if (this.confirmed) {
         harness = mergeHarnessSettings(object(raw.harness) as HarnessSettingsInput, {});
         const project = this.confirmed.projectTrusted ? object(this.confirmed.project.harness) as HarnessSettingsInput : {};
-        effectivePermissionMode = mergePolicies({ mode: harness.permissions?.mode ?? 'normal', rules: [] },
+        if (!this.confirmed.effectiveUnavailable) effectivePermissionMode = mergePolicies({ mode: harness.permissions?.mode ?? 'normal', rules: [] },
           { mode: project.permissions?.mode }).mode;
       }
     } catch (failure) {
@@ -68,7 +69,7 @@ export class HarnessSettingsController {
       error = failure instanceof Error ? failure.message : String(failure);
     }
     const reserveRatio = object(raw.compaction).reserveRatio as number | undefined;
-    this.state = { harness, effectivePermissionMode, reserveRatio: reserveRatio ?? DEFAULT_COMPACTION_RESERVE_RATIO, status, error };
+    this.state = { harness, effectivePermissionMode, effectiveUnavailable: this.confirmed?.effectiveUnavailable ?? null, reserveRatio: reserveRatio ?? DEFAULT_COMPACTION_RESERVE_RATIO, status, error };
     this.listeners.forEach((listener) => listener());
   }
 

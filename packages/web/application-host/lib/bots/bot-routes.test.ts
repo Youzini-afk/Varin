@@ -5,7 +5,7 @@ import type { BotService } from './bot-service.js';
 import type { BotSummary } from '@varin/application-client';
 
 const entry = { runtime: 'agent' as const, threadId: 'bot-thread', branchId: 'bot-branch' };
-const bot: BotSummary = { id: 'bot', name: 'Bot', instructions: null, model: null, coordinatorHostId: 'host', homeDir: '/bots/bot', entry, archived: false, createdAt: '', updatedAt: '' };
+const bot: BotSummary = { revision: 1, id: 'bot', name: 'Bot', instructions: null, model: null, coordinatorHostId: 'host', homeDir: '/bots/bot', entry, archived: false, createdAt: '', updatedAt: '' };
 function fixture() {
   const create = vi.fn(async () => bot); const update = vi.fn(async () => bot);
   const ensureEntry = vi.fn(async () => ({ bot, entry, model: null }));
