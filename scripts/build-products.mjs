@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { BuildCache } from './build-cache.mjs';
+import kernelIdentity from './kernel-binary-identity.cjs';
 
 export const repository = path.resolve(import.meta.dirname, '..');
 export const productRoot = path.join(repository, 'artifacts/build');
@@ -77,7 +78,9 @@ export async function prepareHost() {
   return { directory, ...result };
 }
 
-export async function prepareKernel(platform = process.platform, arch = process.arch) {
+export async function prepareKernel(platform = process.env.VARIN_TARGET_PLATFORM || process.platform,
+  arch = process.env.VARIN_TARGET_ARCH || process.arch) {
+  arch = kernelIdentity.normalizeKernelArchitecture(arch);
   const directory = path.join(productRoot, `kernel-${platform}-${arch}`);
   const name = `kernel-${platform}-${arch}`;
   const prebuilt = process.env.VARIN_KERNEL_PREBUILT;
@@ -96,7 +99,7 @@ export async function prepareKernel(platform = process.platform, arch = process.
     ? await cache.restore(name, path.resolve(process.env.VARIN_KERNEL_ARTIFACT), { ...spec, output: directory })
     : await cache.task(name, spec);
   if (platform !== 'win32') await fs.chmod(path.join(directory, 'varin-kernel'), 0o755);
-  return { directory, ...result };
+  return { directory, name, ...result };
 }
 
 export async function prepareWebProduct() {
@@ -162,7 +165,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   else if (command === 'kernel') {
     const result = await prepareKernel();
     const exportIndex = args.indexOf('--export');
-    if (exportIndex >= 0) await cache.export(`kernel-${process.platform}-${process.arch}`, path.resolve(args[exportIndex + 1]), result.directory);
+    if (exportIndex >= 0) await cache.export(result.name, path.resolve(args[exportIndex + 1]), result.directory);
   }
   else throw new Error('Usage: build-products.mjs runtime|frontend [--export directory]|host|kernel');
 }

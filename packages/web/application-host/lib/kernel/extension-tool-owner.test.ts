@@ -15,6 +15,7 @@ import {
 } from './material-tool-owner.js';
 import {
   createExtensionTools,
+  extendToolConfiguration,
   retainExtensionTool,
 } from './extension-tool-owner.js';
 import {
@@ -330,11 +331,23 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
       computers: { automation: { attachRequests: () => {} },
         applicationToolAvailability: async () => ({ browser: true, office: true }),
         defaultDesktop: async () => { throw new Error('malformed original Computer default'); } } as never });
-    const isolated = await createExtensionTools({ ...options, prepareConfiguration: computer.prepareConfiguration })(
+    const isolated = await createExtensionTools({
+      ...options,
+      prepareConfiguration: async (run, required) => {
+        const configuration = await computer.prepareConfiguration(run, required);
+        // Configuration preparation replaces the initial selection. Keep this fixture
+        // focused on the custom tool and Computer rather than cold-starting every builtin.
+        return extendToolConfiguration(configuration,
+          (value, original) => configuration(value, original),
+          value => value.id === descriptor.id || COMPUTER_TOOL_DECLARATIONS.some(declaration => declaration.id === value.id)
+            ? undefined : false);
+      },
+    })(
       { runId: 'independent-custom-selection', threadId: 'thread', branchId: 'history-branch', source: null }, [], new AbortController().signal,
     );
     try {
-      expect(isolated.initial.map(value => value.binding.serviceId)).toContain(descriptor.id);
+      expect(isolated.initial.map(value => value.binding.serviceId)).toEqual([descriptor.id]);
+      expect(isolated.inspect()).toHaveLength(COMPUTER_TOOL_DECLARATIONS.length + 1);
       expect(isolated.initial.some(value => COMPUTER_TOOL_DECLARATIONS.some(declaration => declaration.id === value.binding.serviceId))).toBe(false);
       for (const declaration of COMPUTER_TOOL_DECLARATIONS) expect(isolated.inspect()).toContainEqual(expect.objectContaining({
         serviceId: declaration.id, status: 'unavailable', error: `extension_tool_configuration_unavailable:${declaration.id}`,
