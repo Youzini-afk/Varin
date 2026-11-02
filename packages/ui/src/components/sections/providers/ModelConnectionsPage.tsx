@@ -2,6 +2,7 @@ import React from 'react';
 import { applyModelDirectoryDefaults, createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, registerRuntimeEndpointSwitchBlocker, MODEL_CATALOG_FIELDS, type ModelMetadataRequest, type ChannelModel, type ModelChannel, type ModelConnectionOptions, type ModelConnectionsSnapshot, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState } from '@varin/application-client';
 import { SettingsPageLayout } from '../shared/SettingsPageLayout';
 import { ConnectionSettings } from './ConnectionSettings';
+import { accountSignInProviders } from './account-sign-in';
 import { ModelConfiguration } from './ModelConfiguration';
 import { ModelSelection } from './ModelSelection';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
@@ -190,7 +191,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
         <Input aria-label={t('settings.models.filterProviders')} placeholder={t('settings.models.filterProviders')} value={providerQuery} onChange={event => setProviderQuery(event.target.value)} className="mb-6 max-w-sm" />
         <div className="grid gap-3 @xl:grid-cols-2 @4xl:grid-cols-3">
           {snapshot.types.filter(type => `${type.name} ${type.id}`.toLowerCase().includes(providerQuery.toLowerCase())).map(type => <button key={type.id} type="button" disabled={busy} onClick={() => addChannel(type.id)} className="group flex items-center gap-4 rounded-xl border border-border/60 p-5 text-left transition-colors hover:border-border hover:bg-interactive-hover">
-            <ProviderLogo providerId={type.id} className="size-7 shrink-0" /><span className="min-w-0 flex-1"><span className="block typography-ui-label">{type.name}</span><span title={type.defaultBaseUrl} className="mt-1 block truncate typography-micro text-muted-foreground">{type.defaultBaseUrl ? providerEndpoint(type.defaultBaseUrl) : t('settings.models.customEndpoint')}</span>{type.oauthProviders?.length ? <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 typography-micro text-muted-foreground">{t('settings.models.accountSignIn')}</span> : null}</span><Icon name="arrow-right-s" className="size-4 text-muted-foreground" />
+            <ProviderLogo providerId={type.id} className="size-7 shrink-0" /><span className="min-w-0 flex-1"><span className="block typography-ui-label">{type.name}</span><span title={type.defaultBaseUrl} className="mt-1 block truncate typography-micro text-muted-foreground">{type.defaultBaseUrl ? providerEndpoint(type.defaultBaseUrl) : t('settings.models.customEndpoint')}</span>{accountSignInProviders(type).length ? <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 typography-micro text-muted-foreground">{t('settings.models.accountSignIn')}</span> : null}</span><Icon name="arrow-right-s" className="size-4 text-muted-foreground" />
           </button>)}
         </div>
       </> : null}
