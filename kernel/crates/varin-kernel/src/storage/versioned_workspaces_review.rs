@@ -47,6 +47,223 @@ fn workspace_tree_cached_statements_recheck_rows_and_observe_rollback() {
     f.close();
 }
 
+fn assert_workspace_tree_balanced(storage: &Storage, root: &str) {
+    fn index(
+        storage: &Storage,
+        root: Option<&String>,
+        lower: Option<&str>,
+        upper: Option<&str>,
+    ) -> i32 {
+        let Some(root) = root else {
+            return 0;
+        };
+        let TrieNode::Index {
+            key,
+            child,
+            left,
+            right,
+            height,
+        } = storage.load_node(root).unwrap()
+        else {
+            panic!("expected index");
+        };
+        assert!(lower.is_none_or(|lower| lower < key.as_str()));
+        assert!(upper.is_none_or(|upper| key.as_str() < upper));
+        assert_workspace_tree_balanced(storage, &child);
+        let left_height = index(storage, left.as_ref(), lower, Some(&key));
+        let right_height = index(storage, right.as_ref(), Some(&key), upper);
+        assert!(
+            (left_height - right_height).abs() <= 1,
+            "unbalanced child {key}: {left_height}/{right_height}"
+        );
+        assert_eq!(i32::from(height), left_height.max(right_height) + 1);
+        i32::from(height)
+    }
+    let TrieNode::Path { children, .. } = storage.load_node(root).unwrap() else {
+        panic!("expected path");
+    };
+    index(storage, children.as_ref(), None, None);
+}
+
+#[test]
+fn workspace_bulk_index_reuses_old_views_and_builds_large_left_and_right_ranges_once() {
+    let mut f = Fixture::new();
+    let initial = json!([
+        {"path":"wide/05000","state":{"kind":"symlink","symlinkTarget":"original"}},
+        {"path":"untouched/leaf","state":{"kind":"symlink","symlinkTarget":"cold"}}
+    ]);
+    f.begin("main", None);
+    f.append("main", 0, initial.clone()).unwrap();
+    let created = f.finish("main");
+    let frozen = created["root"].as_str().unwrap().to_owned();
+    let frozen_entries = f.storage.root_entries(&frozen).unwrap();
+    let untouched = f
+        .storage
+        .find_path_node(&frozen, &["untouched".into()])
+        .unwrap();
+    let mut root = frozen.clone();
+    for (revision, start) in [6000, 3000].into_iter().enumerate() {
+        let changes: Vec<Value> = (start..start + 1024).map(|i| json!({
+            "path":format!("wide/{i:05}"), "state":{"kind":"symlink","symlinkTarget":"batch"}
+        })).collect();
+        let nodes = f.nodes();
+        let receipt = f
+            .write_batch(
+                json!({"operationId":format!("range:{revision}"), "branchId":"main",
+            "expectedWriteRevision":revision, "changes":changes}),
+            )
+            .unwrap();
+        root = receipt["root"].as_str().unwrap().to_owned();
+        assert!(
+            f.nodes() - nodes < 2 * 1024,
+            "one range must not retain one AVL spine per inserted child"
+        );
+        assert_workspace_tree_balanced(&f.storage, &root);
+        assert_eq!(
+            f.storage
+                .find_path_node(&root, &["untouched".into()])
+                .unwrap(),
+            untouched
+        );
+        assert_eq!(f.storage.root_entries(&frozen).unwrap(), frozen_entries);
+    }
+    let mut expected: BTreeMap<String, PathState> =
+        f.storage.root_entries(&root).unwrap().into_iter().collect();
+    let mut seed = 71_u64;
+    for round in 0..6 {
+        let previous = root.clone();
+        let previous_entries = f.storage.root_entries(&previous).unwrap();
+        let mut patch = BTreeMap::new();
+        for _ in 0..173 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let key = format!("wide/{:05}", 3000 + (seed >> 32) % 4200);
+            let state = PathState::Symlink {
+                symlink_target: format!("round-{round}"),
+                mode: None,
+            };
+            patch.insert(key, state);
+        }
+        let updates: Vec<_> = patch
+            .iter()
+            .map(|(path, state)| (Storage::validate_path(path).unwrap(), state.clone()))
+            .collect();
+        root = f.storage.root_apply(&root, &updates).unwrap();
+        expected.extend(patch);
+        assert_eq!(
+            f.storage.root_entries(&root).unwrap(),
+            expected.clone().into_iter().collect::<Vec<_>>()
+        );
+        assert_eq!(f.storage.root_entries(&previous).unwrap(), previous_entries);
+        assert_workspace_tree_balanced(&f.storage, &root);
+        let nodes = f.nodes();
+        assert_eq!(
+            f.storage.root_apply(&root, &updates).unwrap(),
+            root,
+            "unchanged replay keeps the exact root"
+        );
+        assert_eq!(
+            f.nodes(),
+            nodes,
+            "unchanged replay adds no immutable candidates"
+        );
+    }
+    // Replayed publication must keep its original receipt even if the new
+    // batching algorithm would build a different candidate shape.
+    let current = f.storage.branch("main").unwrap().head_root;
+    f.begin("main", None);
+    f.append("main", 0, initial).unwrap();
+    assert_eq!(f.finish("main"), created);
+    assert_eq!(f.storage.branch("main").unwrap().head_root, current);
+    f.close();
+}
+
+#[test]
+fn workspace_bulk_index_append_rolls_back_partial_nodes_and_keeps_its_sequence_retryable() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.append(
+        "main",
+        0,
+        json!([
+            {"path":"a/old","state":{"kind":"directory"}},
+            {"path":"m/seed","state":{"kind":"directory"}},
+            {"path":"z/old","state":{"kind":"directory"}}
+        ]),
+    )
+    .unwrap();
+    let original = f.storage.branch_builders["main"].staged_root.clone();
+    let changes = json!([
+        {"path":"a/new","state":{"kind":"directory","mode":448}},
+        {"path":"m/new","state":{"kind":"directory","mode":448}}
+    ]);
+    f.storage.set_cancellation(Arc::new(AtomicBool::new(true)));
+    assert!(matches!(
+        f.append("main", 1, changes.clone()),
+        Err(KernelError::Cancelled)
+    ));
+    f.storage.clear_cancellation();
+    assert_eq!(f.storage.branch_builders["main"].staged_root, original);
+    assert_eq!(f.storage.branch_builders["main"].next_sequence, 1);
+    let damaged = f
+        .storage
+        .find_path_node(&original, &["a".into()])
+        .unwrap()
+        .unwrap();
+    let encoded: String = f
+        .storage
+        .conn
+        .query_row(
+            "SELECT children_json FROM trie_nodes WHERE hash=?1",
+            params![damaged],
+            |row| row.get(0),
+        )
+        .unwrap();
+    f.storage
+        .conn
+        .execute(
+            "UPDATE trie_nodes SET children_json=?1 WHERE hash=?2",
+            params![
+                serde_json::to_string(&TrieNode::Path {
+                    state: None,
+                    children: None
+                })
+                .unwrap(),
+                damaged
+            ],
+        )
+        .unwrap();
+    let nodes = f.nodes();
+    let writes = f.storage.conn.total_changes();
+    assert!(
+        matches!(f.append("main", 1, changes.clone()), Err(KernelError::Storage(message)) if message.contains("corrupt trie node"))
+    );
+    assert!(
+        f.storage.conn.total_changes() > writes,
+        "the sibling was built before the failed child, exercising rollback"
+    );
+    assert!(f.storage.conn.is_autocommit());
+    assert_eq!(f.nodes(), nodes);
+    assert_eq!(f.storage.branch_builders["main"].staged_root, original);
+    assert_eq!(f.storage.branch_builders["main"].next_sequence, 1);
+    f.storage
+        .conn
+        .execute(
+            "UPDATE trie_nodes SET children_json=?1 WHERE hash=?2",
+            params![encoded, damaged],
+        )
+        .unwrap();
+    f.append("main", 1, changes).unwrap();
+    let published = f.finish("main");
+    assert_workspace_tree_balanced(&f.storage, published["root"].as_str().unwrap());
+    assert!(f.storage.root_get(&original, "a/new").unwrap().is_none());
+    assert!(f
+        .storage
+        .root_get(published["root"].as_str().unwrap(), "a/new")
+        .unwrap()
+        .is_some());
+    f.close();
+}
+
 #[cfg(unix)]
 #[test]
 fn new_workspace_file_metadata_roundtrips_to_ordinary_host_files() {
