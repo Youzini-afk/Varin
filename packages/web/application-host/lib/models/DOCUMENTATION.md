@@ -52,6 +52,14 @@ external edits. A malformed document is an error, not an empty replacement; an a
 binding can retain the last valid configuration. Invalid channel entries report their own issues
 without removing independent valid channels. A first invalid load has no invented valid fallback.
 
+Agent-facing channel reads redact header values and URL credentials. The provider `patch` action edits declared
+fields against the original stored channel inside the same revision-CAS transaction; omitted fields
+retain their values and `reset` explicitly removes optional fields. Never write a redacted projection
+back as a complete channel. Save/patch receipts describe the exact committed revision, not a later
+read that might belong to another writer. They do not claim background model discovery has completed
+or that previously captured inference bindings changed. Credential-bearing dispatch changes require
+their explicit semantic permission, separate from ordinary cosmetic settings.
+
 `ProjectTrustService` owns native `VARIN_DATA_DIR/project-trust.json` through the same locked revision-CAS
 file transaction. Missing decisions are untrusted. Explicit true/false decisions inherit along canonical
 ancestors; deleting a direct decision exposes the ancestor decision, if any. The authenticated

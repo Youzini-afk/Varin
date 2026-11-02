@@ -85,7 +85,7 @@ vi.mock('@/components/layout/MainLayout', () => ({
 }));
 
 const bot = (id: string): BotSummary => ({
-  id, name: `Bot ${id}`, entry: { runtime: 'agent', threadId: `entry-${id}`, branchId: `branch-${id}` }, archived: false,
+  id, revision: 1, name: `Bot ${id}`, entry: { runtime: 'agent', threadId: `entry-${id}`, branchId: `branch-${id}` }, archived: false,
   homeDir: `/bots/${id}`, coordinatorHostId: 'host-a', instructions: null, model: null,
   createdAt: '', updatedAt: '',
 });

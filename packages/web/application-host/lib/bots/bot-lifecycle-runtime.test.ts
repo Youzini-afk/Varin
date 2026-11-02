@@ -3,7 +3,7 @@ import type { BotSummary } from '@varin/application-client';
 import type { ComputerDesktop, ComputerVmDescriptor } from '@varin/protocol';
 import { createBotLifecycleRuntime, type BotLifecycleRuntimeOptions } from './bot-lifecycle-runtime.js';
 
-const bot: BotSummary = { id: 'b', name: 'Bot', archived: false, instructions: null, model: null,
+const bot: BotSummary = { revision: 1, id: 'b', name: 'Bot', archived: false, instructions: null, model: null,
   homeDir: '/bot', coordinatorHostId: 'coordinator', entry: { runtime: 'agent', threadId: 'entry', branchId: 'main' }, createdAt: '', updatedAt: '',
   activity: { state: 'sleeping', operationId: 'sleep-original', planned: true, work: [], machines: [], error: null } };
 const work = { runtime: 'agent' as const, threadId: 't', branchId: 'main', runId: 'run', resume: true, stopped: false, resumed: false };

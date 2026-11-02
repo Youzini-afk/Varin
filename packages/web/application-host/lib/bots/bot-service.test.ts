@@ -271,3 +271,34 @@ it('persists profile changes before applying native personalization and exposes 
   await service.update(bot.id, { instructions: null, model: null });
   expect(applyProfile).toHaveBeenLastCalledWith(expect.objectContaining({ instructions: null, model: null, entry: bot.entry }));
 });
+
+it('uses the exposed native profile revision for stale and concurrent edits', async () => {
+  const { service, applyProfile } = await setup();
+  const bot = await service.create({ name: 'Original' });
+  expect(bot.revision).toBe(1);
+  const outcomes = await Promise.allSettled([
+    service.update(bot.id, { expectedRevision: bot.revision, instructions: 'First update' }),
+    service.update(bot.id, { expectedRevision: bot.revision, instructions: 'Stale overwrite' }),
+  ]);
+  expect(outcomes.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  const saved = await service.get(bot.id);
+  expect(saved).toMatchObject({ revision: 2, instructions: 'First update' });
+  expect(applyProfile).toHaveBeenCalledTimes(1);
+  await expect(service.update(bot.id, { expectedRevision: bot.revision, name: 'Stale name' })).rejects.toThrow(/changed/);
+  expect((await service.get(bot.id))?.name).toBe('Original');
+});
+
+it('retains the exact saved profile when live propagation fails and allows a revisioned retry', async () => {
+  const { service, applyProfile } = await setup();
+  const bot = await service.create();
+  applyProfile.mockRejectedValueOnce(new Error('Model preparation is offline'));
+  let failure: unknown;
+  try { await service.update(bot.id, { expectedRevision: bot.revision, instructions: 'Persisted guidance' }); }
+  catch (error) { failure = error; }
+  expect(failure).toMatchObject({ name: 'BotProfileMutationError', stage: 'profile-propagation', bot: { revision: 2, instructions: 'Persisted guidance' } });
+  const saved = await service.get(bot.id);
+  expect(saved).toMatchObject({ revision: 2, instructions: 'Persisted guidance' });
+  const retried = await service.update(bot.id, { expectedRevision: saved!.revision, instructions: saved!.instructions });
+  expect(retried?.revision).toBe(3);
+  expect(applyProfile).toHaveBeenCalledTimes(2);
+});

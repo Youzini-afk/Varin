@@ -38,7 +38,7 @@ describe('native global/project settings ownership', () => {
     const f = await fixture(), caller = { ...f.caller, workspaceId: 'admitted-project' };
     // Exercise the trust owner with a project-writable field; shell selection is user-owned.
     expect((await f.service.read(caller, { id: 'harness.output', scope: 'project' })).state).toBe('denied');
-    await expect(f.service.update(caller, { id: 'harness.output', scope: 'project', set: { 'harness.output.visibleBytes': 4096 } })).rejects.toThrow(/trusted/);
+    expect((await f.service.update(caller, { id: 'harness.output', scope: 'project', set: { 'harness.output.visibleBytes': 4096 } })).status).toBe('failed');
     await expect(readFile(join(f.project, '.varin', 'settings.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     f.trust(); await writeFile(join(f.project, '.varin', 'settings.json'), '{ malformed');
     expect((await f.service.read(caller, { id: 'harness.shell', scope: 'global' })).state).toBe('ok');
@@ -48,12 +48,12 @@ describe('native global/project settings ownership', () => {
   });
   it('rejects malformed native utility bindings and their project overrides', async () => {
     const f = await fixture();
-    await expect(f.service.update(f.caller, { id: 'sessions.small-model', set: { utilityModel: { providerId: 'native' } } })).rejects.toThrow(/providerId and modelId/);
+    expect((await f.service.update(f.caller, { id: 'sessions.small-model', set: { utilityModel: { providerId: 'native' } } })).status).toBe('failed');
     f.trust();
     const denied = await f.service.update({ ...f.caller, workspaceId: 'project' }, { id: 'sessions.small-model', scope: 'project', set: { utilityModel: { providerId: 'native', modelId: 'model' } } });
     expect(denied.status).toBe('failed');
     expect((await f.owner.snapshot()).global).toEqual({});
-    await expect(f.service.update(f.caller, { id: 'sessions.small-model', set: { utilityThinkingLevel: 'invented' } })).rejects.toThrow(/thinking level/);
+    expect((await f.service.update(f.caller, { id: 'sessions.small-model', set: { utilityThinkingLevel: 'invented' } })).status).toBe('failed');
     expect((await f.service.update(f.caller, { id: 'sessions.small-model', set: {
       utilityModel: { providerId: 'native', modelId: 'model' }, utilityThinkingLevel: 'high',
     } })).status).toBe('applied');
