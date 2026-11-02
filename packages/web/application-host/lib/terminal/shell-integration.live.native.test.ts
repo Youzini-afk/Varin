@@ -65,6 +65,9 @@ describe("live shell integration", () => {
     const cwd = await fs.mkdtemp(path.join(tmpdir(), 'varin-live-shell-'));
     const started = performance.now();
     const phase = (name: string) => console.info(`[live shell] ${name}: ${Math.round(performance.now() - started)}ms`);
+    // Avoid diagnostic console I/O between the observed command and native stop.
+    const nativePhases: Array<{ name: string; atMs: number }> = [];
+    const nativePhase = (name: string) => { nativePhases.push({ name, atMs: Math.round(performance.now() - started) }); };
     const native = createNativeProcessTestHarness();
     let lastControl: Record<string, unknown> | undefined;
     let lastData: Record<string, unknown> | undefined;
@@ -74,39 +77,52 @@ describe("live shell integration", () => {
         const { service, client, root } = await native.get();
         nativeRoot = root;
         const subscribe = client.processSubscribe.bind(client);
-        client.processSubscribe = (params, grant, observer) => subscribe(params, grant, (event, acknowledge) => {
-          const result = event.result;
-          if (result) {
-            const metadata = {
-              atMs: Math.round(performance.now() - started), sequence: event.sequence,
-              processId: result.process.processId,
-              status: result.process.status, writerActive: result.process.writerActive,
-              exitCode: result.process.exitCode, outputComplete: result.outputComplete,
-              outputError: result.outputError, nextCursor: result.nextCursor, endCursor: result.endCursor,
+        client.processSubscribe = (params, grant, observer) => {
+          const pending = subscribe(params, grant, (event, acknowledge) => {
+            const result = event.result;
+            if (result) {
+              const metadata = {
+                atMs: Math.round(performance.now() - started), sequence: event.sequence,
+                processId: result.process?.processId,
+                status: result.process?.status, writerActive: result.process?.writerActive,
+                exitCode: result.process?.exitCode, outputComplete: result.outputComplete,
+                outputError: result.outputError, nextCursor: result.nextCursor, endCursor: result.endCursor,
+              };
+              if (event.stream === 'control') lastControl = metadata;
+              else lastData = metadata;
+            }
+            observer(event, acknowledge);
+          });
+          void pending.then(subscription => {
+            const close = subscription.close;
+            subscription.close = () => {
+              nativePhase('subscription close requested');
+              const closing = close();
+              void closing.then(() => nativePhase('subscription close acknowledged'), () => nativePhase('subscription close rejected'));
+              return closing;
             };
-            if (event.stream === 'control') lastControl = metadata;
-            else lastData = metadata;
-          }
-          observer(event, acknowledge);
-        });
+          }, () => nativePhase('subscription rejected'));
+          return pending;
+        };
         const release = client.processRelease.bind(client);
-        client.processRelease = async (...args) => {
-          phase('native release requested');
-          const result = await release(...args);
-          phase('native release acknowledged');
-          return result;
+        client.processRelease = (...args) => {
+          nativePhase('native release requested');
+          const pending = release(...args);
+          void pending.then(() => nativePhase('native release acknowledged'), () => nativePhase('native release rejected'));
+          return pending;
         };
         const provider = service.ptyProvider;
         return { ...provider, async spawn(...args: Parameters<typeof provider.spawn>) {
           const process = await provider.spawn(...args);
-          process.onExit(() => phase('native exit delivered'));
-          void process.completion.then(() => phase('native completion'), () => phase('native completion rejected'));
+          process.onExit(() => nativePhase('native exit delivered'));
+          void process.completion.then(() => nativePhase('native completion'), () => nativePhase('native completion rejected'));
           const terminate = process.terminate;
-          process.terminate = async (force = false) => {
-            phase('native stop requested');
-            await terminate(force);
+          process.terminate = (force = false) => {
+            nativePhase('native stop requested');
+            const pending = terminate(force);
             // This acknowledges the kernel's stop enqueue, not the OS exit.
-            phase('native stop acknowledged');
+            void pending.then(() => nativePhase('native stop acknowledged'), () => nativePhase('native stop rejected'));
+            return pending;
           };
           return process;
         } };
@@ -146,7 +162,7 @@ describe("live shell integration", () => {
       // process.list/read call could reconcile state and mask a missed wakeup.
       // This timer neither settles destroy nor releases its original process.
       const diagnostic = setTimeout(() => {
-        console.info('[live shell] pending destroy', { lastControl, lastData });
+        console.info('[live shell] pending destroy', { nativePhases, lastControl, lastData });
         if (!nativeRoot) return;
         const directory = path.join(nativeRoot, 'storage', 'process-receipts');
         void fs.readdir(directory).then(async names => {
@@ -172,6 +188,7 @@ describe("live shell integration", () => {
       }, 5_000);
       try { await handle.destroy(); }
       finally { clearTimeout(diagnostic); }
+      console.info('[live shell] native teardown', nativePhases);
       phase('destroyed');
     } finally {
       subscription.dispose();
