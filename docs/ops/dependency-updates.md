@@ -51,11 +51,37 @@ PptxGenJS 4.0.1 仍声明 image-size ^1.2.1，但已发布的 CJS/ESM 运行时�
 待 PptxGenJS 正式发布安全依赖范围后，经实际图片创建和开发/生产解析验证再移除 override。
 两个 Bun 锁文件须保留相同修复；发布 CI 还负责完整 staged production 布局及打包原生运行时的验收。
 
-Dependabot checks Bun, Cargo, and GitHub Actions dependencies once every 24 hours at 00:00 UTC,
-including weekends, with no additional release cooldown. Discovery is scheduled, not an upstream-release
-webhook, so GitHub's
-queue and the configured open-PR limit can delay proposals. Major versions remain visible; for example,
-an `@types/node` major upgrade should be evaluated with the actual Node runtime instead of being hidden.
+### Dependabot 候选策略
+
+[配置](../../.github/dependabot.yml)按升级单元组织候选，不以减少 PR 数量为目标：
+
+| 生态 | 检查时段（UTC） | 新版本发布后的冷却期 |
+| --- | --- | --- |
+| Bun `/` | 每天 00:00，含周末 | patch 1 天、minor 3 天、major 7 天；其他情况 3 天 |
+| Cargo `/kernel` | 每天 01:00，含周末 | patch 1 天、minor 3 天、major 7 天；其他情况 3 天 |
+| GitHub Actions `/` | 每周一 02:00 | 3 天；该生态不支持 SemVer 分档冷却 |
+
+冷却按发布年龄计算，不是 PR 打开后的审批等待；定时检查也不是上游发布 webhook，GitHub 排队仍可能延迟。
+三个生态均设置 `open-pull-requests-limit: 1000000`，按[官方建议](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#open-pull-requests-limit)
+用足够大的整数实现实际不设数量预算，而非真正无限或平台最大值。省略此项会恢复默认 5，`0` 会禁用版本 PR。
+
+React、PDF.js/canvas、CodeMirror/Lezer、Vite、Vitest、ESLint、Electron、Capacitor、SQLite、
+tree-sitter/Wasmtime/Cranelift 和 artifact actions 按各自联动边界分组，允许共同评审 major，
+但不假定同组最新版一定兼容或 major 编号相同。纯开发工具与普通库的 minor/patch 分开合批；
+认证、网络、原生、编译器和已知高风险 0.x 依赖从普通批次排除，未匹配的升级仍单独提议，并非忽略。
+规则按首次匹配生效；包名 pattern 不能自动识别所有 0.x 版本，新增依赖需按实际消费者判断归属。
+
+`triviumdb-upgrade-0.8` 是旧格式迁移读者，不能随当前 `triviumdb` 一起升到最新格式线；
+当前 [Bun updater 跳过 `npm:` 别名要求](https://github.com/dependabot/dependabot-core/pull/15850)，
+它的 0.8 版本线由维护者固定和审阅，分组排除不是别名维护保证。所有非联动 major 保持可见，
+例如 `@types/node` 应连同实际 Node runtime 评估。保留默认自动 rebase，不开启自动合并。
+
+安全更新不受上述常规版本冷却或 PR 数量预算约束；不改变告警/通知设置，也不把独立安全修复塞进大组。
+[官方生态矩阵](https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories)
+目前列出的 Bun 不支持 Dependabot security updates，不能承诺它有即时安全 PR 兜底；已识别的紧急修复应主动处理，
+不等待常规冷却或每周批次。每周审阅候选并记录具体迁移阻塞，不通过永久屏蔽整个包或所有 major 清理列表。
+
+### PR 验证与报告
 
 Dependabot's expensive source/native/platform/container jobs share the existing job-level
 `varin-dependabot-background` group with `queue: max`; change detection and the cheap production-lock
