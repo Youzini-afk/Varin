@@ -373,10 +373,13 @@ describe('runtime contract User API through the real HTTP handler and runtime', 
   it('resolves selected shell declarations through the Documents workspace ID without claiming a live mount', async () => {
     await runtime.catalog.reconcileBuiltins(VARIN_BUILTIN_EXTENSION_DEFINITIONS, VARIN_BUILTIN_EXTENSION_PREFIX);
     const identity = await documents.resolveWorkspace({ path: directory });
-    await runtime.workbench.updateLayout({ expectedRevision: 0, layer: {
+    const layout = await runtime.workbench.updateLayout({ expectedRevision: 0, layer: {
       profileId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID, scope: 'workspace', scopeId: identity.workspaceId, surface: 'web',
       references: [], replacementSelections: { [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID },
     } });
+    // Exercise a project override of the Agent profile, independent of the initial mode.
+    await runtime.workbench.selectProfile({ expectedRevision: layout.document.revision,
+      profileId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID, scope: 'user', scopeId: 'default' });
     onWorkspaceResolved.mockClear();
     const registrations = await documents.listWorkspaceRegistrations();
     const scoped = await api.queryContracts({ action: 'list', kind: 'ui_slot' }, { directory, surface: 'web' });
