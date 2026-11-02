@@ -10,6 +10,7 @@ import { KERNEL_PROTOCOL_VERSION, type KernelCreateEntry, type ThreadSummary } f
 import { KernelStorageAdapter } from "./storage-adapter.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
+import { TransportFixture } from './tests/transport-fixture.js';
 
 const extension = process.platform === "win32" ? ".exe" : "";
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.resolve(process.cwd(), "kernel", "target", "release", `varin-kernel${extension}`);
@@ -1134,7 +1135,8 @@ test("branch creation streams a normal input larger than one control frame", { t
   }
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-large-branch-"));
   roots.push(root);
-  const host = createKernelClient({ hostId: "large-branch-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  const transport = new TransportFixture();
+  const host = createKernelClient({ hostId: "large-branch-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false, transportFactory: transport.create });
   clients.push(host);
   await host.start();
   const client = host.scoped(await issueActor(host, "large-branch-actor", "large-branch-workspace"));
@@ -1146,9 +1148,19 @@ test("branch creation streams a normal input larger than one control frame", { t
   }));
   assert.ok(Buffer.byteLength(JSON.stringify(entries), "utf8") > 16 * 1024 * 1024);
   const started = performance.now();
+  transport.onReceive = response => {
+    const request = transport.sent.find(frame => frame.id === response.id);
+    if (request?.method === 'branch.create.append') {
+      const { sequence } = request.params as { sequence: number };
+      t.diagnostic(`large branch: append ${sequence} replied after ${Math.round(performance.now() - started)}ms`);
+    }
+  };
   t.diagnostic("large branch: dispatching streamed create");
   const created = await client.createBranch({ operationId: "large-branch-create", branchId: "large-branch", workspaceId: "large-branch-workspace", draftBasePaths: [], captureScopes: [], entries });
   t.diagnostic(`large branch: create committed after ${Math.round(performance.now() - started)}ms`);
+  const appends = transport.sent.filter(request => request.method === 'branch.create.append');
+  assert.ok(appends.length > 1);
+  assert.ok(appends.every(request => Buffer.byteLength(JSON.stringify(request), 'utf8') < 16 * 1024 * 1024));
   assert.equal(created.created, true);
   assert.equal((await client.readBranch({ branchId: "large-branch" })).writeRevision, 0);
   const added = await client.writeBranch({
