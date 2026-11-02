@@ -1191,7 +1191,7 @@ describe("computer service (BC7 virtual machines)", () => {
     return { service, kernel };
   };
 
-  it("creates a bootable Debian guest, registers its Host, and exposes the same managed desktop", async () => {
+  it("creates a managed x64 Debian guest, or rejects an incompatible Host before provisioning", async () => {
     const driverDir = newDataDir();
     const bundle = join(driverDir, "linux", "guest-bundle-x64");
     mkdirSync(bundle, { recursive: true });
@@ -1256,6 +1256,17 @@ describe("computer service (BC7 virtual machines)", () => {
         return reply({});
       }) as typeof fetch,
     });
+    // The packaged managed-guest recipe is x64-only. An arm64 Host must reject
+    // before provisioning, not pretend that the x64 guest can be made bootable.
+    if (process.arch !== "x64") {
+      await expect(service.createVm({ providerId: "hv1", name: "office", managed: true }))
+        .rejects.toThrow("Managed VM preparation requires a Linux x64 Host");
+      expect(fixture.domains.size).toBe(0);
+      expect(fixture.volumes.size).toBe(0);
+      expect(connections).toEqual([]);
+      await service.dispose();
+      return;
+    }
     const created = await service.createVm({ providerId: "hv1", name: "office", managed: true });
     expect(created.machine.vm?.volumePaths).toEqual([
       `varin-${created.machine.vm!.domainUuid}.qcow2`,

@@ -56,6 +56,7 @@
     "type-check:cli:raw": "bun run type-check:cli:source && bun run type-check:cli:tests",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" \"./application-host/**/*.ts\" \"./cli/**/*.ts\" --config ../../eslint.config.js",
     "test": "vitest run",
+    "test:platform": "vitest run --config vitest.platform.config.ts",
     "structure:cold-start": "tsx scripts/structure-cold-start.ts",
     "structure:copy-runtime": "node scripts/copy-structure-runtime.mjs",
     "semantic:perf:store": "tsx scripts/semantic-store-perf.ts",

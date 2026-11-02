@@ -150,13 +150,14 @@ jobs:
           overwrite: true
 
   native-quality:
-    name: Verify native authority and Host
+    name: Verify Rust authority and native Host
     needs: [prepare, native-build]
     runs-on: ubuntu-latest
     env:
       VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
       VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
       VARIN_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
+      VARIN_TEST_KERNEL_EXECUTABLE: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
     steps:
       - uses: actions/checkout@v7
         with:
@@ -179,7 +180,8 @@ jobs:
           name: varin-kernel-linux-x64
           path: .build-input/kernel
       - run: node scripts/build-products.mjs kernel
-      - run: bun run build:type-dependencies
+      - id: prepare
+        run: bun run build:type-dependencies
       - name: Prepare FUSE for native workspace acceptance
         run: |
           sudo apt-get update
@@ -187,6 +189,19 @@ jobs:
           sudo modprobe fuse
           test -c /dev/fuse
       - run: node scripts/test-kernel-authority.mjs
+      # Host acceptance does not execute Catalog/Storage's Rust state machines.
+      # Qualify the accepted SHA's actual migration, permission and no-replay
+      # contracts, collecting them even if an independent Host assertion fails.
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        id: rust-build
+        name: Compile Rust owner tests
+        run: bun run test:rust --no-run
+      - if: ${{ !cancelled() && steps.rust-build.outcome == 'success' }}
+        name: Verify Rust owner contracts
+        timeout-minutes: 10
+        env:
+          RUST_BACKTRACE: 1
+        run: bun run test:rust --no-fail-fast
 
   vm-guest:
     name: Prepare Linux x64 VM runtime
@@ -275,6 +290,13 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
+      - name: Checkout current Android setup automation
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/actions/android-setup
+          path: .release-automation
+
       - name: Prepare Android release signing and optional push configuration
         env:
           VARIN_ANDROID_KEYSTORE_BASE64: ${{ secrets.VARIN_ANDROID_KEYSTORE_BASE64 }}
@@ -313,16 +335,7 @@ jobs:
         with:
           node-version: 24
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-        with:
-          packages: platform-tools platforms;android-36 build-tools;36.0.0
-
-      - uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+      - uses: ./.release-automation/.github/actions/android-setup
 
       - uses: actions/cache@v6
         with:

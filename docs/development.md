@@ -61,12 +61,13 @@ Host→Rust 的恢复/undo 与响应丢失重启由 `recovery/kernel-durable-eng
 
 共享 fixture 只负责准备输入、故障注入和资源回收。若测试结果完全由 fixture 自己算出，改为观察真实 owner，
 或在已有 owner 回归足够时删除该重复证明；仍需保留 Host 对冲突、未知效果、权限及取消的独立处理。
-CI 的 cloud 部署 smoke 直接消费本轮生成并校验锁文件/布局的 archive，不另造一份无人消费的 staging 输出。
+CI 的 cloud 部署 smoke 通过 `--archive` 直接消费 VM guest 已生成并校验锁文件/布局的同一 archive；
+故障注入只修改临时副本，不再重复 staging/解析锁。省略参数的本地入口仍会准备自己的 archive。
 `bun run test:cloud-deploy` 在 Linux/Bash 下复用这一验收：先准备正式 build，再验证临时目录与 loopback 上的
 安装、重复投递、保密配置拒绝、部署锁、链接提交失败和启动失败回滚。退出时关闭该 Host 并清理本次临时目录。
-PR 中的 Docker workflow 验证实际镜像的构建、启动、身份和 native handshake；cloud helper 单元测试由主 CI
-的 `test:tooling` 统一拥有，不再为 PR 单独安装一次整个 workspace。能够发布候选镜像的非 PR 运行仍保留
-直接 helper 门禁，不能将另一个 workflow 的成功当作它的发布依赖。
+PR 与 main 的镜像验证由主 CI 按容器输入调用只读 reusable workflow；共享 builder 先验证 slim，
+基础镜像/公共容器配置改动再验证 toolbelt。不会向 GHCR 发布。镜像发行只接受版本匹配的 release tag，
+先验证精确 SHA，再构建、启动并提升同一 digest；main 推送不再更新 `latest`。见[部署说明](ops/cloud-deployment.md#container-images)。
 
 ## 命令入口
 
@@ -81,7 +82,8 @@ PR 中的 Docker workflow 验证实际镜像的构建、启动、身份和 nativ
 | 第二操作系统的文件/进程/外壳包（不含 native Host） | `bun run test:packages:platform` |
 | Rust 编译检查 / release binary | `bun run kernel:check` / `bun run kernel:build` |
 | Rust workspace 测试 | `bun run test:rust` |
-| 已核验 release kernel 的 Host 验收 | `bun run test:kernel` |
+| 已核验 release kernel 的 Host 验收 / 平台 owner 子集 | `bun run test:kernel` / `bun run test:kernel -- --platform` |
+| Host 文件、凭据、锁与进程 owner | `bun run --cwd packages/web test:platform` |
 | 工具、发布与平台配置行为 | `bun run test:tooling` |
 | 共享浏览器产物 / 完整桌面包 | `bun run build:frontend` / `bun run electron:build` |
 | 仅 Host 生产边界及 cloud layout helper | `bun run test:cloud` |
@@ -100,19 +102,43 @@ Node 测试包统一使用 `node --import tsx --test`，不额外启动 CLI 包�
 `test:tooling` 是 CI 中轻量工具测试的统一入口，包含 Electron 打包与更新清单 helper；`test:cloud` 是其子集，无需顺序重复运行。
 Electron 的运行时、更新策略与路径打开行为统一由包的 `test` 自动发现；Linux autostart 仅在 Linux 执行，
 真实桌面发现仍使用 `test:linux-desktop`。不为同一种 runner 维护额外配置和手写测试文件清单。
-Windows 用 `test:packages:platform` 重跑拥有文件、进程、worker 与原生外壳边界的包，另外运行 Host、
-打包 helper 与 native 验收。纯协议/解析、SDK conformance、客户端观察和 UI 投影由 Linux 验证一次；
-新增平台敏感 owner 时更新包级入口，不维护第二份逐文件清单。包测试和打包 helper 不依赖 native 构建成功。
-CI 的手动运行会对所选 ref 执行完整 code/Rust 检查，不依赖最近一次提交的差异；普通 push/PR
-仍按改动范围选择检查。Linux 的包测试和 tooling 独立于原生构建执行；Host 中实际启动原生目录观察器的
-Documents capture、文件观察和语言服务集成归入 `*.native.test.ts`，不混入 portable suite。Windows 仍重跑
-完整 Host portable suite，保留文件系统、Git、凭据与进程差异。各组按依赖安装/类型输出准备的真实结果启动，
-任一独立检查失败不会遮蔽其他组，也不把失败改成成功。原生构建成功后，即使 Host 验收失败，仍收集独立 Rust 测试结果，
-任何失败仍使 CI 失败。Linux release kernel 由一个 job 构建并导出，native 验收与 production build
-分别通过既有构建回执核验源码、选项和产物摘要后消费，不借用另一个测试组的成功。`Source quality` 保留为
-portable、kernel build 与 Linux native 结果的必需汇总检查；仅文档改动允许跳过两个 native job。
-拆分增加一次依赖安装和 Host 类型输出准备，避免两份独立 release kernel 构建；耗时以实际运行结果为准。
-Rust 测试编译与执行分开，执行超过十分钟会明确失败，保留日志供排查。
+### CI 责任与适用范围
+
+普通 push/PR 由 `scripts/ci-scope.mjs` 按少数产品/owner 边界选择检查，不维护逐测试文件名单。
+已知 renderer 改动运行一次 Linux types/lint/portable 行为与浏览器/外壳构建，不搭载整套 Rust、
+Windows native 或双镜像。Host/共享协议/扩展改动保留 Linux 真 native；Catalog/Storage/schema
+及 Rust 依赖改动继续在 PR 中阻断真实 Rust 升级、耐久、权限、取消和不重放契约。
+公共文件、进程、IPC、凭据和原生依赖会触发相关平台，不只匹配带 win/mac 名称的文件。
+根依赖/构建入口、未知路径或取不到 diff 都扩大到完整适用范围；重命名同时考虑旧、新 owner。
+
+Windows 用 `test:packages:platform`、Host `test:platform` 与 `test:kernel -- --platform`
+验证文件/锁/CAS/路径/PTY/进程树/真实退出等 owner。Linux 的完整 native suite 保留所有业务接线；
+Windows 的平台选择保留 live-shell destroy 等真实资源寿命回归，不按当前红绿挑测试。
+macOS 验证文件/凭据/进程 owner 和真实 Swift Computer helper；涉及 Rust/workspace 时另做
+FSKit 双架构编译、真实 storage 测试及 mount feature 编译。它不代证已安装系统组件的实际挂载或桌面授权。
+Android native/toolchain 变更执行无签名 debug build，release 使用同一个 Android setup action。
+
+手动 CI 和每日完整资格检查不依赖最近一次 diff，并恢复完整 Windows Host/native 组合；
+普通 push 不会取消这两种完整资格。发行调用固定候选 SHA，container caller 的实际镜像由它自己验证，
+不递归调用 container check。定期红项有其 owner，未解决的真实平台故障不能用绿色局部检查代证。
+真实设备、FSKit enablement、桌面权限与远端多机仍按[运行时验收](runtime-acceptance.md)单独说明。
+
+`Source quality` 始终创建，严格汇总本轮适用的 source、preflight、native、平台、production、
+container 和 Android 结果；失败、取消、缺失或意外 skip 都不能放行。cheap production-lock
+前置失败阻止 production/image 重复构建，同时不遮蔽独立源码与 native owner 的结果。
+Linux release kernel 一次构建，native 与 production 用现有回执核验输入/选项/摘要后消费；
+Cargo release/debug 缓存分开；没有对应编译工作的任务不恢复 Rust 缓存。测试任务保留已成功编译的
+缓存，Windows 在 native 验收前保存，避免真实断言/teardown 失败导致下一轮再次冷编译；缓存不是测试成功证据。
+Rust 编译与执行分开，执行仍有原十分钟预算。
+日常代码保留本地安全 patch 消费者回归；实时 Bun/Cargo advisory 查询由依赖改动、完整资格和发行承担。
+
+失败归属跟随检查而不是另建重试流程：preflight 由生产依赖/锁文件 owner 修复；portable 由失败的
+包/Host owner 修复；native 与平台 lane 由真实文件、进程或系统适配 owner 修复；production/container
+由产物、启动或部署 owner 修复。测试正文完成而 destroy 未完成仍是资源寿命失败，不能按“业务已通过”忽略。
+runner 磁盘/安装服务失败单独标记基础设施原因，先修复输入或缓存边界，不用整体延长 timeout 掩盖。
+被新提交替代的普通 run 标为 cancelled，不冒充绿色证据；每日完整资格的红项也保留具体 owner 和 SHA。
+发行必须通过自己的完整候选检查，不能借用另一个 SHA 的绿色结果或用局部 CI 覆盖已知平台故障。
+
 Linux driver 的私有 D-Bus 协议测试使用
 `dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`，
 需要系统 `python3-gi` 与 `dbus`，不连接真实桌面或请求屏幕授权。
@@ -124,7 +150,8 @@ Windows 的无桌面 input targeting 回归由 `packages/computer-driver/windows
 根 build、Web build 和 type-check 复用这些有序输出。包级 `build` 保持独立可用；多数共享包的 `build:raw`
 仅供已经准备依赖的有序聚合使用，但 Web 的 `build` 与 `build:raw` 都进入
 `build-products.mjs web --publish`，会自行准备或核验依赖及产物，不能将名字当作跳过依赖的保证。
-`type-check:prepared` 不重新构建。发布前仍使用相应目标的正式命令。
+`type-check:prepared` 不重新构建。根 `build` 不再把 UI 的 `tsc --noEmit` 当作产物构建重复执行；
+UI 类型由 source/type-check 门禁负责。发布前仍使用相应目标的正式命令。
 
 生产构建由 `scripts/build-products.mjs` 统一准备，产物与可丢弃的构建回执在 `artifacts/build`。
 复用同时核对源码、工具链/选项及现有产物的内容摘要，输出缺失、被改写或上次构建失败时重新生成。

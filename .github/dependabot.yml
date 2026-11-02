@@ -1,35 +1,51 @@
 version: 2
-# Check for releases every 24 hours (00:00 UTC), including weekends.
 # Proposing an update does not approve it:
 # keep major upgrades visible and review their migration notes before merging.
+# GitHub has no unlimited sentinel: a large integer avoids a practical PR quota.
+# Omitting open-pull-requests-limit restores 5; setting it to 0 disables version updates.
+# Keep the default automatic rebase and independent security updates.
 updates:
   - package-ecosystem: cargo
     directory: /kernel
     schedule:
       interval: cron
-      cronjob: '0 0 * * *'
+      # Include weekends; Dependabot's "daily" interval only runs on weekdays.
+      cronjob: '0 1 * * *'
+      timezone: UTC
     cooldown:
-      default-days: 0
+      default-days: 3
+      semver-patch-days: 1
+      semver-minor-days: 3
+      semver-major-days: 7
+    open-pull-requests-limit: 1000000
     groups:
       tree-sitter-wasm:
         patterns:
           - tree-sitter
           - wasmtime*
           - cranelift*
+      sqlite-runtime:
+        patterns:
+          - rusqlite
+          - libsqlite3-sys
       kernel-patches:
         patterns: ['*']
+        exclude-patterns:
+          - wasmparser
         update-types: [patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: cron
-      cronjob: '0 0 * * *'
+      interval: weekly
+      day: monday
+      time: '02:00'
+      timezone: UTC
     cooldown:
-      default-days: 0
+      # GitHub Actions supports default-days, not SemVer-specific cooldowns.
+      default-days: 3
+    open-pull-requests-limit: 1000000
     groups:
-      # The artifact actions must carry matching major versions, and the download action's v8 is the
-      # counterpart to the newer non-zipped upload behavior. Proposing one side alone is half a
-      # migration, so keep the pair in one pull request.
+      # Review the upload/download protocol together; compatible major numbers need not be equal.
       artifact-actions:
         patterns:
           - actions/upload-artifact
@@ -47,12 +63,15 @@ updates:
     schedule:
       interval: cron
       cronjob: '0 0 * * *'
+      timezone: UTC
     cooldown:
-      default-days: 0
-    open-pull-requests-limit: 10
+      default-days: 3
+      semver-patch-days: 1
+      semver-minor-days: 3
+      semver-major-days: 7
+    open-pull-requests-limit: 1000000
     groups:
-      # ESLint and its TypeScript plugins have to move together: a major on one is inconsistent with
-      # the others, so separate pull requests cannot pass individually.
+      # First match wins. Coupled families include majors, but grouping does not prove compatibility.
       eslint:
         patterns:
           - eslint
@@ -63,6 +82,25 @@ updates:
         patterns:
           - vitest
           - '@vitest/*'
+      vite:
+        patterns:
+          - vite
+          - '@vitejs/*'
+      react:
+        patterns:
+          - react
+          - react-dom
+          - '@types/react'
+          - '@types/react-dom'
+      codemirror:
+        patterns:
+          - '@codemirror/*'
+          - '@lezer/*'
+          - '@replit/codemirror-vim'
+      pdf-runtime:
+        patterns:
+          - pdfjs-dist
+          - '@napi-rs/canvas'
       electron-runtime:
         patterns:
           - electron
@@ -77,8 +115,39 @@ updates:
       storage-runtime:
         patterns:
           - triviumdb
-      # Keep routine upgrades in one review/build instead of one full CI run per package.
+      # Bun groups do not support dependency-type: development; list pure tools explicitly.
+      development-tools:
+        patterns:
+          - globals
+          - tsx
+          - concurrently
+          - cross-env
+          - nodemon
+        update-types: [minor, patch]
+      # Sensitive runtime, native and toolchain updates remain individual review units.
+      # Exclusion from this group does not ignore updates. In particular, the legacy Trivium
+      # alias is a manually pinned old-format reader, not another copy to move to the newest
+      # storage line. Bun currently skips npm: aliases; these patterns do not manage that pin.
       # Major upgrades remain separate unless they belong to a coupled group above.
       routine-libraries:
         patterns: ['*']
+        exclude-patterns:
+          - '@anthropic-ai/claude-agent-sdk'
+          - '@simplewebauthn/*'
+          - '@types/node'
+          - '@vscode/ripgrep'
+          - '@xmldom/xmldom'
+          - ghostty-web
+          - google-auth-library
+          - jose
+          - linkedom
+          - monaco-editor
+          - node-addon-api
+          - sharp
+          - sherpa-onnx-node
+          - tree-sitter-*
+          - triviumdb*
+          - typescript
+          - undici
+          - web-tree-sitter
         update-types: [minor, patch]

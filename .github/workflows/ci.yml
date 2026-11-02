@@ -5,60 +5,73 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Complete qualification is owned here, not silently deferred forever.
+    - cron: '17 3 * * *'
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      full:
+        default: true
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: varin-ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Ordinary pushes supersede old validation, not explicit release checks or
+  # the complete daily qualification that owns deferred platform combinations.
+  group: varin-ci-${{ (inputs.source_sha != '' || github.event_name == 'workflow_dispatch') && github.run_id || github.event_name == 'schedule' && 'qualification' || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ inputs.source_sha == '' && github.event_name != 'workflow_dispatch' }}
 
 jobs:
   changes:
-    name: Detect change surface
+    name: Identify affected owners
     runs-on: ubuntu-latest
-    # Share one job slot with Bot PR Docker checks and reports; main and human PRs stay parallel.
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-changes-{0}', github.run_id) }}
-      queue: max
     outputs:
       code: ${{ steps.surface.outputs.code }}
+      frontend: ${{ steps.surface.outputs.frontend }}
+      native: ${{ steps.surface.outputs.native }}
       rust: ${{ steps.surface.outputs.rust }}
+      windows: ${{ steps.surface.outputs.windows }}
+      macos: ${{ steps.surface.outputs.macos }}
+      production: ${{ steps.surface.outputs.production }}
+      container: ${{ steps.surface.outputs.container }}
+      toolbelt: ${{ steps.surface.outputs.toolbelt }}
+      android: ${{ steps.surface.outputs.android }}
+      security: ${{ steps.surface.outputs.security }}
+      full: ${{ steps.surface.outputs.full }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - id: surface
-        run: |
-          set -euo pipefail
-          # Manual runs validate the selected candidate, not just its last diff.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE="${{ github.event.before }}"
-          fi
-          if ! git cat-file -e "$BASE" 2>/dev/null; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          CHANGED=$(git diff --name-only "$BASE" HEAD)
-          CODE_CHANGED=$(grep -vE '(^docs/|^packages/docs/|\.mdx?$|^\.github/readme/|^LICENSE$)' <<< "$CHANGED" || true)
-          if [ -n "$CODE_CHANGED" ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          fi
-          if grep -qE '(^kernel/|^packages/workspace-driver/|^scripts/(build-kernel|generate-kernel-protocol|test-kernel-authority)\.mjs$|^package\.json$|^\.github/workflows/ci\.yml$)' <<< "$CODE_CHANGED"; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "rust=false" >> "$GITHUB_OUTPUT"
-          fi
+        env:
+          CI_FULL: ${{ inputs.full || false }}
+          CI_CALLED: ${{ inputs.source_sha != '' }}
+        run: node scripts/ci-scope.mjs
+
+  production-preflight:
+    name: Production lock preflight
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # No install/build: block consumers of an invalid production graph while
+      # unrelated source and native-owner checks still report their results.
+      - run: node --test scripts/cloud-runtime-layout.test.js
 
   portable-source:
     name: Portable source checks
@@ -69,6 +82,8 @@ jobs:
       queue: max
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
@@ -89,9 +104,14 @@ jobs:
         run: bun install --frozen-lockfile
       - run: bun run test:docs
       - run: bun run docs:validate
-      - if: needs.changes.outputs.code == 'true'
-        run: bun run audit:dependencies
       - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        name: Verify security repairs and applicable advisories
+        env:
+          LIVE_AUDIT: ${{ needs.changes.outputs.security }}
+        run: |
+          if [ "$LIVE_AUDIT" = true ]; then bun run audit:dependencies;
+          else node scripts/audit-dependencies.mjs --local-only; fi
+      - if: ${{ !cancelled() && needs.changes.outputs.security == 'true' && steps.dependencies.outcome == 'success' }}
         id: rust-audit-tool
         uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
@@ -120,17 +140,25 @@ jobs:
           dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
       - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         run: bun run --cwd packages/electron test:linux-desktop
+      - if: ${{ !cancelled() && needs.changes.outputs.frontend == 'true' && needs.changes.outputs.production != 'true' && steps.prepare.outcome == 'success' }}
+        name: Build browser and desktop shell consumers
+        run: |
+          bun run build:frontend
+          bun run --cwd packages/electron build
+          bun run --cwd packages/mobile build:assets
 
   native-build:
     name: Build shared Linux kernel
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.native == 'true' || needs.changes.outputs.production == 'true'
     concurrency:
       group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-kernel-{0}', github.run_id) }}
       queue: max
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -140,13 +168,13 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            kernel/target
+            kernel/target/release
           key: rust-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
           restore-keys: rust-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       - run: node scripts/build-products.mjs kernel --export artifacts/shared-kernel
       - uses: actions/upload-artifact@v7
         with:
-          name: varin-kernel-linux-x64
+          name: varin-ci-kernel-linux-x64
           path: artifacts/shared-kernel/
           include-hidden-files: true
           compression-level: 0
@@ -156,7 +184,7 @@ jobs:
     name: Linux native verification
     runs-on: ubuntu-latest
     needs: [changes, native-build]
-    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && needs.native-build.result == 'success' }}
+    if: ${{ !cancelled() && needs.changes.outputs.native == 'true' && needs.native-build.result == 'success' }}
     concurrency:
       group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-native-{0}', github.run_id) }}
       queue: max
@@ -166,6 +194,8 @@ jobs:
       VARIN_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
@@ -179,18 +209,19 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
+      - uses: actions/cache/restore@v6
+        id: rust-cache
+        if: needs.changes.outputs.rust == 'true'
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            kernel/target
+            kernel/target/debug
           key: rust-tests-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
           restore-keys: rust-tests-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
       - uses: actions/download-artifact@v8
         with:
-          name: varin-kernel-linux-x64
+          name: varin-ci-kernel-linux-x64
           path: .build-input/kernel
       - id: native-restore
         run: node scripts/build-products.mjs kernel
@@ -241,40 +272,28 @@ jobs:
         # the step if any binary fails, and the execution timeout bounds hangs.
         run: bun run test:rust --no-fail-fast
 
-  # Preserve the branch-protection contract: portable success alone is not Source quality.
-  source-quality:
-    name: Source quality
-    runs-on: ubuntu-latest
-    needs: [changes, portable-source, native-build, linux-native]
-    if: ${{ always() }}
-    steps:
-      - name: Require every applicable source check
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          CODE: ${{ needs.changes.outputs.code }}
-          PORTABLE: ${{ needs.portable-source.result }}
-          KERNEL: ${{ needs.native-build.result }}
-          NATIVE: ${{ needs.linux-native.result }}
-        run: |
-          set -euo pipefail
-          test "$CHANGES" = success
-          test "$PORTABLE" = success
-          case "$CODE" in
-            true) test "$KERNEL" = success; test "$NATIVE" = success ;;
-            false) test "$KERNEL" = skipped; test "$NATIVE" = skipped ;;
-            *) echo "Missing or invalid change surface" >&2; exit 1 ;;
-          esac
+      - if: ${{ !cancelled() && steps.rust-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        name: Preserve compiled Rust test inputs
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target/debug
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   windows-runtime:
     name: Windows runtime
     runs-on: windows-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.windows == 'true'
     concurrency:
       group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-{0}', github.run_id) }}
       queue: max
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
@@ -288,8 +307,9 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
+      - uses: actions/cache/restore@v6
+        id: rust-cache
+        if: needs.changes.outputs.native == 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -306,10 +326,18 @@ jobs:
         run: bun run test:packages:platform
       - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: bun run --cwd packages/electron test:packaging-tools
-      # Host filesystem, Git, credentials and process behavior also runs on Windows.
+      # Linux owns the complete platform-independent Host behavior matrix.
+      # Qualification retains the full second-OS sweep; normal PRs exercise
+      # actual file/lock/CAS/credential/process owners, not a copied core suite.
       - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run --cwd packages/web test
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        name: Verify Windows Host owners
+        shell: bash
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+        run: |
+          if [ "$FULL" = true ]; then bun run --cwd packages/web test;
+          else bun run --cwd packages/web test:platform; fi
+      - if: ${{ !cancelled() && needs.changes.outputs.native == 'true' && steps.prepare.outcome == 'success' }}
         id: native-build
         name: Build native kernel
         run: node scripts/test-kernel-authority.mjs --build-only
@@ -335,17 +363,42 @@ jobs:
         name: Test Windows input targeting without desktop access
         shell: pwsh
         run: ./packages/computer-driver/windows/test-targeting.ps1
+      # Successful compilation is reusable even if a later native assertion
+      # fails. Save before acceptance: a red teardown must not force another
+      # cold Rust build, and a cache never substitutes for those assertions.
+      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        name: Preserve compiled Windows Rust inputs
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
       - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
-        name: Verify native kernel authority
-        run: node scripts/test-kernel-authority.mjs
+        name: Verify Windows native resources and teardown
+        shell: bash
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+        run: |
+          if [ "$FULL" = true ]; then node scripts/test-kernel-authority.mjs;
+          else node scripts/test-kernel-authority.mjs --platform; fi
 
   macos-storage:
-    name: macOS storage
+    name: macOS platform
     runs-on: macos-latest
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.macos == 'true'
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-macos-{0}', github.run_id) }}
+      queue: max
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -356,39 +409,67 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
+      - uses: actions/cache/restore@v6
+        id: rust-cache
+        if: needs.changes.outputs.rust == 'true'
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            kernel/target
+            kernel/target/debug
           key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-${{ hashFiles('kernel/crates/**', 'kernel/vendor/**', 'kernel/Cargo.toml', 'scripts/build-kernel.mjs') }}
           restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('kernel/rust-toolchain.toml', 'kernel/Cargo.lock') }}-
-      - name: Compile and ad-hoc sign the bundled FSKit executor
+      - id: dependencies
+        run: bun install --frozen-lockfile
+      - id: prepare
+        run: bun run build:type-dependencies
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        name: Verify macOS file, credential and process owners
+        run: |
+          bun run test:packages:platform
+          bun run --cwd packages/web test:platform
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        name: Compile the native macOS Computer helper
+        run: node packages/computer-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-computer"
+      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
+        name: Compile and ad-hoc sign the bundled FSKit executor
         run: |
           XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
           if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
           node packages/workspace-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-workspace" "$(node -p process.arch)"
           node packages/workspace-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-workspace-intel" x64
-      - name: Verify workspace tree publication on macOS
+      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
+        name: Verify workspace tree publication on macOS
         working-directory: kernel
         run: cargo test -p varin-kernel --lib storage::versioned_workspaces_review --locked
-      - name: Verify native executor bytes, cache boundaries and admitted-inode import
+      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
+        name: Verify native executor bytes, cache boundaries and admitted-inode import
         working-directory: kernel
         run: cargo test -p varin-kernel --lib workspace_mount::review --locked
       # Compile callback contracts without installing a filesystem component or
       # changing the runner's system-extension policy. Actual mount tests remain
       # explicit qualification on a machine with an already-enabled component.
-      - name: Compile macOS workspace callbacks without system installation
+      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
+        id: rust-compile
+        name: Compile macOS workspace callbacks without system installation
         working-directory: kernel
         run: cargo check -p varin-kernel --all-targets --features workspace-mount --locked
+
+      - if: ${{ !cancelled() && steps.rust-compile.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        name: Preserve compiled macOS Rust inputs
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target/debug
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   production-build:
     name: Production build
     runs-on: ubuntu-latest
-    needs: [changes, native-build]
-    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && needs.native-build.result == 'success' }}
+    needs: [changes, native-build, production-preflight]
+    if: ${{ !cancelled() && needs.changes.outputs.production == 'true' && needs.native-build.result == 'success' && needs.production-preflight.result == 'success' }}
     concurrency:
       group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-build-{0}', github.run_id) }}
       queue: max
@@ -396,6 +477,8 @@ jobs:
       VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
@@ -411,7 +494,7 @@ jobs:
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
       - uses: actions/download-artifact@v8
         with:
-          name: varin-kernel-linux-x64
+          name: varin-ci-kernel-linux-x64
           path: .build-input/kernel
       - run: bun install --frozen-lockfile
       - run: bun run build
@@ -424,5 +507,57 @@ jobs:
       # This stages and verifies the production lock/layout once, then exercises
       # the same archive through install, health checks and rollback.
       - name: Smoke atomic cloud deployment and rollback
-        run: bun run test:cloud-deploy
+        run: bash scripts/smoke-cloud-deploy.sh --archive packages/computer-driver/linux/guest-bundle-x64/runtime.tgz
       - run: bun run test:packages:dist
+
+  container-check:
+    name: Container contract
+    needs: [changes, production-preflight]
+    if: needs.changes.outputs.container == 'true' && needs.production-preflight.result == 'success'
+    uses: ./.github/workflows/container-check.yml
+    with:
+      source_sha: ${{ inputs.source_sha || github.sha }}
+      toolbelt: ${{ needs.changes.outputs.toolbelt == 'true' }}
+
+  android-build:
+    name: Android unsigned build
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-android-{0}', github.run_id) }}
+      queue: max
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: ./.github/actions/android-setup
+      - run: bun install --frozen-lockfile
+      - run: bun run mobile:build:android:debug
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+  # Keep one always-present check, including affected platform/product results.
+  # A cancelled, failed, missing or unexpectedly skipped requirement is not green.
+  source-quality:
+    name: Source quality
+    runs-on: ubuntu-latest
+    needs: [changes, production-preflight, portable-source, native-build, linux-native, windows-runtime, macos-storage, production-build, container-check, android-build]
+    if: ${{ always() }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Require every applicable check
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/ci-scope.mjs gate
