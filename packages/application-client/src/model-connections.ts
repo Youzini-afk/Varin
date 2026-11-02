@@ -44,6 +44,8 @@ export interface ChannelModel {
   protocol?: string;
   requestModelId?: string;
   name: string;
+  /** Free-text model and channel guidance; explicit edits survive directory refreshes. */
+  description?: string;
   enabled: boolean;
   operations: ModelOperation[];
   input?: ('text' | 'image')[];
@@ -62,12 +64,12 @@ export interface ChannelModel {
   catalog?: { source?: 'service'; overrides: ModelCatalogField[]; match?: { requestModelId: string; protocol?: string } };
 }
 export type ModelCatalogField = Exclude<keyof ChannelModel, 'id' | 'enabled' | 'catalog'>;
-export const MODEL_CATALOG_FIELDS: readonly ModelCatalogField[] = ['name', 'protocol', 'requestModelId', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'pricing', 'billing', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat', 'image', 'decision', 'tokenizer'];
+export const MODEL_CATALOG_FIELDS: readonly ModelCatalogField[] = ['name', 'description', 'protocol', 'requestModelId', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'pricing', 'billing', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat', 'image', 'decision', 'tokenizer'];
 export interface ModelDirectoryStatus { revision: string; updatedAt?: number; refreshing: boolean; issue?: 'cache-unavailable' | 'refresh-failed' | 'partial-refresh' | 'cache-write-failed' }
 export interface ModelDirectorySnapshot { models: ChannelModel[]; status: ModelDirectoryStatus }
 /** Resolve metadata for these model identities without exposing channel credentials. */
 export type ModelMetadataRequest = Pick<ChannelModel, 'id'> & Partial<Pick<ChannelModel, 'requestModelId' | 'protocol' | 'operations'>>;
-const inferredModelFields = ['contextWindow', 'maxOutputTokens', 'pricing', 'input', 'reasoning', 'thinking', 'thinkingLevelMap', 'tokenizer', 'compat'] as const;
+const inferredModelFields = ['description', 'contextWindow', 'maxOutputTokens', 'pricing', 'input', 'reasoning', 'thinking', 'thinkingLevelMap', 'tokenizer', 'compat'] as const;
 
 export function applyModelDirectoryDefaults(model: ChannelModel, defaults?: ChannelModel): ChannelModel {
   const match = { requestModelId: model.requestModelId ?? model.id, ...(model.protocol ? { protocol: model.protocol } : {}) };

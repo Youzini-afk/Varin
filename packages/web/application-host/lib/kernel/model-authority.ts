@@ -40,7 +40,7 @@ export interface ModelExecutionAuthority extends ExistingModelAuthRuntime {
 interface ModelAuthority extends ModelExecutionAuthority {
   selectedModel(providerId: string, modelId: string): Promise<SelectedModel>;
   listModels(): Promise<SelectedModel[]>;
-  captureModel?(providerId: string, modelId: string, original?: ModelSessionConfiguration): Promise<{ model: SelectedModel; authority: ModelExecutionAuthority; release?: () => void }>;
+  captureModel?(providerId: string, modelId: string, original?: ModelSessionConfiguration, expectedFingerprint?: string): Promise<{ model: SelectedModel; authority: ModelExecutionAuthority; release?: () => void }>;
 }
 const families = new Set(['openai-responses', 'openai-completions', 'anthropic-messages', 'azure-openai-responses',
   'google-generative-ai', 'google-vertex', 'mistral-conversations', 'openai-codex-responses', 'bedrock-converse-stream', 'pi-messages']);
@@ -208,8 +208,8 @@ export function createModelAuthority(authority: ModelAuthority, options: { outpu
       return { ...(tokenizer ? { tokenizer } : {}), providerId: model.providerId, model: model.requestModelId ?? model.modelId, ...resolved,
         contextWindowTokens: model.contextWindow ?? null, maxOutputTokens: max };
     },
-    async resolveModel(selection: ThreadModel, inherited?: { configuration: ModelSessionConfiguration; credentialScope: CredentialScope }) {
-      const captured = authority.captureModel ? await authority.captureModel(selection.providerId, selection.modelId, inherited?.configuration)
+    async resolveModel(selection: ThreadModel, inherited?: { configuration: ModelSessionConfiguration; credentialScope: CredentialScope }, expectedFingerprint?: string) {
+      const captured = authority.captureModel ? await authority.captureModel(selection.providerId, selection.modelId, inherited?.configuration, expectedFingerprint)
         : { model: await authority.selectedModel(selection.providerId, selection.modelId), authority };
       let tokenizer: TokenizerLease | undefined;
       let credentialOwner: ExistingHostCredentialOwner | undefined;

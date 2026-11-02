@@ -277,7 +277,7 @@ impl ContentCollection {
                 manifest
                     .dependencies
                     .into_iter()
-                    .map(|content_object| Reference { content_object }),
+                    .map(|content_object| Reference { content_object, ..Default::default() }),
             );
             let mut length = 0u64;
             for hash in manifest.chunks {
@@ -355,6 +355,7 @@ impl ContentCollection {
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.reviewed_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='mcp_sampling_generation_v1' UNION ALL SELECT json_extract(body,'$.intent.configuration_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='mcp_sampling_generation_v1' UNION ALL SELECT json_extract(body,'$.result.value.snapshot_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='mcp_sampling_generation_v1' AND json_extract(body,'$.result.value.snapshot_ref') IS NOT NULL UNION ALL SELECT json_extract(body,'$.result.value.output_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='mcp_sampling_generation_v1' AND json_extract(body,'$.result.value.output_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.responseRef') FROM events e WHERE kind='inference.settled' AND json_extract(data,'$.responseRef') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM operations w WHERE w.run_id=json_extract(e.data,'$.runId') AND json_extract(w.body,'$.intent.kind')='memory_work_v1' AND json_extract(w.body,'$.result.value.released')=1)");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.recipeRef') FROM operations WHERE json_extract(body,'$.intent.kind')='memory_work_v1' AND coalesce(json_extract(body,'$.result.value.released'),0)=0");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.recipeRef') FROM operations WHERE json_extract(body,'$.intent.kind')='delegation_model_selection_v1'");
         let live_inference = "json_extract(i.body,'$.intent.kind')='inference_request_v1' AND NOT EXISTS(SELECT 1 FROM operations w WHERE w.run_id=i.run_id AND json_extract(w.body,'$.intent.kind')='memory_work_v1' AND json_extract(w.body,'$.result.value.released')=1)";
         roots.push_str(&format!(" UNION ALL SELECT json_extract(i.body,'$.intent.requestRef') FROM operations i WHERE {live_inference} UNION ALL SELECT json_extract(i.body,'$.result.value.responseRef') FROM operations i WHERE {live_inference} AND json_extract(i.body,'$.result.value.responseRef') IS NOT NULL"));
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.requestRef') FROM mcp_interactions UNION ALL SELECT json_extract(body,'$.responseRef') FROM mcp_interactions WHERE json_extract(body,'$.responseRef') IS NOT NULL");
@@ -449,6 +450,7 @@ impl ContentCollection {
             if let Some(output) = result.receipt.and_then(|r| r.output) {
                 references.push(Reference {
                     content_object: output.content_ref,
+                    ..Default::default()
                 });
             }
         }

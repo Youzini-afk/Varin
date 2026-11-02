@@ -2,6 +2,17 @@ import { settingsDict as englishSettingsDict } from './en.js';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.models.modelDescription": "紹介",
+  "settings.models.modelDescriptionHint": "モデルの特徴、使用経験、チャネルの好みをここに記録します。カタログ更新で編集内容が上書きされることはありません。",
+  "settings.delegationModelSelection.title": "委任モデルの選択",
+  "settings.delegationModelSelection.description": "新しいネイティブ委任の実行モデルと思考設定を、1 回の補助リクエストで選択します。明示的な選択と指定済みのプリセットは保持されます。初期状態では無効です。",
+  "settings.delegationModelSelection.enabled": "自動選択を有効にする",
+  "settings.delegationModelSelection.model": "選択用モデル",
+  "settings.delegationModelSelection.thinking": "選択モデルの思考設定",
+  "settings.delegationModelSelection.thinkingHint": "選択モデル自身にのみ適用され、実行モデルの思考設定とは独立しています。既定では選択したモデルの設定を使用します。",
+  "settings.delegationModelSelection.chooseModel": "有効にする前に、利用可能なチャットモデルまたは判断モデルを選択してください。",
+  "settings.delegationModelSelection.unavailable": "保存済みモデルは利用できないか無効です。別の設定を選択してください。自動で置き換えることはありません。",
+
   "settings.projects.workspace.extensionSettings": "Host の内蔵機能拡張を有効にする",
   "settings.projects.workspace.backend": "実行 Host のファイルシステム",
   "settings.projects.workspace.backendReady": "依存関係の準備完了",

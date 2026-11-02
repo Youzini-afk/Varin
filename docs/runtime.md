@@ -86,8 +86,9 @@ Thread、branch 的小型身份记录和删除回执保留，支持稳定身份�
 [Catalog](../kernel/crates/varin-runtime/src/catalog.rs) 通过独占 owner 锁管理
 `conversation.sqlite`，使用 SQLite WAL/FULL 短事务。初次安装所有内部域在同一事务完成。
 已有数据先只读检查已知格式和结构，再由原 writer 自动升级到当前结构。升级步骤位于
-[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，目前覆盖格式 78 → 79 → 80；可从 78 或 79 打开并转换到 80。
-前一步初始化外部 Agent 结构，后一步初始化空用量账本及开始记账时间，不按缺少结算时间的旧回执伪造历史账单。
+[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，目前覆盖格式 78 → 79 → 80 → 82；可从 78、79 或 80 打开并转换到 82，未验证的格式 81 明确拒绝。
+78 → 79 初始化外部 Agent 结构，79 → 80 初始化空用量账本及开始记账时间，不按缺少结算时间的旧回执伪造历史账单。
+80 → 82 为原历史引用增加稀疏文本范围索引，供[派发模型选择](collaboration.md#自由派发与模型选择)按原身份读取有限原文；不复制正文或媒体。
 转换、版本号和 `catalog.upgraded` 事件一起提交，随后才推进 epoch、恢复执行；正文对象和历史回执保持原样，
 已派发的效果不能因升级而重放。转换未提交时由 SQLite 回滚，下次打开重新升级，不另存完整数据库副本。
 未知、新于当前或结构损坏的内部格式明确失败并保留数据，不能像处理缓存一样重建用户历史。

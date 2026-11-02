@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.modelDescription": "Description",
+  "settings.models.modelDescriptionHint": "Describe this model, your experience and channel preferences in one place. Directory updates preserve your edits.",
+  "settings.delegationModelSelection.title": "Delegation model selection",
+  "settings.delegationModelSelection.description": "Use one auxiliary request to choose the execution model and thinking for new native delegations. Explicit choices and selected presets stay unchanged. Disabled by default.",
+  "settings.delegationModelSelection.enabled": "Enable automatic selection",
+  "settings.delegationModelSelection.model": "Selection model",
+  "settings.delegationModelSelection.thinking": "Selector thinking",
+  "settings.delegationModelSelection.thinkingHint": "Applies only to the selector itself, independently of the executor. Default uses the selected model configuration.",
+  "settings.delegationModelSelection.chooseModel": "Choose an enabled chat or decision model before enabling.",
+  "settings.delegationModelSelection.unavailable": "The saved model is unavailable or disabled. Choose another configuration; no replacement is selected automatically.",
+
   'bot.work.background': 'Reference conversation · {count} passages',
   'bot.follow.title': 'Ask the assistant to follow this work',
   'bot.follow.description': 'Keep the original conversation and workspace. The assistant can read this branch; choose whether it may send messages or retain its exchanges in long-term memory.',

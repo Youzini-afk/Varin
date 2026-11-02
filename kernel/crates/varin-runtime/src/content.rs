@@ -71,10 +71,23 @@ struct Manifest {
     chunks: Vec<String>,
     dependencies: Vec<String>,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Reference {
     content_object: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    history_text: Option<text::TextIndex>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    history_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dispatch: Option<DispatchReference>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DispatchReference {
+    request_id: String,
+    run_id: String,
+    child_dispatch: Option<Box<Reference>>,
 }
 
 #[derive(Clone)]
@@ -112,6 +125,8 @@ impl Drop for ContentPublication {
 }
 #[path = "content_collection.rs"]
 pub(crate) mod collection;
+#[path = "content_text.rs"]
+mod text;
 pub use collection::{ContentCollection, ContentCollectionAdmission};
 pub struct ContentChunk {
     pub content_ref: String,
@@ -335,6 +350,7 @@ impl ContentStore {
         let hash = self.put_bytes(&serde_json::to_vec(&manifest)?)?;
         Ok(serde_json::to_value(Reference {
             content_object: hash,
+            ..Reference::default()
         })?)
     }
     pub(crate) fn reference(value: &Value) -> Result<Value> {
@@ -351,6 +367,7 @@ impl ContentStore {
         };
         Ok(serde_json::to_value(Reference {
             content_object: identity(&serde_json::to_vec(&manifest)?),
+            ..Reference::default()
         })?)
     }
     pub(crate) fn load(&self, reference: &Value) -> Result<Value> {
@@ -407,7 +424,8 @@ impl ContentStore {
         content: &Value,
         provider: &Option<crate::types::ProviderOriginal>,
     ) -> Result<Value> {
-        self.save(&serde_json::json!({"format":"data", "content": content, "provider": provider}))
+        let payload = serde_json::json!({"format":"data", "content": content, "provider": provider});
+        self.index_history_text(self.save(&payload)?, &payload)
     }
     pub(crate) fn save_conversation(
         &self,
@@ -420,10 +438,8 @@ impl ContentStore {
             dependencies.push(stored.content_ref.content_object.clone());
             Ok::<_, RuntimeError>(stored)
         })?;
-        self.save_with_dependencies(
-            &serde_json::json!({"format":"conversation", "content":stored,"provider":provider}),
-            dependencies,
-        )
+        let payload = serde_json::json!({"format":"conversation", "content":stored,"provider":provider});
+        self.index_history_text(self.save_with_dependencies(&payload, dependencies)?, &payload)
     }
     pub(crate) fn save_user_history(&self, input_id: &str, input: &Value) -> Result<Value> {
         self.save_stored_user_history(&self.store_user_input(input_id, input)?)

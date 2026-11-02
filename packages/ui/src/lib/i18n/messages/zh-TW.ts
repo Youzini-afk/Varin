@@ -4289,6 +4289,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.children.preparation.verify": "核對檔案快照",
   "chat.children.preparation.publish": "準備工作區",
   "chat.children.preparation.context": "準備上下文",
+  "chat.children.preparation.modelSelection": "正在選擇執行模型",
   "chat.children.preparation.admission": "啟動任務",
   "chat.children.trigger.dispatch": "分派任务",
   "chat.children.trigger.user": "用户接续",

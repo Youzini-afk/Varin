@@ -8,6 +8,7 @@ import { requestClassifier, classifierWireUsage, classifierRawUsage, classifierW
 import type { InferenceProviderBinding as HostInferenceProviderBinding } from '../../models/service.js';
 import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
 import { DecisionInferenceFailure } from './decision-failure.js';
+import { KernelClientError } from '../../kernel/kernel-error.js';
 import type { InferenceBinding, InferenceReceipt } from '../../kernel/protocol.generated.js';
 import { acquireTokenCounter } from '../../models/token-count.js';
 import { classifierContextLimits, classifierInputTexts, classifierQuestionInputTexts } from '../../models/classifier.js';
@@ -110,6 +111,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
           const combined = call.signal;
           return consume({ decide: async (input, guard, materialFence) => {
             const batchReceipts: InferenceReceipt[] = [];
+            let preparationHold: KernelClientError | undefined;
             const failedRoutes = new Map<string, number>();
             const batchId = randomUUID();
             const base: HarnessFastDecisionResult = { batchId, providerId: binding.providerId, modelId: binding.modelId,
@@ -163,7 +165,13 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                     return { ...(actual ? { usage: { measurement: 'actual' as const, inputTokens: actual.inputTokens ?? null, outputTokens: actual.outputTokens ?? null } } : {}),
                       rawUsage: route.requestKind === 'model_compute' ? classifierRawUsage(provider.api, raw) : null,
                       valid: route.requestKind !== 'model_compute' || classifierWireResponseValid(provider.api, binding.modelId, input.questions, raw) };
-                  } });
+                  } }).catch(error => {
+                    // The classifier reports semantic failure after draining its transports.
+                    // Retain the exact native pre-admission hold object across that boundary.
+                    if (purpose === 'delegation-model-selection' && error instanceof KernelClientError
+                      && (error.code === 'activation-held' || error.code === 'bot-suspended')) preparationHold ??= error;
+                    throw error;
+                  });
                 // A successful retry clears only its own route. Parallel preparation
                 // responses must not erase another endpoint's failed HTTP status.
                 if (response.ok) failedRoutes.delete(destination);
@@ -180,13 +188,21 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                 headers: Object.fromEntries(headers),
                 model: provider.requestModelId ?? binding.modelId,
                 state: { goal: input.goal, materials: input.materials, ...(input.context === undefined ? {} : { context: input.context }) },
-                questions: input.questions, signal: combined, fetchImpl });
+                questions: input.questions, signal: combined, fetchImpl,
+                ...(purpose === 'delegation-model-selection' ? { adaptiveReadout: false } : {}) });
               if (combined.aborted) throw new DecisionInferenceFailure('Decision interrupted after retaining its original provider receipt.', observed(), call.cancelled);
               const { usage: _usage, ...answers } = result;
               const projected = { ...observed(), ...answers };
               await assertDelivery(projected);
               return projected;
             } catch (error) {
+              if (preparationHold && !receipts().length) {
+                // Preparation transports do not contribute model-compute receipts. The
+                // original session must also prove none was admitted before this hold.
+                let fresh = false;
+                try { await call.assertFresh(); fresh = true; } catch { /* Original evidence owns any accepted request. */ }
+                if (fresh) throw preparationHold;
+              }
               if (error instanceof DecisionInferenceFailure) {
                 if (!error.result && receipts().length) throw new DecisionInferenceFailure(error.message, observed(), error.cancelled || call.cancelled);
                 throw error;

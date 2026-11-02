@@ -55,7 +55,7 @@ export function directoryModels(data: Record<string, unknown>, type: ChannelType
     const outputLimit = positive(ownLimit.output) ? ownLimit.output : canonicalLimit.output;
     const tokenizer = discoveredTokenizer(model);
     const pricing = directoryPricing(model.cost);
-    const parsed: DiscoveredModel = { ...(pricing ? { pricing } : {}), ...(tokenizer ? { tokenizer } : {}), id, name: typeof model.name === 'string' ? model.name : id, protocol, operations,
+    const parsed: DiscoveredModel = { ...(typeof model.description === 'string' ? { description: model.description } : {}), ...(pricing ? { pricing } : {}), ...(tokenizer ? { tokenizer } : {}), id, name: typeof model.name === 'string' ? model.name : id, protocol, operations,
       ...(Array.isArray(modalities.input) ? { input: modalities.input.includes('image') ? ['text', 'image'] : ['text'] } : {}),
       ...(positive(context) ? { contextWindow: context } : {}),
       ...(positive(outputLimit) ? { maxOutputTokens: outputLimit } : {}),

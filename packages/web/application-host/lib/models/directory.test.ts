@@ -126,3 +126,29 @@ test('discovered IDs inherit refreshed metadata while the account cache retains 
   const cache = JSON.parse(await readFile(join(models.directory, 'model-directory.json'), 'utf8'));
   expect(cache.connections.custom.models[0].contextWindow).toBeUndefined();
 });
+
+
+test('service descriptions remain per-channel, follow refreshes, and preserve explicit edits and clearing', async () => {
+  const models = await fixture();
+  const base: ModelChannel = { id: 'first', name: 'First account', type: 'openai-compatible', enabled: true,
+    baseUrl: 'https://first.example/v1', authentication: { kind: 'none' }, parameters: {}, models: [] };
+  for (const id of ['first', 'second', 'cleared']) {
+    const channel = { ...base, id, name: id, baseUrl: `https://${id}.example/v1` };
+    await models.save(channel, (await models.read()).revision);
+    const result = await models.discover(id, async () => Response.json({ data: [{ id: 'same-model', description: 'Service introduction' }] }));
+    expect(result.models[0]?.description).toBe('Service introduction');
+    const model = { ...result.models[0]!, enabled: true, operations: ['chat' as const],
+      ...(id === 'second' ? { description: 'My experience on this account', catalog: { source: 'service' as const, overrides: ['description' as const] } }
+        : id === 'cleared' ? { description: '', catalog: { source: 'service' as const, overrides: ['description' as const] } } : {}) };
+    await models.save({ ...channel, models: [model] }, (await models.read()).revision);
+    await models.discover(id, async () => Response.json({ data: [{ id: 'same-model', description: 'Updated service introduction' }] }));
+  }
+  const snapshot = await models.read();
+  expect(snapshot.channels.map(channel => [channel.id, channel.models[0]?.description])).toEqual([
+    ['first', 'Updated service introduction'], ['second', 'My experience on this account'], ['cleared', ''],
+  ]);
+  const restarted = new ModelsService(models.directory, { projectTrusted: () => false, fetch: unexpected });
+  expect((await restarted.read()).channels.map(channel => channel.models[0]?.description)).toEqual(snapshot.channels.map(channel => channel.models[0]?.description));
+  const invalid = { ...base, models: [{ id: 'bad', name: 'Bad', enabled: true, operations: ['chat' as const], description: 7 }] };
+  await expect(models.save(invalid as unknown as ModelChannel, snapshot.revision)).rejects.toMatchObject({ code: 'channel-model-invalid' });
+});

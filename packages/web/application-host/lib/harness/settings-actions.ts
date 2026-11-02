@@ -1,3 +1,4 @@
+import { readDelegationModelCatalog } from '../models/delegation-catalog.js';
 /**
  * Domain-action adapters for `owner: "action"` settings catalog entries
  * (Stage S / D-309).
@@ -254,7 +255,7 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           return authorizationResult(owner.authorizations.read(id));
         }
         case 'disconnect': await owner.removeCredential(needString(args, 'reference')); return { status: 'applied' };
-        case 'models': return { status: 'applied', data: await owner.listModels() };
+        case 'models': return { status: 'applied', data: (await readDelegationModelCatalog(owner, { enabled: false })).candidates };
         case 'discover-models': {
           if (!deps.modelFetch) return unavailable('Model discovery egress is unavailable');
           return { status: 'applied', data: await owner.discover(needString(args, 'id'), deps.modelFetch, ctx.caller.signal) };

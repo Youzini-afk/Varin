@@ -51,7 +51,7 @@ Web / Electron / mobile renderer
 | 语义向量与索引 | 独立派生存储进程 |
 | 外壳、布局和视图状态 | UI kernel 与选中扩展 |
 
-Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 80；Storage 的 format 为 22，
+Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 82；Storage 的 format 为 22，
 SQLite `user_version` 为 16。版本以各自源码为准；Catalog 的升级链不能套用于 Storage。
 Storage 当前只接受自己的现行格式及 schema fingerprint，不提供旧格式转换，见[打开入口](../kernel/crates/varin-kernel/src/storage/core.rs)。
 
@@ -91,8 +91,9 @@ Thread/worktree 保留，供核对和后续处理。
 ## 数据与交付
 
 内部结构可以继续演进，由原存储 owner 在打开时自动升级已支持的旧版本，业务读取与执行随后使用当前结构。
-Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80，也可从 79 升至 80。
+Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80 → 82，也可从 79 或 80 升至 82；未验证的格式 81 不接受。
 78 → 79 初始化外部 Agent 记录，79 → 80 初始化用量账本及开始记账时间；旧回执缺少可靠结算时间与归属，不补造账本。
+80 → 82 为原历史引用建立稀疏文本范围索引，支持派发选择读取；原正文对象、消息身份和已派发绑定不改变。
 转换、最终版本号与升级事件在同一事务中提交，然后才推进 epoch 和执行恢复；正文对象、会话身份、队列和原回执保留，不复制整库。
 事务提交前失败或进程中断时回滚未完成转换，下次打开重试；失败信息保留源版本、目标版本和原始原因。
 未知、更新或结构损坏的格式仍只读拒绝并保留资产。工作区、Git、历史原生数据与外部配置仍由原 owner 管理。

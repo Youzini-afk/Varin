@@ -49,7 +49,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 80;
+pub(crate) const FORMAT: i64 = 82;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -280,10 +280,10 @@ impl Catalog {
         db.pragma_update(None, "foreign_keys", true)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "FULL")?;
-        if version != 0 && version != FORMAT {
-            upgrades::apply(&mut db, version)?;
-        }
         let content = crate::content::ContentStore::open(root.as_ref().join("content"))?;
+        if version != 0 && version != FORMAT {
+            upgrades::apply(&mut db, version, &content)?;
+        }
         let epoch = initialize_metadata(&mut db, if version == 0 { 0 } else { FORMAT }, &content)?;
         let mut this = Self {
             db,
@@ -1562,6 +1562,11 @@ impl Catalog {
             if model_text::recover(&tx, &mut op, self.epoch)? { continue; }
             if knowledge_inference::recover(&tx, &mut op, self.epoch)? { continue; }
             if memory_work::recover(&tx, &mut op, self.epoch)? { continue; }
+            // This is pending child preparation, not a dispatched executor. Its original
+            // inference children recover their own paid/unknown effects below. A new Host
+            // may adopt only the frozen preparation through its typed owner after those
+            // receipts settle; generic read-only interruption would destroy that recovery.
+            if delegation_model::is_selection(&op) { continue; }
             if inference::recover(&tx, &mut op)? {
                 continue;
             }
@@ -1774,6 +1779,8 @@ pub mod service_composition;
 #[path = "catalog_launch_content.rs"]
 pub mod launch_content;
 
+#[path = "catalog_delegation_model.rs"]
+pub mod delegation_model;
 #[path = "catalog_delegated.rs"]
 pub mod delegated;
 
@@ -1922,6 +1929,10 @@ impl Drop for Catalog {
 #[cfg(test)]
 #[path = "catalog_content_collection_tests.rs"]
 mod content_collection_tests;
+
+#[cfg(test)]
+#[path = "catalog_delegation_model_tests.rs"]
+mod delegation_model_tests;
 
 pub(super) fn request_cancel_run_in(tx: &Transaction<'_>, id: &str) -> Result<Run> {
     let mut run: Run = record(tx, "runs", id)?;
