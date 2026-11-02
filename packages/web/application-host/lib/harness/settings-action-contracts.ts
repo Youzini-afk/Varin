@@ -33,7 +33,7 @@ const channelSchema = object({ id: string, name: string, type: string, enabled: 
   parameters: { type: 'object', description: 'Use this channel type’s parametersSchema from providers read; provider-specific parameters are validated by the model owner.' },
   connection: object({ headers: { type: 'object', additionalProperties: { type: 'string' } }, paths: { type: 'object', additionalProperties: { type: 'string' } },
     proxy: { oneOf: [object({ mode: { const: 'direct' } }, ['mode']), object({ mode: { const: 'proxy' }, url: string }, ['mode', 'url'])] } }),
-  models: { type: 'array', items: { ...object({ id: string, name: string, enabled: { type: 'boolean' },
+  models: { type: 'array', items: { ...object({ id: string, name: string, description: { type: 'string' }, enabled: { type: 'boolean' },
     operations: { type: 'array', minItems: 1, items: { enum: ['chat', 'embedding', 'rerank', 'decision', 'image-generation', 'image-editing'] } },
     protocol: string, requestModelId: string, input: { type: 'array', items: { enum: ['text', 'image'] } },
     contextWindow: { ...integer, minimum: 1 }, maxOutputTokens: { ...integer, minimum: 1 }, reasoning: { type: 'boolean' },
@@ -59,7 +59,7 @@ export function getSettingsActionContracts(entry: SettingsCatalogEntry): Record<
     case 'runtime:providers': contracts = {
       list: read(), status: read(), read: read(), models: read(),
       save: write(object({ channel: { ...channelSchema, description: 'Complete channel for creation/replacement. Prefer patch for an existing channel so hidden secrets survive.' }, ...revision }, ['channel', 'expectedRevision']), 'next-request'),
-      patch: write(MODEL_CHANNEL_PATCH_SCHEMA, 'next-request', 'Patch only declared channel fields. Omitted secrets and unrelated fields are retained by the owner.'),
+      patch: write(MODEL_CHANNEL_PATCH_SCHEMA, 'next-request', 'Patch only declared channel fields. Set models.<literal model ID>.description to edit an introduction (empty string explicitly clears it); reset that path to restore directory defaults. Omitted secrets, other models and unrelated fields are retained by the owner.'),
       remove: write(object(identified, ['id', 'expectedRevision']), 'next-request'),
       connect: write(auth, 'next-request', 'Starts an owned authorization flow; inspect the returned operation.', 'credentials'),
       login: write(auth, 'next-request', 'Starts an owned authorization flow; inspect the returned operation.', 'credentials'),

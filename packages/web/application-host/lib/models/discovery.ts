@@ -14,7 +14,7 @@ export function modelList(response: unknown): DiscoveredModel[] {
   return response.data.map(item => {
     if (!object(item) || typeof item.id !== 'string' || !item.id) throw new Error('Model discovery returned an invalid model');
     const tokenizer = discoveredTokenizer(item);
-    return { ...(tokenizer ? { tokenizer } : {}), id: item.id, name: typeof item.display_name === 'string' ? item.display_name : typeof item.name === 'string' ? item.name : item.id };
+    return { ...(tokenizer ? { tokenizer } : {}), ...(typeof item.description === 'string' ? { description: item.description } : {}), id: item.id, name: typeof item.display_name === 'string' ? item.display_name : typeof item.name === 'string' ? item.name : item.id };
   });
 }
 export function openRouterModels(response: unknown): DiscoveredModel[] {
@@ -49,7 +49,7 @@ export function geminiModels(response: unknown): DiscoveredModel[] {
     if (!object(item) || typeof item.name !== 'string') throw new Error('Model discovery returned an invalid model');
     const methods = Array.isArray(item.supportedGenerationMethods) ? item.supportedGenerationMethods : [];
     if (methods.length && !methods.includes('generateContent')) return [];
-    return [{ id: item.name.replace(/^models\//, ''), name: typeof item.displayName === 'string' ? item.displayName : item.name,
+    return [{ ...(typeof item.description === 'string' ? { description: item.description } : {}), id: item.name.replace(/^models\//, ''), name: typeof item.displayName === 'string' ? item.displayName : item.name,
       ...capacity(item.inputTokenLimit, item.outputTokenLimit), operations: ['chat'] as ModelOperation[],
       ...(typeof item.thinking === 'boolean' ? { reasoning: item.thinking } : {}) }];
   });

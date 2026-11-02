@@ -49,6 +49,12 @@ const schemas: Record<string, Schema> = {
   'harness.permissions.rules': { type: 'array', items: object({ tool: nonempty, match: object({ param: nonempty, pattern: { type: 'string', maxLength: 512 } }, ['param', 'pattern']), decision: { enum: ['allow', 'deny', 'ask'] }, authority: nonempty }, ['tool', 'decision']) },
   'harness.images': object({ generation: { anyOf: [model, { type: 'null' }] }, editing: { anyOf: [model, { type: 'null' }] } }),
   'harness.agents': record(customAgent),
+  'harness.delegationModelSelection': {
+    ...object({ enabled: boolean, model: object({ providerId: { ...nonempty, pattern: '\\S' }, modelId: { ...nonempty, pattern: '\\S' } }, ['providerId', 'modelId']),
+      thinkingLevel: { enum: THINKING_LEVELS } }),
+    if: { properties: { enabled: { const: true } }, required: ['enabled'] },
+    then: { required: ['model'] },
+  },
   'harness.nextStep': object({ enabled: boolean }),
   'harness.embedding': object({ protocol: { enum: ['local', 'openai-compatible'] }, providerId: nonempty, modelId: nonempty, dimensions: positive, maxTokens: positive }, ['protocol', 'providerId', 'modelId']),
   'harness.rerank': object({ protocol: { const: 'http-rerank' }, providerId: nonempty, modelId: nonempty, endpoint: nonempty, maxDocumentTokens: positive }, ['protocol', 'providerId', 'modelId']),

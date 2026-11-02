@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.modelDescription": "Опис",
+  "settings.models.modelDescriptionHint": "Опишіть модель, свій досвід і вподобання щодо каналу в одному місці. Оновлення каталогу зберігають ваші зміни.",
+  "settings.delegationModelSelection.title": "Вибір моделі для делегування",
+  "settings.delegationModelSelection.description": "Один допоміжний запит вибирає модель виконання та її міркування для нових нативних делегувань. Явні вибори й вибрані шаблони зберігаються. Типово вимкнено.",
+  "settings.delegationModelSelection.enabled": "Увімкнути автоматичний вибір",
+  "settings.delegationModelSelection.model": "Модель вибору",
+  "settings.delegationModelSelection.thinking": "Міркування моделі вибору",
+  "settings.delegationModelSelection.thinkingHint": "Стосується лише моделі вибору, незалежно від виконавця. Типово використовується конфігурація вибраної моделі.",
+  "settings.delegationModelSelection.chooseModel": "Перед увімкненням виберіть активну модель чату або ухвалення рішень.",
+  "settings.delegationModelSelection.unavailable": "Збережена модель недоступна або вимкнена. Виберіть іншу конфігурацію; автоматична заміна не виконується.",
+
   "settings.projects.workspace.extensionSettings": "Увімкнути вбудоване розширення на хості",
   "settings.projects.workspace.backend": "Файлова система Host",
   "settings.projects.workspace.backendReady": "Залежності готові",

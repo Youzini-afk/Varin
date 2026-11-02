@@ -571,10 +571,8 @@ impl crate::content::ContentStore {
         &self,
         input: &Value,
     ) -> Result<Value, crate::catalog::RuntimeError> {
-        self.save_with_dependencies(
-            &serde_json::json!({"format":"user_input","content":input,"provider":null}),
-            user_input_dependencies(input)?,
-        )
+        let payload = serde_json::json!({"format":"user_input","content":input,"provider":null});
+        self.index_history_text(self.save_with_dependencies(&payload, user_input_dependencies(input)?)?, &payload)
     }
 }
 

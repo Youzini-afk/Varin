@@ -29,6 +29,23 @@ test('channel patches preserve omitted secrets, support explicit removal and do 
   expect(applyModelChannelPatch(noConnection, { reset: ['connection.headers.absent'] })).toEqual(noConnection);
 });
 
+test('description paths address literal model IDs, preserve overrides and reject overlapping or absent targets', () => {
+  const current = channel();
+  current.models = ['org/model.v1:custom', 'org/model.v1:custom.description.extra', '__proto__'].map(id => ({
+    id, name: id, enabled: true, operations: ['chat'], description: 'Inherited', catalog: { source: 'service', overrides: ['name'] },
+  }));
+  const set = Object.fromEntries(current.models.map(model => [`models.${model.id}.description`, '']));
+  const next = applyModelChannelPatch(current, { set });
+  expect(next.models.map(model => [model.description, model.catalog])).toEqual(current.models.map(() => ['', { source: 'service', overrides: ['name', 'description'] }]));
+  expect(current.models.every(model => model.description === 'Inherited')).toBe(true);
+  const restored = applyModelChannelPatch(next, { reset: Object.keys(set) });
+  expect(restored.models.every(model => model.description === undefined && !model.catalog?.overrides.includes('description'))).toBe(true);
+  expect(() => applyModelChannelPatch(current, { set: { models: [], ...set } })).toThrow('overlap');
+  expect(() => applyModelChannelPatch(current, { set, reset: [Object.keys(set)[0]!] })).toThrow('overlap');
+  expect(() => applyModelChannelPatch(current, { set: { 'models.absent.description': 'No' } })).toThrow('missing');
+  expect(() => applyModelChannelPatch(current, { set: { 'models.__proto__.parameters': {} } })).toThrow('declared channel');
+});
+
 test('real model owner patches the stored channel with CAS and returns the committed revision without rereading', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'varin-settings-patch-')); fixtures.push(directory);
   const owner = new ModelsService(directory, { projectTrusted: () => false, fetch: async () => { throw new Error('Unexpected test network'); } });

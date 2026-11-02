@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "example.collaboration-policy",
   "displayName": "Fixed-source Collaboration Policy",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "engines": { "varin": "*" },
   "entrypoints": {
     "host": { "file": "host.cjs", "mode": "brokered", "activation": ["service-request"] }

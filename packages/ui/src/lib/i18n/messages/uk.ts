@@ -3953,6 +3953,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.children.preparation.verify": "Перевірка файлів",
   "chat.children.preparation.publish": "Підготовка робочого простору",
   "chat.children.preparation.context": "Підготовка контексту",
+  "chat.children.preparation.modelSelection": "Вибір моделі виконання",
   "chat.children.preparation.admission": "Запуск завдання",
   "chat.children.trigger.dispatch": "Assigned task",
   "chat.children.trigger.user": "User continuation",

@@ -3,16 +3,21 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
+import { useSettingsSearchTarget } from '@/lib/settings/search-target';
+import { DelegationModelSelectionPage } from '../harness/DelegationModelSelectionSettings';
 import { useI18n } from '@/lib/i18n';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { agentProfileLabels } from './agent-profile-presentation';
 import { AgentProfileEditor } from './AgentProfileEditor';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { useAgentProfiles } from './useAgentProfiles';
-import { cancelAgentProfileCreation, removeAgentProfile, saveAgentProfile } from './agent-profiles-store';
+import { cancelAgentProfileCreation, removeAgentProfile, saveAgentProfile, selectDelegationModelSelection } from './agent-profiles-store';
 
 export function AgentsPage() {
   const profiles = useAgentProfiles();
+  const target = useSettingsSearchTarget();
+  React.useEffect(() => { if (target === 'harness.delegationModelSelection') selectDelegationModelSelection(); }, [target, profiles.host]);
+  if (profiles.state.view === 'delegation-model-selection') return <DelegationModelSelectionPage key={profiles.host} />;
   return <AgentProfilesDetails key={profiles.host} {...profiles} />;
 }
 function AgentProfilesDetails({ api, host, state, snapshot, refresh }: ReturnType<typeof useAgentProfiles>) {

@@ -9,6 +9,10 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildRelation {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub model_selection_required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_selection_head: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherited_context: Option<crate::context_retention::RetainedContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -247,8 +251,10 @@ pub(super) fn write_child_task(db: &Connection, child: &ChildTask) -> Result<()>
     execution.resources_released = child.resources_released;
     write_execution(db, &execution)
 }
-pub(super) fn insert_initial(db: &Connection, child: &ChildTask) -> Result<()> {
+pub(super) fn insert_initial(db: &Connection, child: &ChildTask, model_selection_required: bool) -> Result<()> {
     let relation = ChildRelation {
+        model_selection_required,
+        model_selection_head: if model_selection_required { db.query_row("SELECT head FROM branches WHERE id=?1", [&child.parent_branch_id], |r| r.get(0))? } else { None },
         inherited_context: child.inherited_context.clone(),
         avatar: child.avatar.clone(),
         operation_id: child.operation_id.clone(),
@@ -434,7 +440,7 @@ pub(super) fn hydrate_source(
 }
 impl Catalog {
     pub fn child_preparation_progress(&mut self, id: &str, progress: ChildPreparationProgress) -> Result<bool> {
-        if !matches!(progress.phase.as_str(), "source" | "source_wait" | "inventory" | "capture" | "verify" | "publish" | "context" | "admission")
+        if !matches!(progress.phase.as_str(), "source" | "source_wait" | "inventory" | "capture" | "verify" | "publish" | "context" | "admission" | "model_selection")
             || progress.total.is_some() && progress.completed.is_none()
             || progress.completed.zip(progress.total).is_some_and(|(done,total)| done > total) {
             return Err(RuntimeError::Invalid("invalid child preparation progress".into()));
@@ -1225,6 +1231,16 @@ impl Catalog {
         });
         execution.revision += 1;
         let tx = self.db.transaction()?;
+        if let Some(mut selection) = optional_record::<Operation>(&tx, "operations", &format!("delegation-model:{id}"))? {
+            if selection.phase != OperationPhase::Terminal {
+                selection = super::request_cancel_operation_in(&tx, &selection.id)?;
+                selection.phase = OperationPhase::Terminal;
+                selection.outcome = Some(Outcome::Failed);
+                selection.revision += 1;
+                put(&tx, "operations", &selection.id, &selection)?;
+                event(&tx, &selection.id, selection.revision, "child.model_selection_failed", json!({"reason":reason}))?;
+            }
+        }
         write_execution(&tx, &execution)?;
         event(
             &tx,

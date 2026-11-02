@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.modelDescription": "Opis",
+  "settings.models.modelDescriptionHint": "Opisz model, swoje doświadczenia i preferencje dotyczące kanału w jednym miejscu. Aktualizacje katalogu zachowują Twoje zmiany.",
+  "settings.delegationModelSelection.title": "Wybór modelu do delegowania",
+  "settings.delegationModelSelection.description": "Jedno żądanie pomocnicze wybiera model wykonawczy i jego rozumowanie dla nowych delegacji natywnych. Jawne wybory i wybrane ustawienia wstępne pozostają bez zmian. Domyślnie wyłączone.",
+  "settings.delegationModelSelection.enabled": "Włącz automatyczny wybór",
+  "settings.delegationModelSelection.model": "Model wybierający",
+  "settings.delegationModelSelection.thinking": "Rozumowanie modelu wybierającego",
+  "settings.delegationModelSelection.thinkingHint": "Dotyczy tylko modelu wybierającego, niezależnie od wykonawcy. Domyślnie używana jest konfiguracja wybranego modelu.",
+  "settings.delegationModelSelection.chooseModel": "Przed włączeniem wybierz aktywny model czatu lub decyzyjny.",
+  "settings.delegationModelSelection.unavailable": "Zapisany model jest niedostępny lub wyłączony. Wybierz inną konfigurację; model nie jest zastępowany automatycznie.",
+
   "settings.projects.workspace.extensionSettings": "Włącz wbudowane rozszerzenie na hoście",
   "settings.projects.workspace.backend": "System plików hosta",
   "settings.projects.workspace.backendReady": "Zależności dostępne",
