@@ -36,7 +36,12 @@ async function fixture(endpoint = 'http://127.0.0.1:9/responses') {
   cleanups.push(async () => { for (const client of clients.toReversed()) await client.close(); await fs.rm(root, { recursive: true, force: true }); });
   const makeRuntime = () => new AgentRuntimeClient(kernel, undefined, undefined, undefined, async source => {
     if (source.workspaceId !== workspaceId || source.executionWorkspaceId !== workspaceId
-      || source.liveRoot.hostId !== hostId || source.liveRoot.canonicalRoot !== await fs.realpath(workspace)) throw new Error('Fixture source changed');
+      || source.liveRoot.hostId !== hostId || source.liveRoot.rootId !== registered.rootId
+      || source.liveRoot.canonicalRoot !== registered.canonicalRoot) throw new Error('Fixture source changed');
+    // Rust's Windows canonical path can retain the extended-length prefix that
+    // Node realpath removes. Preserve the registered identity, then compare both
+    // physical paths through the same filesystem API rather than their spelling.
+    expect(await fs.realpath(source.liveRoot.canonicalRoot)).toBe(await fs.realpath(workspace));
   });
   let runtime = makeRuntime(); await kernel.start(); await runtime.createThread('thread', 'branch');
   const grant = await kernel.issueGrant({ grantId: 'observation-root', owningWorkspace: workspaceId, executionWorkspace: workspaceId,
