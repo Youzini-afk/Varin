@@ -327,7 +327,7 @@ test("workbench conformance covers async mount abort, profile switch, and resour
   assert.equal(mount.disposed, true);
   assert.equal(mount.aborted, true);
   const profiles = runWorkbenchProfileConformance();
-  assert.equal(profiles.beforeSwitch, "default");
+  assert.equal(profiles.beforeSwitch, "varin.bot");
   assert.equal(profiles.afterSwitch, "studio");
   assert.equal(profiles.desiredEnabledUnchanged, true);
   assert.equal(profiles.failedCandidateKeepsPrevious, true);

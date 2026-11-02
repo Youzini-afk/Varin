@@ -11,6 +11,8 @@ import {
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
   VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES,
+  VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+  VARIN_WORKBENCH_BOT_PROFILE_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_SURFACES,
@@ -30,6 +32,7 @@ import {
 
 test("workbench profile resolution layers distribution, user, and workspace without dropping missing references", () => {
   const document = defaultVarinWorkbenchProfileDocument();
+  document.profileSelections.users.default = VARIN_WORKBENCH_DEFAULT_PROFILE_ID;
   document.layouts = [
     {
       profileId: "default",
@@ -200,7 +203,7 @@ test("workbench profile resolution inspects shell availability without mutating 
   const original = structuredClone(document);
   const builtin = resolveVarinWorkbenchProfile(document, [], context);
   assert.equal(builtin.status, "builtin");
-  assert.equal(builtin.profileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.equal(builtin.profileId, VARIN_WORKBENCH_BOT_PROFILE_ID);
 
   const candidate = resolveVarinWorkbenchLayoutForProfile(document, context, "studio");
   assert.equal(candidate.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell], "dev.example.shell");
@@ -249,9 +252,9 @@ test("workbench profile resolution inspects shell availability without mutating 
   assert.equal(resolveVarinWorkbenchProfile(document, [], context).status, "missing");
 });
 
-test("default Agent profile seeds the official shell on web, desktop, and mobile", () => {
+test("Varin is the initial shell on every surface and Agent remains available", () => {
   const document = defaultVarinWorkbenchProfileDocument();
-  assert.equal(document.activeProfileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.equal(document.activeProfileId, VARIN_WORKBENCH_BOT_PROFILE_ID);
   assert.equal(document.profiles[0]?.label, VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL);
   assert.equal(document.revision, 0);
   const agentLayouts = document.layouts.filter((layer) => layer.profileId === VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
@@ -263,15 +266,32 @@ test("default Agent profile seeds the official shell on web, desktop, and mobile
     const resolved = resolveVarinWorkbenchLayout(document, { surface, userId: "default" });
     assert.equal(
       resolved.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell],
-      VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+      VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID,
     );
+    const agent = resolveVarinWorkbenchLayoutForProfile(document, { surface, userId: "default" }, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+    assert.equal(agent.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell], VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
   }
   assert.equal(migrateVarinWorkbenchProfileDocument(document), false);
 });
 
+test("renames the built-in Bot label while preserving existing mode choices and custom labels", () => {
+  const document = defaultVarinWorkbenchProfileDocument();
+  document.activeProfileId = VARIN_WORKBENCH_DEFAULT_PROFILE_ID;
+  document.profileSelections.users.default = VARIN_WORKBENCH_IDE_PROFILE_ID;
+  const bot = document.profiles.find(profile => profile.id === VARIN_WORKBENCH_BOT_PROFILE_ID)!;
+  bot.label = "Varin bot";
+  assert.equal(migrateVarinWorkbenchProfileDocument(document), true);
+  assert.equal(bot.label, "Varin");
+  assert.equal(document.activeProfileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.equal(resolveVarinWorkbenchLayout(document, { surface: "desktop", userId: "default" }).profileId, VARIN_WORKBENCH_IDE_PROFILE_ID);
+  bot.label = "My assistant";
+  assert.equal(migrateVarinWorkbenchProfileDocument(document), false);
+  assert.equal(bot.label, "My assistant");
+});
+
 test("distribution includes an optional IDE profile without making it active", () => {
   const document = defaultVarinWorkbenchProfileDocument();
-  assert.equal(document.activeProfileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.equal(document.activeProfileId, VARIN_WORKBENCH_BOT_PROFILE_ID);
   assert.ok(document.profiles.some((profile) => (
     profile.id === VARIN_WORKBENCH_IDE_PROFILE_ID && profile.label === VARIN_WORKBENCH_IDE_PROFILE_LABEL
   )));
@@ -305,6 +325,7 @@ test("distribution includes the Research profile and shell on every supported su
 
 test("migrates missing IDE profiles without changing the active Agent selection", () => {
   const document = defaultVarinWorkbenchProfileDocument();
+  document.activeProfileId = VARIN_WORKBENCH_DEFAULT_PROFILE_ID;
   document.profiles = document.profiles.filter((profile) => profile.id !== VARIN_WORKBENCH_IDE_PROFILE_ID);
   document.layouts = document.layouts.filter((layer) => layer.profileId !== VARIN_WORKBENCH_IDE_PROFILE_ID);
   assert.equal(migrateVarinWorkbenchProfileDocument(document), true);
@@ -343,6 +364,7 @@ test("migrates the legacy Default profile onto Agent Workspace without clobberin
 
 test("migrates missing Agent shells without replacing a chosen IDE shell", () => {
   const document = defaultVarinWorkbenchProfileDocument();
+  document.activeProfileId = VARIN_WORKBENCH_DEFAULT_PROFILE_ID;
   document.layouts = [{
     profileId: VARIN_WORKBENCH_IDE_PROFILE_ID,
     references: [],
@@ -365,6 +387,7 @@ test("migrates missing Agent shells without replacing a chosen IDE shell", () =>
 
 test("resolves the official Agent Workspace shell without mutating enablement", () => {
   const document = defaultVarinWorkbenchProfileDocument();
+  document.profileSelections.users.default = VARIN_WORKBENCH_DEFAULT_PROFILE_ID;
   const extensions = [catalogEntry({
     enabled: false,
     contributionId: VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,

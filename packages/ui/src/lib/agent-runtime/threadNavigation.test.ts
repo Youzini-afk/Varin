@@ -23,6 +23,7 @@ let unbind: (() => void) | undefined;
 const get = vi.fn();
 beforeEach(async () => {
   state.host = 1; state.document = defaultVarinWorkbenchProfileDocument();
+  state.document.activeProfileId = 'default';
   state.select.mockReset().mockImplementation(async (profile: string) => { state.document!.activeProfileId = profile; });
   state.directory.mockReset(); get.mockReset().mockResolvedValue(bot);
   useBotNavigation.setState({ botId: null, entry: null, model: null, archived: undefined });

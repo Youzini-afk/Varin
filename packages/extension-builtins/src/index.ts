@@ -304,7 +304,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       kind: "single",
       order: 2,
       slug: "harness-bots",
-      title: "Varin bot",
+      title: "Varin",
       titleKey: "settings.page.harness.page.bots.title",
     }),
   ],
@@ -449,7 +449,7 @@ export const VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION = definition({
 
 export const VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION = definition({
   id: VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID,
-  displayName: "Varin bot",
+  displayName: "Varin",
   supports: VARIN_BUILTIN_BOT_WORKSPACE_SURFACES,
   contributions: [{
     contractVersion: 1,

@@ -82,7 +82,7 @@ const hostSnapshot = (
   workbench: {
     authoritative: options?.authoritative ?? true,
     diagnostics: [],
-    document: defaultVarinWorkbenchProfileDocument(),
+    document: { ...defaultVarinWorkbenchProfileDocument(), activeProfileId: 'default' },
     hostId,
     storageState: 'missing',
   },

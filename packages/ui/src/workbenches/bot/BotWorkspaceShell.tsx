@@ -56,9 +56,8 @@ const momentOf = (event: BotStageEvent, nameOf: (key: string) => string): BotTea
   return null;
 };
 
-const openBotSettings = () => {
-  useUIStore.getState().setSettingsPage('harness-bots');
-  useUIStore.getState().setSettingsDialogOpen(true);
+const openSettings = (event: React.MouseEvent<HTMLButtonElement>) => {
+  useUIStore.getState().setSettingsDialogOpen(true, event.currentTarget);
 };
 
 function useMatchMedia(query: string): boolean {
@@ -505,7 +504,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const isSidebarOpen = useUIStore(state => state.isSidebarOpen);
   const sidebarAttention = isSidebarOpen ? null : otherSessions.some(session => session.waiting) ? 'warn' : otherSessions.some(session => session.unread) ? 'info' : null;
   const branchIndex = currentSession ? currentSession.branches.findIndex(branch => branch.branchId === selectedEntry?.branchId) : -1;
-  const navigationTitle = currentSession ? sessionTitleOf(currentSession) : selected?.name ?? 'Varin bot';
+  const navigationTitle = currentSession ? sessionTitleOf(currentSession) : selected?.name ?? 'Varin';
   const navigationSubtitle = currentSession && selected
     ? branchIndex >= 0 ? t('bot.session.branchOf', { bot: selected.name, session: sessionTitleOf(currentSession) }) : selected.name
     : undefined;
@@ -527,7 +526,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     figures={figures} busy={busy || actionBusy !== null} showArchived={showArchived} isMobile={isMobile} sessionTitle={sessionTitleOf}
     onSelectBot={selectBot} onSelectSession={openSession} onNewSession={() => { void newSession(); }}
     onBotAction={(bot, action) => { void mutateBot(bot, action); }} onCreateBot={openCreateDialog}
-    onToggleArchived={() => setShowArchived(value => !value)} onRefresh={refresh} onOpenSettings={openBotSettings} />;
+    onToggleArchived={() => setShowArchived(value => !value)} onRefresh={refresh} onOpenSettings={openSettings} />;
 
   const conversation = (active: boolean) => <div className="flex h-full min-h-0 flex-col"
     onPointerDown={() => { if (floating && narrowPanelOpen) setNarrowPanelOpen(false); }}>
@@ -547,7 +546,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       : <p role="alert">Conversation service unavailable</p>}</div> : (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
         <BotFigure state={selected ? figure : 'idle'} size={64} />
-        <h1 className="typography-title">{selected?.name ?? 'Varin bot'}</h1>
+        <h1 className="typography-title">{selected?.name ?? 'Varin'}</h1>
         {busy || (!bots && !error) ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
         {bots && !bots.some(bot => bot.archived === showArchived) ? <>
           <p className="typography-body text-muted-foreground">{t(showArchived ? 'settings.bots.archivedEmpty' : 'settings.bots.empty')}</p>

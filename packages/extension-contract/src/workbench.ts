@@ -21,7 +21,7 @@ export const VARIN_WORKBENCH_IDE_PROFILE_LABEL = "IDE";
 export const VARIN_WORKBENCH_RESEARCH_PROFILE_ID = "varin.research";
 export const VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL = "Research";
 export const VARIN_WORKBENCH_BOT_PROFILE_ID = "varin.bot";
-export const VARIN_WORKBENCH_BOT_PROFILE_LABEL = "Varin bot";
+export const VARIN_WORKBENCH_BOT_PROFILE_LABEL = "Varin";
 export const VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID = "varin.builtin.bot-workspace";
 export const VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID = "varin.builtin.bot-workspace.shell";
 export const VARIN_BUILTIN_BOT_WORKSPACE_SURFACES: VarinApplicationSurface[] = ["web", "desktop", "mobile"];
@@ -627,7 +627,7 @@ const ensureDistributionShellLayouts = (
 };
 
 export const defaultVarinWorkbenchProfileDocument = (): VarinWorkbenchProfileDocument => ({
-  activeProfileId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
+  activeProfileId: VARIN_WORKBENCH_BOT_PROFILE_ID,
   layouts: [
     ...VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES.map((surface) => (
       distributionShellLayer(
@@ -685,6 +685,11 @@ export const migrateVarinWorkbenchProfileDocument = (
   }
   if (!document.profiles.some((candidate) => candidate.id === VARIN_WORKBENCH_BOT_PROFILE_ID)) {
     document.profiles.push({ id: VARIN_WORKBENCH_BOT_PROFILE_ID, label: VARIN_WORKBENCH_BOT_PROFILE_LABEL });
+    changed = true;
+  }
+  const botProfile = document.profiles.find((candidate) => candidate.id === VARIN_WORKBENCH_BOT_PROFILE_ID);
+  if (botProfile?.label === "Varin bot") {
+    botProfile.label = VARIN_WORKBENCH_BOT_PROFILE_LABEL;
     changed = true;
   }
   changed = ensureDistributionShellLayouts(

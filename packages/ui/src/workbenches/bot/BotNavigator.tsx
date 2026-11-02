@@ -43,7 +43,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   onCreateBot(): void;
   onToggleArchived(): void;
   onRefresh(): void;
-  onOpenSettings(): void;
+  onOpenSettings(event: React.MouseEvent<HTMLButtonElement>): void;
 }) {
   const { t } = useI18n();
   const list = React.useRef<HTMLDivElement>(null);
@@ -143,7 +143,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
         <Icon name={showArchived ? 'robot' : 'archive'} className="size-4 shrink-0" />{t(showArchived ? 'settings.bots.activeList' : 'settings.bots.archivedList')}
       </button>
       <button type="button" onClick={onOpenSettings} className={rowClass}>
-        <Icon name="settings-3" className="size-4 shrink-0" />{t('bot.sidebar.settings')}
+        <Icon name="settings-3" className="size-4 shrink-0" />{t('sessions.sidebar.footer.actions.settings')}
       </button>
     </div>
   </nav>;

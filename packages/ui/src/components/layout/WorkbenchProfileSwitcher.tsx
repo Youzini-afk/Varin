@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { VarinLogo } from '@/components/ui/VarinLogo';
 import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,6 +21,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import {
   VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
   VARIN_WORKBENCH_BOT_PROFILE_ID,
+  VARIN_WORKBENCH_BOT_PROFILE_LABEL,
   VARIN_WORKBENCH_IDE_PROFILE_ID,
   VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
   resolveVarinWorkbenchLayout,
@@ -67,9 +69,9 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
     ?? agentProfiles[0];
   if (!agentProfile) return null;
   const modes = ([
+    { id: 'bot', label: VARIN_WORKBENCH_BOT_PROFILE_LABEL, icon: 'workbench-bot', profileId: VARIN_WORKBENCH_BOT_PROFILE_ID },
     { id: 'workbench', label: t('settings.varin.extensions.workbench.profile.agent'), icon: 'workbench-agent', profileId: agentProfile.id },
     { id: 'ide', label: t('settings.varin.extensions.workbench.profile.ide'), icon: 'code-box', profileId: VARIN_WORKBENCH_IDE_PROFILE_ID },
-    { id: 'bot', label: 'Varin bot', icon: 'workbench-bot', profileId: VARIN_WORKBENCH_BOT_PROFILE_ID },
   ] satisfies { id: string; label: string; icon: IconName; profileId: string }[])
     .filter((mode) => workbench.document.profiles.some((profile) => profile.id === mode.profileId)
       && (mode.id !== 'ide' || varinSurfaceRuntime.surface !== 'mobile'));
@@ -102,7 +104,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
             data-varin-workbench-switcher=""
             className={cn('h-7 shrink-0 gap-1.5 rounded-md bg-interactive-hover px-2 typography-meta font-medium', className)}
           >
-            <Icon name={selectedMode.icon} className="size-4 shrink-0" />
+            {selectedMode.id === 'bot' ? <VarinLogo decorative width={16} height={16} className="shrink-0" /> : <Icon name={selectedMode.icon} className="size-4 shrink-0" />}
             <span>{selectedMode.label}</span>
             <Icon name="arrow-down-s" className="size-3.5 shrink-0 opacity-60" />
           </Button>
@@ -114,7 +116,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
           }}>
             {modes.map((mode) => (
               <DropdownMenuRadioItem key={mode.id} value={mode.id} disabled={busy} className="gap-2.5">
-                <Icon name={mode.icon} className="size-4 shrink-0 text-muted-foreground" />
+                {mode.id === 'bot' ? <VarinLogo decorative width={16} height={16} className="shrink-0 text-muted-foreground" /> : <Icon name={mode.icon} className="size-4 shrink-0 text-muted-foreground" />}
                 {mode.label}
               </DropdownMenuRadioItem>
             ))}

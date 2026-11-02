@@ -144,12 +144,20 @@ describe('Bot workbench', () => {
     state.open.mockReset();
     state.openWork.mockReset().mockResolvedValue(undefined);
     useThreadStore.setState({ hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
-    useUIStore.setState({ isSettingsDialogOpen: false });
+    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general' });
   });
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
+  });
+
+  it('opens ordinary settings from the sidebar and preserves the last settings page', async () => {
+    useUIStore.setState({ settingsPage: 'appearance' });
+    await render();
+    await click('sessions.sidebar.footer.actions.settings');
+    expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
+    expect(useUIStore.getState().settingsPage).toBe('appearance');
   });
 
   it('keeps a staged candidate inert and leaves the ordinary conversation hidden', async () => {
