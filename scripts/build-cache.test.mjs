@@ -61,3 +61,47 @@ test('browser/native artifact transfer verifies the same source/options and all 
   await fs.writeFile(path.join(artifact, 'payload/app.js'), 'different code');
   await assert.rejects(new BuildCache(consumer).restore('app', artifact, spec), /content mismatch/);
 });
+
+async function kernelFixture(t, arch) {
+  const root = await fixture(t);
+  for (const file of ['scripts/build-products.mjs', 'scripts/build-cache.mjs', 'scripts/build-kernel.mjs',
+    'scripts/kernel-binary-identity.cjs', 'packages/workspace-driver/macos/build-helper.mjs',
+    'kernel/rust-toolchain.toml', 'kernel/protocol/schema.json', 'package.json']) {
+    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await fs.copyFile(new URL(`../${file}`, import.meta.url), path.join(root, file));
+  }
+  // Header-only fixture: exercise real target validation/staging without a Rust compilation.
+  const bytes = Buffer.alloc(64);
+  bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1]);
+  bytes.writeUInt16LE(arch === 'arm64' ? 183 : 62, 18);
+  const prebuilt = path.join(root, 'prebuilt-kernel');
+  await fs.writeFile(prebuilt, bytes);
+  return { root, bytes, env: { ...process.env, VARIN_TARGET_PLATFORM: 'linux', VARIN_TARGET_ARCH: 'aarch64',
+    VARIN_TARGET_TRIPLE: '', VARIN_KERNEL_ARTIFACT: '', VARIN_RELEASE_SOURCE_SHA: '', VARIN_KERNEL_PREBUILT: prebuilt } };
+}
+
+test('kernel product stages and exports the requested Docker target rather than the build host', async t => {
+  const { root, bytes, env } = await kernelFixture(t, 'arm64');
+  execFileSync(process.execPath, ['scripts/build-products.mjs', 'kernel', '--export', 'exported-kernel'],
+    { cwd: root, env, encoding: 'utf8', windowsHide: true });
+  const manifest = JSON.parse(await fs.readFile(path.join(root, 'exported-kernel/payload/manifest.json'), 'utf8'));
+  assert.equal(manifest.platform, 'linux');
+  assert.equal(manifest.arch, 'arm64');
+  assert.equal(manifest.targetTriple, 'aarch64-unknown-linux-gnu');
+  assert.deepEqual(await fs.readFile(path.join(root, 'artifacts/build/kernel-linux-arm64/varin-kernel')), bytes);
+  const receipt = JSON.parse(await fs.readFile(path.join(root, 'exported-kernel/build-artifact.json'), 'utf8'));
+  assert.equal(receipt.values.arch, 'arm64');
+  assert.equal(receipt.values.platform, 'linux');
+});
+
+test('explicit kernel product targets override environment aliases and still reject wrong-architecture binaries', async t => {
+  const { root, env } = await kernelFixture(t, 'x64');
+  execFileSync(process.execPath, ['--input-type=module', '-e',
+    'import { prepareKernel } from "./scripts/build-products.mjs"; await prepareKernel("linux", "amd64");'],
+  { cwd: root, env, encoding: 'utf8', windowsHide: true });
+  const manifest = JSON.parse(await fs.readFile(path.join(root, 'artifacts/build/kernel-linux-x64/manifest.json'), 'utf8'));
+  assert.equal(manifest.arch, 'x64');
+  assert.throws(() => execFileSync(process.execPath, ['scripts/build-products.mjs', 'kernel'],
+    { cwd: root, env, encoding: 'utf8', windowsHide: true, stdio: 'pipe' }),
+  error => /binary is linux\/x64, expected linux\/arm64/.test(error.stderr));
+});
