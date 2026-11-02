@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createIsolatedTerminalSessionApi } from "./isolated-session-api.test-helper.js";
 import type { TerminalCommandRecord } from "./session-api.js";
 import { createPlatformEnvironmentRuntime } from '../platform/environment-runtime.js';
-import { hasNativeProcessKernel } from '../process/native-process.test-helper.js';
+import { createNativeProcessTestHarness, hasNativeProcessKernel, type NativeProcessDiagnostic } from '../process/native-process.test-helper.js';
 
 const gitBashCandidates = [
   process.env.VARIN_TERMINAL_SHELL,
@@ -65,7 +65,75 @@ describe("live shell integration", () => {
     const cwd = await fs.mkdtemp(path.join(tmpdir(), 'varin-live-shell-'));
     const started = performance.now();
     const phase = (name: string) => console.info(`[live shell] ${name}: ${Math.round(performance.now() - started)}ms`);
+    // Avoid diagnostic console I/O between the observed command and native stop.
+    const nativePhases: Array<{ name: string; atMs: number }> = [];
+    const nativePhase = (name: string) => { nativePhases.push({ name, atMs: Math.round(performance.now() - started) }); };
+    const nativeStages: NativeProcessDiagnostic[] = [];
+    let reportPendingStages = false;
+    const native = createNativeProcessTestHarness(undefined, { onProcessDiagnostic: event => {
+      nativeStages.push(event);
+      // Once the original teardown is already stalled, retain visibility of
+      // later progress without console I/O in the command-to-stop race window.
+      if (reportPendingStages) console.info('[live shell] pending native stage', event);
+    } });
+    let lastControl: Record<string, unknown> | undefined;
+    let lastData: Record<string, unknown> | undefined;
+    let nativeRoot: string | undefined;
     const runtime = createIsolatedTerminalSessionApi({
+      loadPtyProvider: async () => {
+        const { service, client, root } = await native.get();
+        nativeRoot = root;
+        const subscribe = client.processSubscribe.bind(client);
+        client.processSubscribe = (params, grant, observer) => {
+          const pending = subscribe(params, grant, (event, acknowledge) => {
+            const result = event.result;
+            if (result) {
+              const metadata = {
+                atMs: Math.round(performance.now() - started), sequence: event.sequence,
+                processId: result.process?.processId,
+                status: result.process?.status, writerActive: result.process?.writerActive,
+                exitCode: result.process?.exitCode, outputComplete: result.outputComplete,
+                outputError: result.outputError, nextCursor: result.nextCursor, endCursor: result.endCursor,
+              };
+              if (event.stream === 'control') lastControl = metadata;
+              else lastData = metadata;
+            }
+            observer(event, acknowledge);
+          });
+          void pending.then(subscription => {
+            const close = subscription.close;
+            subscription.close = () => {
+              nativePhase('subscription close requested');
+              const closing = close();
+              void closing.then(() => nativePhase('subscription close acknowledged'), () => nativePhase('subscription close rejected'));
+              return closing;
+            };
+          }, () => nativePhase('subscription rejected'));
+          return pending;
+        };
+        const release = client.processRelease.bind(client);
+        client.processRelease = (...args) => {
+          nativePhase('native release requested');
+          const pending = release(...args);
+          void pending.then(() => nativePhase('native release acknowledged'), () => nativePhase('native release rejected'));
+          return pending;
+        };
+        const provider = service.ptyProvider;
+        return { ...provider, async spawn(...args: Parameters<typeof provider.spawn>) {
+          const process = await provider.spawn(...args);
+          process.onExit(() => nativePhase('native exit delivered'));
+          void process.completion.then(() => nativePhase('native completion'), () => nativePhase('native completion rejected'));
+          const terminate = process.terminate;
+          process.terminate = (force = false) => {
+            nativePhase('native stop requested');
+            const pending = terminate(force);
+            // This acknowledges the kernel's stop enqueue, not the OS exit.
+            void pending.then(() => nativePhase('native stop acknowledged'), () => nativePhase('native stop rejected'));
+            return pending;
+          };
+          return process;
+        } };
+      },
       isExecutable: (value: string) => existsSync(value),
       searchPathFor: (name: string) => {
         if (name.toLowerCase().includes("bash") && shell.family === "bash") return shell.path;
@@ -73,7 +141,7 @@ describe("live shell integration", () => {
         return existsSync(name) ? name : null;
       },
       buildAugmentedPath: () => process.env.PATH ?? "",
-    });
+    }, native);
     const seen: TerminalCommandRecord[] = [];
     const subscription = runtime.subscribeCommands((event) => { seen.push(event); });
     try {
@@ -97,7 +165,38 @@ describe("live shell integration", () => {
         exitCode: 0,
       })), { timeout: 15_000 });
       phase('command observed');
-      await handle.destroy();
+      // Observe only frames already delivered and durable receipt metadata. A
+      // process.list/read call could reconcile state and mask a missed wakeup.
+      // This timer neither settles destroy nor releases its original process.
+      const diagnostic = setTimeout(() => {
+        reportPendingStages = true;
+        console.info('[live shell] pending destroy', { nativePhases, nativeStages, lastControl, lastData });
+        if (!nativeRoot) return;
+        const directory = path.join(nativeRoot, 'storage', 'process-receipts');
+        void fs.readdir(directory).then(async names => {
+          console.info('[live shell] native receipt files', {
+            treeReceipts: names.filter(name => name.endsWith('.json')).length,
+            outputMarkers: names.filter(name => name.endsWith('.output.complete')).length,
+          });
+          for (const name of names.filter(name => name.endsWith('.json') || name.endsWith('.output') || name.endsWith('.output.complete'))) {
+            const file = path.join(directory, name);
+            if (name.endsWith('.output')) {
+              console.info('[live shell] native output file', { bytes: (await fs.stat(file)).size });
+            } else {
+              const value = JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, unknown>;
+              console.info('[live shell] native receipt metadata', {
+                kind: name.endsWith('.json') ? 'tree' : 'output', status: value.status,
+                processId: value.processId,
+                treeConfirmed: value.treeConfirmed, stopApplied: value.stopApplied,
+                exitCode: value.exitCode, complete: value.complete, endCursor: value.endCursor,
+              });
+            }
+          }
+        }).catch(() => phase('native receipt metadata unavailable'));
+      }, 5_000);
+      try { await handle.destroy(); }
+      finally { clearTimeout(diagnostic); reportPendingStages = false; }
+      console.info('[live shell] native teardown', { nativePhases, nativeStages });
       phase('destroyed');
     } finally {
       subscription.dispose();

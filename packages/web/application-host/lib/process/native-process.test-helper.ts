@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createDocumentAuthority, type DocumentAuthority } from "../documents/authority.js";
 import { createKernelClient } from "../kernel/kernel-client.js";
@@ -13,8 +14,48 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 export const hasNativeProcessKernel = fs.existsSync(kernelPath);
 
+export interface NativeProcessDiagnostic {
+  processId: string;
+  guardianPid: number;
+  elapsedMs: number;
+  stage: string;
+}
+
+function observeProcessDiagnostics(child: ChildProcess, observe: (event: NativeProcessDiagnostic) => void): void {
+  const prefix = '[native process stage] ';
+  // This is only a diagnostic carry limit, not a process-output/protocol limit.
+  // Never retain an unbounded unrelated stderr line while waiting for a newline.
+  const maxLine = 8 * 1024;
+  let pending = '';
+  let discarding = false;
+  child.stderr?.on('data', (chunk: Buffer | string) => {
+    const parts = chunk.toString().split('\n');
+    for (let index = 0; index < parts.length; index += 1) {
+      if (!discarding) pending += parts[index];
+      if (pending.length > maxLine) { pending = ''; discarding = true; }
+      if (index === parts.length - 1) break;
+      if (!discarding && pending.startsWith(prefix)) {
+        try {
+          const value = JSON.parse(pending.slice(prefix.length)) as Partial<NativeProcessDiagnostic> | null;
+          if (value && typeof value.processId === 'string' && value.processId.length > 0
+            && Number.isSafeInteger(value.guardianPid) && value.guardianPid! > 0
+            && Number.isSafeInteger(value.elapsedMs) && value.elapsedMs! >= 0
+            && typeof value.stage === 'string' && /^[a-z][a-z0-9-]*$/.test(value.stage)) {
+            // Only the kernel's static stage metadata is forwarded. Unrelated
+            // stderr, extra JSON properties and observer failures are ignored.
+            observe({ processId: value.processId, guardianPid: value.guardianPid!, elapsedMs: value.elapsedMs!, stage: value.stage });
+          }
+        } catch { /* Diagnostic observation cannot change process completion. */ }
+      }
+      pending = ''; discarding = false;
+    }
+  });
+}
+
 /** An isolated real-kernel fixture. No Node/Bun PTY production fallback. */
-export function createNativeProcessTestHarness(authority?: DocumentAuthority) {
+export function createNativeProcessTestHarness(authority?: DocumentAuthority, options: {
+  onProcessDiagnostic?: (event: NativeProcessDiagnostic) => void;
+} = {}) {
   let initialized: Promise<{
     service: ReturnType<typeof createKernelProcessService>;
     client: ReturnType<typeof createKernelClient>;
@@ -36,7 +77,17 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority) {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "varin-process-consumer-"));
       cleanups.push(() => fs.rmSync(root, { recursive: true, force: true }));
       const buildVersion = (JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string }).version;
-      const client = createKernelClient({ hostId: "process-consumer", storageRoot: path.join(root, "storage"), kernelPath, buildVersion, allowCargoDevRunner: false });
+      const observeDiagnostic = options.onProcessDiagnostic;
+      const client = createKernelClient({ hostId: "process-consumer", storageRoot: path.join(root, "storage"), kernelPath, buildVersion, allowCargoDevRunner: false,
+        ...(observeDiagnostic ? {
+          env: { VARIN_PROCESS_TRACE: '1' },
+          spawnProcess: ((command: string, args: string[], spawnOptions: Parameters<typeof nodeSpawn>[2]) => {
+            const child = nodeSpawn(command, args, spawnOptions);
+            observeProcessDiagnostics(child, observeDiagnostic);
+            return child;
+          }) as typeof nodeSpawn,
+        } : {}),
+      });
       cleanups.push(() => client.close());
       const documents = authority ?? createDocumentAuthority({ hostId: "process-consumer", dataDir: path.join(root, "documents"), isAllowedRoot: async () => true, isTrusted: async () => true });
       if (!authority) cleanups.splice(cleanups.length - 1, 0, () => documents.dispose());

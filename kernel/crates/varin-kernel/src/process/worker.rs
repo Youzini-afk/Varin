@@ -77,6 +77,33 @@ fn send_data(output: &DataOutput, event: Value) -> io::Result<()> {
         &event,
     )
 }
+// Opt-in, content-free diagnostics for the original guardian. These frames are
+// not process observations and must not wake subscription/interaction waiters.
+pub(super) fn diagnostic_stage(stage: &str) -> bool {
+    matches!(stage,
+        "stop-received" | "target-kill-returned" | "target-exit-observed"
+        | "pty-master-lock-started" | "pty-close-started" | "pty-close-returned" | "output-reader-ended"
+        | "pty-reader-join-started" | "pty-reader-joined"
+        | "descendant-drain-started" | "descendant-drain-confirmed"
+        | "input-finish-requested" | "input-finish-queued" | "input-worker-joined"
+        | "tree-receipt-write-started" | "tree-receipt-installed" | "tree-receipt-sent")
+}
+#[derive(Clone)]
+struct Diagnostic {
+    output: Output,
+    process_id: String,
+    kernel_epoch: String,
+    started: Instant,
+}
+fn trace(diagnostic: &Option<Diagnostic>, stage: &'static str) {
+    if let Some(diagnostic) = diagnostic {
+        let _ = send(&diagnostic.output, json!({
+            "type":"diagnostic", "processId":diagnostic.process_id,
+            "kernelEpoch":diagnostic.kernel_epoch, "guardianPid":std::process::id(),
+            "elapsedMs":diagnostic.started.elapsed().as_millis(), "stage":stage,
+        }));
+    }
+}
 // Keep canonical paths for resource identity, but don't hand cmd.exe a verbatim
 // namespace it treats as an unsupported UNC cwd and silently replaces with Windows.
 fn child_cwd(path: &std::path::Path) -> std::borrow::Cow<'_, std::path::Path> {
@@ -236,6 +263,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         };
         serde_json::from_slice(&frame)?
     };
+    let diagnostic = (std::env::var("VARIN_PROCESS_TRACE").as_deref() == Ok("1"))
+        .then(|| Diagnostic {
+            output: output.clone(),
+            process_id: config.process_id.clone(),
+            kernel_epoch: config.kernel_epoch.clone(),
+            started: Instant::now(),
+        });
     #[cfg(windows)]
     let job = Arc::new(platform::WorkerJob::open(&config.job_name)?);
     if STOP.load(Ordering::Acquire) > 0 {
@@ -272,6 +306,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut readers = readers.into_iter().map(|(channel, mut reader)| {
         let output = output.clone();
         let data_output = data_output.clone();
+        let diagnostic = diagnostic.clone();
         thread::spawn(move || {
             let mut buffer = [0u8; 16384];
             let mut delivering = true;
@@ -293,6 +328,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Err(_) => { let _ = send(&output, json!({"type":"output-error", "channel":channel})); break; }
                 }
             }
+            trace(&diagnostic, "output-reader-ended");
         })
     }).collect::<Vec<_>>();
     let (input_tx, input_rx) = mpsc::sync_channel::<Value>(1);
@@ -449,6 +485,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let control_output = output.clone();
     let control_master = master.clone();
     let control_receipt_path = config.receipt_path.clone();
+    let control_diagnostic = diagnostic.clone();
     #[cfg(windows)]
     let control_job = job.clone();
     thread::spawn(move || {
@@ -467,6 +504,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         },
                         Ordering::Release,
                     );
+                    trace(&control_diagnostic, "stop-received");
                 }
                 Some("write") => {
                     if let Err(error) = control_input.try_send(value) {
@@ -577,6 +615,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     let _ = force;
                     child.kill()?;
+                    // portable-pty accepting kill is not an observed OS exit.
+                    if !stop_applied {
+                        trace(&diagnostic, "target-kill-returned");
+                    }
                     stop_applied = true;
                 }
             }
@@ -587,23 +629,30 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             thread::sleep(Duration::from_millis(10));
         };
+    trace(&diagnostic, "target-exit-observed");
     // Close ConPTY while its reader is still draining, not after joining it.
-    drop(
-        master
+    trace(&diagnostic, "pty-master-lock-started");
+    {
+        let mut master = master
             .lock()
-            .map_err(|_| io::Error::other("PTY master poisoned"))?
-            .take(),
-    );
+            .map_err(|_| io::Error::other("PTY master poisoned"))?;
+        trace(&diagnostic, "pty-close-started");
+        drop(master.take());
+    }
+    trace(&diagnostic, "pty-close-returned");
     // ConPTY's console host owns the final screen flush. Killing Job members
     // before its output pipe reaches EOF can truncate the last output and race
     // a conhost already tearing down. ClosePseudoConsole above runs alongside
     // the reader; only then drain any remaining Job descendants.
     #[cfg(windows)]
     if config.mode == "pty" {
+        trace(&diagnostic, "pty-reader-join-started");
         for reader in readers.drain(..) {
             let _ = reader.join();
         }
+        trace(&diagnostic, "pty-reader-joined");
     }
+    trace(&diagnostic, "descendant-drain-started");
     let drain_started = Instant::now();
     loop {
         if drain_started.elapsed() >= Duration::from_secs(5) {
@@ -625,16 +674,23 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         thread::sleep(Duration::from_millis(10));
     }
+    trace(&diagnostic, "descendant-drain-confirmed");
     // The stopped tree closes pipe/PTY readers and releases blocked input writes. Keep
     // the guardian alive through the writer's final durable receipt; process exit itself
     // must not kill the receipt thread between a successful write and fsync.
+    trace(&diagnostic, "input-finish-requested");
     let _ = input_tx.send(json!({"type":"finish"}));
+    trace(&diagnostic, "input-finish-queued");
     let _ = input_worker.join();
+    trace(&diagnostic, "input-worker-joined");
     let value = json!({"processId":config.process_id, "kernelEpoch":config.kernel_epoch,
         "status":"exited", "pid":pid, "exitCode":if exit.signal().is_none() { Some(exit.exit_code()) } else { None },
         "signal":exit.signal(), "reason":null, "treeConfirmed":true,"spawned":true,"stopApplied":stop_applied});
+    trace(&diagnostic, "tree-receipt-write-started");
     receipt(&config, &value)?;
+    trace(&diagnostic, "tree-receipt-installed");
     send(&output, json!({"type":"receipt", "value":value}))?;
+    trace(&diagnostic, "tree-receipt-sent");
     // Tree completion and complete-log delivery are different facts. The control receipt is
     // available before residual output drains, while the guardian stays alive to preserve bytes.
     for reader in readers.drain(..) {
