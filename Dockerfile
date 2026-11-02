@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-slim:main
+ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-slim:latest
 
 FROM --platform=$BUILDPLATFORM rust:1.97.1-bookworm AS kernel-builder
 WORKDIR /src

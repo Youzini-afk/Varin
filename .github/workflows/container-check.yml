@@ -1,0 +1,187 @@
+name: Container validation
+
+# CI owns change applicability and the required aggregate. This workflow has no
+# registry credentials/publication: its only pushes go to an ephemeral loopback
+# registry, including when the caller is an untrusted pull request.
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      toolbelt:
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build and smoke applicable container images
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-container-{0}', github.run_id) }}
+      queue: max
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Require the selected source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Start an isolated local registry
+        id: registry
+        run: docker run --detach --name varin-check-registry --publish 127.0.0.1:5000:5000 registry:2
+
+      - name: Set up one shared builder
+        id: builder
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+
+      - name: Build slim runtime base
+        id: slim-base
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.base
+          target: slim
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: localhost:5000/varin-runtime-slim:check-${{ inputs.source_sha }}
+          cache-from: type=gha,scope=varin-check-runtime-slim
+          cache-to: type=gha,scope=varin-check-runtime-slim,mode=max
+
+      - name: Build coupled slim app image
+        id: slim-app
+        if: ${{ !cancelled() && steps.slim-base.outcome == 'success' }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          pull: true
+          load: true
+          tags: varin-slim:check-${{ inputs.source_sha }}
+          build-args: |
+            RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-slim:check-${{ inputs.source_sha }}
+            VARIN_SOURCE_REVISION=${{ inputs.source_sha }}
+          cache-from: type=gha,scope=varin-check-app
+          cache-to: type=gha,scope=varin-check-app,mode=max
+
+      - name: Smoke the exact slim image
+        if: ${{ !cancelled() && steps.slim-app.outcome == 'success' }}
+        shell: bash
+        env:
+          IMAGE_REF: varin-slim:check-${{ inputs.source_sha }}
+          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
+        run: |
+          cleanup() {
+            docker logs varin-check-smoke 2>/dev/null || true
+            docker rm --force varin-check-smoke 2>/dev/null || true
+            docker image rm "$IMAGE_REF" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          docker run --detach \
+            --name varin-check-smoke \
+            --env VARIN_UI_PASSWORD=varin-ci-smoke-only \
+            --publish 127.0.0.1:3000:3000 \
+            "$IMAGE_REF"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then break; fi
+            if ! docker inspect --format '{{.State.Running}}' varin-check-smoke | grep -qx true; then
+              echo "Varin container exited before becoming healthy." >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "Varin /health did not become ready." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:3000/health \
+            | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
+          docker exec varin-check-smoke node verify-kernel.mjs packages/web
+
+      # Both final variants use this same BuildKit instance and source, so its
+      # common Rust/Web/browser builder stages are reused, not built on a second
+      # matrix runner. All compilation stays inside the Dockerfile's target ABI.
+      - name: Build toolbelt runtime base when applicable
+        id: toolbelt-base
+        if: ${{ !cancelled() && inputs.toolbelt && steps.builder.outcome == 'success' && steps.registry.outcome == 'success' }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.base
+          target: runtime-base
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: localhost:5000/varin-runtime-base:check-${{ inputs.source_sha }}
+          cache-from: type=gha,scope=varin-check-runtime-base
+          cache-to: type=gha,scope=varin-check-runtime-base,mode=max
+
+      - name: Build coupled toolbelt app image when applicable
+        id: toolbelt-app
+        if: ${{ !cancelled() && inputs.toolbelt && steps.toolbelt-base.outcome == 'success' }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          pull: true
+          load: true
+          tags: varin:check-${{ inputs.source_sha }}
+          build-args: |
+            RUNTIME_BASE_IMAGE=localhost:5000/varin-runtime-base:check-${{ inputs.source_sha }}
+            VARIN_SOURCE_REVISION=${{ inputs.source_sha }}
+          cache-from: type=gha,scope=varin-check-app
+          cache-to: type=gha,scope=varin-check-app,mode=max
+
+      - name: Smoke the exact toolbelt image
+        if: ${{ !cancelled() && steps.toolbelt-app.outcome == 'success' }}
+        shell: bash
+        env:
+          IMAGE_REF: varin:check-${{ inputs.source_sha }}
+          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha }}
+        run: |
+          cleanup() {
+            docker logs varin-check-smoke 2>/dev/null || true
+            docker rm --force varin-check-smoke 2>/dev/null || true
+            docker image rm "$IMAGE_REF" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          docker run --detach \
+            --name varin-check-smoke \
+            --env VARIN_UI_PASSWORD=varin-ci-smoke-only \
+            --publish 127.0.0.1:3000:3000 \
+            "$IMAGE_REF"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then break; fi
+            if ! docker inspect --format '{{.State.Running}}' varin-check-smoke | grep -qx true; then
+              echo "Varin container exited before becoming healthy." >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "Varin /health did not become ready." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:3000/health \
+            | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
+          docker exec varin-check-smoke node verify-kernel.mjs packages/web
+
+      - name: Remove the local registry
+        if: always()
+        run: docker rm --force varin-check-registry 2>/dev/null || true

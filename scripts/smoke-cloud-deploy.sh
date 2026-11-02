@@ -3,6 +3,16 @@
 # made outside this invocation's temporary directory and loopback listener.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+INPUT_ARCHIVE=
+if [ "${1:-}" = -- ]; then shift; fi
+if [ "$#" -gt 0 ]; then
+  if [ "$#" -ne 2 ] || [ "$1" != --archive ]; then
+    echo 'Usage: smoke-cloud-deploy.sh [--archive <verified-production-archive>]' >&2
+    exit 2
+  fi
+  INPUT_ARCHIVE=$(realpath "$2")
+  test -f "$INPUT_ARCHIVE"
+fi
 RUNNER_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/varin-cloud-smoke.XXXXXX")
 export RUNNER_TEMP
 ROOT="$RUNNER_TEMP/varin-cloud-deploy"
@@ -31,10 +41,16 @@ verify_good() {
   node --input-type=module -e "const response=await fetch('http://127.0.0.1:${PORT}/health');const body=await response.json();if(!response.ok||body.status!=='ok'||body.releaseId!=='${GOOD_RELEASE}'||body.kernel?.ready!==true)throw new Error(JSON.stringify(body));"
 }
 
-node scripts/build-cloud-runtime.mjs \
-  --skip-build \
-  --output "$RUNNER_TEMP/varin-cloud-runtime" \
-  --archive "$GOOD_ARCHIVE"
+if [ -n "$INPUT_ARCHIVE" ]; then
+  # Test the exact VM/cloud artifact already staged and lock/layout-verified by
+  # its production owner. All fault injection mutates private copies below.
+  cp "$INPUT_ARCHIVE" "$GOOD_ARCHIVE"
+else
+  node scripts/build-cloud-runtime.mjs \
+    --skip-build \
+    --output "$RUNNER_TEMP/varin-cloud-runtime" \
+    --archive "$GOOD_ARCHIVE"
+fi
 cp "$GOOD_ARCHIVE" "$BAD_SOURCE"
 GOOD_SHA=$(sha256sum "$GOOD_ARCHIVE" | awk '{print $1}')
 GOOD_RELEASE="good-${GOOD_SHA:0:16}"

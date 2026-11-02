@@ -7,7 +7,7 @@ services:
       args:
         # Slim by default. Use docker-compose.toolbelt.yml for the language
         # toolbelt, or build Dockerfile.base --target slim as a local base.
-        RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-slim:main}
+        RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-slim:latest}
     container_name: varin
     init: true
     user: "1000:1000"

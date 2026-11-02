@@ -22,18 +22,30 @@ The Docker workflow publishes four images to GHCR:
 | `ghcr.io/youzini-afk/varin-runtime-slim` | Slim base: Bun, Node, Git, SSH, cloudflared, and the compilers needed to install native production modules. |
 | `ghcr.io/youzini-afk/varin-runtime-base` | Toolbelt base: the slim runtime plus Python, Java/Maven, Go/gopls, Rust/rust-analyzer, LSPs, GitHub CLI, ripgrep, daemonless BuildKit, and Chrome on amd64. |
 
-All four images are built for `linux/amd64` and `linux/arm64`. Main builds receive `main`, `latest`,
-and `sha-*` tags; version tags also receive semantic-version tags. Each application build consumes
-the matching base manifest digest produced by the same workflow, so it cannot silently pick up a
-newer floating base halfway through a build. Images include provenance and SBOM attestations.
+All four images are built for `linux/amd64` and `linux/arm64` **at release time**, not on every
+main push. `Docker Images` accepts `v<package version>` tag pushes, or a manual run whose selected
+workflow ref is that release tag; branch/manual-main runs cannot publish. Stable releases receive
+exact version, major/minor, major, `latest`, and full `sha-*` tags. Prereleases receive only their
+exact version and SHA tags. No workflow updates a `main` image alias. Local Dockerfile/Compose builds default to the released
+`varin-runtime-*:latest` base; set `VARIN_RUNTIME_BASE_IMAGE` to a version/digest for reproducible local builds.
 
-Builds first publish uniquely named candidate manifests. CI pulls both application images by digest,
-starts each amd64 container, checks `/health`, and verifies the native Host package closure. Only those
-verified digests are promoted to `main`, `latest`, `sha-*`, or semantic-version tags; a failed or
-cancelled candidate leaves the previously verified installable tags untouched. Pull requests build
-the coupled slim and toolbelt image pairs against a private runner-local registry and run the same
-health and host smoke without publishing to GHCR. A manually supplied slim or toolbelt base tag is
-resolved to its manifest digest before the matching application build begins.
+Before any GHCR candidate write, the workflow accepts the exact tag/SHA/version and runs full source,
+Rust/native and platform qualification for that SHA. Each application consumes the matching base
+manifest digest from this release (or an explicitly supplied immutable-resolved override), so it
+cannot silently pick up a newer floating base. Images retain provenance and SBOM attestations.
+
+Uniquely named candidates are pulled by digest; both amd64 applications must start, pass `/health`
+and native Host closure checks before those same digests are promoted. Promotion rechecks the tag
+and serializes public alias changes across releases without canceling in-progress publication.
+The alias set is not a cross-image atomic transaction; a manual interruption or registry failure
+requires completing/retrying that accepted release. Arm64 native dependencies/kernel are checked
+during image assembly; this is not a full arm64 server-startup qualification.
+
+PR/main validation is separate and read-only. CI invokes `container-check.yml` only for applicable
+container inputs, including kernel, build graph and runtime dependency changes. A private runner-local
+registry and one shared Buildx builder validate slim, plus toolbelt for shared/base changes; common
+application stages are reused within that runner. Ordinary renderer changes do not rebuild images.
+Full qualification validates both variants. No validation job can publish to GHCR.
 
 The slim runtime is enough to run the Varin server, Git, SSH, and tunnels. The toolbelt base
 adds a cloud development toolbox: Python, Java/Maven, Go/gopls,
