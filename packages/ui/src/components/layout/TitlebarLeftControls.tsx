@@ -18,7 +18,7 @@ const ICON_BUTTON_CLASS =
  * this row, so controls and the adjacent title never overlap or change parents.
  * Left padding clears native window controls where the surface needs it.
  */
-export const TitlebarLeftControls: React.FC<{ attention?: 'info' | 'warn' | null }> = ({ attention = null }) => {
+export const TitlebarLeftControls: React.FC<{ attention?: 'info' | 'warn' | null; leftInset: string }> = ({ attention = null, leftInset }) => {
   const { t } = useI18n();
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -40,7 +40,7 @@ export const TitlebarLeftControls: React.FC<{ attention?: 'info' | 'warn' | null
     <div
       className="app-region-no-drag flex shrink-0 select-none items-center pr-3"
       style={{
-        paddingLeft: 'var(--varin-titlebar-left-inset, 0.75rem)',
+        paddingLeft: leftInset,
       }}
     >
       <div className="flex items-center gap-1">

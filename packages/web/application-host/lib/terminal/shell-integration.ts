@@ -30,6 +30,12 @@ export type TerminalCommandObservation = {
 
 export type ShellIntegrationStatus = "not-observed" | "ready";
 
+// Match the terminal's retained-history allocation: an unfinished control frame
+// must not become an unbounded second PTY buffer. Oversized frames are discarded,
+// never emitted as a complete command with silently truncated text.
+export const MAX_SHELL_INTEGRATION_FRAME_BYTES = 512 * 1024;
+type ParsedSequence = ShellIntegrationSequence | { kind: "frame-discarded" };
+
 /* eslint-disable no-control-regex -- OSC 133/633 frames use ESC and BEL */
 const OSC_START = /\u001b\](?:133|633);/u;
 const ST_OR_BEL = /\u0007|\u001b\\|\u009c/u;
@@ -102,27 +108,42 @@ const consumeOscChunk = (
   pending: string,
   data: string,
   expectedId: string,
-): { pending: string; sequences: ShellIntegrationSequence[] } => {
+  discarding: boolean,
+): { pending: string; discarding: boolean; sequences: ParsedSequence[] } => {
   const input = `${pending}${data}`;
-  const sequences: ShellIntegrationSequence[] = [];
+  const sequences: ParsedSequence[] = [];
   let cursor = 0;
+  if (discarding) {
+    const end = input.search(ST_OR_BEL);
+    if (end < 0) return { pending: input.endsWith("\u001b") ? "\u001b" : "", discarding: true, sequences };
+    cursor = end + (input[end] === "\u001b" ? 2 : 1);
+  }
   while (cursor < input.length) {
     const match = OSC_START.exec(input.slice(cursor));
     if (!match || match.index === undefined) {
       const tail = input.slice(Math.max(cursor, input.length - 8));
-      return { pending: /\u001b(?:\](?:1(?:3(?:3)?)?)?)?$/u.test(tail) ? tail : "", sequences };
+      return { pending: /\u001b(?:\](?:[16](?:3(?:3)?)?)?)?$/u.exec(tail)?.[0] ?? "", discarding: false, sequences };
     }
     const absolute = cursor + match.index;
     const bodyStart = absolute + match[0].length;
     const rest = input.slice(bodyStart);
     const end = rest.search(ST_OR_BEL);
-    if (end < 0) return { pending: input.slice(absolute), sequences };
+    if (end < 0) {
+      const frame = input.slice(absolute);
+      if (Buffer.byteLength(frame) <= MAX_SHELL_INTEGRATION_FRAME_BYTES) return { pending: frame, discarding: false, sequences };
+      sequences.push({ kind: "frame-discarded" });
+      return { pending: input.endsWith("\u001b") ? "\u001b" : "", discarding: true, sequences };
+    }
     const terminator = rest[end] === "\u001b" ? 2 : 1;
-    const parsed = parseVarinShellIntegrationBody(rest.slice(0, end), expectedId);
-    if (parsed) sequences.push(parsed);
+    if (Buffer.byteLength(input.slice(absolute, bodyStart + end + terminator)) > MAX_SHELL_INTEGRATION_FRAME_BYTES) {
+      sequences.push({ kind: "frame-discarded" });
+    } else {
+      const parsed = parseVarinShellIntegrationBody(rest.slice(0, end), expectedId);
+      if (parsed) sequences.push(parsed);
+    }
     cursor = bodyStart + end + terminator;
   }
-  return { pending: "", sequences };
+  return { pending: "", discarding: false, sequences };
 };
 
 export function createShellIntegrationParser(options: {
@@ -132,9 +153,12 @@ export function createShellIntegrationParser(options: {
   consume(data: string): TerminalCommandObservation[];
   reset(generation: number): void;
   status(): ShellIntegrationStatus;
+  discardedFrames(): number;
 } {
   const now = options.now ?? Date.now;
   let pending = "";
+  let discarding = false;
+  let discardedFrames = 0;
   let generation = 0;
   let sequence = 0;
   let status: ShellIntegrationStatus = "not-observed";
@@ -171,10 +195,16 @@ export function createShellIntegrationParser(options: {
 
   return {
     consume(data: string) {
-      const parsed = consumeOscChunk(pending, data, expectedId());
+      const parsed = consumeOscChunk(pending, data, expectedId(), discarding);
       pending = parsed.pending;
+      discarding = parsed.discarding;
       const finished: TerminalCommandObservation[] = [];
       for (const item of parsed.sequences) {
+        if (item.kind === "frame-discarded") {
+          discardedFrames += 1;
+          command = undefined; startedAt = undefined; awaitingFinish = false;
+          continue;
+        }
         status = "ready";
         if (item.kind === "cwd") {
           cwd = item.cwd;
@@ -202,6 +232,8 @@ export function createShellIntegrationParser(options: {
       generation = nextGeneration;
       sequence = 0;
       pending = "";
+      discarding = false;
+      discardedFrames = 0;
       status = "not-observed";
       cwd = undefined;
       command = undefined;
@@ -209,5 +241,6 @@ export function createShellIntegrationParser(options: {
       awaitingFinish = false;
     },
     status: () => status,
+    discardedFrames: () => discardedFrames,
   };
 }

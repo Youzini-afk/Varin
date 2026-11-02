@@ -1,6 +1,9 @@
 use super::*;
 use std::{collections::BTreeMap, path::PathBuf};
 
+#[path = "catalog_upgrade_integration_tests.rs"]
+mod integration_tests;
+
 struct Fixture(PathBuf);
 impl Fixture {
     fn v78() -> Self {
@@ -78,6 +81,37 @@ impl Fixture {
         )
         .unwrap();
         tx.pragma_update(None, "user_version", 79).unwrap();
+        tx.commit().unwrap();
+        fixture
+    }
+    fn v80() -> Self {
+        let fixture = Self::v79();
+        let mut raw = fixture.raw();
+        let tx = raw.transaction().unwrap();
+        usage_ledger::initialize(&tx).unwrap();
+        tx.pragma_update(None, "user_version", 80).unwrap();
+        tx.commit().unwrap();
+        fixture
+    }
+    fn v81() -> Self {
+        let fixture = Self::v80();
+        let mut raw = fixture.raw();
+        let tx = raw.transaction().unwrap();
+        context_observations::initialize(&tx).unwrap();
+        tx.pragma_update(None, "user_version", 81).unwrap();
+        tx.commit().unwrap();
+        fixture
+    }
+    fn v82() -> Self {
+        // The released standalone 80→82 converter. This layout genuinely has
+        // indexed original history and no Zone2 tables or partial indexes.
+        let fixture = Self::v80();
+        let content = crate::content::ContentStore::open(fixture.0.join("content")).unwrap();
+        let mut raw = fixture.raw();
+        let indexes = prepare_history_indexes(&raw, &content).unwrap();
+        let tx = raw.transaction().unwrap();
+        install_history_indexes(&tx, &indexes).unwrap();
+        tx.pragma_update(None, "user_version", 82).unwrap();
         tx.commit().unwrap();
         fixture
     }
@@ -301,54 +335,61 @@ fn catalog_upgrade_process_interruption_retries_from_committed_wal() {
         let content = crate::content::ContentStore::open(root.join("content")).unwrap();
         raw.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=0; PRAGMA cache_size=1;
             INSERT INTO commands VALUES('before-crash','{}','{\"accepted\":true}');").unwrap();
-        apply_before_commit(&mut raw, 78, &content, |_| std::process::exit(42)).unwrap();
+        let from = inspect_catalog_format(&raw).unwrap();
+        apply_before_commit(&mut raw, from, &content, |_| std::process::exit(42)).unwrap();
         panic!("interruption hook did not run");
     }
-    let fixture = Fixture::v78();
-    let bodies = fixture.bodies();
-    let child = std::process::Command::new(std::env::current_exe().unwrap())
+    for fixture in [
+        Fixture::v78(),
+        Fixture::v80(),
+        Fixture::v81(),
+        Fixture::v82(),
+    ] {
+        let bodies = fixture.bodies();
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "catalog::upgrades::tests::catalog_upgrade_process_interruption_retries_from_committed_wal", "--nocapture"])
         .env(ENV, &fixture.0)
         .output().unwrap();
-    assert_eq!(
-        child.status.code(),
-        Some(42),
-        "{}",
-        String::from_utf8_lossy(&child.stderr)
-    );
-    assert!(
-        std::fs::metadata(fixture.0.join("conversation.sqlite-wal"))
-            .unwrap()
-            .len()
-            > 32
-    );
-    let catalog = Catalog::open(&fixture.0).unwrap();
-    assert_eq!(catalog.epoch(), 18);
-    assert_eq!(inspect_catalog_format(&catalog.db).unwrap(), FORMAT);
-    assert_eq!(
-        catalog
-            .db
-            .query_row(
-                "SELECT receipt FROM commands WHERE id='before-crash'",
-                [],
-                |row| row.get::<_, String>(0)
-            )
-            .unwrap(),
-        "{\"accepted\":true}"
-    );
-    assert_eq!(
-        catalog
-            .db
-            .query_row(
-                "SELECT count(*) FROM events WHERE kind='catalog.upgraded'",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
-        1
-    );
-    assert_eq!(catalog.operation("effect").unwrap().effect, Effect::Unknown);
-    assert_eq!(fixture.bodies(), bodies);
+        assert_eq!(
+            child.status.code(),
+            Some(42),
+            "{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        assert!(
+            std::fs::metadata(fixture.0.join("conversation.sqlite-wal"))
+                .unwrap()
+                .len()
+                > 32
+        );
+        let catalog = Catalog::open(&fixture.0).unwrap();
+        assert_eq!(catalog.epoch(), 18);
+        assert_eq!(inspect_catalog_format(&catalog.db).unwrap(), FORMAT);
+        assert_eq!(
+            catalog
+                .db
+                .query_row(
+                    "SELECT receipt FROM commands WHERE id='before-crash'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "{\"accepted\":true}"
+        );
+        assert_eq!(
+            catalog
+                .db
+                .query_row(
+                    "SELECT count(*) FROM events WHERE kind='catalog.upgraded'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(catalog.operation("effect").unwrap().effect, Effect::Unknown);
+        assert_eq!(fixture.bodies(), bodies);
+    }
 }
 
 fn ledger_start(db: &Connection) -> u64 {
@@ -429,7 +470,7 @@ fn catalog_upgrade_v79_starts_an_empty_usage_ledger_with_its_format_marker() {
 }
 
 #[test]
-fn delegation_generation_upgrade_preserves_v80_receipts_and_rejects_unverified_v81() {
+fn delegation_generation_upgrade_indexes_v80_without_reading_media_or_copying_bodies() {
     let fixture = Fixture::v79();
     let content = crate::content::ContentStore::open(fixture.0.join("content")).unwrap();
     let original_call = content.save(&json!({"format":"conversation","content":{"content":{"kind":"tool_call","call":{"call_id":"original-dispatch","arguments":{"large":"argument".repeat(10000)}}}},"provider":null})).unwrap();
@@ -502,23 +543,6 @@ fn delegation_generation_upgrade_preserves_v80_receipts_and_rejects_unverified_v
         ["image/png"]
     );
     assert_eq!(fixture.bodies(), bodies);
-    drop(catalog);
-    fixture
-        .raw()
-        .pragma_update(None, "user_version", 81)
-        .unwrap();
-    assert!(matches!(
-        Catalog::open(&fixture.0),
-        Err(RuntimeError::Format(81))
-    ));
-    assert_eq!(
-        fixture
-            .raw()
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .unwrap(),
-        81
-    );
-    assert_eq!(fixture.bodies(), bodies);
 }
 
 #[test]
@@ -585,4 +609,54 @@ fn new_catalog_installs_the_usage_ledger_and_rejects_a_store_missing_its_start()
             .unwrap(),
         0
     );
+}
+
+#[test]
+fn catalog_upgrade_v80_initializes_capture_owner_without_rewriting_original_bodies() {
+    let fixture = Fixture::v80();
+    let bodies = fixture.bodies();
+    let raw = fixture.raw();
+    let original: Vec<(String, String)> = raw
+        .prepare("SELECT id,body FROM input_queue ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap();
+    drop(raw);
+    let catalog = Catalog::open(&fixture.0).unwrap();
+    assert_eq!(inspect_catalog_format(&catalog.db).unwrap(), FORMAT);
+    let queue: Vec<(String, String)> = catalog
+        .db
+        .prepare("SELECT id,body FROM input_queue ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap();
+    assert_eq!(queue, original);
+    assert_eq!(fixture.bodies(), bodies);
+    assert_eq!(
+        catalog
+            .db
+            .query_row(
+                "SELECT count(*) FROM context_observation_captures",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        catalog
+            .db
+            .query_row(
+                "SELECT count(*) FROM context_observation_imports",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(catalog.db.query_row("SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=80 AND json_extract(data,'$.to')=?1",[FORMAT],|r|r.get::<_,i64>(0)).unwrap(),1);
 }

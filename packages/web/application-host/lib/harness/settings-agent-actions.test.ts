@@ -26,7 +26,7 @@ describe('native settings action owners', () => {
     const owner = { read: async () => ({ profiles: [] }), save, remove: vi.fn() };
     const adapter = createSettingsActionRegistry({ agentProfiles: () => owner } as unknown as SettingsActionDeps).adapterFor('service:agents')!;
     const entry = getSettingsCatalogEntry('agents.catalog')!;
-    const config = { kind: 'custom', key: '', agent: { name: 'reader' } };
+    const config = { kind: 'custom', key: '', agent: { name: 'reader', description: 'Reads sources', instructions: 'Read carefully', enabled: true, workFocus: [] } };
     expect((await adapter.invoke(ctx, entry, 'create', { expectedRevision: 'r', config, tools: [] })).status).toBe('applied');
     expect(save).toHaveBeenCalledWith({ runtime: 'agent', expectedRevision: 'r', config, tools: [] }, undefined);
     expect((await adapter.invoke(ctx, entry, 'delete', { id: 'varin:custom:new' })).status).toBe('failed');
@@ -35,7 +35,7 @@ describe('native settings action owners', () => {
   it('uses original model OAuth references and redacts connection header secrets', async () => {
     let status = 'pending';
     const signIn = vi.fn(() => ({ id: 'auth', status }));
-    const owner = { read: async () => ({ revision: 'r', types: [], channels: [{ id: 'channel', baseUrl: 'https://example.test', connection: { headers: { authorization: 'secret' } } }] }),
+    const owner = { read: async () => ({ revision: 'r', types: [], channels: [{ id: 'channel', name: 'Channel', type: 'test', enabled: true, authentication: { kind: 'none' }, models: [], parameters: {}, baseUrl: 'https://example.test', connection: { headers: { authorization: 'secret' } } }] }),
       signIn, authorizations: { read: () => ({ id: 'auth', status }), cancel: () => { status = 'cancelled'; } } };
     const adapter = createSettingsActionRegistry({ models: () => owner } as unknown as SettingsActionDeps).adapterFor('runtime:providers')!;
     const entry = getSettingsCatalogEntry('providers.auth')!;
@@ -44,4 +44,21 @@ describe('native settings action owners', () => {
     expect(signIn).toHaveBeenCalledWith('oauth-owner', 'account');
     expect(await adapter.cancelOperation!(ctx, entry, 'auth', {})).toMatchObject({ operation: { id: 'auth', state: 'cancelled' } });
   });
+});
+
+it('rebases an Agent-profile CAS only across the trusted permission-save transition for this original call', async () => {
+  let revision = 'permission-saved';
+  const save = vi.fn(async () => ({ profileId: 'varin:custom:new' }));
+  const owner = { read: async () => ({ revision, profiles: [] }), save, remove: vi.fn() };
+  const adapter = createSettingsActionRegistry({ agentProfiles: () => owner } as unknown as SettingsActionDeps).adapterFor('service:agents')!;
+  const entry = getSettingsCatalogEntry('agents.catalog')!;
+  const config = { kind: 'custom', key: '', agent: { name: 'Reader', description: '', instructions: 'Read', enabled: true, workFocus: [] } };
+  const original = { ...ctx, caller: { ...ctx.caller, permissionSettingsRevision: { before: 'original', after: 'permission-saved' } } };
+  await adapter.invoke(original, entry, 'create', { expectedRevision: 'original', config, tools: [] });
+  expect(save).toHaveBeenLastCalledWith({ runtime: 'agent', expectedRevision: 'permission-saved', config, tools: [] }, undefined);
+  revision = 'another-writer';
+  await adapter.invoke(original, entry, 'create', { expectedRevision: 'original', config, tools: [] });
+  expect(save).toHaveBeenLastCalledWith({ runtime: 'agent', expectedRevision: 'original', config, tools: [] }, undefined);
+  await adapter.invoke(ctx, entry, 'create', { expectedRevision: 'original', config, tools: [] });
+  expect(save).toHaveBeenLastCalledWith({ runtime: 'agent', expectedRevision: 'original', config, tools: [] }, undefined);
 });

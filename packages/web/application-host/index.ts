@@ -184,6 +184,8 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/sto
 
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createContextObservationPublication } from './lib/knowledge/context-publication.js';
+import { createEnvironmentObservationRuntime } from './lib/environment-observations/runtime.js';
+import { createObservationPort } from './lib/environment-observations/coordinator.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { projectContainsPath } from '@varin/application-client';
 import { createEmbeddingRequestSettings, DEFAULT_EMBEDDING_REQUEST_CONFIGURATION, registerEmbeddingRequestRoutes } from './lib/knowledge/vectors/request-settings.js';
@@ -236,6 +238,7 @@ import { createSettingsService, settingsDocumentRevision } from './lib/harness/s
 
 import { createClientSurfaceBridge } from './lib/harness/client-surfaces.js';
 import { createSettingsActionRegistry } from './lib/harness/settings-actions.js';
+import { createSettingsPermissionSubjects } from './lib/harness/settings-authority.js';
 import { createKernelSettingsActionOperationStore } from './lib/harness/settings-operation-store.js';
 import * as gitIdentityStorage from './lib/git/identity-storage.js';
 import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } from './lib/github/auth.js';
@@ -1001,7 +1004,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const dirtyBarrierTimeoutMs = /^\d+$/.test(configuredDirtyBarrierTimeout)
     ? Number(configuredDirtyBarrierTimeout)
     : undefined;
-  let observeKnowledgeDocumentMutation = (_event: DocumentMutationObservation): void => {};
+  let observeEnvironmentDocumentMutation = (_event: DocumentMutationObservation): void => {};
   let observeThreadIntegrationParentChange = (_workspaceId: string, _resourceIds?: readonly string[]): void => {};
   // eslint-disable-next-line prefer-const -- Deferred port: early document callbacks must observe undefined until wiring completes.
   let nativeWorkspaces:NativeWorkspaceOwner|undefined;
@@ -1017,7 +1020,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       resolvePath:(value,containing)=>nativeWorkspaces?.resolvePath(value,containing)??Promise.resolve(undefined),
       retainReference:(source,key)=>nativeWorkspaces!.retainReference(source,key),releaseReference:key=>nativeWorkspaces!.releaseReference(key)},
     onSourceRetentionChanged:()=>requestSourceMaintenance(),
-    onMutation: (event) => observeKnowledgeDocumentMutation(event),
+    onMutation: (event) => observeEnvironmentDocumentMutation(event),
     onIntegrationParentChanged: (workspaceId, resourceIds) => observeThreadIntegrationParentChange(workspaceId, resourceIds),
     ...(dirtyBarrierTimeoutMs !== undefined ? { dirtyBarrierTimeoutMs } : {}),
   });
@@ -1248,6 +1251,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   // Agent tools and user settings surfaces share the same native owners and CAS.
   const settingsActionRegistry = createSettingsActionRegistry({
+    self: () => ({ runtime: agentRuntime, bots: botService, threads, resolveBotModel: botAgentModel }),
     embeddingRequests: () => embeddingRequestSettings,
     models: () => modelsService,
     modelFetch: (input, init) => egressRuntime.fetch(input, init),
@@ -1961,6 +1965,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // This is a user-scoped role. It does not inherit another Thread model binding.
     settings: async () => ({ global: await modelsService.readGlobalInferenceSettings() }),
   }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,
+    permissionSubjects: createSettingsPermissionSubjects({ models: () => modelsService }),
     subscribeConfiguration: listener => { extensionConfigurationListeners.add(listener); return () => extensionConfigurationListeners.delete(listener); },
     prepareConfiguration: async (run, required) => {
     if (!scriptRuntimeOwner.current) throw new Error('Script tool preparation is unavailable');
@@ -2543,21 +2548,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   }
 
-  const knowledgeStoreExistsForScope = (scopeId: string): Promise<boolean> => (
-    fsPromises.access(path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`))
-      .then(() => true, (error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return false;
-        throw error;
-      })
-  );
+  const knowledgeStoreExistsForScope = async (scopeId: string): Promise<boolean> => {
+    const file = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`);
+    // A durable journal can exist before its first checkpoint. Opening that
+    // original store is recovery, whereas an entirely absent store stays absent.
+    for (const suffix of ['', '.wal', '.publish']) {
+      try { await fsPromises.access(`${file}${suffix}`); return true; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    return false;
+  };
 
+  const environmentObservations = createEnvironmentObservationRuntime({
+    port: createObservationPort(kernelClient),
+    onError: error => console.error('[ContextObservations] Capture awaits reconciliation:', errorMessage(error)),
+  });
   const contextObservationPublication = createContextObservationPublication(kernelClient, {
+    getLegacyStore: async workspaceId => await knowledgeStoreExistsForScope(workspaceId) ? getKnowledgeStoreForScope(workspaceId) : null,
+    onError: error => console.error('[ContextObservations] Original legacy import awaits recovery:', errorMessage(error)),
     onUnavailable: (error, owner) => console.error('[ContextObservations] Workspace notifications unavailable; conversation continues:',
       { workspaceId: error.workspaceId, runId: owner.runId, reason: error.reason }),
   });
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
-    threadSources: () => contextObservationPublication.sources(),
-    onObservation: owner => contextObservationPublication.publishSource(knowledgeContextRuntime, owner),
     recallContextForThread: botRecallContext,
     goalForThread: async threadId => {
       const goals = await agentRuntime.goals(threadId);
@@ -2577,13 +2589,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     getStore: getKnowledgeStoreForScope,
     getUserStore: getUserKnowledgeStore,
-    onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
-  contextService.bindObservations((run, signal) => contextObservationPublication.publish(knowledgeContextRuntime, run, signal));
-  // Replay original persisted observations after Host restart; Catalog receipts dedupe them.
-  void contextObservationPublication.recover(knowledgeContextRuntime).catch(error => {
-    console.error('[ContextObservations] Original workspace observations await recovery:', errorMessage(error));
+  const recoverLegacyObservations = (): void => {
+    void contextObservationPublication.recover().catch(error => {
+      console.error('[ContextObservations] Original workspace observations await recovery:', errorMessage(error));
+    });
+  };
+  contextService.bindObservations(async (run, signal) => {
+    // Native input consumption freezes its own already-durable cutoff. Never
+    // wait for Host producer queues or a workspace's legacy store to quiesce.
+    const prepared = await environmentObservations.prepare(run, signal);
+    // The scoped snapshot includes same-source original ancestors. Reuse it
+    // instead of scanning every branch or waiting for legacy I/O per request.
+    contextObservationPublication.wake(prepared.sources.map(source => source.owner));
+    return prepared;
   });
+  recoverLegacyObservations();
   const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
   // A grammar catalog must not be able to stop the Host from starting: an
   // unreadable manifest means "nothing is installable", not "no server".
@@ -2700,22 +2721,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     cache: semanticVectorCache,
     resolveEmbedder: knowledgeEmbedding.resolve,
   });
-  const observeKnowledgeGitStatus = createGitStatusObserver({
+  const observeEnvironmentGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
-    observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
+    observe: (event) => environmentObservations.observeGitStatus(event),
     onError: (error) => console.error('[HarnessKnowledge] Git status observer failed:', errorMessage(error)),
   });
-  observeKnowledgeDocumentMutation = (event) => {
+  observeEnvironmentDocumentMutation = (event) => {
     languageSupervisor.observeDocumentMutation(event);
-    knowledgeContextRuntime.observeDocumentMutation(event);
+    environmentObservations.observeDocumentMutation(event);
   };
-  const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
 
   const terminalCommandProjector = createTerminalCommandProjector({
     resolveWorkspaceId: (cwd) => documentsAuthority.resolveScopeId(cwd),
-    observe: createTerminalCommandObserveAdapter(knowledgeContextRuntime),
-    drain: () => knowledgeContextRuntime.drain(),
-    listBoundOwners: (workspaceId) => knowledgeContextRuntime.listBoundOwners(workspaceId),
+    observe: createTerminalCommandObserveAdapter(environmentObservations),
     inspectCwd: (terminalId) => terminalRuntime?.inspectSession(terminalId)?.cwd,
     onError: (error) => {
       console.error('[HarnessKnowledge] Terminal command projection failed:', errorMessage(error));
@@ -2904,7 +2922,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     uiAuthController,
     documents: documentsAuthority,
     fileResources: kernelFileResources,
-    onGitStatus: observeKnowledgeGitStatus,
+    onGitStatus: observeEnvironmentGitStatus,
     languageSupervisor,
     languageSupport: languageSupportRuntime,
     runRuntime,
@@ -3053,12 +3071,31 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await shutdown.run('unregisterDebugCapability', () => unregisterDebugCapability());
       await shutdown.run('unregisterTestCapability', () => unregisterTestCapability());
       await shutdown.run('terminalCommandSubscription.dispose', () => terminalCommandSubscription.dispose());
-      for (const subscription of knowledgeLanguageSubscriptions.values()) await shutdown.run('knowledgeLanguageSubscription.close', () => subscription.close());
-      await shutdown.run('knowledgeLanguageSubscriptions.clear', () => knowledgeLanguageSubscriptions.clear());
       // Semantic and graph observers still read Documents and use the kernel
       // services. Stop them while those owners are alive; otherwise each late
       // document event can race a disposed mutation authority during shutdown.
-      observeKnowledgeDocumentMutation = () => undefined;
+      observeEnvironmentDocumentMutation = () => undefined;
+      await shutdown.run('terminalCommandProjector.close', async () => {
+        const result = await terminalCommandProjector.close();
+        if (result.gap || result.failed) console.warn('[ContextObservations] Terminal projection stopped with coverage gaps:', result);
+      });
+      await shutdown.run('observeEnvironmentGitStatus.close', async () => {
+        const result = await observeEnvironmentGitStatus.close();
+        if (result.gaps) console.warn('[ContextObservations] Git samples stopped with coverage gaps:', result);
+      });
+      await shutdown.run('environmentObservations.dispose', async () => {
+        const result = await environmentObservations.dispose();
+        if (result.producerGaps.length || result.retiredGaps.length || result.sources.some(source => source.availability !== 'ready')) {
+          console.warn('[ContextObservations] Host stopped with unaccepted capture identities:', result);
+        }
+      });
+      await shutdown.run('contextObservationPublication.close', async () => {
+        const sources = await contextObservationPublication.close();
+        if (sources.some(source => source.state !== 'ready')) {
+          console.warn('[ContextObservations] Original legacy import remains incomplete:', sources);
+        }
+      });
+
       // The organizer is a semantic-inference consumer; fence it before closing that owner.
       const inferenceShutdownErrors: unknown[] = [];
       await shutdown.run('memoryOrganizer.dispose', () => memoryOrganizer.dispose().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));

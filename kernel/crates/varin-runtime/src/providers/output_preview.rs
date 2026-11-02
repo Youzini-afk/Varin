@@ -273,7 +273,7 @@ pub(super) fn is_explicit_read(call: &ToolCall) -> bool {
     match name {
         "read_thread" => matches!(
             args["query"]["kind"].as_str(),
-            Some("item" | "output" | "media")
+            Some("item" | "output" | "media" | "observation")
         ),
         "file_read" => args.get("files").is_some_and(Value::is_array) || args.get("length").is_some_and(Value::is_u64)
             || args.get("startLine").is_some_and(Value::is_u64) && args.get("endLine").is_some_and(Value::is_u64),

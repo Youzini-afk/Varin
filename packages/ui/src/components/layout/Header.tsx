@@ -31,9 +31,10 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 
+import { useTitlebarLeftInset } from '@/hooks/useTitlebarLeftInset';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
-import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
+import { useDeviceInfo } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -44,7 +45,7 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { TitlebarLeftControls } from '@/components/layout/TitlebarLeftControls';
 import { BotDelegatedNote, BotReturnChip } from '@/workbenches/bot/BotReturnChip';
 import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
-import { invokeDesktop, isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
+import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { SwapText } from '@/components/motion/SwapText';
 import { recentSwitchDirection } from '@/lib/motion/switchDirection';
@@ -189,8 +190,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     return isDesktopShell();
   });
-  const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
-  const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
+  const titlebarLeftInset = useTitlebarLeftInset();
 
   const isMacPlatform = React.useMemo(() => {
     if (typeof navigator === 'undefined') {
@@ -531,65 +531,6 @@ export const Header: React.FC<HeaderProps> = ({
     onToggleRightDrawer?.();
   }, [onToggleRightDrawer, rightDrawerOpen]);
 
-  // Left padding the header needs to clear the OS window controls (macOS
-  // traffic lights / window-controls-overlay). When the sidebar is open this
-  // space is owned by the sidebar's top strip instead, so the header drops back
-  // to its normal content padding. The full value is published as
-  // `--varin-titlebar-left-inset` so the sidebar strip can mirror it.
-  const titlebarLeftInset = React.useMemo(() => {
-    if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
-      return '5.5rem';
-    }
-    if (isTabletStandalonePwa) {
-      return 'max(calc(0.75rem + var(--varin-wco-left-inset, 0px)), 5.5rem)';
-    }
-    if (!isDesktopApp || usesFramelessChrome) {
-      return 'calc(0.75rem + var(--varin-wco-left-inset, 0px))';
-    }
-    return '0.75rem';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, usesFramelessChrome]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    document.documentElement.style.setProperty('--varin-titlebar-left-inset', titlebarLeftInset);
-  }, [titlebarLeftInset]);
-
-  useEffect(() => {
-    if (!isDesktopApp || !isMacPlatform) {
-      setIsDesktopWindowFullscreen(false);
-      return;
-    }
-
-    let disposed = false;
-
-    const syncFullscreenState = async () => {
-      try {
-        const fullscreen = await invokeDesktop('desktop_is_window_fullscreen');
-        if (!disposed) {
-          setIsDesktopWindowFullscreen(fullscreen === true);
-        }
-      } catch {
-        if (!disposed) {
-          setIsDesktopWindowFullscreen(false);
-        }
-      }
-    };
-
-    const onResize = () => {
-      void syncFullscreenState();
-    };
-
-    void syncFullscreenState();
-    window.addEventListener('varin:window-resized', onResize);
-
-    return () => {
-      disposed = true;
-      window.removeEventListener('varin:window-resized', onResize);
-    };
-  }, [isDesktopApp, isMacPlatform]);
-
   const macosHeaderSizeClass = React.useMemo(() => {
     if (!isDesktopApp || !isMacPlatform || macosMajorVersion === null) {
       return '';
@@ -824,7 +765,7 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
-      <TitlebarLeftControls attention={sidebarAttention ?? null} />
+      <TitlebarLeftControls attention={sidebarAttention ?? null} leftInset={titlebarLeftInset} />
       {navigationTitle === undefined ? <BotReturnChip /> : null}
       <div className="flex min-w-0 flex-1 self-stretch items-center">
         {activeSurfaceHeader ? (
