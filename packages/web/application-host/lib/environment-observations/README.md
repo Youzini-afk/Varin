@@ -48,7 +48,10 @@ reconciles the finite capture prefix while Documents and native owners are still
 Preparation reports already-durable native progress plus Host pending/unknown/gap diagnostics.
 It never waits for producer queues or legacy import to become empty. Native input consumption
 freezes its own committed, finite selection page; the Host snapshot is informational, not a
-second cutoff authority. Later passive observations wait for a later legitimate request and
+second cutoff authority. Standalone clients without a declared model capacity may omit the
+Host capacity/diagnostic service. Its defined unavailable/failed-helper replies do not fabricate
+a ready observation snapshot; closure, cancellation, invalid replies and native Catalog input or
+diagnostic-record failures retain their own errors. Later passive observations wait for a later legitimate request and
 cannot veto completion or trigger paid continuation. Existing explicit Bot-work notifications
 and mandatory user ingress keep their separate activation rules.
 
