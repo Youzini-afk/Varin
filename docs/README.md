@@ -48,6 +48,8 @@
 
 ## 持续演进的设计
 
+- [可替换执行循环：Run Driver](design/pluggable-run-drivers.md)：设计提案；默认 Rust driver、自由循环与真实执行 owner 的边界，尚未实现。
+
 - [Bot 工作台：界面、交互与动效](design/bot-ui.md)、[交互稿](design/bot-preview/index.html)：桌面主体、形象和舞台已实施（第 12 节），其余部分见原文。
 - [动效与交互：丝滑到底](design/motion-and-interaction.md)、[可交互原型](design/motion-preview/index.html)：P0–P4 已在 main 上实施；真机、Electron 和读屏验收（第 7 节）仍待进行。
 - [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：引擎和 WinFsp / macFUSE / FUSE 适配器已接入，平台安装与挂载的实际行为以对应环境验收为准；目标合同见第 16 节。
