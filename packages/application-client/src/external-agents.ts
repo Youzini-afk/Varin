@@ -13,8 +13,34 @@ export interface ExternalAgentConfiguration {
   command: string;
   args: string[];
 }
+export interface ExternalAgentProfile {
+  id: string;
+  name: string;
+  harness: ExternalHarness;
+  description: string;
+  installUrl?: string;
+  platforms: string[];
+  platformArchitectures?: Record<string, string[]>;
+  launch: { command: string; args: string[] };
+  versionArgs?: string[];
+  authentication?: string;
+  compatibility?: string;
+}
+export interface ExternalAuthentication {
+  methods: Array<{ id: string; name: string; description?: string; type: 'agent' | 'terminal'; command?: string; args?: string[] }>;
+  guidance?: string;
+}
+export interface ExternalAgentConfigOption {
+  id: string;
+  name: string;
+  category?: string;
+  type?: 'select' | 'boolean';
+  currentValue: string | boolean;
+  options: Array<{ value: string; name: string; description?: string }>;
+}
 export interface ExternalAgentSettings {
   revision: number;
+  profiles?: ExternalAgentProfile[];
   defaultAgent: string | null;
   agents: ExternalAgentConfiguration[];
 }
@@ -36,6 +62,14 @@ export interface ExternalAgentCapabilities {
   steering: boolean;
   models: ExternalAgentModel[];
   modelsError?: string | undefined;
+  /** A real native metadata query can retry model discovery without restarting. */
+  modelsRefresh?: boolean;
+  current?: { model?: string | undefined; thinking?: string | undefined; mode?: string | undefined };
+  configOptions?: ExternalAgentConfigOption[];
+  commands?: Array<{ name: string; description: string; inputHint?: string }>;
+  protocol?: { name: string; version?: string; agentVersion?: string };
+  authentication?: ExternalAuthentication;
+  resumeMethods?: Array<'load' | 'resume'>;
   modes?: Array<{ id: string; name: string }>;
 }
 export interface ExternalConversation {
@@ -70,6 +104,7 @@ export type ExternalTurnStatus =
   | 'cancelled'
   | 'interrupted';
 export interface ExternalInput {
+  config?: Record<string, string>;
   text: string;
   images?: Array<{ data: string; mimeType: string }>;
   model?: string;
@@ -111,10 +146,51 @@ export type ExternalItem = {
     command?: string | undefined;
   };
 };
+export interface ExternalInteractionResponse {
+  optionId?: string;
+  answers?: Record<string, string[]>;
+  text?: string;
+  cancelled?: boolean;
+  values?: Record<string, string | number | boolean | string[]>;
+}
+export interface ExternalInteractionField {
+  id: string;
+  label: string;
+  description?: string;
+  type: 'text' | 'number' | 'boolean' | 'select' | 'multiselect';
+  required?: boolean;
+  options?: Array<{ value: string; label: string }>;
+  defaultValue?: string | number | boolean | string[];
+  integer?: boolean;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+}
+/** Shared normalized-form validation; invalid answers keep the interaction open. */
+export function isExternalInteractionValueValid(field: ExternalInteractionField, value: unknown): boolean {
+  if (value === undefined) return !field.required;
+  if (field.type === 'boolean') return typeof value === 'boolean';
+  if (field.type === 'number') return typeof value === 'number' && Number.isFinite(value) &&
+    (!field.integer || Number.isSafeInteger(value)) &&
+    (field.minimum === undefined || value >= field.minimum) &&
+    (field.maximum === undefined || value <= field.maximum);
+  if (field.type === 'multiselect') return Array.isArray(value) && new Set(value).size === value.length &&
+    value.every((entry) => typeof entry === 'string' && field.options?.some((option) => option.value === entry)) &&
+    (field.minItems === undefined || value.length >= field.minItems) &&
+    (field.maxItems === undefined || value.length <= field.maxItems);
+  return typeof value === 'string' &&
+    (field.minLength === undefined || [...value].length >= field.minLength) &&
+    (field.maxLength === undefined || [...value].length <= field.maxLength) &&
+    (field.type !== 'select' || Boolean(field.options?.some((option) => option.value === value)));
+}
 export interface ExternalInteraction {
   id: string;
   turnId: string;
   kind: 'permission' | 'question';
+  fields?: ExternalInteractionField[];
   title: string;
   detail?: string;
   options: Array<{ id: string; label: string }>;
@@ -161,7 +237,7 @@ export interface ExternalDelegation {
 export interface ExternalAgentsAPI {
   settings(signal?: AbortSignal): Promise<ExternalAgentSettings>;
   configure(
-    value: Omit<ExternalAgentSettings, 'revision'>,
+    value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>,
     expectedRevision: number,
     key: string,
   ): Promise<ExternalAgentSettings>;
@@ -181,11 +257,14 @@ export interface ExternalAgentsAPI {
   read(id: string, before?: number, signal?: AbortSignal): Promise<ExternalConversationSnapshot>;
   send(id: string, key: string, input: ExternalInput): Promise<ExternalTurn>;
   connect(id: string, signal?: AbortSignal): Promise<ExternalAgentCapabilities>;
-  stop(id: string, turnId: string): Promise<void>;
+  authenticate(id: string, methodId: string): Promise<ExternalAgentCapabilities>;
+  continueConversation(id: string): Promise<void>;
+  disconnect(id: string): Promise<void>;
+  stop(id: string, turnId: string, force?: boolean): Promise<void>;
   respond(
     id: string,
     requestId: string,
-    response: { optionId?: string; answers?: Record<string, string[]>; text?: string },
+    response: ExternalInteractionResponse,
   ): Promise<void>;
   update(
     id: string,
@@ -200,6 +279,7 @@ export class ExternalAgentError extends Error {
     readonly code: string,
     message: string,
     readonly status = 400,
+    readonly details?: { authentication?: ExternalAuthentication; [key: string]: unknown },
   ) {
     super(message);
   }
@@ -221,6 +301,7 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
         result.code ?? 'external_agent_failed',
         result.error ?? 'External Agent request failed',
         response.status,
+        result.details,
       );
     if (generation !== getRuntimeEndpointGeneration())
       throw new ExternalAgentError('host_changed', 'Application Host changed', 409);
@@ -241,6 +322,7 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
         key,
         input: {
           text: input.text,
+          ...(input.config === undefined ? {} : { config: input.config }),
           ...(input.images === undefined ? {} : { images: input.images }),
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinking ? { thinking: input.thinking } : {}),
@@ -248,7 +330,10 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
         },
       }),
     connect: (id, signal) => request('connect', { id }, signal),
-    stop: (id, turnId) => request('stop', { id, turnId }),
+    authenticate: (id, methodId) => request('authenticate', { id, methodId }),
+    continueConversation: (id) => request('continue', { id }),
+    disconnect: (id) => request('disconnect', { id }),
+    stop: (id, turnId, force) => request('stop', { id, turnId, ...(force ? { force } : {}) }),
     respond: (id, requestId, response) => request('respond', { id, requestId, response }),
     update: (id, expectedRevision, patch) => request('update', { id, expectedRevision, patch }),
     async observe(id, listener, signal) {
