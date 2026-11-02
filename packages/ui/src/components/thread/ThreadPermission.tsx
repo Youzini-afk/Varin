@@ -35,11 +35,15 @@ export function ThreadPermission({ operation, enabled, onDecide }: {
     } finally { busy.current = false; if (mounted.current && active.current === id) setPending(false); }
   };
   const tool = String(persistent?.tool ?? call.name), args = record(call.arguments);
+  const targets = Array.isArray(persistent?.targets) ? persistent.targets.map(record).filter((target): target is Record<string, unknown> => target !== null) : [];
   const subject = typeof args?.path === 'string' ? args.path : typeof args?.url === 'string' ? args.url : '';
   return <section aria-label={t('chat.permission.title')} className="thread-permission">
     <h3>{t('chat.permission.title')}</h3>
     <p className="thread-permission-subject">{tool}{subject && <> · {subject}</>}</p>
-    {persistent && <p className="thread-permission-scope">{t('chat.permission.scope', { tool })}</p>}
+    {persistent && <p className="thread-permission-scope">{persistent.scope === 'targets' ? t('chat.permission.targetScope') : t('chat.permission.scope', { tool })}</p>}
+    {targets.length > 0 && <ul className="thread-permission-scope">{targets.map((target, index) => <li key={index}>
+      {String(target.label ?? target.tool)}{target.authority ? <> · {t('settings.permissions.authority')}</> : null}
+    </li>)}</ul>}
     {persistent?.available === false && permission.decision === null && <p className="text-status-warning typography-meta">{t('chat.permission.unavailable')}</p>}
     <details className="thread-permission-details"><summary>{t('chat.permission.details')}</summary>
       <p>{String(scope.reason)}</p><pre>{JSON.stringify({ arguments: call.arguments, scope, actor: permission.actor }, null, 2)}</pre>

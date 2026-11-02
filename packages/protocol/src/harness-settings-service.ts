@@ -34,6 +34,22 @@ export interface SettingsSearchParams {
   offset?: number;
 }
 
+export interface SettingsEffectiveValue {
+  value: unknown;
+  configured?: unknown;
+  note?: string;
+  source: "user" | "project" | "merged" | "default" | "runtime" | "none";
+  /** Configured next-use value; not an observation of an admitted Run. */
+  basis?: "configured" | "active";
+}
+export interface SettingsActionContract {
+  inputSchema: Record<string, unknown>;
+  mutation: "none" | "owner";
+  apply?: "immediate" | "next-request" | "next-run" | "restart" | "manual" | "unsupported" | undefined;
+  note?: string;
+  authority?: "permissions" | "credentials";
+}
+export type SettingsEffectTiming = "immediate" | "next-request" | "next-run" | "restart" | "manual" | "unsupported";
 export interface SettingsSearchItem {
   id: string;
   category: string;
@@ -43,7 +59,13 @@ export interface SettingsSearchItem {
   /** Machine-usable paths this row controls, if any. */
   paths: string[];
   writable: boolean;
-  apply?: "immediate" | "next-request" | "next-run" | "restart" | "manual";
+  /** Executable catalog field constraints, including scope, reset/default and JSON schemas. */
+  fields?: ReadonlyArray<{ path: string; kind: string; [constraint: string]: unknown }>;
+  /** Exact invocable per-verb contracts; absent if no action owner is installed. */
+  actions?: Record<string, SettingsActionContract>;
+  authority?: "permissions" | "credentials";
+  scope?: "project";
+  apply?: "immediate" | "next-request" | "next-run" | "restart" | "manual" | "unsupported";
   /** Settings-page slug; the UI focuses this row by id. */
   page: string;
   keywords?: string[];
@@ -55,9 +77,9 @@ export interface SettingsSearchItem {
    * Secret values never appear — `isSet` only.
    */
   summary?: {
-    /** Effective value in force right now. */
+    /** Configured value for the next consumer boundary (not an active Run snapshot). */
     value?: unknown;
-    source?: "user" | "project" | "default" | "runtime" | "none" | "surface";
+    source?: "user" | "project" | "merged" | "default" | "runtime" | "none" | "surface";
     isSet?: boolean;
     /** Field kind for single-field entries (boolean/enum/number/…). */
     fieldKind?: string;
@@ -85,6 +107,9 @@ export interface SettingsFieldValue {
   saved?: unknown;
   /** Whether the field is set at this scope (distinguishes unset from null). */
   isSet: boolean;
+  effective?: SettingsEffectiveValue;
+  /** Raw configured layers are distinct from the merged configured value. Secrets are never included. */
+  layers?: { global?: unknown; project?: unknown };
 }
 
 export interface SettingsReadParams {
@@ -104,13 +129,10 @@ export interface SettingsReadResult {
   /** Per-field saved values at the requested scope. */
   fields?: SettingsFieldValue[];
   /**
-   * Resolved value actually in force, with the scope that produced it.
+   * Resolved configured value for the next consumer boundary, with provenance.
    * Absent when the entry has no value or the owner is unavailable.
    */
-  effective?: {
-    value: unknown;
-    source: "user" | "project" | "default" | "runtime" | "none";
-  };
+  effective?: SettingsEffectiveValue;
   /**
    * Content-hash revision of the owning document at read time — pass back as
    * `expectedRevision` in `settings.update` for compare-and-swap.
@@ -118,6 +140,10 @@ export interface SettingsReadResult {
    */
   revision?: string;
   revisions?: { global?: string; project?: string };
+  effectiveUnavailable?: string;
+  consistency?: "compare-and-swap" | "last-write-wins";
+  /** When configured values are consumed. Existing accepted requests remain frozen. */
+  appliedAt?: SettingsEffectTiming;
   /** Resolved dynamic options when the field declares an optionsSource. */
   options?: { value: string; label?: string }[];
   /** Catalog ids of related rows (same page/group). */
@@ -127,6 +153,7 @@ export interface SettingsReadResult {
   /** Owning domain action description for `action` entries. */
   action?: {
     domain: string;
+    actions?: Record<string, SettingsActionContract>;
     /** Verbs actually invocable right now (owner reported; catalog fallback). */
     verbs?: string[];
     note?: string;
@@ -147,7 +174,8 @@ export interface SettingsUpdateChange {
 }
 
 export interface SettingsUpdateParams {
-  id: string;
+  /** Required for a single entry; compound calls identify each item independently. */
+  id?: string;
   /** `agent-settings` entries: target file. Default `global`. */
   scope?: "global" | "project";
   /** Field paths → values. May address one or several fields of the entry. */
@@ -178,29 +206,42 @@ export interface SettingsUpdateItem {
 }
 
 export interface SettingsItemResult {
+  /** Original zero-based compound input position, independent of catalog id/scope. */
+  index?: number;
+  consistency?: "compare-and-swap" | "last-write-wins";
   id: string;
   status: "applied" | "partial" | "pending" | "failed" | "unavailable";
   fields?: SettingsFieldResult[];
   revision?: string;
   error?: string;
+  scope?: "host" | "global" | "project" | "client" | "action";
+  appliedAt?: SettingsEffectTiming;
+  mutation?: "none" | "applied" | "unknown";
+  effective?: Record<string, unknown>;
 }
 
 export interface SettingsFieldResult {
   path: string;
   status: "applied" | "failed";
   error?: string;
+  /** Value actually persisted by the owner, never merely the requested input. */
+  saved?: unknown;
+  isSet?: boolean;
+  effective?: SettingsEffectiveValue;
 }
 
 export interface SettingsUpdateResult {
   /** Overall outcome; `partial` = some fields/items failed within one owner or batch. */
   status: "applied" | "partial" | "failed" | "pending";
   entry: SettingsSearchItem;
-  scope: "host" | "global" | "project" | "client" | "action";
+  scope: "host" | "global" | "project" | "client" | "action" | "mixed";
   fields: SettingsFieldResult[];
   /** New owner revision after a successful write (for follow-up CAS). */
   revision?: string;
   /** When the change actually reaches the running product. */
-  appliedAt: "immediate" | "next-request" | "next-run" | "restart" | "manual";
+  appliedAt: SettingsEffectTiming | "per-item";
+  mutation?: "none" | "applied" | "unknown";
+  consistency?: "compare-and-swap" | "last-write-wins";
   /** Post-write effective state for the affected fields. */
   effective?: Record<string, unknown>;
   /** Domain-action result for `action` entries. */
@@ -243,6 +284,8 @@ export interface SettingsActionOperation {
 }
 
 export interface SettingsActionResult {
+  mutation?: "none" | "applied" | "unknown";
+  appliedAt?: SettingsEffectTiming;
   status: "applied" | "pending" | "failed" | "unavailable" | "denied";
   entry: SettingsSearchItem;
   verb: string;

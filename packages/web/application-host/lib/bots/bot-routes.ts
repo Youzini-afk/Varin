@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
-import type { BotModelSelection, BotService } from "./bot-service.js";
+import { BotProfileConflictError, BotProfileMutationError, type BotModelSelection, type BotService } from "./bot-service.js";
 import type { ComputerService } from "../computer/computer-service.js";
 import { botScopeId } from "../harness/owner-scope.js";
 import { createHash } from "node:crypto";
@@ -44,6 +44,14 @@ const parseModel = (value: unknown): BotModelSelection | null | undefined => {
 };
 
 const sendError = (response: Response, error: unknown, fallback: string): void => {
+  if (error instanceof BotProfileConflictError) {
+    response.status(409).json({ code: 'conflict', error: error.message, revision: error.revision });
+    return;
+  }
+  if (error instanceof BotProfileMutationError) {
+    response.status(503).json({ code: 'propagation-failed', error: error.message, saved: true, bot: error.bot, stage: error.stage });
+    return;
+  }
   if (error instanceof KnowledgeMutationError) {
     response.status(error.code === 'conflict' ? 409 : error.code === 'not-found' ? 404 : 400).json({ code: error.code, error: error.message });
     return;
@@ -160,7 +168,10 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
       if (body.name !== undefined && typeof body.name !== "string") throw new HarnessServiceError("invalid-params", "name must be a string");
       if (body.instructions !== undefined && body.instructions !== null && typeof body.instructions !== "string") throw new HarnessServiceError("invalid-params", "instructions must be a string or null");
       if (body.pinned !== undefined && typeof body.pinned !== "boolean") throw new HarnessServiceError("invalid-params", "pinned must be a boolean");
+      if (body.expectedRevision !== undefined && (!Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0))
+        throw new HarnessServiceError('invalid-params', 'expectedRevision must be a non-negative safe integer');
       const bot = await bots.update(botIdOf(request), {
+        ...(body.expectedRevision === undefined ? {} : { expectedRevision: body.expectedRevision as number }),
         ...(body.pinned === undefined ? {} : { pinned: body.pinned as boolean }),
         ...(body.name !== undefined ? { name: body.name as string } : {}),
         ...(body.instructions !== undefined ? { instructions: body.instructions as string | null } : {}),
