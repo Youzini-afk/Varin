@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HostCapabilityRegistry, HostServiceRegistry, type ApplicationExtensionRuntime, type HostServiceOwnerIdentity } from '@varin/extension-host';
+import { HostBindingRestoreError, HostCapabilityRegistry, HostServiceRegistry, type ApplicationExtensionRuntime, type HostServiceOwnerIdentity } from '@varin/extension-host';
 import { provideModels, type VarinBrokeredHostContext, type VarinHostServiceHandler, type VarinModelsImplementation } from '@varin/extension-sdk';
 import { VARIN_MODELS_SERVICE, VARIN_MODEL_AUTHENTICATION_CAPABILITY, type ModelProtocolCall, type VarinModelsDescription, type VarinHostServiceComposition, type VarinExtensionCapabilityGrant } from '@varin/extension-contract';
 import { ModelsExtensionOwner, type ModelAdapterContribution } from './extensions.js';
@@ -232,6 +232,7 @@ test('unrelated providers reuse the existing adapter identity, while a same-arti
   await f.models.save(channel(), (await f.models.read()).revision);
   const authority = createModelAuthority(f.models);
   const originalSelection = await authority.resolveModel({ providerId: 'connection', modelId: 'chat' });
+  const originalScope = await originalSelection.credentialOwner.scope();
   const other = codec(2); other.description.channels[0]!.id = 'other.channel'; other.description.channels[0]!.adapter!.id = 'other.codec'; other.description.adapters[0]!.id = 'other.codec';
   await f.install(other, false, { extensionId: 'fixture.other' }); await f.owner.refresh();
   expect(f.publications[1]!.adapters.find(adapter => adapter.id === original.id)!.bindingId).toBe(original.bindingId);
@@ -244,9 +245,19 @@ test('unrelated providers reuse the existing adapter identity, while a same-arti
   expect(restartedSelection.configuration.adapterBindingId).toBe(replacement.bindingId);
   expect(restartedSelection.configuration.adapterIdentity).toBe(originalSelection.configuration.adapterIdentity);
   expect(restartedSelection.configuration.configurationGeneration).toBe(originalSelection.configuration.configurationGeneration);
+  const restored = await authority.rebindModel(originalSelection.configuration, originalScope);
+  restored.release();
   originalSelection.credentialOwner.release(); restartedSelection.credentialOwner.release();
   expect(await f.owner.protocol(original.bindingId, parse, new AbortController().signal)).toMatchObject({ state: { version: 1 } });
   expect(await f.owner.protocol(replacement.bindingId, parse, new AbortController().signal)).toMatchObject({ state: { version: 3 } });
+  const before = await readFile(join(f.directory, 'models.json'), 'utf8');
+  await f.install(codec(4)); await f.owner.refresh();
+  const refused = await authority.rebindModel(originalSelection.configuration, originalScope).catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(HostBindingRestoreError);
+  expect(refused).toMatchObject({ code: 'model-configuration-changed', kind: 'model', reason: 'binding_changed', reference: 'fixture.codec@1' });
+  expect((refused as Error).message).toContain('will not be retargeted or replayed');
+  expect(f.retained.size).toBe(0);
+  expect(await readFile(join(f.directory, 'models.json'), 'utf8')).toBe(before);
 });
 
 test('a capture pending its retained-lease reply keeps the original adapter through publication, and lost replies release that exact lease', async () => {

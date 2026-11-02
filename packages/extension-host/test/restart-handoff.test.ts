@@ -169,7 +169,7 @@ test('fixed dependency withdrawal fails before candidate evaluation in the new p
   await old.call('disable', { extensionId: 'test.restart.other' }); await old.stop();
   const next = await host(root);
   const failed = await until(() => next.call<VarinExtensionHostStateSnapshot>('state'), state => entry(state).restartHandoffs!.at(-1)!.status === 'failed');
-  assert.match(entry(failed).restartHandoffs!.at(-1)!.failure!.message, /Frozen Host artifact is unavailable/);
+  assert.match(entry(failed).restartHandoffs!.at(-1)!.failure!.message, /The original Host extension is disabled: test\.restart\.other@1\.0\.0/);
   assert.equal((await readFile(join(root, 'loads'), 'utf8')).includes(`${next.pid}:`), false);
   await next.stop();
 });

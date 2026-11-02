@@ -355,6 +355,8 @@ export interface VarinWorkbenchProfileRemoveRequest {
 
 export interface VarinWorkbenchProfileApplyRequest {
   expectedCatalogRevision: number;
+  /** UI code confirmation is bound to this exact extension set. */
+  expectedWorkbenchRevision?: number;
   profileId: string;
 }
 
@@ -574,6 +576,9 @@ export const parseVarinWorkbenchProfileApplyRequest = (value: unknown): VarinWor
   if (!raw) throw new Error("Workbench profile apply request must be an object");
   return {
     expectedCatalogRevision: revision(raw.expectedCatalogRevision, "expectedCatalogRevision"),
+    ...(raw.expectedWorkbenchRevision === undefined ? {} : {
+      expectedWorkbenchRevision: revision(raw.expectedWorkbenchRevision, "expectedWorkbenchRevision"),
+    }),
     profileId: profileId(raw.profileId, "profileId"),
   };
 };

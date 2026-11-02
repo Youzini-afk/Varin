@@ -54,6 +54,9 @@ module.exports = {
     context.services.provide({ id: '${serviceId}', version: 1 }, {
       read() { return context.storage.snapshot.document.data.value || '${version}'; },
       generation() { return '${version}'; },
+      async refreshSchema() { return (await context.storage.refresh()).document.schemaVersion; },
+      async openLateSchema() { return (await context.storage.open({ scope: 'workspace', key: 'late', schemaVersion: ${schemaVersion} })).snapshot.document.schemaVersion; },
+      async migrateLateSchema() { const client = await context.storage.open({ scope: 'workspace', key: 'late', schemaVersion: ${schemaVersion} }); await client.update({ migrated: ${schemaVersion} }); return client.snapshot.document.schemaVersion; },
       assetPath() { return context.assets.path('runtime/tool.mjs'); },
       async write([value]) { await context.storage.update({ value }); return value; },
       crash() { setTimeout(() => process.exit(17), 100); return 'crashing'; }
@@ -663,8 +666,15 @@ test("persistent routes select different real providers by Thread and isolate pr
       expectedRevision: beforeProfile.workbench.document.revision,
       profile: { extensionIds: ["dev.example.beta"], id: "beta-only", label: "Beta only" },
     });
+    const reviewedProfile = await runtime.state();
+    await assert.rejects(runtime.applyWorkbenchProfile({
+      expectedCatalogRevision: reviewedProfile.catalog.revision,
+      expectedWorkbenchRevision: beforeProfile.workbench.document.revision,
+      profileId: "beta-only",
+    }), /revision/i);
     const applied = await runtime.applyWorkbenchProfile({
-      expectedCatalogRevision: (await runtime.state()).catalog.revision,
+      expectedCatalogRevision: reviewedProfile.catalog.revision,
+      expectedWorkbenchRevision: reviewedProfile.workbench.document.revision,
       profileId: "beta-only",
     });
     assert.equal(applied.extensions.find((entry) => entry.manifest.id === "dev.example.alpha")?.desired.enabled, false);
@@ -789,4 +799,34 @@ test("packaged and authored ContextFragments use the full SDK descriptor through
     assert.ok(described.kind === "service" && described.action === "describe");
     assert.deepEqual(described.member?.contract, VARIN_CONTEXT_FRAGMENTS_SERVICE.contract.methods.describe);
   } finally { await runtime.stop(); }
+});
+
+test("an original pinned generation cannot refresh, open or overwrite a successor's storage schema", { timeout: 30_000 }, async () => {
+  const dataDir = await temporaryDirectory("varin-pinned-storage-runtime-");
+  const first = await temporaryDirectory("varin-pinned-storage-first-");
+  const second = await temporaryDirectory("varin-pinned-storage-second-");
+  await writeHostExtension(first, "1.0.0", 1, "ok");
+  await writeHostExtension(second, "2.0.0", 2, "ok");
+  const runtime = await ApplicationExtensionRuntime.create({ dataDir, varinVersion,
+    brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)) });
+  let binding: HostServiceBinding | undefined;
+  let pin: ReturnType<HostServiceBinding["pin"]> | undefined;
+  try {
+    await runtime.start();
+    await runtime.installOrStage({ expectedRevision: (await runtime.catalog.snapshot()).revision, source: { kind: "local", specifier: first, display: "Original" } });
+    binding = await runtime.prepareService({ serviceId, version: 1, method: "generation", args: [] });
+    pin = binding.pin();
+    const staged = await runtime.installOrStage({ expectedRevision: (await runtime.catalog.snapshot()).revision, source: { kind: "local", specifier: second, display: "Successor" } });
+    const integrity = staged.extensions.find(entry => entry.manifest.id === extensionId)!.candidate!.integrity;
+    const requested = await runtime.requestCandidateApplication({ extensionId, candidateIntegrity: integrity, expectedRevision: staged.revision });
+    await runtime.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision: requested.revision });
+    assert.equal(await pin.invoke("generation", []), "1.0.0", "storage migration does not retarget the retained callback");
+    await assert.rejects(pin.invoke("refreshSchema", []), /schema changed/);
+    await assert.rejects(pin.invoke("write", ["old-generation"]), /schema changed/);
+    await runtime.storage.update({ extensionId, scope: "workspace", key: "late" }, 0, 1, { initial: true });
+    assert.equal(await runtime.invokeService({ serviceId, version: 1, method: "migrateLateSchema", args: [] }), 2,
+      "the current provider retains the SDK's explicit live migration of additional documents");
+    await assert.rejects(pin.invoke("openLateSchema", []), /schema changed/);
+    assert.equal((await runtime.storage.read({ extensionId, scope: "application", key: "state" })).document.schemaVersion, 2);
+  } finally { pin?.release(); binding?.release(); await runtime.stop(); }
 });
