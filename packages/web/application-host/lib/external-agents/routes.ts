@@ -36,8 +36,11 @@ export function registerExternalAgentRoutes(
     create: ['key', 'configurationId', 'cwd', 'title'],
     read: ['id', 'before'],
     connect: ['id'],
+    authenticate: ['id', 'methodId'],
+    continue: ['id'],
+    disconnect: ['id'],
     send: ['id', 'key', 'input'],
-    stop: ['id', 'turnId'],
+    stop: ['id', 'turnId', 'force'],
     respond: ['id', 'requestId', 'response'],
     update: ['id', 'expectedRevision', 'patch'],
   };
@@ -59,7 +62,7 @@ export function registerExternalAgentRoutes(
             break;
           case 'configure':
             result = await service.configure(
-              object(body.value) as unknown as Omit<ExternalAgentSettings, 'revision'>,
+              object(body.value) as unknown as Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>,
               number(body.expectedRevision),
               string(body.key),
             );
@@ -108,6 +111,15 @@ export function registerExternalAgentRoutes(
           case 'connect':
             result = await service.connect(string(body.id));
             break;
+          case 'authenticate':
+            result = await service.authenticate(string(body.id), string(body.methodId));
+            break;
+          case 'continue':
+            result = await service.continueConversation(string(body.id));
+            break;
+          case 'disconnect':
+            result = await service.disconnect(string(body.id));
+            break;
           case 'send':
             result = await service.send(
               string(body.id),
@@ -116,7 +128,9 @@ export function registerExternalAgentRoutes(
             );
             break;
           case 'stop':
-            result = await service.stop(string(body.id), string(body.turnId));
+            if (body.force !== undefined && typeof body.force !== 'boolean')
+              throw new ExternalAgentError('invalid_request', 'force must be a boolean');
+            result = await service.stop(string(body.id), string(body.turnId), body.force === true);
             break;
           case 'respond':
             result = await service.respond(string(body.id), string(body.requestId), object(body.response));
@@ -151,6 +165,7 @@ export function registerExternalAgentRoutes(
           .json({
             code: error instanceof ExternalAgentError ? error.code : 'external_agent_failed',
             error: message,
+            ...(error instanceof ExternalAgentError && error.details ? { details: error.details } : {}),
           });
       } finally {
         res.off('close', close);

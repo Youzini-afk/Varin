@@ -50,6 +50,7 @@ export const useExternalAgentStore = create<{
     }
   },
   select(id) {
+    if (get().host !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed');
     const conversation = get().conversations.find((v) => v.id === id);
     if (!conversation) throw new Error('External conversation is unavailable');
     useThreadStore.setState({ selectedIdentity: null, selectedDraftKey: null });
@@ -59,9 +60,12 @@ export const useExternalAgentStore = create<{
     useUIStore.getState().closeMainSurfaces();
   },
   async update(id, patch) {
+    const generation = getRuntimeEndpointGeneration();
+    if (get().host !== generation) throw new Error('Application Host changed');
     const conversation = get().conversations.find((v) => v.id === id);
     if (!conversation) throw new Error('External conversation is unavailable');
-    const result = await createExternalAgentsHttpAPI().update(id, conversation.revision, patch);
+    const result = await createExternalAgentsHttpAPI(generation).update(id, conversation.revision, patch);
+    if (generation !== getRuntimeEndpointGeneration()) return;
     set((state) => ({
       conversations: state.conversations.flatMap((v) =>
         v.id === id ? (result.deleted ? [] : [result]) : [v],
@@ -119,6 +123,7 @@ function acquire() {
         await createExternalAgentsHttpAPI(host).observe(
           '*',
           (event) => {
+            if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
             if (event.kind === 'unavailable') useExternalAgentStore.setState({ error: event.message });
             else if (event.kind === 'refresh') void refresh();
           },
@@ -145,7 +150,7 @@ function acquire() {
 export function useExternalAgents() {
   const host = useThreadStore((state) => state.hostKey);
   React.useEffect(acquire, [host]);
-  return useExternalAgentStore((state) => state.settings);
+  return useExternalAgentStore((state) => state.host === getRuntimeEndpointGeneration() ? state.settings : null);
 }
 export async function openConversationFromNavigation(target: {
   threadId: string;

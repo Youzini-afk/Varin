@@ -53,9 +53,12 @@ export interface ThreadFirstSend {
 export interface ThreadDraft {
   harnessId?: string | null;
   externalConversationId?: string;
+  /** Idempotent preparation identity, retained after uncertain create/connection results. */
+  externalPreparationKey?: string;
+  externalConversationHost?: number;
   externalInput?: import('@varin/application-client').ExternalInput & { key: string };
   externalModels?: Record<string, string>;
-  externalOptions?: Record<string, { thinking?: string; mode?: string }>;
+  externalOptions?: Record<string, { thinking?: string; mode?: string; config?: Record<string, string> }>;
   text: string;
   images: ImageAttachment[];
   /** High-water mark retained after removing an image, reset after sending the draft. */

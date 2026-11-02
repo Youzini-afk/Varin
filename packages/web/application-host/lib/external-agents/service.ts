@@ -5,12 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import {
   ExternalAgentError,
+  isExternalInteractionValueValid,
   type ExternalAgentConfiguration,
   type ExternalAgentSettings,
+  type ExternalAgentProfile,
   type ExternalConversation,
   type ExternalConversationSnapshot,
   type ExternalInput,
   type ExternalInteraction,
+  type ExternalInteractionResponse,
   type ExternalItem,
   type ExternalTurn,
   type ExternalObservation,
@@ -21,6 +24,8 @@ import type { createKernelProcessService } from '../kernel/process-service.js';
 import { createPlatformEnvironmentRuntime } from '../platform/environment-runtime.js';
 import { HarnessTransport, record, text } from './transport.js';
 import type { HarnessConnection } from './adapter.js';
+import { ACP_DEFAULTS, ACP_PROFILES, getAcpProfile } from './profiles.js';
+import { assertProfilePlatform, profileVersionArguments } from './profile-launch.js';
 import { connectCodex } from './codex.js';
 import { connectPi } from './pi.js';
 import { connectAcp } from './acp.js';
@@ -32,9 +37,13 @@ const defaults: ExternalAgentConfiguration[] = [
   { id: 'codex', name: 'Codex', harness: 'codex', command: 'codex', args: [], enabled: false },
   { id: 'claude', name: 'Claude Code', harness: 'claude', command: 'claude', args: [], enabled: false },
   { id: 'pi', name: 'Pi', harness: 'pi', command: 'pi', args: [], enabled: false },
+  ...ACP_DEFAULTS,
 ];
 type Spawn = ReturnType<typeof createKernelProcessService>['spawn'];
 interface Live {
+  generation: string;
+  failure?: Error;
+  dispose: Array<() => void>;
   launchKey: string;
   connection: HarnessConnection;
   peer: HarnessTransport;
@@ -42,7 +51,8 @@ interface Live {
     string,
     {
       request: ExternalInteraction;
-      resolve(value: { optionId?: string; answers?: Record<string, string[]>; text?: string }): void;
+      resolve(value: ExternalInteractionResponse): void;
+      cleanup(): void;
       reject(error: Error): void;
     }
   >;
@@ -55,6 +65,8 @@ const launchKey = (launch: Pick<ExternalAgentConfiguration, 'command' | 'args'>)
 export class ExternalAgentsService {
   private readonly connections = new Map<string, Live>();
   private readonly connecting = new Map<string, Promise<Live>>();
+  private readonly authenticating = new Set<string>();
+  private readonly disconnecting = new Map<string, Promise<void>>();
   private readonly connectionControllers = new Map<string, AbortController>();
   private readonly running = new Map<string, Promise<void>>();
   private readonly observers = new Map<string, Set<(event: ExternalObservation) => boolean>>();
@@ -301,10 +313,11 @@ export class ExternalAgentsService {
     const value = await this.command<ExternalAgentSettings>({ action: 'settings' }, signal);
     return {
       ...value,
+      profiles: [...ACP_PROFILES],
       agents: [...value.agents, ...defaults.filter((d) => !value.agents.some((a) => a.id === d.id))],
     };
   }
-  async configure(value: Omit<ExternalAgentSettings, 'revision'>, expectedRevision: number, key: string) {
+  async configure(value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>, expectedRevision: number, key: string) {
     if (
       !value ||
       !Array.isArray(value.agents) ||
@@ -346,6 +359,8 @@ export class ExternalAgentsService {
   private async executable(
     config: ExternalAgentConfiguration,
   ): Promise<{ executable: string; command: string; args: string[]; env: NodeJS.ProcessEnv }> {
+    const profile = getAcpProfile(config.id);
+    assertProfilePlatform(profile, process.platform, process.arch);
     const env = { ...process.env, ...this.environment.getLoginShellEnvSnapshot() };
     const executable = path.isAbsolute(config.command)
       ? config.command
@@ -371,34 +386,35 @@ export class ExternalAgentsService {
     }
     return { executable, command: executable, args: config.args, env };
   }
+  private async probeVersion(launch: Awaited<ReturnType<ExternalAgentsService['executable']>>, signal?: AbortSignal, profile?: ExternalAgentProfile) {
+    const cwd = path.join(this.deps.directory, 'probe');
+    await mkdir(cwd, { recursive: true });
+    // This deadline bounds only a version query, never a model turn or native effect.
+    const timeout = AbortSignal.timeout(15_000);
+    const args = profileVersionArguments(launch.args, profile);
+    const child = await this.deps.spawn(launch.command, args, {
+      cwd, env: launch.env, stdio: ['ignore', 'pipe', 'pipe'],
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout, windowsHide: true,
+    });
+    const stdout: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.resume();
+    try {
+      await child.completion;
+      signal?.throwIfAborted();
+      if (timeout.aborted) throw new ExternalAgentError('probe_timeout', 'Program version query did not finish');
+      if (child.exitCode !== 0) throw new Error(`Program version check exited with ${child.exitCode}`);
+      return Buffer.concat(stdout).toString('utf8').trim();
+    } finally {
+      if (child.exitConfirmed) await child.release();
+    }
+  }
   async detect(id: string, signal?: AbortSignal) {
     const config = await this.configuration(id);
     try {
       const launch = await this.executable(config);
-      const cwd = path.join(this.deps.directory, 'probe');
-      await mkdir(cwd, { recursive: true });
-      const child = await this.deps.spawn(launch.command, [...launch.args, '--version'], {
-        cwd,
-        env: launch.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        signal,
-        windowsHide: true,
-      });
-      const stdout: Buffer[] = [];
-      child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-      child.stderr.resume();
-      try {
-        await child.completion;
-        if (child.exitCode !== 0) throw new Error(`Program version check exited with ${child.exitCode}`);
-        return {
-          id,
-          status: 'available' as const,
-          executable: launch.executable,
-          version: Buffer.concat(stdout).toString('utf8').trim(),
-        };
-      } finally {
-        if (child.exitConfirmed) await child.release();
-      }
+      const version = await this.probeVersion(launch, signal, getAcpProfile(config.id));
+      return { id, status: 'available' as const, executable: launch.executable, version };
     } catch (error) {
       if (signal?.aborted) throw error;
       return {
@@ -465,41 +481,94 @@ export class ExternalAgentsService {
       observationEpoch: this.observationEpoch,
       observationRevision: this.revisions.get(id) ?? 0,
       items: [...items.values()],
-      connected: Boolean(live && !live.peer.disconnected),
+      connected: Boolean(live && !live.failure && !live.peer.disconnected && !live.connection.failure),
       capabilities: live?.connection.capabilities,
       interactions: [...(live?.interactions.values() ?? [])].map((v) => v.request),
     };
   }
   async connect(id: string) {
+    const previous = this.connections.get(id);
+    const live = await this.connection(id);
+    if (previous === live && live.connection.capabilities.modelsError && live.connection.capabilities.modelsRefresh)
+      await live.connection.refreshCapabilities?.();
+    this.notify(id, true);
+    return live.connection.capabilities;
+  }
+  disconnect(id: string): Promise<void> {
+    const pending = this.disconnecting.get(id);
+    if (pending) return pending;
+    if (this.retiring.has(id)) return Promise.reject(new ExternalAgentError('conversation_busy', 'This conversation is being deleted'));
+    this.retiring.add(id);
+    const work = Promise.resolve().then(async () => {
+      const snapshot = await this.read(id);
+      if (snapshot.conversation.activeTurn || snapshot.turns.some((turn) => turn.status === 'queued'))
+        throw new ExternalAgentError('turn_active', 'Stop active or queued turns before disconnecting');
+      this.connectionControllers.get(id)?.abort(new ExternalAgentError('connection_cancelled', 'External connection preparation cancelled'));
+      await this.connecting.get(id)?.catch(() => {});
+      const live = this.connections.get(id);
+      if (live) {
+        this.cancelInteractions(live);
+        await live.connection.close();
+        for (const dispose of live.dispose) dispose();
+        if (this.connections.get(id) === live) this.connections.delete(id);
+      }
+      this.notify(id);
+    }).finally(() => {
+      this.retiring.delete(id);
+      if (this.disconnecting.get(id) === work) this.disconnecting.delete(id);
+    });
+    this.disconnecting.set(id, work);
+    return work;
+  }
+  async continueConversation(id: string) {
     const live = await this.connection(id);
     await this.command({ action: 'reconnected', id, sessionId: live.connection.sessionId });
     this.advance(id);
     this.notify(id, true);
-    return live.connection.capabilities;
+  }
+  async authenticate(id: string, methodId: string) {
+    if (this.authenticating.has(id) || this.retiring.has(id) || this.running.has(id))
+      throw new ExternalAgentError('conversation_busy', 'Wait for active conversation work before authenticating');
+    this.authenticating.add(id);
+    try {
+      const snapshot = await this.read(id);
+      if (snapshot.conversation.activeTurn || snapshot.turns.some((turn) => turn.status === 'queued'))
+        throw new ExternalAgentError('turn_active', 'Stop active or queued turns before authenticating');
+      if (snapshot.conversation.harness !== 'acp')
+        throw new ExternalAgentError('authentication_unsupported', 'Use this harness’s own sign-in command');
+      const live = await this.connection(id, undefined, methodId);
+      this.notify(id, true);
+      return live.connection.capabilities;
+    } finally {
+      this.authenticating.delete(id);
+      this.advance(id);
+    }
   }
   private async connection(
     id: string,
     launch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>,
+    authMethodId?: string,
   ): Promise<Live> {
-    if (this.retiring.has(id))
-      throw new ExternalAgentError('conversation_deleting', 'This conversation is being deleted');
+    if (this.retiring.has(id) || (this.authenticating.has(id) && authMethodId === undefined))
+      throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
     const pending = this.connecting.get(id);
     if (pending) {
       await pending;
-      return this.connection(id, launch);
+      return this.connection(id, launch, authMethodId);
     }
     const controller = new AbortController();
     this.connectionControllers.set(id, controller);
     const opening = Promise.resolve()
       .then(async () => {
         const live = this.connections.get(id);
-        if (live && !live.peer.disconnected && (!launch || live.launchKey === launchKey(launch))) return live;
+        if (live && !authMethodId && !live.failure && !live.peer.disconnected && !live.connection.failure && (!launch || live.launchKey === launchKey(launch))) return live;
         if (live) {
           await live.connection.close();
+          for (const dispose of live.dispose) dispose();
           if (this.connections.get(id) === live) this.connections.delete(id);
         }
         controller.signal.throwIfAborted();
-        return this.open(id, controller.signal, launch);
+        return this.open(id, controller.signal, launch, authMethodId);
       })
       .finally(() => {
         if (this.connecting.get(id) === opening) {
@@ -514,6 +583,7 @@ export class ExternalAgentsService {
     id: string,
     signal: AbortSignal,
     frozenLaunch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>,
+    authMethodId?: string,
   ): Promise<Live> {
     if (this.stopping) throw new Error('External Agent service is stopping');
     const { conversation: c } = await this.read(id);
@@ -551,6 +621,7 @@ export class ExternalAgentsService {
       executionCwd=view.path;admittedSource={workspaceId:c.nativeWorkspace.workspace_id,executionWorkspaceId:c.nativeWorkspace.execution_workspace_id,canonicalRoot:view.path};
     }else await this.deps.resolveWorkspace(c.cwd);
     const launch = await this.executable(config);
+    const version = config.harness === 'pi' ? await this.probeVersion(launch, signal) : undefined;
     const command = config.harness === 'claude' ? process.execPath : launch.command;
     const args =
       config.harness === 'claude'
@@ -580,28 +651,32 @@ export class ExternalAgentsService {
         config.harness === 'codex'
           ? await connectCodex(peer, executionCwd, c.sessionId)
           : config.harness === 'pi'
-            ? await connectPi(peer, c.sessionId)
+            ? await connectPi(peer, c.sessionId, version === undefined ? {} : { version })
             : config.harness === 'claude'
               ? await connectClaude(peer, { command: launch.command, args: launch.args }, executionCwd, c.sessionId)
-              : await connectAcp(peer, executionCwd, c.sessionId);
+              : await connectAcp(peer, executionCwd, c.sessionId, { profile: getAcpProfile(c.configurationId), authMethodId });
       await this.command({ action: 'bind', id, sessionId: connection.sessionId });
       if (this.stopping) throw new Error('External Agent service stopped during connection');
-      const live: Live = { connection, peer, interactions: new Map(), launchKey: launchKey(config) };
+      const live: Live = { generation: randomUUID(), dispose: [], connection, peer, interactions: new Map(), launchKey: launchKey(config) };
+      if (connection.failure) throw connection.failure;
       this.connections.set(id, live);
-      peer.onExit((error) => {
-        // Retain ownership until the native process tree is joined. A broken protocol
-        // alone must not permit a second writer in the same workspace/session.
-        void peer
-          .close()
-          .then(() => {
-            if (this.connections.get(id) === live) this.connections.delete(id);
-            this.notify(id);
-          })
-          .catch((error) => this.deps.onError?.(id, error));
-        for (const waiter of live.interactions.values()) waiter.reject(error);
-        live.interactions.clear();
+      const retire = (error: Error) => {
+        if (live.failure) return;
+        live.failure = error;
+        // A fatal protocol/session failure also owns the process tree until it is joined.
+        this.cancelInteractions(live, undefined, error);
+        void connection.close().then(() => {
+          for (const dispose of live.dispose) dispose();
+          if (this.connections.get(id) === live) this.connections.delete(id);
+          this.notify(id);
+        }).catch((failure) => this.deps.onError?.(id, failure));
         this.notify(id);
-      });
+      };
+      live.dispose.push(peer.onExit(retire));
+      if (connection.onFailure) live.dispose.push(connection.onFailure(retire));
+      if (connection.onCapabilities) live.dispose.push(connection.onCapabilities(() => {
+        if (this.connections.get(id) === live) this.notify(id);
+      }));
       this.notify(id, true);
       return live;
     } catch (error) {
@@ -613,12 +688,17 @@ export class ExternalAgentsService {
           'External Agent preparation failed and process exit is unconfirmed',
         );
       }
+      if (signal.aborted) throw signal.reason;
       throw error;
     }
   }
   async send(id: string, key: string, input: ExternalInput): Promise<ExternalTurn> {
+    if (this.retiring.has(id) || this.authenticating.has(id)) throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
     if (
-      Object.keys(input).some((key) => !['text', 'images', 'model', 'thinking', 'mode'].includes(key)) ||
+      Object.keys(input).some((key) => !['text', 'images', 'model', 'thinking', 'mode', 'config'].includes(key)) ||
+      (input.config !== undefined && (!input.config || typeof input.config !== 'object' || Array.isArray(input.config) || Object.values(input.config).some((v) => typeof v !== 'string'))) ||
       ['model', 'thinking', 'mode'].some(
         (key) =>
           input[key as keyof ExternalInput] !== undefined &&
@@ -662,6 +742,7 @@ export class ExternalAgentsService {
         'backend_changed',
         'This conversation uses another harness; start a new conversation for the new backend',
       );
+    if (this.retiring.has(id) || this.authenticating.has(id)) throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
     const receipt = await this.command<ExternalTurn>({
       action: 'admit',
       id,
@@ -673,7 +754,7 @@ export class ExternalAgentsService {
     return receipt;
   }
   private advance(id: string) {
-    if (this.running.has(id) || this.stopping || this.retiring.has(id)) return;
+    if (this.running.has(id) || this.stopping || this.retiring.has(id) || this.authenticating.has(id)) return;
     const work = this.drain(id).finally(async () => {
       if (this.running.get(id) !== work) return;
       this.running.delete(id);
@@ -693,7 +774,7 @@ export class ExternalAgentsService {
   private async drain(id: string) {
     while (!this.stopping) {
       const snapshot = await this.read(id);
-      if (snapshot.conversation.needsReview) return;
+      if (snapshot.conversation.needsReview || this.authenticating.has(id) || this.retiring.has(id)) return;
       const turn = snapshot.turns.find((t) => t.status === 'queued');
       if (!turn || snapshot.conversation.activeTurn) return;
       await this.command({ action: 'begin', id, turnId: turn.id });
@@ -794,9 +875,17 @@ export class ExternalAgentsService {
           throw new Error('External Agent startup cancelled');
         if (input.images?.length && !live.connection.capabilities.images)
           throw new ExternalAgentError('images_unsupported', 'This Agent does not accept image input');
-        await this.command({ action: 'observe', id, turnId: turn.id, status: 'running' });
-        dispatched = true;
+        const generation = live.generation;
         const result = await live.connection.prompt(input, {
+          beforeDispatch: async () => {
+            if (dispatched) throw new Error('This external input has already been dispatched');
+            if (this.connections.get(id)?.generation !== generation || live!.connection.failure)
+              throw new Error('The external connection changed before delivery');
+            const current = (await this.read(id)).turns.find((t) => t.id === turn.id);
+            if (current?.status === 'stopping') throw new Error('External Agent startup cancelled');
+            await this.command({ action: 'observe', id, turnId: turn.id, status: 'running' });
+            dispatched = true;
+          },
           started: (nativeId) => {
             // Serialize binding with body persistence so a fast final receipt cannot
             // overtake the original turn identity.
@@ -809,18 +898,35 @@ export class ExternalAgentsService {
           usage: (value) => {
             usage = value;
           },
-          interaction: (request) =>
-            new Promise((resolve, reject) => {
-              live!.interactions.set(request.id, {
-                request: { ...request, turnId: turn.id },
-                resolve,
-                reject,
-              });
-              void this.command({ action: 'observe', id, turnId: turn.id, status: 'waiting_user' }).then(
-                () => this.notify(id),
-                reject,
+          interaction: (request, signal) => new Promise<ExternalInteractionResponse>((resolve, reject) => {
+            if (signal?.aborted || this.connections.get(id)?.generation !== generation) {
+              resolve({ cancelled: true });
+              return;
+            }
+            const publicId = `${generation}:${turn.id}:${randomUUID()}`;
+            const abort = () => {
+              const waiter = live!.interactions.get(publicId);
+              if (!waiter) return;
+              live!.interactions.delete(publicId);
+              waiter.cleanup();
+              waiter.resolve({ cancelled: true });
+              // A native-withdrawn callback is no longer waiting for the user.
+              // Catalog rejects this observation if stop/end already won.
+              void this.command({ action: 'observe', id, turnId: turn.id,
+                status: live!.interactions.size ? 'waiting_user' : 'running' }).then(
+                () => this.notify(id), () => this.notify(id),
               );
-            }),
+            };
+            live!.interactions.set(publicId, {
+              request: { ...request, id: publicId, turnId: turn.id }, resolve, reject,
+              cleanup: () => signal?.removeEventListener('abort', abort),
+            });
+            signal?.addEventListener('abort', abort, { once: true });
+            void this.command({ action: 'observe', id, turnId: turn.id, status: 'waiting_user' }).then(
+              () => this.notify(id),
+              () => abort(),
+            );
+          }),
         });
         await flush();
         await this.command({
@@ -846,16 +952,14 @@ export class ExternalAgentsService {
         });
         return;
       } finally {
-        for (const waiter of live?.interactions.values() ?? [])
-          waiter.reject(new Error('The external turn ended'));
-        live?.interactions.clear();
+        if (live) this.cancelInteractions(live, turn.id);
         this.projectedItems.delete(id);
         this.notify(id, true);
         this.maintenance?.();
       }
     }
   }
-  async stop(id: string, turnId: string) {
+  async stop(id: string, turnId: string, force = false) {
     const snapshot = await this.read(id);
     const turn = snapshot.turns.find((t) => t.id === turnId);
     if (!turn) throw new ExternalAgentError('turn_missing', 'External turn is unavailable');
@@ -867,21 +971,64 @@ export class ExternalAgentsService {
     }
     const live = this.connections.get(id);
     if (!live && (this.connectionControllers.has(id) || turn.status === 'preparing')) {
+      const controller = this.connectionControllers.get(id);
       await this.command({ action: 'observe', id, turnId, status: 'stopping' });
-      this.connectionControllers.get(id)?.abort(new Error('External Agent startup was cancelled'));
+      const latest = await this.read(id);
+      const active = latest.turns.find((candidate) => candidate.id === turnId);
+      if (!active || ended(active)) return;
+      const currentController = this.connectionControllers.get(id);
+      if (latest.conversation.activeTurn !== turnId || (controller && currentController !== controller))
+        throw new ExternalAgentError('turn_changed', 'The original external preparation is no longer active');
+      currentController?.abort(new Error('External Agent startup was cancelled'));
       this.notify(id);
       return;
     }
     if (!live) throw new ExternalAgentError('not_connected', 'Reconnect before controlling this Agent');
     await this.command({ action: 'observe', id, turnId, status: 'stopping' });
-    await live.connection.stop();
+    // Catalog observation is asynchronous. A completed old turn must never let
+    // a late control request stop its successor on this reusable connection.
+    const latest = await this.read(id);
+    const active = latest.turns.find((candidate) => candidate.id === turnId);
+    if (!active || ended(active)) return;
+    if (latest.conversation.activeTurn !== turnId || this.connections.get(id) !== live)
+      throw new ExternalAgentError('turn_changed', 'The original external turn is no longer active');
+    this.cancelInteractions(live, turnId);
+    if (force) {
+      // Explicit termination joins the Rust-owned process tree. It does not claim that
+      // already-performed effects were rolled back or that the interrupted input may replay.
+      await live.connection.close();
+      await this.running.get(id);
+    } else await live.connection.stop();
     this.notify(id);
+  }
+  private cancelInteractions(live: Live, turnId?: string, error?: Error) {
+    for (const [id, waiter] of live.interactions) {
+      if (turnId && waiter.request.turnId !== turnId) continue;
+      live.interactions.delete(id);
+      waiter.cleanup();
+      // Cancellation is a protocol response, not an abandoned permission callback.
+      if (error && live.peer.disconnected) waiter.reject(error);
+      else waiter.resolve({ cancelled: true });
+    }
   }
   async respond(
     id: string,
     requestId: string,
-    response: { optionId?: string; answers?: Record<string, string[]>; text?: string },
+    response: ExternalInteractionResponse,
   ) {
+    const dictionary = (value: unknown): value is Record<string, unknown> =>
+      Boolean(value && typeof value === 'object' && !Array.isArray(value));
+    if (!dictionary(response) ||
+      Object.keys(response).some((key) => !['optionId', 'answers', 'text', 'cancelled', 'values'].includes(key)) ||
+      (response.optionId !== undefined && typeof response.optionId !== 'string') ||
+      (response.text !== undefined && typeof response.text !== 'string') ||
+      (response.cancelled !== undefined && typeof response.cancelled !== 'boolean') ||
+      (response.answers !== undefined && (!dictionary(response.answers) || Object.values(response.answers).some((value) => !Array.isArray(value) || value.some((entry) => typeof entry !== 'string')))) ||
+      (response.values !== undefined && (!dictionary(response.values) || Object.values(response.values).some((value) =>
+        typeof value !== 'string' && typeof value !== 'boolean' &&
+        !(typeof value === 'number' && Number.isFinite(value)) &&
+        !(Array.isArray(value) && value.every((entry) => typeof entry === 'string'))))))
+      throw new ExternalAgentError('invalid_answer', 'Invalid external Agent answer');
     const live = this.connections.get(id),
       waiter = live?.interactions.get(requestId);
     if (!live || !waiter)
@@ -889,15 +1036,24 @@ export class ExternalAgentsService {
     const current = (await this.read(id)).turns.find((t) => t.id === waiter.request.turnId);
     if (!current || current.status === 'stopping' || ended(current))
       throw new ExternalAgentError('interaction_expired', 'This turn is stopping or has ended');
-    if (waiter.request.options.length && !waiter.request.options.some((v) => v.id === response.optionId))
+    if (!response.cancelled && waiter.request.options.length && !waiter.request.options.some((v) => v.id === response.optionId))
       throw new ExternalAgentError('invalid_answer', 'Select an available answer');
-    live.interactions.delete(requestId);
+    if (!response.cancelled && waiter.request.fields) {
+      const values = response.values as ExternalInteractionResponse['values'];
+      const field = waiter.request.fields.find((field) => !isExternalInteractionValueValid(field, values?.[field.id]));
+      if (field || Object.keys(response.values ?? {}).some((id) => !waiter.request.fields!.some((field) => field.id === id)))
+        throw new ExternalAgentError('invalid_answer', field ? `Invalid value for ${field.label}` : 'Unexpected answer field');
+    }
     await this.command({
       action: 'observe',
       id,
       turnId: waiter.request.turnId,
-      status: live.interactions.size ? 'waiting_user' : 'running',
+      status: live.interactions.size > 1 ? 'waiting_user' : 'running',
     });
+    if (live.interactions.get(requestId) !== waiter)
+      throw new ExternalAgentError('interaction_expired', 'This request has already ended');
+    live.interactions.delete(requestId);
+    waiter.cleanup();
     waiter.resolve(response);
     this.notify(id);
   }
@@ -916,12 +1072,15 @@ export class ExternalAgentsService {
       this.notify(id, true);
       return value;
     }
+    if (this.retiring.has(id) || this.authenticating.has(id)) throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
     this.retiring.add(id);
     try {
       if ((await this.read(id)).conversation.activeTurn)
         throw new ExternalAgentError('turn_active', 'Stop this turn before deleting the conversation');
       await this.connecting.get(id);
-      await this.connections.get(id)?.connection.close();
+      const live = this.connections.get(id);
+      await live?.connection.close();
+      for (const dispose of live?.dispose ?? []) dispose();
       this.connections.delete(id);
       const value = await this.command<ExternalConversation>({
         action: 'update',
@@ -995,15 +1154,19 @@ export class ExternalAgentsService {
     this.stopping = true;
     this.removeChildrenListener?.();
     for (const task of this.childTasks.values()) task.controller.abort();
-    await Promise.allSettled([...this.childTasks.values()].map((task) => task.work));
     for (const controller of this.connectionControllers.values())
       controller.abort(new Error('Application Host is stopping'));
-    await Promise.allSettled([...this.connecting.values()]);
-    const results = await Promise.allSettled(
+    // Start native termination before joining tasks that may themselves be
+    // waiting for an unresponsive cancel acknowledgement from those peers.
+    const closing = Promise.allSettled(
       [...this.connections.values()].map((live) => live.connection.close()),
     );
+    await Promise.allSettled([...this.connecting.values()]);
+    const results = await closing;
+    await Promise.allSettled([...this.childTasks.values()].map((task) => task.work));
     await Promise.allSettled([...this.running.values()]);
     if (this.cleanupWork) await this.cleanupWork;
+    for (const live of this.connections.values()) for (const dispose of live.dispose) dispose();
     this.connections.clear();
     const errors = results.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
     if (errors.length) throw new AggregateError(errors, 'External Agent shutdown did not complete');

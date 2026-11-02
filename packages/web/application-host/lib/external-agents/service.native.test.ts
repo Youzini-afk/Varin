@@ -24,7 +24,7 @@ const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 if (process.argv.includes('--version')) { console.log('fixture 1'); process.exit(0); }
 let count = 0, active;
 const reply = (id, result) => send({jsonrpc:'2.0',id,result});
-const event = (method, params) => send({jsonrpc:'2.0',method,params:{threadId:'native-thread',...params}});
+const event = (method, params) => send({jsonrpc:'2.0',method,params:{threadId:'native-thread',turnId:active,...params}});
 createInterface({ input: process.stdin }).on('line', line => {
   const m = JSON.parse(line);
   if (m.method === 'initialize') reply(m.id, {userAgent:'fixture'});
@@ -40,7 +40,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     if (input === 'permission') send({jsonrpc:'2.0',id:'permission',method:'item/commandExecution/requestApproval',params:{threadId:'native-thread',turnId:active,command:'fixture',availableDecisions:['accept','decline']}});
     else event('turn/completed',{turn:{id:active,status:'completed'}});
   }
-  if (m.id === 'permission' && m.result) event('turn/completed',{turn:{id:active,status:'completed'}});
+  if (m.id === 'permission' && m.result?.decision === 'accept') event('turn/completed',{turn:{id:active,status:'completed'}});
   if (m.method === 'turn/interrupt') { reply(m.id,{}); event('turn/completed',{turn:{id:active,status:'interrupted'}}); }
 });
 `,
@@ -91,7 +91,8 @@ it('round-trips external input, real protocol approval, queued turns and durable
   await vi.waitFor(async () => expect((await service.read(conversation.id)).interactions).toHaveLength(1), {
     timeout: 15_000,
   });
-  await service.respond(conversation.id, 'permission', { optionId: 'accept' });
+  const approvalId = (await service.read(conversation.id)).interactions[0]!.id;
+  await service.respond(conversation.id, approvalId, { optionId: 'accept' });
   await vi.waitFor(
     async () =>
       expect((await service.read(conversation.id)).turns.find((v) => v.id === second.id)?.status).toBe(
@@ -112,6 +113,7 @@ it('round-trips external input, real protocol approval, queued turns and durable
   await vi.waitFor(async () => expect((await service.read(conversation.id)).interactions).toHaveLength(1), {
     timeout: 15_000,
   });
+  const expiredApprovalId = (await service.read(conversation.id)).interactions[0]!.id;
   await service.stop(conversation.id, stopping.id);
   await vi.waitFor(
     async () =>
@@ -120,7 +122,7 @@ it('round-trips external input, real protocol approval, queued turns and durable
       ),
     { timeout: 15_000 },
   );
-  await expect(service.respond(conversation.id, 'permission', { optionId: 'accept' })).rejects.toThrow();
+  await expect(service.respond(conversation.id, expiredApprovalId, { optionId: 'accept' })).rejects.toThrow();
 });
 
 it('keeps an interrupted external input and does not automatically replay it', async () => {

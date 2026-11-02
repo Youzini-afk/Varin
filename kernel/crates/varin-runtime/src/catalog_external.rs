@@ -213,6 +213,22 @@ mod tests {
         )
         .unwrap();
     }
+    #[test]
+    fn external_completion_cannot_replace_the_original_native_turn_identity() {
+        let directory = Fixture::new();
+        let mut c = Catalog::open(directory.path()).unwrap();
+        create(&mut c, "external:a");
+        let admitted = call(&mut c, json!({"action":"admit","id":"external:a","key":"input","input":{"text":"work"}})).unwrap();
+        let turn = &admitted["id"];
+        call(&mut c, json!({"action":"begin","id":"external:a","turnId":turn})).unwrap();
+        call(&mut c, json!({"action":"native_turn","id":"external:a","turnId":turn,"nativeId":"native-current"})).unwrap();
+        assert!(call(&mut c, json!({"action":"observe","id":"external:a","turnId":turn,"status":"completed","nativeId":"native-stale"})).is_err());
+        let snapshot = call(&mut c, json!({"action":"read","id":"external:a"})).unwrap();
+        assert_eq!(snapshot["turns"][0]["nativeId"], "native-current");
+        assert_eq!(snapshot["conversation"]["activeTurn"], *turn);
+        call(&mut c, json!({"action":"observe","id":"external:a","turnId":turn,"status":"completed","nativeId":"native-current"})).unwrap();
+    }
+
 }
 fn now() -> u64 {
     std::time::SystemTime::now()
@@ -721,6 +737,10 @@ impl Catalog {
                 t["status"] = json!(status);
                 t["updatedAt"] = json!(now());
                 if let Some(n) = native_id {
+                    required(&n)?;
+                    if t.get("nativeId").is_some_and(|original| original != &n) {
+                        return Err(RuntimeError::Conflict("external native turn identity changed".into()));
+                    }
                     t["nativeId"] = json!(n);
                 }
                 if let Some(e) = error {

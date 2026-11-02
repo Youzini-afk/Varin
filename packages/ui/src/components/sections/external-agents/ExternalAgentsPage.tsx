@@ -2,6 +2,8 @@ import React from 'react';
 import {
   createExternalAgentsHttpAPI,
   getRuntimeEndpointGeneration,
+  subscribeRuntimeEndpointChanged,
+  type ExternalAgentProfile,
   type ExternalAgentConfiguration,
   type ExternalAgentDetection,
 } from '@varin/application-client';
@@ -15,6 +17,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { HarnessIcon } from '@/components/thread/HarnessIcon';
+import { openExternalUrl } from '@/lib/url';
 
 export function ExternalAgentDefault() {
   const { t } = useI18n();
@@ -66,15 +69,18 @@ export function ExternalAgentDefault() {
 function ConfigurationRow({
   configuration,
   busy,
+  profile,
   save,
   remove,
 }: {
   configuration: ExternalAgentConfiguration;
   busy: boolean;
+  profile?: ExternalAgentProfile;
   save(value: ExternalAgentConfiguration): Promise<void>;
   remove(): Promise<void>;
 }) {
   const { t } = useI18n();
+  const host = getRuntimeEndpointGeneration();
   const [expanded, setExpanded] = React.useState(false);
   const [draft, setDraft] = React.useState(configuration);
   const [args, setArgs] = React.useState(JSON.stringify(configuration.args));
@@ -87,25 +93,26 @@ function ConfigurationRow({
     setDraft(configuration);
     setArgs(JSON.stringify(configuration.args));
   }, [configuration]);
-  const detect = async () => {
+  const detect = React.useCallback(async () => {
     controller.current?.abort();
     const request = new AbortController();
     controller.current = request;
     setDetecting(true);
     setError('');
     try {
-      const result = await createExternalAgentsHttpAPI().detect(configuration.id, request.signal);
-      if (!request.signal.aborted) setDetection(result);
+      const result = await createExternalAgentsHttpAPI(host).detect(configuration.id, request.signal);
+      if (!request.signal.aborted && host === getRuntimeEndpointGeneration()) setDetection(result);
     } catch (error) {
-      if (!request.signal.aborted) setError(String(error));
+      if (!request.signal.aborted && host === getRuntimeEndpointGeneration()) setError(String(error));
     } finally {
-      if (!request.signal.aborted) setDetecting(false);
+      if (!request.signal.aborted && host === getRuntimeEndpointGeneration()) setDetecting(false);
     }
-  };
+  }, [host, configuration.id]);
+  const detectionArguments = JSON.stringify(configuration.args);
   React.useEffect(() => {
     void detect();
     return () => controller.current?.abort();
-  }, [configuration.id, configuration.command, JSON.stringify(configuration.args)]);
+  }, [detect, configuration.command, detectionArguments]);
   return (
     <section className="border-b border-border/60 py-5">
       <div className="flex items-center gap-3">
@@ -115,7 +122,7 @@ function ConfigurationRow({
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
         >
-          <HarnessIcon harness={configuration.harness} className="size-5" />
+          <HarnessIcon harness={configuration.harness} profileId={profile?.id} className="size-5" />
           <span className="min-w-0">
             <span className="block font-medium">{configuration.name}</span>
             <span className="block truncate typography-meta text-muted-foreground">
@@ -176,6 +183,16 @@ function ConfigurationRow({
               }
             }}
           >
+            {profile && <div className="space-y-2 rounded-lg bg-muted/40 p-3 typography-meta text-muted-foreground">
+              <p>{profile.description}</p>
+              <p>{t('external.platforms')}: {profile.platforms.join(' · ')}</p>
+              <p>{t('external.profileLaunch')}</p>
+              <pre className="overflow-x-auto whitespace-pre-wrap break-all">{profile.launch.command} {JSON.stringify(profile.launch.args)}</pre>
+              {profile.authentication && <p className="whitespace-pre-wrap">{profile.authentication}</p>}
+              {profile.compatibility && <p className="whitespace-pre-wrap">{profile.compatibility}</p>}
+              {profile.installUrl && <Button type="button" size="sm" variant="outline" onClick={() => void openExternalUrl(profile.installUrl!).catch(error => setError(String(error)))}>{t('external.installGuide')}</Button>}
+            </div>}
+            <p className="typography-meta text-muted-foreground">{t('external.detectionScope')}</p>
             <label className="block space-y-2 typography-meta">
               <span>{t('external.name')}</span>
               <Input value={draft.name} onChange={(e) => setDraft((v) => ({ ...v, name: e.target.value }))} />
@@ -198,7 +215,7 @@ function ConfigurationRow({
             <Button disabled={busy} type="submit">
               {t('external.save')}
             </Button>
-            {configuration.harness === 'acp' && (
+            {configuration.harness === 'acp' && !profile && (
               <Button
                 disabled={busy}
                 type="button"
@@ -221,6 +238,10 @@ function ConfigurationRow({
   );
 }
 export function ExternalAgentsPage() {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <ExternalAgentsSettings key={host} host={host} />;
+}
+function ExternalAgentsSettings({ host }: { host: number }) {
   const { t } = useI18n();
   const settings = useExternalAgents();
   const loadError = useExternalAgentStore((state) => state.error);
@@ -230,7 +251,7 @@ export function ExternalAgentsPage() {
     if (!settings) return;
     setSaving(true);
     try {
-      await createExternalAgentsHttpAPI().configure(
+      await createExternalAgentsHttpAPI(host).configure(
         {
           agents: settings.agents.filter((a) => a.id !== id),
           defaultAgent: settings.defaultAgent === id ? null : settings.defaultAgent,
@@ -238,9 +259,9 @@ export function ExternalAgentsPage() {
         settings.revision,
         crypto.randomUUID(),
       );
-      await useExternalAgentStore.getState().refresh();
+      if (host === getRuntimeEndpointGeneration()) await useExternalAgentStore.getState().refresh();
     } finally {
-      setSaving(false);
+      if (host === getRuntimeEndpointGeneration()) setSaving(false);
     }
   };
   const save = async (configuration: ExternalAgentConfiguration) => {
@@ -256,7 +277,7 @@ export function ExternalAgentsPage() {
         settings.revision,
         crypto.randomUUID(),
       );
-      await useExternalAgentStore.getState().refresh();
+      if (generation === getRuntimeEndpointGeneration()) await useExternalAgentStore.getState().refresh();
     } finally {
       if (generation === getRuntimeEndpointGeneration()) setSaving(false);
     }
@@ -273,11 +294,22 @@ export function ExternalAgentsPage() {
         <ConfigurationRow
           key={configuration.id}
           configuration={configuration}
+          profile={settings.profiles?.find(profile => profile.id === configuration.id)}
           busy={saving}
           save={save}
           remove={() => remove(configuration.id)}
         />
       ))}
+      {settings?.profiles?.filter(profile => !settings.agents.some(agent => agent.id === profile.id)).map(profile => <section key={profile.id} className="space-y-2 border-b border-border/60 py-5">
+        <div className="flex items-center gap-3"><HarnessIcon harness={profile.harness} profileId={profile.id} /><span className="flex-1 font-medium">{profile.name}</span>
+          <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => void save({ id: profile.id, name: profile.name,
+            harness: profile.harness, enabled: false, command: profile.launch.command, args: profile.launch.args }).catch(error => setError(String(error)))}>{t('external.addProfile')}</Button>
+        </div>
+        <p className="typography-meta text-muted-foreground">{profile.description}</p>
+        <p className="typography-meta text-muted-foreground">{t('external.platforms')}: {profile.platforms.join(' · ')}</p>
+        {profile.authentication && <p className="typography-meta text-muted-foreground">{profile.authentication}</p>}
+        {profile.installUrl && <Button type="button" variant="ghost" size="sm" onClick={() => void openExternalUrl(profile.installUrl!).catch(error => setError(String(error)))}>{t('external.installGuide')}</Button>}
+      </section>)}
       <Button
         className="mt-5"
         variant="outline"
