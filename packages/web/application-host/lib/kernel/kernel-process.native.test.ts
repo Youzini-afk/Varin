@@ -399,6 +399,15 @@ vitestIt.skipIf(!available || process.platform !== "win32")("Windows recovers su
   // The target remains alive after killing only its guardian. Kernel recovery
   // must terminate the retained Job, not send another request to the dead pipe.
   await fs.writeFile(gate, "go");
+  // Establish the fault independently of the kernel projection. A failed
+  // fixture kill must not masquerade as a Job-recovery failure.
+  await expect.poll(() => {
+    try { process.kill(identity.guardianPid, 0); return false; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+      throw error;
+    }
+  }).toBe(true);
   const stopped = await waitFor(f.client, params.processId, snapshot => !snapshot.writerActive);
   assert.equal(stopped.status, "exited");
   assert.equal(stopped.exitCode, null);

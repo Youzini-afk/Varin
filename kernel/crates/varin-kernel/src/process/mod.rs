@@ -541,6 +541,18 @@ impl ProcessManager {
         {
             live.guardian_exited = true;
         }
+        #[cfg(windows)]
+        if live.guardian_exited && !live.containment.empty()? {
+            // An exited guardian cannot consume stop requests or drain its
+            // descendants. Do not wait for control-pipe EOF: a surviving
+            // descendant can retain an inherited writer, making EOF depend
+            // on the very Job termination that recovery must perform.
+            let guardian = live
+                .guardian
+                .lock()
+                .map_err(|_| failure("guardian control poisoned"))?;
+            live.containment.terminate(&guardian, true)?;
+        }
         let buffer = live.shared.lock();
         let mut status = if buffer.pid.is_some() {
             "running"
@@ -560,15 +572,6 @@ impl ProcessManager {
         } else if live.guardian_exited && buffer.closed {
             #[cfg(windows)]
             {
-                if !live.containment.empty()? {
-                    // The guardian can no longer consume a stop request. The kernel
-                    // still owns the original Job, including any surviving writers.
-                    let guardian = live
-                        .guardian
-                        .lock()
-                        .map_err(|_| failure("guardian control poisoned"))?;
-                    live.containment.terminate(&guardian, true)?;
-                }
                 // Termination acceptance is not proof that all Job members exited.
                 if live.containment.empty()? {
                     status = "exited";
