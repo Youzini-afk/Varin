@@ -34,13 +34,17 @@ Select the provider through existing service routing, using the routing document
 
 Installing this example alone does not select its native policy or grant a tool/Source capability. Prepare a `fixed_branch` source with an authorized
 whole-root read grant and the ordinary `file_read` tool. Create `source.txt` before capturing its
-fixed revision. Choose the parent model through normal model/credential settings. The child uses
-that exact admitted model and credential scope, with `workMode: read_only` and an explicit file-read tool subset. Running the example
-can make model calls on that configured provider; building and installing it do not.
+fixed revision. Choose the parent model through normal model/credential settings. With delegation
+model selection disabled, the child inherits that exact admitted model and credential scope.
+When enabled globally, the normal model-preparation owner selects from the eligible catalog
+and freezes the result before child launch; the policy does not grant model or credential authority.
+In either case, the child has `workMode: read_only` and an explicit file-read tool subset. Running the
+example can make calls on these configured providers, including the selector when needed; building
+and installing it do not.
 
 ## Sequence and ownership
 
-1. Submit one `dispatch` graph with the declared task, `workMode: read_only` and `tools: [file_read]` using dispatch schema version 6.
+1. Submit one `dispatch` graph with the declared task, `workMode: read_only` and `tools: [file_read]` using dispatch schema version 7.
    Policy inputs do not advertise tool schemas, so the example selects this supported contract
    explicitly; core rejects unavailable versions rather than silently upgrading a call.
    The core commits the real policy-action/node origin, independent child Thread, source pin and
