@@ -35,7 +35,7 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
 **A team you can watch.**
 
 - The lead agent splits a task and assigns the parts: a Worker writes the implementation, a research agent gathers context, a verifier runs the tests. Teammates work in parallel, message each other, hand over code with file-by-file diffs, and report back in the collaboration panel. Step in whenever you like.
-- A bot has its own name, instructions, model, working directory and memory, and keeps several pieces of work moving. Its stage in the Bot workbench shows what it is doing and which teammates are out on the job. Put it to sleep and its work is suspended; wake it and it picks up where it left off.
+- A bot is a long-running super agent with its own name, instructions, model, working directory and memory, and keeps several pieces of work moving. Its stage in the Bot workbench shows what it is doing and which teammates are out on the job. Put it to sleep and its work is suspended; wake it and it picks up where it left off.
 - Codex, Claude Code, Pi and programs that speak ACP can run on your Host as sessions in Varin, or take work dispatched by the lead agent. They keep their own models, accounts and tools.
 - In the desktop app, an optional desktop companion sits on your desktop and acts out what the bot is doing. Its artwork is a separate download in Settings.
 

@@ -35,7 +35,7 @@
 **Une équipe que vous voyez travailler.**
 
 - L'agent principal découpe la tâche et en confie les parties à ses coéquipiers : un Worker écrit l'implémentation, l'agent de recherche rassemble le contexte, le vérificateur lance les tests. Les coéquipiers avancent en parallèle, s'écrivent directement, se transmettent du code avec son diff fichier par fichier, et rendent compte dans le panneau de collaboration. Intervenez quand vous voulez.
-- Un bot a son propre nom, ses instructions, son modèle, son dossier de travail et sa mémoire, et mène plusieurs tâches de front. Sa scène dans l'espace Bot montre ce qu'il est en train de faire et quels coéquipiers sont partis en mission. Mettez-le en veille et son travail est suspendu ; réveillez-le et il reprend là où il s'était arrêté.
+- Un bot est un super agent qui tourne dans la durée, avec son propre nom, ses instructions, son modèle, son dossier de travail et sa mémoire ; il mène plusieurs tâches de front. Sa scène dans l'espace Bot montre ce qu'il est en train de faire et quels coéquipiers sont partis en mission. Mettez-le en veille et son travail est suspendu ; réveillez-le et il reprend là où il s'était arrêté.
 - Codex, Claude Code, Pi et les programmes compatibles avec ACP peuvent tourner sur votre Host comme sessions dans Varin, ou prendre en charge le travail confié par l'agent principal. Ils gardent leurs propres modèles, comptes et outils.
 - Dans l'application de bureau, un compagnon de bureau facultatif s'installe sur votre bureau et mime ce que fait le bot. Ses illustrations se téléchargent à part, dans les Paramètres.
 
