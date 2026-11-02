@@ -13,6 +13,7 @@ type Runtime = ReturnType<typeof createTerminalRuntime>;
  */
 export function createIsolatedTerminalSessionApi(
   overrides: Record<string, unknown> = {},
+  native = createNativeProcessTestHarness(),
 ): Runtime & TerminalSessionApi {
   const app = overrides.app ?? {
     get() {},
@@ -20,7 +21,6 @@ export function createIsolatedTerminalSessionApi(
     delete() {},
   };
   const server = overrides.server ?? new EventEmitter();
-  const native = createNativeProcessTestHarness();
   const terminal = createTerminalRuntime({
     loadPtyProvider: () => native.loadPtyProvider(),
     app,
