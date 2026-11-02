@@ -4,7 +4,7 @@ import type { ChannelType, ChannelTypes } from './channel-types.js';
 import { directoryModels, metadataProviderId } from './directory-models.js';
 import { object } from './configuration.js';
 
-const metadataFields = ['contextWindow', 'maxOutputTokens', 'pricing', 'input', 'reasoning', 'thinking', 'thinkingLevelMap', 'tokenizer', 'compat'] as const;
+const metadataFields = ['description', 'contextWindow', 'maxOutputTokens', 'pricing', 'input', 'reasoning', 'thinking', 'thinkingLevelMap', 'tokenizer', 'compat'] as const;
 const modelCompat = ['thinkingFormat', 'supportsReasoningEffort', 'forceAdaptiveThinking', 'supportsMidConvoEffort', 'requiresReasoningContentOnAssistantMessages', 'maxTokensField'] as const;
 type Metadata = Pick<ChannelModel, typeof metadataFields[number]>;
 type Entry = { provider: string; owner: string; canonical: string; model: ChannelModel };
@@ -116,7 +116,10 @@ export function modelDirectoryDefaults(index: ModelMetadataIndex, type: ChannelT
   const id = request.requestModelId ?? request.id;
   const local = scopedMatch(directory, id);
   const inferred = index.lookup(type, request);
-  if (local && (local.requestModelId ?? local.id) === id && request.id === local.id) return local.pricing || !inferred?.pricing ? local : { ...local, pricing: inferred.pricing };
+  if (local && (local.requestModelId ?? local.id) === id && request.id === local.id) return { ...local,
+    ...(local.pricing === undefined && inferred?.pricing !== undefined ? { pricing: inferred.pricing } : {}),
+    ...(local.description === undefined && inferred?.description !== undefined ? { description: inferred.description } : {}),
+  };
   if (!local && !inferred) return undefined;
   const scopedMetadata = local ? metadata(local) : {};
   if (local?.protocol !== (request.protocol ?? type.protocol)) { delete scopedMetadata.compat; delete scopedMetadata.thinkingLevelMap; }

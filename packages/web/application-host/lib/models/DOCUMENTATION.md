@@ -17,6 +17,20 @@ owner loss a later count reopens that resource in the new epoch; concurrent call
 and a failed open remains retryable. Released consumers stay closed. This does not replay model
 requests or transfer their original execution/usage owners to another kernel.
 
+Delegation model selection freezes the current user setting and safe enabled-model catalog only at
+first child preparation, not while preparing the parent's dispatch tool. Replay reads the original
+recipe and inference receipts without reacquiring the selector, recounting or regenerating a choice.
+After Host packing, the selected native provider serializer supplies the final capacity estimate,
+including protocol wrappers and the configured output reserve. A rejected request retains a concrete
+not-dispatched capacity failure, and replay reports that same evidence rather than generating again.
+Disabled implicit inheritance keeps the original retained parent binding without inspecting unrelated
+models. Chat completion checks the durable finish reason before accepting JSON; typed classifiers use
+one normal question/readout (llama.cpp requests its existing full probability depth once). Semantic
+invalid-response retries are disabled only for this purpose; ordinary transport retry/accounting
+remains with the shared inference owner. Selected executor capture checks the frozen configuration
+fingerprint before credentials and retains that owner through the original child handoff lifetime.
+
+
 ## Entry points and storage
 
 Host-wide `retry` settings live in `agent-settings.json` and are captured in each native model
@@ -207,11 +221,44 @@ metadata can be filled from a unique match. The shared `applyModelDirectoryDefau
 Host capture and settings draft previews; the latter request metadata for unsaved IDs without sending
 credentials. `catalog.match` records the upstream ID/protocol behind inferred fields. Changing that
 identity clears inherited facts until the new identity matches, while explicit overrides survive.
+Each channel model also has one optional free-text `description`. Discovery preserves an actual
+string supplied by the service (including OpenRouter and Gemini); metadata matching can share a supplied
+introduction only through the existing confirmed identity match. The bundled models.dev snapshot has no
+introductions, so missing descriptions remain absent rather than being generated from names. Description
+edits, including an explicit empty string, use the same catalog override tracking as other fields and
+survive refreshes independently in each channel. Settings provider actions accept descriptions in full-channel
+saves and narrow `models.<literal model ID>.description` patches. The latter retain hidden original fields
+and unrelated overrides through the model owner’s CAS; IDs containing dots, slashes or colons are literal.
+Setting an empty string explicitly clears the introduction; resetting the path resumes directory defaults.
+Changing the upstream identity clears only inherited
+descriptions. Descriptions are guidance, never protocol, tool or environment authority.
+
 Account caches retain only service-supplied facts, so inferred defaults can follow future refreshes.
 Refreshing never rewrites `models.json`, enables newly
 discovered models, removes configured references or changes purpose selections. Captured execution
 bindings retain their original configuration. A model missing from a later directory keeps its saved
 metadata. Model catalogs and user configuration have independent revisions.
+
+`harness.delegationModelSelection` is a user-owned, disabled-by-default purpose setting. Enabling it
+requires an explicit `{providerId, modelId}` selection; its optional `thinkingLevel` belongs to the
+selector itself, not its executor. Projects cannot enable or redirect the selector. Settings receipts label
+this `next-request`: the consumer boundary is the next free delegation’s model preparation, including
+within an existing Run. Accepted delegation recipes/bindings and the current Run model remain unchanged. The Agent settings
+sidebar exposes this purpose separately from saved Agent profiles. Chat and decision models are available;
+`decision` takes precedence for a model declaring both operations and has no chat thinking control.
+
+`delegation-catalog.ts` takes one resolved model snapshot without capturing candidate execution owners,
+credential leases, tokenizers or workspaces. It publishes opaque channel/model IDs and only selection
+facts: names, descriptions, declared inputs, capacity, pricing/billing and effective thinking options.
+Native `modelOptions` validates eligible options; a fixed opaque model reference filters before
+validation so unrelated invalid configurations cannot block an explicit dispatch. An invalid eligible
+configuration fails specifically rather than silently dropping a candidate; an unknown fixed reference
+keeps an empty candidate set, never a fallback. Disabled thinking-only dispatch uses that same identity
+helper to restrict validation to the original inherited provider/catalog model, while enabled
+thinking-only selection keeps all eligible models. Connection/authentication metadata stays behind a configuration hash.
+Presentation edits leave the hash stable, while native options retain execution-significant protocol
+hints. The selected chat or decision binding rechecks that hash on its captured configuration before
+acquiring credentials, avoiding a metadata-check/binding race. Accepted bindings retain their snapshots.
 
 Mixed-API channels declare supported `protocols` and optional relative `modelBasePaths`; a model's
 protocol chooses both the installed codec and the corresponding path beneath the saved service root.

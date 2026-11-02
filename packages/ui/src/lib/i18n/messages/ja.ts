@@ -3724,6 +3724,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.children.preparation.verify": "ファイルを検証中",
   "chat.children.preparation.publish": "ワークスペースを準備中",
   "chat.children.preparation.context": "コンテキストを準備中",
+  "chat.children.preparation.modelSelection": "実行モデルを選択中",
   "chat.children.preparation.admission": "タスクを開始中",
   "chat.children.trigger.dispatch": "Assigned task",
   "chat.children.trigger.user": "User continuation",

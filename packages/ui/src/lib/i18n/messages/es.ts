@@ -3953,6 +3953,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.children.preparation.verify": "Verificando archivos",
   "chat.children.preparation.publish": "Preparando el espacio de trabajo",
   "chat.children.preparation.context": "Preparando el contexto",
+  "chat.children.preparation.modelSelection": "Seleccionando el modelo de ejecución",
   "chat.children.preparation.admission": "Iniciando la tarea",
   "chat.children.trigger.dispatch": "Assigned task",
   "chat.children.trigger.user": "User continuation",

@@ -22,7 +22,7 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : record(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
 const freeze = (presets: ChildPreset[], normal_unavailable: ChildCapabilityFailure | null, native_capabilities: ChildCapabilityDescriptor[] = [], projects: ChildProjectSource[] = []): ChildDispatchCatalog => ({
-  identity: createHash('sha256').update(JSON.stringify(canonical({ presets, normal_unavailable, native_capabilities, projects }))).digest('hex'), presets, normal_unavailable, native_capabilities, projects,
+  identity: createHash('sha256').update(JSON.stringify(canonical({ presets, normal_unavailable, native_capabilities, projects, model_selection_preparation: true }))).digest('hex'), presets, normal_unavailable, native_capabilities, projects, model_selection_preparation: true,
 });
 const unavailable = (code: string, capabilities: string[] = []): ChildCapabilityFailure => ({ code, capabilities });
 

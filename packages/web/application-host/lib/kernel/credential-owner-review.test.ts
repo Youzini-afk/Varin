@@ -368,3 +368,65 @@ it('requires the exact auxiliary binding ID and scope in the Host credential bri
   expect(responses.find(response => response.id === 'after-release')!.ok).toBe(false);
   expect(responses.find(response => response.id === 'main-still-valid')!.result!.headers).toContainEqual({ name: 'authorization', value: 'Bearer fake-main' });
 });
+
+it.each(['release', 'report'] as const)('selected child owner survives parent unregister and late observer cancellation until original child %s', async completion => {
+  const parentReleased = vi.fn(), selectedReleased = vi.fn();
+  const parent = owner({ bindingIdentity: 'parent-before-selection', release: parentReleased });
+  const selected = owner({ bindingIdentity: 'selected-executor', release: selectedReleased });
+  const bridge = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  const observer = new AbortController();
+  const binding = { operationId: 'original-child-operation', parentRunId: 'parent', executionOwner: { kind: 'kernel' as const }, executionEpoch: 7 };
+  try {
+    await bridge.register('parent', parent); parent.release();
+    await bridge.retainSelectedChildModel(binding, selected, { mcp: null, extensions: [] }, observer.signal);
+    // Duplicate observation retains exactly the original duty, not another owner/cache.
+    await bridge.retainSelectedChildModel(binding, selected, { mcp: null, extensions: [] });
+    selected.release(); bridge.unregister('parent'); observer.abort();
+    expect(parentReleased).toHaveBeenCalledOnce(); expect(selectedReleased).not.toHaveBeenCalled();
+    await expect(bridge.retainSelectedChildModel(binding, selected, { mcp: null, extensions: [] }, observer.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    bridge.reconcileChildModels([{ operation_id: binding.operationId, report: null }]);
+    const retained = bridge.findOwner('selected-executor', scope, 'parent');
+    expect(retained).toBeInstanceOf(ExistingHostCredentialOwner); expect(await retained!.scope()).toEqual(scope); retained!.release();
+    expect(selectedReleased).not.toHaveBeenCalled();
+    if (completion === 'release') bridge.releaseChildModel('parent', binding.operationId);
+    else bridge.reconcileChildModels([{ operation_id: binding.operationId, report: { state: 'cancelled' } }]);
+    expect(selectedReleased).toHaveBeenCalledOnce(); expect(bridge.findOwner('selected-executor', scope)).toBeUndefined();
+    bridge.releaseChildModel('parent', binding.operationId); expect(selectedReleased).toHaveBeenCalledOnce();
+  } finally { bridge.close(); parent.release(); selected.release(); }
+});
+
+it('selected child handoff transfers to the actual child Run before original duty release', async () => {
+  const released = vi.fn(), selected = owner({ bindingIdentity: 'selected-executor', release: released });
+  const bridge = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  const binding = { operationId: 'original-child-operation', parentRunId: 'finished-parent', executionOwner: { kind: 'kernel' as const }, executionEpoch: 7 };
+  try {
+    await bridge.retainSelectedChildModel(binding, selected, { mcp: null, extensions: [] }); selected.release();
+    bridge.unregister('finished-parent');
+    const handoff = bridge.findOwner('selected-executor', scope)!;
+    await bridge.register('actual-child-run', handoff); handoff.release();
+    bridge.releaseChildModel(binding.parentRunId, binding.operationId); expect(released).not.toHaveBeenCalled();
+    const running = bridge.findOwner('selected-executor', scope, 'actual-child-run')!;
+    expect((await running.resolve(scope)).headers.authorization).toBe('Bearer fake-test-key'); running.release();
+    bridge.unregister('actual-child-run'); expect(released).toHaveBeenCalledOnce();
+  } finally { bridge.close(); selected.release(); }
+});
+
+
+it('selected child retention returns the exact registered scope when the owner changes between scope observations', async () => {
+  const released = vi.fn(); let reads = 0;
+  const registered = { ...scope, generation: scope.generation + 1 };
+  const selected = owner({ bindingIdentity: 'scope-transition', release: released, currentScope: async () => ++reads === 1 ? scope : registered });
+  const bridge = new CredentialBridge(() => 'epoch', async () => {}, () => {});
+  const binding = { operationId: 'original-child-operation', parentRunId: 'parent', executionOwner: { kind: 'kernel' as const }, executionEpoch: 7 };
+  try {
+    const retained = await bridge.retainSelectedChildModel(binding, selected, { mcp: null, extensions: [] });
+    expect(retained).toEqual(registered); expect(reads).toBe(2);
+    const repeated = await bridge.retainSelectedChildModel(binding, selected, { mcp: null, extensions: [] });
+    expect(repeated).toEqual(registered); repeated.generation = 999;
+    const stale = bridge.findOwner('scope-transition', scope);
+    if (stale) { await expect(stale.resolve(scope)).rejects.toMatchObject({ code: 'credential-scope-changed' }); stale.release(); }
+    const exact = bridge.findOwner('scope-transition', registered)!; expect(exact).toBeInstanceOf(ExistingHostCredentialOwner); exact.release();
+    selected.release(); bridge.unregister('parent'); expect(released).not.toHaveBeenCalled();
+    bridge.releaseChildModel('parent', binding.operationId); expect(released).toHaveBeenCalledOnce();
+  } finally { bridge.close(); selected.release(); }
+});

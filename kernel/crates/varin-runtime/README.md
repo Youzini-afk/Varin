@@ -13,6 +13,8 @@ This document is the local code map and maintenance boundary, not an implementat
 | --- | --- |
 | Single durable owner, short metadata transactions, format preflight | [catalog.rs](src/catalog.rs) |
 | One-time supported-generation conversion before recovery | [catalog_upgrade.rs](src/catalog_upgrade.rs) |
+| Original delegated model selection, short history and frozen binding commit | [catalog_delegation_model.rs](src/catalog_delegation_model.rs) |
+| Sparse Unicode ranges into original stored history bodies | [content_text.rs](src/content_text.rs) |
 | Thread titles, archive/pin, read positions and visibility tombstones | [catalog_threads.rs](src/catalog_threads.rs) |
 | Transaction-consistent, metadata-only Host attention (including hidden unsettled work) | [catalog_attention.rs](src/catalog_attention.rs) |
 | Deleted conversation metadata retirement and surviving reference protection | [catalog_retention.rs](src/catalog_retention.rs) |
@@ -40,11 +42,17 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. The owner upgrades supported formats 78 and 79 to 80
-  in place: 78 → 79 adds external-agent records; 79 → 80 initializes the usage ledger and its recording
-  start time. Older receipts lack reliable
-  settlement time/attribution and are not backfilled. Conversion, final version marker and upgrade event
-  commit atomically before epoch changes or recovery.
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83
+  and standalone 82 → 83. The first two steps initialize external-agent records and the usage ledger;
+  old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
+  capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
+  already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
+  Preflight recognizes each actual layout rather than assuming all generations >=81 contain Zone2.
+  Original content identities, captures and paid receipts survive. Conversion, marker and upgrade
+  event commit atomically before epoch changes or recovery.
+  Preflight for 82/83 scans User/Assistant reference metadata for index-object presence, not content
+  bodies. This startup work scales with history records; typed index validation remains at use and
+  malformed indexes never trigger request-time repair or a full-body fallback.
   Failure or process interruption before commit rolls back the conversion; reopening retries it.
   Existing immutable bodies, identities and original receipts remain in place without a full database copy.
   A failed open cannot turn history into an empty cache or replay a dispatched effect.

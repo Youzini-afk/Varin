@@ -708,6 +708,21 @@ pub(super) fn measured(
     event(tx, &binding.id, 0, "goal.usage_changed", Value::Null)?;
     Ok(())
 }
+/// An already accepted delegated duty keeps its original Goal attribution. Pause/resume
+/// may advance that same Goal's control generation, but cannot attach the duty to a new Goal.
+/// Conversation/ModelStep generation fences remain strict in check_dispatch.
+pub(super) fn check_delegated_dispatch(
+    db: &Connection,
+    run: &str,
+    original: Option<&FrozenGoal>,
+) -> Result<Option<FrozenGoal>> {
+    let current = for_run(db, run)?.as_ref().map(Definition::binding);
+    if current.as_ref().map(|goal| &goal.id) != original.map(|goal| &goal.id) {
+        return Err(RuntimeError::GoalChanged);
+    }
+    check_dispatch(db, run, current.as_ref())
+}
+
 pub(super) fn check_dispatch(
     db: &Connection,
     run: &str,

@@ -18,7 +18,7 @@ import { HarnessInferenceSettingsValidationError } from "./harness-inference.js"
  * that judges whether recalled memory candidates contribute to the current
  * goal before they enter a model request.
  */
-export const FAST_DECISION_PURPOSES = ["explore", "web", "scholarly", "memory-organization", "memory-recall"] as const;
+export const FAST_DECISION_PURPOSES = ["explore", "web", "scholarly", "memory-organization", "memory-recall", "delegation-model-selection"] as const;
 export type HarnessFastDecisionPurpose = (typeof FAST_DECISION_PURPOSES)[number];
 
 export type HarnessFastDecisionProtocol = "typed-classifier";

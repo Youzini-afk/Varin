@@ -125,10 +125,17 @@ fn settle_preparation_failure(
         http_status: None,
         problem: Some(InferenceProblem::NotDispatched),
     };
+    // These local diagnostics contain only configured capacity and measured token counts.
+    // Preserve them in the original receipt without exposing arbitrary adapter/auth errors.
+    let message = if error.code.starts_with("delegation-selection-capacity-") {
+        error.message
+    } else {
+        "Auxiliary inference could not start; inspect its retained evidence".into()
+    };
     let failed = ModelFailure {
         tool_name: None,
         code: error.code,
-        message: "Auxiliary inference could not start; inspect its retained evidence".into(),
+        message,
         retry_after_ms: None,
         provider_request_id: None,
     };
@@ -315,6 +322,7 @@ fn prepare(
     if cancel.is_cancelled() || read.operation.cancel_requested {
         return Err(failure("cancelled"));
     }
+    let selection_capacity = selection_input_capacity(&p.purpose, &p.configuration)?;
     let resolver = credentials
         .resolver_for_binding(&read.operation.run_id, id, p.credential_scope.clone())
         .map_err(|e| ExecutionError::new(e.code, e.message))?;
@@ -361,6 +369,7 @@ fn prepare(
         ].into_iter().map(Into::into).collect(),
     };
     let serialized = bound.provider.serialize_cancellable(&view, None, cancel)?;
+    check_selection_capacity(selection_capacity, &view, &serialized)?;
     let snapshot = RequestSnapshot { view, serialized };
     let prep = owner.lock().map_err(failure)?.prepare_inference_content();
     let body = prep
@@ -378,4 +387,100 @@ fn prepare(
         .prepare_inference_generation(id, body)
         .map_err(failure)?;
     Ok((bound.provider, snapshot))
+}
+
+
+fn selection_input_capacity(
+    purpose: &str,
+    configuration: &varin_runtime::ModelSessionConfiguration,
+) -> Result<Option<u64>, ExecutionError> {
+    if purpose != "delegation-model-selection" { return Ok(None); }
+    let capacity = configuration.context_window_tokens.filter(|value| *value > 0)
+        .ok_or_else(|| ExecutionError::new("delegation-selection-capacity-unknown", "Configure the selector model context capacity"))?;
+    let reserve = configuration.max_output_tokens.unwrap_or(2048).max(capacity.div_ceil(10));
+    Ok(Some(capacity.saturating_sub(reserve)))
+}
+
+fn check_selection_capacity(
+    available: Option<u64>,
+    view: &RequestView,
+    serialized: &RequestBody,
+) -> Result<(), ExecutionError> {
+    if let Some(available) = available {
+        // Only the selected provider serializer knows its actual envelope. This uses
+        // the ordinary conversation estimator and executes before any model send.
+        let estimate = varin_runtime::context_capacity::estimate_request(view, serialized);
+        if estimate.estimated_tokens > available {
+            return Err(ExecutionError::new("delegation-selection-capacity-exceeded",
+                format!("Serialized selector input requires {} tokens; {} remain after output reserve", estimate.estimated_tokens, available)));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod selection_capacity_tests {
+    use super::*;
+
+    fn request() -> (varin_runtime::ModelSessionConfiguration, RequestView, RequestBody) {
+        let configuration: varin_runtime::ModelSessionConfiguration = serde_json::from_value(serde_json::json!({
+            "providerFamily": "openai-responses", "model": "local-capacity-fixture",
+            "endpoint": "https://not-contacted.invalid/v1/responses", "credentialEnvironment": null,
+            "allowAnonymous": false, "configurationGeneration": 1, "maxOutputTokens": 2048,
+            "contextWindowTokens": 16384
+        })).unwrap();
+        let bound = model_session::bind(configuration.clone()).unwrap();
+        let view = RequestView {
+            request_id: "capacity-fixture".into(), run_id: "selection-run".into(),
+            origin: RequestOrigin::AuxiliaryInference { operation_id: "selection".into(), parent_operation_id: "child".into(), purpose: "delegation-model-selection".into() },
+            binding: bound.binding,
+            history: vec![
+                ConversationItem { resource_activation: None, id: "system".into(), provenance: Provenance::SystemInstruction { source: "selection".into() },
+                    content: Content::Text { text: "Select one valid model and thinking option.".into() }, opaque: None },
+                ConversationItem { resource_activation: None, id: "user".into(), provenance: Provenance::ExternalData { source: "selection".into() },
+                    content: Content::Text { text: "{\"task\":\"Check the patch\",\"choices\":[{\"model\":\"candidate\",\"thinking\":\"off\"}]}".into() }, opaque: None },
+            ].into_iter().map(Into::into).collect(),
+        };
+        let serialized = bound.provider.serialize(&view, None).unwrap();
+        (configuration, view, serialized)
+    }
+
+    #[test]
+    fn actual_provider_wrapper_can_exceed_reserve_when_text_alone_fits() {
+        let (mut configuration, view, serialized) = request();
+        let counter = varin_runtime::token_count::TokenCounter::for_binding(&view.binding.model, view.binding.tokenizer.as_ref());
+        let text_only: u64 = view.history.iter().map(|item| match &item.content { Content::Text { text } => counter.count(text), _ => 0 }).sum();
+        let actual = varin_runtime::context_capacity::estimate_request(&view, &serialized).estimated_tokens;
+        let available = actual - 1;
+        assert!(text_only < available, "the actual adapter envelope must contribute to the input estimate");
+        configuration.context_window_tokens = Some(2048 + available);
+        let budget = selection_input_capacity("delegation-model-selection", &configuration).unwrap();
+        assert_eq!(budget, Some(available));
+        let error = check_selection_capacity(budget, &view, &serialized).unwrap_err();
+        assert_eq!(error.code, "delegation-selection-capacity-exceeded");
+        assert!(error.message.contains(&format!("requires {actual} tokens")));
+        assert!(error.message.contains(&format!("{available} remain after output reserve")));
+    }
+
+    #[test]
+    fn fitting_serialized_input_is_admitted_at_the_exact_reserved_boundary() {
+        let (mut configuration, view, serialized) = request();
+        let actual = varin_runtime::context_capacity::estimate_request(&view, &serialized).estimated_tokens;
+        configuration.context_window_tokens = Some(2048 + actual);
+        let budget = selection_input_capacity("delegation-model-selection", &configuration).unwrap();
+        assert_eq!(budget, Some(actual));
+        check_selection_capacity(budget, &view, &serialized).unwrap();
+        configuration.max_output_tokens = configuration.context_window_tokens;
+        assert_eq!(selection_input_capacity("delegation-model-selection", &configuration).unwrap(), Some(0));
+        assert!(check_selection_capacity(Some(0), &view, &serialized).is_err());
+    }
+
+    #[test]
+    fn missing_capacity_is_concrete_and_other_auxiliary_purposes_are_unchanged() {
+        let (mut configuration, view, serialized) = request();
+        configuration.context_window_tokens = None;
+        assert_eq!(selection_input_capacity("delegation-model-selection", &configuration).unwrap_err().code, "delegation-selection-capacity-unknown");
+        let budget = selection_input_capacity("title", &configuration).unwrap();
+        assert_eq!(budget, None); check_selection_capacity(budget, &view, &serialized).unwrap();
+    }
 }
