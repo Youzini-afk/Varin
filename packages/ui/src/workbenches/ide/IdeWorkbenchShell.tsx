@@ -34,6 +34,7 @@ import { WorktreesView } from '@/components/views/WorktreesView';
 import { MultiRunLauncher } from '@/components/multirun';
 import { WorkspaceOverlays } from '@/components/workspace/WorkspaceOverlays';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
+import { useTitlebarLeftInset } from '@/hooks/useTitlebarLeftInset';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
@@ -431,6 +432,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const gitDirectory = containedSelectedGitDirectory || directory || null;
   const branchLabel = useGitBranchLabel(gitDirectory);
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
+  const titlebarLeftInset = useTitlebarLeftInset('0.5rem');
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setCommandPaletteOpen = useUIStore((state) => state.setCommandPaletteOpen);
@@ -705,7 +707,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
 
         <header
           data-startup-part="header"
-          className={cn('workbench-titlebar app-region-drag flex h-11 shrink-0 items-center gap-2 pl-2',
+          style={{ paddingLeft: titlebarLeftInset }}
+          className={cn('workbench-titlebar app-region-drag flex h-11 shrink-0 items-center gap-2',
             usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-2')}
           onMouseDown={(event) => {
             const target = event.target as HTMLElement;

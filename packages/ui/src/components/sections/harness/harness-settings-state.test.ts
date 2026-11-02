@@ -173,3 +173,14 @@ describe('Harness explicit draft saving', () => {
     expect(controller.getSnapshot().harness).toMatchObject({ permissions: { mode: 'accept-edits', rules: [{ tool: 'file_write', decision: 'ask' }] }, context: { backgroundPreparation: false } });
   });
 });
+
+it('keeps a confirmed global save distinct from unavailable effective project context', async () => {
+  const snapshot: AgentSettingsSnapshot = { global: { harness: { permissions: { mode: 'bypass' } } }, globalRevision: 'saved', project: {}, projectRevision: 'unselected', projectTrusted: false,
+    effectiveUnavailable: 'Project settings could not be read' };
+  const write = vi.fn(async () => snapshot);
+  const controller = new HarnessSettingsController({ read: async () => snapshot, write });
+  await controller.load();
+  expect(controller.getSnapshot()).toMatchObject({ harness: { permissions: { mode: 'bypass' } }, effectivePermissionMode: null,
+    effectiveUnavailable: 'Project settings could not be read', status: 'idle', error: null });
+  expect(write).not.toHaveBeenCalled();
+});

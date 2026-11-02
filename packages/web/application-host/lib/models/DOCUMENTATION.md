@@ -66,6 +66,14 @@ external edits. A malformed document is an error, not an empty replacement; an a
 binding can retain the last valid configuration. Invalid channel entries report their own issues
 without removing independent valid channels. A first invalid load has no invented valid fallback.
 
+Agent-facing channel reads redact header values and URL credentials. The provider `patch` action edits declared
+fields against the original stored channel inside the same revision-CAS transaction; omitted fields
+retain their values and `reset` explicitly removes optional fields. Never write a redacted projection
+back as a complete channel. Save/patch receipts describe the exact committed revision, not a later
+read that might belong to another writer. They do not claim background model discovery has completed
+or that previously captured inference bindings changed. Credential-bearing dispatch changes require
+their explicit semantic permission, separate from ordinary cosmetic settings.
+
 `ProjectTrustService` owns native `VARIN_DATA_DIR/project-trust.json` through the same locked revision-CAS
 file transaction. Missing decisions are untrusted. Explicit true/false decisions inherit along canonical
 ancestors; deleting a direct decision exposes the ancestor decision, if any. The authenticated
@@ -218,7 +226,11 @@ string supplied by the service (including OpenRouter and Gemini); metadata match
 introduction only through the existing confirmed identity match. The bundled models.dev snapshot has no
 introductions, so missing descriptions remain absent rather than being generated from names. Description
 edits, including an explicit empty string, use the same catalog override tracking as other fields and
-survive refreshes independently in each channel. Changing the upstream identity clears only inherited
+survive refreshes independently in each channel. Settings provider actions accept descriptions in full-channel
+saves and narrow `models.<literal model ID>.description` patches. The latter retain hidden original fields
+and unrelated overrides through the model owner’s CAS; IDs containing dots, slashes or colons are literal.
+Setting an empty string explicitly clears the introduction; resetting the path resumes directory defaults.
+Changing the upstream identity clears only inherited
 descriptions. Descriptions are guidance, never protocol, tool or environment authority.
 
 Account caches retain only service-supplied facts, so inferred defaults can follow future refreshes.
@@ -229,7 +241,9 @@ metadata. Model catalogs and user configuration have independent revisions.
 
 `harness.delegationModelSelection` is a user-owned, disabled-by-default purpose setting. Enabling it
 requires an explicit `{providerId, modelId}` selection; its optional `thinkingLevel` belongs to the
-selector itself, not its executor. Projects cannot enable or redirect the selector. The Agent settings
+selector itself, not its executor. Projects cannot enable or redirect the selector. Settings receipts label
+this `next-request`: the consumer boundary is the next free delegation’s model preparation, including
+within an existing Run. Accepted delegation recipes/bindings and the current Run model remain unchanged. The Agent settings
 sidebar exposes this purpose separately from saved Agent profiles. Chat and decision models are available;
 `decision` takes precedence for a model declaring both operations and has no chat thinking control.
 

@@ -135,6 +135,37 @@ describe("KnowledgeStore", () => {
     }
   });
 
+  it("hydrates only the requested legacy event page after its committed cursor", async () => {
+    const ids: number[] = [];
+    for (let index = 0; index < 100; index += 1) {
+      ids.push((await store.putEvent({ kind: "edit", at: index, sessionId: "legacy-run", text: String(index), source: "user" })).id);
+    }
+    const payloadReads = vi.spyOn(TriviumDB.prototype, "getPayload");
+    try {
+      expect(await store.listEvents({ sessionId: "legacy-run", afterId: ids.at(-1)!, limit: 16 })).toEqual([]);
+      expect(payloadReads).not.toHaveBeenCalled();
+      const page = await store.listEvents({ sessionId: "legacy-run", afterId: ids[49]!, limit: 16 });
+      expect(page.map(event => event.id)).toEqual(ids.slice(50, 66));
+      expect(payloadReads).toHaveBeenCalledTimes(16);
+    } finally {
+      payloadReads.mockRestore();
+    }
+  });
+
+  it("fails closed on the native legacy ID lookup budget without truncating or changing records", () => {
+    const native = new TriviumDB(join(TEST_DIR, "budget.tdb"), {dim: 8, syncMode: "full"});
+    try {
+      native.createIndex("type"); native.createIndex("sessionId");
+      for (let index = 0; index < 3; index += 1) {
+        native.insert(new Array(8).fill(0), {type: "event", sessionId: "budget-run", text: String(index)});
+      }
+      // maxResults is an error budget, not LIMIT. listEvents propagates this
+      // native failure to the importer, which must not acknowledge false EOF.
+      expect(() => native.indexedLookup({type: "event", sessionId: "budget-run"}, 2)).toThrow(expect.objectContaining({code: "TDB_QUERY_BUDGET"}));
+      expect(native.indexedLookup({type: "event", sessionId: "budget-run"}, 3)).toHaveLength(3);
+    } finally { native.close(); }
+  });
+
   it("leaves retired Pi records unchanged when native knowledge opens and commits", async () => {
     const dir = join(TEST_DIR, "retired-records");
     const dbDir = join(dir, "knowledge", "test-host");

@@ -677,6 +677,7 @@ impl Catalog {
         if super::observations::next(&tx, &run.id)?.is_some() {
             return Ok(Some(InputBatch::default()));
         }
+        let mut holds=ingress::HoldBatch::default();
         for input in &queued {
             let current: QueuedInputMetadata = record(&tx, "input_queue", &input.id)?;
             if current != *input
@@ -688,7 +689,7 @@ impl Catalog {
             {
                 return Ok(None);
             }
-            if ingress::hold(&tx, input, Some(&run))?.is_some() {
+            if holds.hold(&tx,input,&run)?.is_some() {
                 return Ok(None);
             }
         }
@@ -831,7 +832,7 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
 
 pub(super) fn has_boundary_inputs(db: &Connection, run_id: &str) -> Result<bool> {
     let run: Run = record(db, "runs", run_id)?;
-    let mut q=db.prepare("SELECT body FROM input_queue WHERE branch_id=?2 AND state='queued' AND mode!='next_run' AND ((run_id=?1 AND activation='activating') OR origin='context_observation')")?;
+    let mut q=db.prepare("SELECT body FROM input_queue WHERE branch_id=?2 AND state='queued' AND mode!='next_run' AND run_id=?1 AND activation='activating'")?;
     let rows = q.query_map(params![run_id,run.branch_id], |r| r.get::<_, String>(0))?;
     for raw in rows {
         let row: QueuedInputMetadata = serde_json::from_str(&raw?)?;

@@ -5,7 +5,7 @@ import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 
 export class BotRequestError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string, readonly retryDisposition?: 'observe' | 'new_attempt' | 'none') { super(message); this.name = 'BotRequestError'; }
+  constructor(readonly status: number, readonly code: string, message: string, readonly retryDisposition?: 'observe' | 'new_attempt' | 'none', readonly savedBot?: BotSummary) { super(message); this.name = 'BotRequestError'; }
 }
 const invalid = (): never => { throw new BotRequestError(502, 'invalid-response', 'The Host returned an invalid Bot response. Refresh before continuing.'); };
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : invalid();
@@ -24,6 +24,7 @@ export const decodeBot = (value: unknown): BotSummary => {
   const bot = record(value);
   for (const key of ['id', 'name', 'homeDir', 'coordinatorHostId', 'createdAt', 'updatedAt']) string(bot[key]);
   entry(bot.entry);
+  if (!Number.isSafeInteger(bot.revision) || Number(bot.revision) < 1) invalid();
   if (typeof bot.archived !== 'boolean' || !nullableString(bot.instructions)) invalid();
   if (bot.model !== null) { const model = record(bot.model); string(model.providerId); string(model.modelId); }
   if (bot.pinnedAt !== undefined && !nullableString(bot.pinnedAt)) invalid();
@@ -206,7 +207,7 @@ export function createBotsHttpAPI(): BotsAPI {
     current(); const result: unknown = await response.json().catch(() => null); current();
     if (!response.ok) {
       const error = result && typeof result === 'object' ? result as Record<string, unknown> : {};
-      throw new BotRequestError(response.status, typeof error.code === 'string' ? error.code : 'bot-request-failed', typeof error.error === 'string' ? error.error : `Bot request failed (${response.status}).`, error.retryDisposition === 'observe' || error.retryDisposition === 'new_attempt' || error.retryDisposition === 'none' ? error.retryDisposition : undefined);
+      throw new BotRequestError(response.status, typeof error.code === 'string' ? error.code : 'bot-request-failed', typeof error.error === 'string' ? error.error : `Bot request failed (${response.status}).`, error.retryDisposition === 'observe' || error.retryDisposition === 'new_attempt' || error.retryDisposition === 'none' ? error.retryDisposition : undefined, error.saved === true ? decodeBot(error.bot) : undefined);
     }
     return record(result);
   };

@@ -1,3 +1,6 @@
+import { DEFAULT_HARNESS_SETTINGS, DEFAULT_COMPACTION_RESERVE_RATIO } from '@varin/protocol';
+import { settingsValueSchema } from './settings-value-schemas.js';
+
 /**
  * Shared settings catalog (D-306 / Stage S).
  *
@@ -49,6 +52,8 @@ export interface SettingsFieldSpec {
   optionsSource?: SettingsOptionSource;
   min?: number;
   max?: number;
+  exclusiveMin?: number;
+  exclusiveMax?: number;
   integer?: boolean;
   unit?: string;
   /** Value may be explicitly cleared (null/delete) rather than set. */
@@ -57,6 +62,12 @@ export interface SettingsFieldSpec {
   maxLength?: number;
   /** Free-form note surfaced to agents (units, format, caveats). */
   note?: string;
+  /** Machine-readable owner shape for structured values; validated without coercion. */
+  schema?: Record<string, unknown>;
+  /** Set replaces this declared path; it is not an implicit deep merge. */
+  updateMode?: 'replace';
+  /** This field changes policy or credential routing, not ordinary preferences. */
+  authority?: 'permissions' | 'credentials';
   /**
    * `agent-settings` scope rule. `user` = global file only; `user-or-project`
    * = writable at either scope. User-owned fields silently dropped into a
@@ -93,10 +104,20 @@ export interface SettingsActionRef {
     | 'service:git' | 'service:tunnel'
     | 'service:extension-packages' | 'service:extensions' | 'service:agents' | 'service:embedding-requests'
     | 'service:notifications' | 'service:projects' | 'service:remote-instances'
+    | 'service:self-bot' | 'service:self-conversation'
     | 'tool:resource' | 'tool:extension' | 'page:ui';
   /** What the agent can actually do without opening the UI. */
   verbs?: readonly string[];
   note?: string;
+}
+
+/** A real owner action's accepted arguments and effect boundary. */
+export interface SettingsActionContract {
+  inputSchema: Record<string, unknown>;
+  mutation: 'none' | 'owner';
+  apply?: SettingsCatalogEntry['apply'];
+  note?: string;
+  authority?: 'permissions' | 'credentials';
 }
 
 export interface SettingsCatalogEntry {
@@ -104,6 +125,12 @@ export interface SettingsCatalogEntry {
   id: string;
   category: SettingsCategory;
   owner: SettingsOwnerKind;
+  /** Semantic management authority, separate from ordinary preference edits. */
+  authority?: 'permissions' | 'credentials';
+  /** Fixed target for project-only aliases; omitted leaves scope selectable. */
+  scope?: 'project';
+  /** Legacy settings without an execution consumer can remain inspectable. */
+  writable?: boolean;
   /** Single-path field. */
   field?: SettingsFieldSpec;
   /** Multi-path group — update accepts a subset of `fields`. */
@@ -117,7 +144,7 @@ export interface SettingsCatalogEntry {
    * `restart` = needs a host/surface restart; `manual` = requires a user or
    * domain action the catalog cannot perform.
    */
-  apply?: 'immediate' | 'next-request' | 'next-run' | 'restart' | 'manual';
+  apply?: 'immediate' | 'next-request' | 'next-run' | 'restart' | 'manual' | 'unsupported';
   /** Pointer for `settings_read(detail)` — doc anchor or resource hint. */
   helpRef?: string;
   ui: {
@@ -164,7 +191,7 @@ const modelField = (path: string, scope: 'user' | 'user-or-project'): SettingsFi
   note: 'model id; set the paired provider field from the option label when required',
 });
 
-export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
+const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
   // ── Harness (agent-settings owner) ──────────────────────────────────────────
   {
     id: 'harness.tools', category: 'harness', owner: 'agent-settings',
@@ -197,20 +224,20 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['bytes', 'output', 'KiB'] },
   },
   {
-    id: 'harness.permissions.mode', category: 'harness', owner: 'agent-settings',
+    id: 'harness.permissions.mode', category: 'harness', owner: 'agent-settings', authority: 'permissions',
     field: { path: 'harness.permissions.mode', kind: 'enum', scope: 'user-or-project',
       options: [
-        { value: 'normal' }, { value: 'accept-edits' }, { value: 'smart' }, { value: 'bypass' },
-      ], default: 'normal' },
-    apply: 'next-run',
+        { value: 'normal' }, { value: 'bypass' },
+      ], default: 'normal', note: 'Controls Host extension/MCP permission admission; project mode can only narrow the global mode. Legacy smart/accept-edits values are preserved on read but currently use normal semantics; native Source and Storage authority is independent.' },
+    apply: 'immediate',
     ui: { page: 'harness-permissions', titleKey: 'settings.page.harness.permissions.mode.label',
       keywords: ['smart', 'approval', 'bypass', 'permission'] },
   },
   {
-    id: 'harness.permissions.rules', category: 'harness', owner: 'agent-settings',
+    id: 'harness.permissions.rules', category: 'harness', owner: 'agent-settings', authority: 'permissions',
     field: { path: 'harness.permissions.rules', kind: 'json', scope: 'user-or-project',
-      note: 'PermissionRule[] — ordered allow/deny/ask patterns; validated by the native settings owner' },
-    apply: 'next-run',
+      note: 'PermissionRule[] — ordered allow/deny/ask patterns for the next Host extension/MCP permission admission. Native Source/Storage authority is independent; project rules can narrow the user policy.' },
+    apply: 'immediate',
     helpRef: 'permission rules are validated by the native settings owner; invalid entries are rejected',
     ui: { page: 'harness-permissions', titleKey: 'settings.harness.rules.title',
       keywords: ['allow', 'deny', 'ask', 'regex', 'rules'] },
@@ -224,7 +251,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.models.explore', category: 'retrieval', owner: 'agent-settings',
     fields: [
-      { path: 'harness.models.explore', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
+      { path: 'harness.models.explore', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; set replaces this binding: include retained model fields, or use agents.catalog enable/disable' },
     ],
     apply: 'next-run',
     ui: { page: 'harness-retrieval', titleKey: 'settings.harness.role.explore', keywords: ["explore", "agent", "model", "enable", "disable"] },
@@ -232,8 +259,8 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.models.execution', category: 'agents', owner: 'agent-settings',
     fields: [
-      { path: 'harness.models.worker', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
-      { path: 'harness.models.retrievalAgent', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
+      { path: 'harness.models.worker', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; set replaces this binding: include retained model fields, or use agents.catalog enable/disable' },
+      { path: 'harness.models.retrievalAgent', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; set replaces this binding: include retained model fields, or use agents.catalog enable/disable' },
     ],
     apply: 'next-run',
     ui: { page: 'agents', titleKey: 'settings.harness.models.execution', keywords: ["worker", "retrievalAgent", "agent", "model", "enable", "disable"] },
@@ -249,7 +276,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.models.reader', category: 'web', owner: 'agent-settings',
     fields: [
-      { path: 'harness.models.reader', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
+      { path: 'harness.models.reader', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; set replaces this binding: include retained model fields, or use agents.catalog enable/disable' },
     ],
     apply: 'next-run',
     ui: { page: 'harness-web', titleKey: 'settings.harness.role.reader', keywords: ["reader", "agent", "model", "enable", "disable"] },
@@ -257,30 +284,31 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'knowledge.model', category: 'knowledge', owner: 'agent-settings',
     fields: [
-      { path: 'harness.models.memoryOrganizer', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
+      { path: 'harness.models.memoryOrganizer', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; set replaces this binding: include retained model fields, or use agents.catalog enable/disable' },
     ],
     apply: 'next-run',
     ui: { page: 'harness-bots', titleKey: 'settings.harness.role.memoryOrganizer', keywords: ["memoryOrganizer", "agent", "model", "enable", "disable"] },
   },
   {
-    id: 'harness.models.permissionJudge', category: 'harness', owner: 'agent-settings',
+    id: 'harness.models.permissionJudge', category: 'harness', owner: 'agent-settings', writable: false,
     fields: [
-      { path: 'harness.models.permissionJudge', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
+      { path: 'harness.models.permissionJudge', kind: 'json', scope: 'user', note: 'Legacy saved permission-judge binding. No running Smart permission consumer currently uses this model.' },
     ],
-    apply: 'next-run',
+    apply: 'unsupported',
+    helpRef: 'The saved binding is retained for inspection only. Smart permission judgment is not implemented; editing a model would not enable it.',
     ui: { page: 'harness-permissions', titleKey: 'settings.harness.role.permissionJudge', keywords: ["permissionJudge", "agent", "model", "enable", "disable"] },
   },
   {
     id: 'harness.delegationModelSelection', category: 'agents', owner: 'agent-settings',
     field: { path: 'harness.delegationModelSelection', kind: 'json', scope: 'user',
-      note: '{enabled: boolean, model?: {providerId, modelId}, thinkingLevel?: ThinkingLevel}. Disabled by default; enabling requires a configured chat or decision model. The selector uses its own model thinking default when omitted. Applies only to new native free delegations; explicit presets and fixed execution choices are retained.' },
-    apply: 'next-run', ui: { page: 'agents', titleKey: 'settings.delegationModelSelection.title',
+      note: '{enabled: boolean, model?: {providerId, modelId}, thinkingLevel?: ThinkingLevel}. Disabled by default; enabling requires a configured chat or decision model. The selector uses its own model thinking default when omitted. Consumed at the next native free delegation model-preparation boundary, even within the current Run. Does not change the current Run model or an accepted delegation recipe/binding; explicit presets and fixed execution choices are retained.' },
+    apply: 'next-request', ui: { page: 'agents', titleKey: 'settings.delegationModelSelection.title',
       descriptionKey: 'settings.delegationModelSelection.description', keywords: ['dispatch', 'delegation', 'selector', 'model', 'thinking', '派发', '模型选择'] },
   },
   {
     id: 'harness.agents', category: 'agents', owner: 'agent-settings',
     field: { path: 'harness.agents', kind: 'json', scope: 'user',
-      note: 'ID → {name, description, instructions, enabled, tools: string[], worktree: "none"|"isolated", workFocus: ("code"|"research")[], model?: {providerId,modelId}}. Empty workFocus means both. Native dispatch uses preset:"custom:ID"; models inherit only when omitted. Prefer agents.catalog actions for editing one definition with its catalog revision.' },
+      note: 'ID → {name, description, instructions, enabled, tools?: string[], workFocus: ("code"|"research")[], model?: {providerId,modelId}}. Empty workFocus means both. Native dispatch uses preset:"custom:ID"; models inherit only when omitted. Prefer agents.catalog actions for editing one definition with its catalog revision.' },
     apply: 'next-run', ui: { page: 'agents', titleKey: 'settings.page.agents.title', keywords: ['custom agent', 'team', 'multiagent', 'instructions', 'tools'] },
   },
   {
@@ -323,12 +351,43 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'harness.context', category: 'harness', owner: 'agent-settings',
-    field: { path: 'harness.context', kind: 'json', scope: 'user',
-      note: '{backgroundPreparation: boolean, preparationWaterline: 0<n<1} — user-owned background compaction prep',
-      default: { backgroundPreparation: true, preparationWaterline: 0.75 } },
-    apply: 'next-run',
+    fields: [
+      { path: 'harness.context.backgroundPreparation', kind: 'boolean', scope: 'user', default: DEFAULT_HARNESS_SETTINGS.context.backgroundPreparation },
+      { path: 'harness.context.preparationWaterline', kind: 'number', scope: 'user', exclusiveMin: 0, exclusiveMax: 1,
+        default: DEFAULT_HARNESS_SETTINGS.context.preparationWaterline },
+    ],
+    apply: 'next-request',
     ui: { page: 'harness-context', titleKey: 'settings.contextScale.title',
-      keywords: ['compaction', 'context', 'preparationWaterline', 'reserve', 'replacement', '压缩', '准备', '替换', '预留', '水位'] },
+      keywords: ['compaction', 'context', 'recovery', 'stalled request', 'retry', 'preparationWaterline', 'reserve', 'replacement', '压缩', '准备', '替换', '预留', '水位'] },
+  },
+  {
+    id: 'harness.context.compactionRecovery', category: 'harness', owner: 'agent-settings', writable: false, apply: 'unsupported',
+    fields: [
+      { path: 'harness.context.compactionRecovery.enabled', kind: 'boolean', scope: 'user', default: DEFAULT_HARNESS_SETTINGS.context.compactionRecovery.enabled },
+      { path: 'harness.context.compactionRecovery.streamIdleMs', kind: 'number', scope: 'user', min: 1, max: 2147483647, integer: true, unit: 'ms', default: DEFAULT_HARNESS_SETTINGS.context.compactionRecovery.streamIdleMs },
+      { path: 'harness.context.compactionRecovery.responseWaitMs', kind: 'number', scope: 'user', min: 1, max: 2147483647, integer: true, unit: 'ms', default: DEFAULT_HARNESS_SETTINGS.context.compactionRecovery.responseWaitMs },
+      { path: 'harness.context.compactionRecovery.maxRetries', kind: 'number', scope: 'user', min: 0, integer: true, default: DEFAULT_HARNESS_SETTINGS.context.compactionRecovery.maxRetries },
+    ],
+    helpRef: 'Legacy saved values are preserved for inspection. The current native ContextJob recovery does not consume these preferences; changing them would not affect execution.',
+    ui: { page: 'harness-context', titleKey: 'settings.page.harness.context.recovery.title', keywords: ['recovery', 'stall', 'timeout', 'retry', 'unsupported', '恢复', '重试'] },
+  },
+  {
+    id: 'harness.compaction', category: 'harness', owner: 'agent-settings',
+    fields: [
+      { path: 'compaction.enabled', kind: 'boolean', scope: 'user-or-project', default: true,
+        note: 'Automatic compaction also requires harness.models.contextCompaction to be enabled.' },
+      { path: 'compaction.reserveRatio', kind: 'number', scope: 'user-or-project', min: 0, exclusiveMax: 1, default: DEFAULT_COMPACTION_RESERVE_RATIO,
+        note: 'Fraction of the selected model context reserved for generation/tool progress; model overrides take precedence.' },
+      { path: 'compaction.keepRecentTokens', kind: 'number', scope: 'user-or-project', min: 0, integer: true, default: 20000,
+        note: 'Recent token budget retained through compaction; model overrides take precedence.' },
+      { path: 'compaction.modelOverrides', kind: 'json', scope: 'user-or-project',
+        note: 'providerId/modelId → partial {reserveRatio, keepRecentTokens}; global/project entries merge per model.',
+        schema: { type: 'object', propertyNames: { minLength: 1 }, additionalProperties: { type: 'object', additionalProperties: false,
+          properties: { reserveRatio: { type: 'number', minimum: 0, exclusiveMaximum: 1 }, keepRecentTokens: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } } } } },
+    ],
+    apply: 'next-request',
+    ui: { page: 'harness-context', titleKey: 'settings.contextScale.title',
+      keywords: ['compaction', 'context', 'reserve ratio', 'keep recent tokens', 'model overrides', '压缩', '预留', '保留'] },
   },
   {
     id: 'harness.codeRetrieval', category: 'retrieval', owner: 'agent-settings',
@@ -367,13 +426,13 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.fastDecision', category: 'retrieval', owner: 'agent-settings',
     field: { path: 'harness.fastDecision', kind: 'json', scope: 'user',
-      note: 'Fast Decision Model {default?: {protocol:"llama-cpp-classify",providerId,modelId,endpoint?}, purposes?: {explore|web|scholarly?: binding|"off"}} — typed candidate/action judgment, not a chat slot; user-owned; applies to the next query' },
+      note: 'Fast Decision Model {default?: {protocol:"typed-classifier",providerId,modelId,endpoint?}, purposes?: {explore|web|scholarly?: binding|"off"}} — typed candidate/action judgment, not a chat slot; user-owned; applies to the next query' },
     apply: 'next-run',
     ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.section.fastDecision',
       keywords: ['fast decision', 'jev', 'typesafe', 'selection'] },
   },
   {
-    id: 'harness.web.search', category: 'web', owner: 'agent-settings',
+    id: 'harness.web.search', category: 'web', owner: 'agent-settings', authority: 'credentials',
     field: { path: 'harness.web.search', kind: 'json', scope: 'user',
       note: '{provider: brave|exa|tavily|jina|searxng, endpoint?, credentialRef?} — credentialRef names a native credential reference; secret material is never returned' },
     apply: 'next-run',
@@ -390,9 +449,11 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'harness.document-reading', category: 'web', owner: 'agent-settings',
-    field: { path: 'harness.documentReading', kind: 'json', scope: 'user',
-      note: '{doclingCommand?, tesseractCommand?, ocrLanguage?} — direct Host executable names/paths and OCR language; user-owned',
-      default: { doclingCommand: 'docling', tesseractCommand: 'tesseract', ocrLanguage: 'eng' } },
+    fields: [
+      { path: 'harness.documentReading.doclingCommand', kind: 'string', scope: 'user', authority: 'permissions', default: DEFAULT_HARNESS_SETTINGS.documentReading.doclingCommand, note: 'Host executable name/path for optional PDF structure parsing.' },
+      { path: 'harness.documentReading.tesseractCommand', kind: 'string', scope: 'user', authority: 'permissions', default: DEFAULT_HARNESS_SETTINGS.documentReading.tesseractCommand, note: 'Host executable name/path for optional OCR.' },
+      { path: 'harness.documentReading.ocrLanguage', kind: 'string', scope: 'user', default: DEFAULT_HARNESS_SETTINGS.documentReading.ocrLanguage },
+    ],
     apply: 'next-run',
     helpRef: 'Optional Host-side PDF structure parsing and OCR executables; base text and page-image reading do not require them.',
     ui: { page: 'harness-web', titleKey: 'settings.page.harness.web.documentReading.title',
@@ -400,7 +461,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['document reading', 'PDF', 'Docling', 'Tesseract', 'OCR'] },
   },
   {
-    id: 'harness.web.domains', category: 'web', owner: 'agent-settings',
+    id: 'harness.web.domains', category: 'web', owner: 'agent-settings', authority: 'permissions',
     field: { path: 'harness.web.domains', kind: 'json', scope: 'user-or-project',
       note: '{allow?: string[], block: string[]} — project scope can only narrow the user policy' },
     apply: 'next-run',
@@ -408,18 +469,20 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['domain', 'allow', 'block'] },
   },
   {
-    id: 'harness.dispatch', category: 'harness', owner: 'agent-settings',
+    id: 'harness.dispatch', category: 'harness', owner: 'agent-settings', writable: false,
     field: { path: 'harness.dispatch', kind: 'json', scope: 'user-or-project',
-      note: '{concurrency: number, askBefore: Record<string, boolean>} child-run dispatch policy' },
-    apply: 'next-run',
+      note: 'Legacy {concurrency, askBefore} preferences. The current native dispatch owner does not consume these settings.' },
+    apply: 'unsupported',
+    helpRef: 'Saved values are preserved for inspection; this legacy configuration does not limit native dispatch concurrency or create approval gates.',
     ui: { page: 'harness-tools', titleKey: 'settings.page.harness.section.tools',
       keywords: ['concurrency', 'dispatch', 'ask before', 'child'] },
   },
   {
-    id: 'harness.worktree', category: 'harness', owner: 'agent-settings',
+    id: 'harness.worktree', category: 'harness', owner: 'agent-settings', writable: false,
     field: { path: 'harness.worktree', kind: 'json', scope: 'user-or-project',
-      note: '{setup?, setupTimeoutMs?, copyIgnored?, shareDependencies?, reclaimIdle?, budget?}' },
-    apply: 'next-run',
+      note: 'Legacy {setup, setupTimeoutMs, copyIgnored, shareDependencies, reclaimIdle, budget} preferences. The current source/materialization owner does not consume them.' },
+    apply: 'unsupported',
+    helpRef: 'Saved worktree preferences remain inspectable. They do not execute setup commands, copy ignored files, share dependencies or enforce budgets in the current native source pipeline.',
     ui: { page: 'projects', titleKey: 'settings.projects.page.section.worktree',
       keywords: ['worktree', 'setup commands', 'bootstrap'] },
   },
@@ -792,9 +855,10 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['changed files', 'turns'] },
   },
   {
-    id: 'chat.server-permission-auto-accept', category: 'chat', owner: 'app',
-    field: { path: 'serverPermissionAutoAcceptEnabled', kind: 'boolean' },
-    apply: 'immediate',
+    id: 'chat.server-permission-auto-accept', category: 'chat', owner: 'app', writable: false,
+    field: { path: 'serverPermissionAutoAcceptEnabled', kind: 'boolean', note: 'Legacy saved preference only. No current execution owner consumes this flag; it cannot approve tool operations.' },
+    apply: 'unsupported',
+    helpRef: 'This preexisting compatibility field has no operating approval feature. Saved values are retained but not writable through the catalog.',
     ui: { page: 'chat', titleKey: 'settings.varin.visual.field.serverPermissionAutoAccept',
       descriptionKey: 'settings.varin.visual.field.serverPermissionAutoAcceptTooltip',
       keywords: ['permission', 'permissions', 'auto accept', 'approve', 'unattended', 'backend'] },
@@ -1017,7 +1081,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       availability: { desktopLocal: true } },
   },
   {
-    id: 'sessions.desktop-lan-access', category: 'sessions', owner: 'app',
+    id: 'sessions.desktop-lan-access', category: 'sessions', owner: 'app', authority: 'permissions',
     field: { path: 'desktopLanAccessEnabled', kind: 'boolean' },
     apply: 'restart',
     ui: { page: 'access', titleKey: 'settings.varin.desktopNetwork.field.allowLanAccess',
@@ -1078,7 +1142,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'git.identities', category: 'git', owner: 'action',
-    actionRef: { domain: 'service:git', verbs: ['list', 'create', 'delete'],
+    actionRef: { domain: 'service:git', verbs: ['list', 'create', 'update', 'delete'],
       note: 'git identity profiles (author/email/signing) via the git identity service' },
     ui: { page: 'git', titleKey: 'settings.gitIdentities.page.section.title',
       descriptionKey: 'settings.gitIdentities.page.empty.description',
@@ -1130,9 +1194,14 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['label', 'display name', 'project metadata'] },
   },
   {
-    id: 'projects.default-model', category: 'projects', owner: 'action',
-    actionRef: { domain: 'service:projects', verbs: ['set-default-model'],
-      note: 'project-scoped defaultProvider/defaultModel and defaultThinkingLevel in the original Agent settings owner' },
+    id: 'projects.default-model', category: 'projects', owner: 'agent-settings', scope: 'project',
+    fields: [
+      { path: 'defaultProvider', kind: 'string', scope: 'user-or-project', note: 'Provider paired with defaultModel in the admitted project’s native settings.' },
+      modelField('defaultModel', 'user-or-project'),
+      { path: 'defaultThinkingLevel', kind: 'string', scope: 'user-or-project', optionsSource: 'thinking-levels',
+        note: 'Reset when changing models unless the new model supports the same thinking level.' },
+    ],
+    apply: 'next-run',
     ui: { page: 'projects', titleKey: 'settings.projects.page.field.defaultModel',
       descriptionKey: 'settings.projects.page.field.defaultModelDescription',
       keywords: ['model', 'new chat', 'project default'] },
@@ -1158,19 +1227,19 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['icon', 'favicon', 'upload', 'project metadata'] },
   },
   {
-    id: 'projects.worktree', category: 'projects', owner: 'app',
+    id: 'projects.worktree', category: 'projects', owner: 'app', writable: false,
     field: { path: 'autoCreateWorktree', kind: 'boolean',
-      note: 'auto-create a worktree for new sessions; per-repo worktree policy lives in harness.worktree' },
-    apply: 'next-run',
+      note: 'Legacy stored preference only. No current session-creation owner consumes this flag; it does not create worktrees.' },
+    apply: 'unsupported',
     ui: { page: 'projects', titleKey: 'settings.projects.page.section.worktree',
       keywords: ['worktree', 'branch', 'repository'] },
   },
   {
-    id: 'projects.worktree.setup.wait', category: 'projects', owner: 'agent-settings',
+    id: 'projects.worktree.setup.wait', category: 'projects', owner: 'agent-settings', writable: false,
     field: { path: 'harness.worktree.setupTimeoutMs', kind: 'number', scope: 'user-or-project',
       min: 0, integer: true, unit: 'ms',
-      note: 'how long session setup waits for worktree setup commands' },
-    apply: 'next-run',
+      note: 'Legacy saved setup wait time. The current native source pipeline does not run setup commands from this preference.' },
+    apply: 'unsupported',
     ui: { page: 'projects', titleKey: 'settings.varin.worktrees.setup.waitForCommands',
       keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'] },
   },
@@ -1212,6 +1281,20 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
 
   // ── Agents ──────────────────────────────────────────────────────────────
   {
+    id: 'self.bot-profile', category: 'agents', owner: 'action', apply: 'next-request',
+    actionRef: { domain: 'service:self-bot', verbs: ['read', 'update'],
+      note: 'The Bot bound to the admitted calling Thread, never a caller-supplied Bot id. Update name, instructions or preferred model with expectedRevision. Profile changes affect this Bot’s direct conversations at safe request boundaries; delegated Agent work keeps its own model.' },
+    ui: { page: 'harness-bots', titleKey: 'settings.varin.agents.catalog.title',
+      keywords: ['self', 'bot', 'my name', 'instructions', 'persona', 'preferred model', '自己', '人格'] },
+  },
+  {
+    id: 'self.conversation-model', category: 'agents', owner: 'action', apply: 'next-request',
+    actionRef: { domain: 'service:self-conversation', verbs: ['read', 'select-model'],
+      note: 'Inspect active/desired model selection and select the admitted current Run’s model, thinking level or temperature. This does not edit Bot profile or future-session defaults; accepted requests keep their immutable original selection.' },
+    ui: { page: 'agents', titleKey: 'settings.varin.agents.catalog.title',
+      keywords: ['self', 'current conversation', 'current run', 'model', 'thinking', 'temperature', '当前会话', '思考'] },
+  },
+  {
     id: 'agents.catalog', category: 'agents', owner: 'action',
     actionRef: { domain: 'service:agents', verbs: ['list', 'read', 'create', 'update', 'enable', 'disable', 'delete'],
       note: 'Native Agent profiles. Save requires expectedRevision and config from the profile snapshot; custom creation also requires explicit tools. Use returned profile identities for dispatch.' },
@@ -1228,7 +1311,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'mcp.configuration', category: 'agents', owner: 'action',
-    actionRef: { domain: 'runtime:mcp', verbs: ['read', 'write'],
+    actionRef: { domain: 'runtime:mcp', verbs: ['read', 'write', 'patch'],
       note: 'MCP definitions belong to the native MCP settings owner; write requires a source path from read and its expectedRevision' },
     ui: { page: 'mcp', titleKey: 'settings.varin.mcp.config.title',
       keywords: ['json', 'jsonc', 'config', 'stdio', 'url', 'environment', 'headers', 'timeout'] },
@@ -1280,7 +1363,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'providers.connect', category: 'providers', owner: 'action',
-    actionRef: { domain: 'runtime:providers', verbs: ['list', 'connect', 'save', 'remove'],
+    actionRef: { domain: 'runtime:providers', verbs: ['list', 'connect', 'save', 'patch', 'remove'],
       note: 'custom/openai-compatible provider connection is a runtime action' },
     ui: { page: 'providers', titleKey: 'settings.providers.page.connect.title',
       keywords: ['add provider', 'connect provider', 'custom provider', 'openai compatible', 'base url', 'credentials'] },
@@ -1297,6 +1380,13 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     actionRef: { domain: 'runtime:providers', verbs: ['read', 'disconnect'] },
     ui: { page: 'providers', titleKey: 'settings.providers.page.connectionDetails.title',
       keywords: ['config', 'source', 'disconnect'] },
+  },
+  {
+    id: 'providers.model-directory', category: 'providers', owner: 'action',
+    actionRef: { domain: 'runtime:providers', verbs: ['models', 'discover-models'],
+      note: 'Enumerate usable configured models or refresh the selected existing channel’s model directory through its owning provider.' },
+    ui: { page: 'providers', titleKey: 'settings.providers.page.models.title',
+      keywords: ['available models', 'discover models', 'refresh', 'model directory'] },
   },
   {
     id: 'providers.models', category: 'providers', owner: 'app',
@@ -1339,7 +1429,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       { path: 'dictationEnabled', kind: 'boolean' },
       { path: 'sttProvider', kind: 'enum',
         options: [{ value: 'local' }, { value: 'openai-compatible' }] },
-      { path: 'sttServerUrl', kind: 'string', nullable: true },
+      { path: 'sttServerUrl', kind: 'string', nullable: true, authority: 'permissions', note: 'Destination for uploaded speech audio; changing it is not an ordinary speech preference.' },
       { path: 'sttModel', kind: 'string', nullable: true },
       { path: 'sttLocalModel', kind: 'string', nullable: true },
       { path: 'sttLanguage', kind: 'string', nullable: true },
@@ -1352,7 +1442,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'microphone'] },
   },
   {
-    id: 'tunnel.provider', category: 'tunnel', owner: 'app',
+    id: 'tunnel.provider', category: 'tunnel', owner: 'app', authority: 'permissions',
     fields: [
       { path: 'tunnelProvider', kind: 'string', nullable: true,
         note: 'e.g. cloudflare, ngrok — validated against installed providers at apply time' },
@@ -1365,7 +1455,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['remote access', 'cloudflare', 'ngrok'] },
   },
   {
-    id: 'tunnel.type', category: 'tunnel', owner: 'app',
+    id: 'tunnel.type', category: 'tunnel', owner: 'app', authority: 'permissions',
     field: { path: 'tunnelMode', kind: 'enum',
       options: [{ value: 'quick' }, { value: 'managed-remote' }, { value: 'managed-local' }] },
     apply: 'manual',
@@ -1373,7 +1463,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['quick', 'managed remote', 'managed local'] },
   },
   {
-    id: 'tunnel.ttl', category: 'tunnel', owner: 'app',
+    id: 'tunnel.ttl', category: 'tunnel', owner: 'app', authority: 'permissions',
     fields: [
       { path: 'tunnelBootstrapTtlMs', kind: 'number', min: 0, integer: true, nullable: true, unit: 'ms' },
       { path: 'tunnelSessionTtlMs', kind: 'number', min: 0, integer: true, unit: 'ms' },
@@ -1384,7 +1474,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['expiry', 'expiration', 'session ttl', 'connect link ttl'] },
   },
   {
-    id: 'tunnel.managed-remote', category: 'tunnel', owner: 'app',
+    id: 'tunnel.managed-remote', category: 'tunnel', owner: 'app', authority: 'credentials',
     fields: [
       { path: 'managedRemoteTunnelHostname', kind: 'string', nullable: true },
       { path: 'managedRemoteTunnelToken', kind: 'secret', nullable: true,
@@ -1398,7 +1488,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['cloudflare', 'hostname', 'token', 'managed remote'] },
   },
   {
-    id: 'tunnel.managed-local-config', category: 'tunnel', owner: 'app',
+    id: 'tunnel.managed-local-config', category: 'tunnel', owner: 'app', authority: 'credentials',
     field: { path: 'managedLocalTunnelConfigPath', kind: 'string', nullable: true,
       note: 'path to the cloudflared config file used by managed-local tunnels' },
     apply: 'manual',
@@ -1447,6 +1537,17 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
 ];
 
+const withValueSchema = (field: SettingsFieldSpec): SettingsFieldSpec => {
+  if (field.kind !== 'json') return field;
+  const schema = field.schema ?? settingsValueSchema(field.path);
+  return { ...field, updateMode: 'replace', ...(schema ? { schema } : {}),
+    note: [field.note, 'Set replaces the entire declared path. Read and retain unchanged members when editing an object; use expectedRevision to prevent stale replacement.'].filter(Boolean).join(' ') };
+};
+export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = CATALOG_ENTRIES.map(entry => ({ ...entry,
+  ...(entry.field ? { field: withValueSchema(entry.field) } : {}),
+  ...(entry.fields ? { fields: entry.fields.map(withValueSchema) } : {}),
+}));
+
 // ── Query helpers (shared by UI search and the agent catalog service) ───────
 
 export interface SettingsCatalogQuery {
@@ -1489,8 +1590,8 @@ export function querySettingsCatalog(query: SettingsCatalogQuery, translations?:
       entry.ui.titleKey,
       entry.ui.descriptionKey ?? '',
       ...(entry.ui.keywords ?? []),
-      entry.field?.path ?? '',
-      ...(entry.fields?.map((field) => field.path) ?? []),
+      entry.field?.path ?? '', entry.field?.note ?? '', entry.actionRef?.note ?? '', entry.helpRef ?? '',
+      ...(entry.fields?.flatMap((field) => [field.path, field.note ?? '']) ?? []),
       translations?.get(entry.id) ?? '',
     ].join(' '));
     return terms.every((term) => haystack.includes(term));

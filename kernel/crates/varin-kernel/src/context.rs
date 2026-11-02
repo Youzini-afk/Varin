@@ -28,7 +28,7 @@ fn response(reply: &Value) -> Result<(), ExecutionError> {
         reply["code"]
             .as_str()
             .unwrap_or("context_policy_unavailable"),
-        "Context budget preparation is unavailable",
+        "Context preparation is unavailable",
     ))
 }
 fn policy(reply: &Value) -> Result<ContextPolicy, ExecutionError> {
@@ -145,9 +145,36 @@ impl ContextPreparation for CapacityPreparation {
         let prepared = self.bridge.query(json!({"action":"prepare","runId":view.run_id,"requestId":view.request_id,
             "expectedRevision":revision,
             "observation":{"estimatedTokens":estimate_request(view, serialized).estimated_tokens,"identity":identity}}), cancel)?;
-        // Without a declared window this only publishes an observation; budget
-        // preparation is not a dependency of the model request.
+        // Producer diagnostics are informational; the native input boundary already
+        // froze its committed Catalog facts. A failed optional Host query is not an
+        // empty/ready observation snapshot and must not publish diagnostics.
+        if prepared["status"] == "ready" {
+            if let Some(diagnostics) = prepared.get("observations") {
+                let diagnostics:varin_runtime::catalog::context_observations::ContextObservationHostDiagnostics=serde_json::from_value(diagnostics.clone()).map_err(failed)?;
+                self.catalog
+                    .lock()
+                    .map_err(failed)?
+                    .record_context_observation_diagnostics(
+                        &view.run_id,
+                        epoch,
+                        &view.request_id,
+                        diagnostics,
+                    )
+                    .map_err(failed)?;
+            }
+        }
+        // Standalone clients need no optional Host capacity service. Only its
+        // defined unavailable/failed-helper outcomes are optional here; closing,
+        // cancellation and malformed responses retain their ordinary failures.
         let Some(capacity) = configuration.context_window_tokens else {
+            let optional_unavailable = prepared["status"] == "failed"
+                && matches!(
+                    prepared["code"].as_str(),
+                    Some("context_owner_unavailable" | "context_preparation_failed")
+                );
+            if !optional_unavailable {
+                response(&prepared)?;
+            }
             return Ok(ContextRequestPreparation::Ready);
         };
         let mut settings = policy(&prepared)?;
@@ -290,9 +317,17 @@ impl ContextPreparation for CapacityPreparation {
                 let Some(candidate) = native_candidate(&legal) else {
                     return Ok(ContextRequestPreparation::Ready);
                 };
-                let mut recipe = ContextSummaryRecipe::automatic(settings.configuration_identity.clone(), mode);
-                recipe.continuation_budget_tokens = Some(varin_runtime::context_capacity::continuation_budget(
-                    view, &settings, capacity, configuration.max_output_tokens, &estimate, &timing));
+                let mut recipe =
+                    ContextSummaryRecipe::automatic(settings.configuration_identity.clone(), mode);
+                recipe.continuation_budget_tokens =
+                    Some(varin_runtime::context_capacity::continuation_budget(
+                        view,
+                        &settings,
+                        capacity,
+                        configuration.max_output_tokens,
+                        &estimate,
+                        &timing,
+                    ));
                 (
                     candidate.through_id.clone(),
                     recipe,
@@ -424,30 +459,48 @@ mod tests {
     use std::{sync::mpsc, time::Duration};
     use varin_runtime::{catalog::context::ContextProposal, SubmitInput};
 
-    #[test]
-    fn external_background_decision_cannot_override_disabled_user_preparation() {
+    fn request_fixture(window: Option<u64>) -> (std::path::PathBuf, Catalog, RequestView, String) {
         let root =
             std::env::temp_dir().join(format!("varin-context-settings-{}", uuid::Uuid::new_v4()));
         let mut catalog = Catalog::open(&root).unwrap();
         catalog.create_thread("thread", "main").unwrap();
-        let prepared = catalog.prepare_submission(SubmitInput {
-            key: "source".into(), thread_id: "thread".into(), branch_id: "main".into(),
-            expected_head: None, input: json!("Original source"),
-            configuration: json!({"providerFamily":"openai-responses","model":"fixture",
-                "endpoint":"https://controlled.invalid","allowAnonymous":true,
-                "credentialEnvironment":null,"configurationGeneration":1,"contextWindowTokens":1000}),
-        }, Some(ContextProposal {
-            key:"original".into(),branch_id:"main".into(),through_id:None,expected_revision:0,
-            summary:String::new(),effective_system_prompt:"Original instructions".into(),
-            instruction_sources:vec![],memory_checkpoint:None,
-        }), None).unwrap().load(None, false).unwrap();
+        let mut configuration = json!({"providerFamily":"openai-responses","model":"fixture",
+            "endpoint":"https://controlled.invalid","allowAnonymous":true,
+            "credentialEnvironment":null,"configurationGeneration":1});
+        if let Some(window) = window {
+            configuration["contextWindowTokens"] = json!(window);
+        }
+        let prepared = catalog
+            .prepare_submission(
+                SubmitInput {
+                    key: "source".into(),
+                    thread_id: "thread".into(),
+                    branch_id: "main".into(),
+                    expected_head: None,
+                    input: json!("Original source"),
+                    configuration,
+                },
+                Some(ContextProposal {
+                    key: "original".into(),
+                    branch_id: "main".into(),
+                    through_id: None,
+                    expected_revision: 0,
+                    summary: String::new(),
+                    effective_system_prompt: "Original instructions".into(),
+                    instruction_sources: vec![],
+                    memory_checkpoint: None,
+                }),
+                None,
+            )
+            .unwrap()
+            .load(None, false)
+            .unwrap();
         let receipt = catalog.admit_submission(prepared).unwrap();
         let checkpoint = catalog
             .capture_active_checkpoint("main")
             .unwrap()
             .unwrap()
             .id;
-        let epoch = catalog.epoch();
         let range = HistoryRange {
             branch_id: "main".into(),
             ancestor_id: None,
@@ -457,10 +510,16 @@ mod tests {
             request_id: "request".into(),
             run_id: receipt.run_id,
             origin: RequestOrigin::Conversation {
-                compaction: None, step: 0,
+                compaction: None,
+                step: 0,
                 history_range: range.clone(),
             },
-            binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+            binding: RequestBinding {
+                pricing: None,
+                tool_output_visible_bytes: None,
+                mcp_tools: Vec::new(),
+                execution_environment: None,
+                direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,
@@ -491,8 +550,98 @@ mod tests {
                     text: "Original source".into(),
                 },
                 opaque: None,
-            }.into()],
+            }
+            .into()],
         };
+        (root, catalog, view, checkpoint)
+    }
+
+    #[test]
+    fn optional_host_service_failures_do_not_mask_invalid_responses() {
+        for window in [None, Some(1000)] {
+            for (reply, optional) in [
+                (
+                    json!({"status":"failed","code":"context_owner_unavailable"}),
+                    true,
+                ),
+                (
+                    json!({"status":"failed","code":"context_preparation_failed"}),
+                    true,
+                ),
+                (
+                    json!({"status":"failed","code":"context_owner_closed"}),
+                    false,
+                ),
+                (
+                    json!({"status":"failed","code":"context_observation_cancelled"}),
+                    false,
+                ),
+                (json!({"status":"failed","code":"unknown_failure"}), false),
+                (
+                    json!({"status":"invalid","code":"context_owner_unavailable"}),
+                    false,
+                ),
+                (json!({}), false),
+                (
+                    json!({"status":"ready","observations":{"invalid":true}}),
+                    false,
+                ),
+            ] {
+                let (root, catalog, view, _) = request_fixture(window);
+                let epoch = catalog.epoch();
+                let catalog = Arc::new(Mutex::new(catalog));
+                let (output, requests) = mpsc::sync_channel(8);
+                let bridge = OwnerChannel::new("context", output);
+                bridge.initialize("fixture");
+                let preparation = CapacityPreparation::new(
+                    Arc::new(NoopContextPreparation),
+                    catalog.clone(),
+                    bridge.clone(),
+                );
+                let worker = std::thread::spawn(move || {
+                    preparation.prepare_request(
+                        epoch,
+                        &view,
+                        &json!({"input":"Original source"}).into(),
+                        None,
+                        &|_| panic!("No candidate may be previewed"),
+                        &CancellationToken::default(),
+                    )
+                });
+                let prepare = requests.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert_eq!(prepare["query"]["action"], "prepare");
+                bridge.receive(json!({"v":1,"kind":"context-response","id":prepare["id"],
+                    "kernelEpoch":"fixture","result":reply}));
+                let result = worker.join().unwrap();
+                if window.is_none() && optional {
+                    assert!(matches!(result, Ok(ContextRequestPreparation::Ready)));
+                } else {
+                    let expected = if reply["status"] == "ready" {
+                        "context_capacity"
+                    } else {
+                        reply["code"]
+                            .as_str()
+                            .unwrap_or("context_policy_unavailable")
+                    };
+                    assert_eq!(
+                        result
+                            .err()
+                            .expect("Required policy and invalid replies retain failures")
+                            .code,
+                        expected
+                    );
+                }
+                drop(catalog);
+                std::fs::remove_dir_all(root).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn external_background_decision_cannot_override_disabled_user_preparation() {
+        let (root, catalog, view, checkpoint) = request_fixture(Some(1000));
+        let epoch = catalog.epoch();
+        let input_id = view.binding.history_range.leaf_id.clone().unwrap();
         let catalog = Arc::new(Mutex::new(catalog));
         let (output, requests) = mpsc::sync_channel(8);
         let bridge = OwnerChannel::new("context", output.clone());
@@ -535,7 +684,7 @@ mod tests {
         bridge.receive(
             json!({"v":1,"kind":"context-response","id":decide["id"],"kernelEpoch":"fixture",
             "result":{"status":"ready","policy":policy,"external":true,"summaryRecipe":recipe,
-                "decision":{"kind":"compact","throughId":receipt.input_id,"mode":"background"}}}),
+                "decision":{"kind":"compact","throughId":input_id,"mode":"background"}}}),
         );
         let next = requests.recv_timeout(Duration::from_secs(5)).unwrap();
         // Unblock a regression before asserting: the forbidden next frame would be compact.

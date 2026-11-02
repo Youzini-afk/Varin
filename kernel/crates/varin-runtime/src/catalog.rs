@@ -14,6 +14,8 @@ use uuid::Uuid;
 pub enum RuntimeError {
     #[error("Bot execution gate is closed")]
     BotSuspended,
+    #[error("observation dispatch epoch changed; the immutable source is still valid")]
+    ObservationEpochChanged,
     #[error("new user input is waiting at this execution boundary")]
     InputPending,
     #[error("tool dispatch cancelled before executor entry")]
@@ -49,7 +51,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 82;
+pub(crate) const FORMAT: i64 = 83;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -151,6 +153,8 @@ fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     if version >= 80 {
         usage_ledger::check_format(db)?;
     }
+    upgrades::check_context_schema(db, version)?;
+    upgrades::check_history_indexes(db, version)?;
     goals::check_format(db)?;
     mcp_interactions::check_format(db)?;
     bot::check_format(db)?;
@@ -216,6 +220,7 @@ fn initialize_metadata(
         mcp_interactions::initialize_new(&tx)?;
         bot::initialize_new(&tx)?;
         usage_ledger::initialize(&tx)?;
+        context_observations::initialize(&tx)?;
     }
     titles::initialize(&tx)?;
     let epoch = tx.query_row(

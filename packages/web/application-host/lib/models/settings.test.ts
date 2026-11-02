@@ -1,0 +1,56 @@
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, expect, it, vi } from 'vitest';
+import { AgentSettingsService } from './settings.js';
+
+const roots: string[] = [];
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), 'varin-agent-settings-')); roots.push(root);
+  return { root, settings: new AgentSettingsService(root, () => false) };
+}
+it('rejects new unsupported automation but preserves legacy mode during unrelated writes and supports reset', async () => {
+  const { root, settings } = await fixture();
+  const initial = await settings.read();
+  await expect(settings.updateHarness(initial.revision, () => ({ permissions: { mode: 'smart' } })))
+    .rejects.toMatchObject({ code: 'permission_mode_unavailable' });
+  expect(await settings.read()).toEqual(initial);
+  await writeFile(join(root, 'agent-settings.json'), JSON.stringify({ harness: { permissions: { mode: 'smart' } } }));
+  const legacy = await settings.read();
+  const renamed = await settings.update({ scope: 'global', expectedRevision: legacy.revision, set: { titleUpdateInterval: 5 }, remove: [] });
+  expect(renamed.global).toMatchObject({ titleUpdateInterval: 5, harness: { permissions: { mode: 'smart' } } });
+  await expect(settings.update({ scope: 'global', expectedRevision: renamed.globalRevision, set: { harness: { permissions: { mode: 'accept-edits' } } }, remove: [] }))
+    .rejects.toMatchObject({ code: 'permission_mode_unavailable' });
+  expect((await settings.read()).revision).toBe(renamed.globalRevision);
+  const reset = await settings.updateHarness(renamed.globalRevision, harness => ({ ...harness, permissions: { mode: 'normal' } }));
+  expect(reset.document).toMatchObject({ harness: { permissions: { mode: 'normal' } } });
+});
+it('returns its actual commit without a fallible postcommit observation or a later writers revision', async () => {
+  const { settings } = await fixture();
+  const initial = await settings.read();
+  const original = settings.global.update.bind(settings.global);
+  let committedRevision: string | undefined;
+  vi.spyOn(settings.global, 'update').mockImplementationOnce(async (...args) => {
+    const committed = await original(...args); committedRevision = committed.revision;
+    await original(committed.revision, document => ({ ...document, titleUpdateInterval: 99 }));
+    vi.spyOn(settings, 'snapshot').mockRejectedValue(new Error('later context unavailable'));
+    return committed;
+  });
+  const saved = await settings.update({ scope: 'global', expectedRevision: initial.revision, set: { titleUpdateInterval: 5 }, remove: [] });
+  expect(saved.global).toEqual({ titleUpdateInterval: 5 });
+  expect(saved.globalRevision).toBe(committedRevision);
+  expect((await settings.read()).document).toEqual({ titleUpdateInterval: 99 });
+});
+
+it('commits global settings independently of an unreadable project and marks effective context unavailable', async () => {
+  const { root } = await fixture();
+  const project = join(root, 'project'); await mkdir(join(project, '.varin'), { recursive: true });
+  await writeFile(join(project, '.varin', 'settings.json'), '{ invalid');
+  const settings = new AgentSettingsService(root, () => true), initial = await settings.read();
+  const saved = await settings.update({ cwd: project, scope: 'global', expectedRevision: initial.revision, set: { titleUpdateInterval: 5 }, remove: [] });
+  expect(saved.global).toEqual({ titleUpdateInterval: 5 });
+  expect(saved.effectiveUnavailable).toContain('Project settings');
+  expect((await settings.read()).revision).toBe(saved.globalRevision);
+  await expect(settings.update({ cwd: project, scope: 'project', expectedRevision: 'unknown', set: {}, remove: [] })).rejects.toThrow();
+});

@@ -24,6 +24,7 @@ import {
 } from '@/lib/desktop';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 import { useThreadStore, threadHostKey } from '@/stores/useThreadStore';
+import { ClientSettingConflict, clientSettingSnapshot, synchronousClientSetting, type ClientSettingAuthority } from './client-settings-authority';
 
 const SURFACE_ID_STORAGE_KEY = 'varin.client-surface.window.v1';
 let cachedSurfaceId: string | null = null;
@@ -78,21 +79,21 @@ export const bindClientSurfaceThread = async (identity: ThreadIdentity): Promise
 
 export interface ClientSettingsFieldResult {
   id: string;
+  itemIndex?: number;
   status: 'applied' | 'failed' | 'unavailable';
   error?: string;
   values?: Record<string, unknown>;
+  revision?: string;
+  consistency?: 'compare-and-swap' | 'last-write-wins';
+  mutation?: 'none' | 'applied' | 'unknown';
 }
 
 interface ClientSettingsRequestEntry {
   id: string;
+  itemIndex?: number;
   values?: Record<string, unknown>;
   reset?: string[];
-}
-
-/** Real per-entry authority on this surface. */
-interface ClientSettingAuthority {
-  read(): Promise<Record<string, unknown>>;
-  apply(values: Record<string, unknown>): Promise<void>;
+  expectedRevision?: string;
 }
 
 const boolField = (values: Record<string, unknown>, key: string): boolean => {
@@ -109,10 +110,10 @@ const notOnThisSurface = (reason: string): ClientSettingAuthority => ({
 const uiStoreField = (
   read: () => boolean,
   write: (value: boolean) => void,
-): ClientSettingAuthority => ({
-  read: async () => ({ enabled: read() }),
-  apply: async (values) => { write(boolField(values, 'enabled')); },
-});
+): ClientSettingAuthority => synchronousClientSetting(
+  () => ({ enabled: read() }),
+  values => { write(boolField(values, 'enabled')); },
+);
 
 const AUTHORITIES: Record<string, ClientSettingAuthority> = {
   'appearance.language': {
@@ -143,16 +144,16 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
     (value) => useUIStore.getState().setDockBadgeEnabled(value),
   ),
 
-  'appearance.file-editor-keymap': {
-    read: async () => ({ keymap: useUIStore.getState().fileEditorKeymap }),
-    apply: async (values) => {
+  'appearance.file-editor-keymap': synchronousClientSetting(
+    () => ({ keymap: useUIStore.getState().fileEditorKeymap }),
+    (values) => {
       const keymap = values.keymap;
       if (keymap !== 'default' && keymap !== 'vim') {
         throw new Error('"keymap" must be "default" or "vim"');
       }
       useUIStore.getState().setFileEditorKeymap(keymap as FileEditorKeymap);
     },
-  },
+  ),
 
   'appearance.terminal-quick-keys': uiStoreField(
     () => useUIStore.getState().showTerminalQuickKeysOnDesktop,
@@ -211,12 +212,12 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
       }
     : notOnThisSurface('direct hosts are a desktop shell preference'),
 
-  'voice.playback': {
-    read: async () => {
+  'voice.playback': synchronousClientSetting(
+    () => {
       const state = usePreferencesStore.getState();
       return { voiceProvider: state.voiceProvider, ttsInputMode: state.ttsInputMode };
     },
-    apply: async (values) => {
+    (values) => {
       const state = usePreferencesStore.getState();
       if (values.voiceProvider !== undefined) {
         const provider = values.voiceProvider;
@@ -224,17 +225,18 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
           && provider !== 'openai-compatible' && provider !== 'say') {
           throw new Error('"voiceProvider" is not a known provider');
         }
-        state.setVoiceProvider(provider);
       }
       if (values.ttsInputMode !== undefined) {
         const mode = values.ttsInputMode;
         if (mode !== 'sanitized' && mode !== 'raw' && mode !== 'summarized') {
           throw new Error('"ttsInputMode" is not a known mode');
         }
-        state.setTtsInputMode(mode);
       }
+      // Validate the whole patch before either store mutation.
+      if (values.voiceProvider !== undefined) state.setVoiceProvider(values.voiceProvider as typeof state.voiceProvider);
+      if (values.ttsInputMode !== undefined) state.setTtsInputMode(values.ttsInputMode as typeof state.ttsInputMode);
     },
-  },
+  ),
 };
 
 const CLIENT_DEFAULTS: Record<string, Record<string, unknown>> = {
@@ -267,10 +269,12 @@ export const handleClientSettingsRequest = async (properties: Record<string, unk
     if (generation !== getRuntimeEndpointGeneration()) return;
     const authority = typeof entry.id === 'string' ? AUTHORITIES[entry.id] : undefined;
     if (!authority) {
-      results.push({ id: String(entry.id ?? ''), status: 'unavailable', error: 'this surface does not own that setting' });
+      results.push({ id: String(entry.id ?? ''), ...(entry.itemIndex !== undefined ? { itemIndex: entry.itemIndex } : {}), status: 'unavailable', error: 'this surface does not own that setting' });
       continue;
     }
+    let mutation: 'none' | 'applied' | 'unknown' = 'none';
     try {
+      let snapshot;
       if (op === 'apply') {
         const values = { ...(entry.values ?? {}) };
         for (const path of entry.reset ?? []) {
@@ -280,13 +284,19 @@ export const handleClientSettingsRequest = async (properties: Record<string, unk
           }
           values[path] = defaults[path];
         }
-        await authority.apply(values);
-      }
-      results.push({ id: entry.id, status: 'applied', values: await authority.read() });
+        if (entry.expectedRevision !== undefined && !authority.compareAndApply) {
+          throw new ClientSettingConflict('this owner supports last-write-wins, not compare-and-swap; no write was attempted');
+        }
+        mutation = 'unknown';
+        if (authority.compareAndApply) snapshot = authority.compareAndApply(values, entry.expectedRevision);
+        else { await authority.apply(values); snapshot = await clientSettingSnapshot(authority); }
+        mutation = 'applied';
+      } else snapshot = await clientSettingSnapshot(authority);
+      results.push({ id: entry.id, ...(entry.itemIndex !== undefined ? { itemIndex: entry.itemIndex } : {}), status: 'applied', ...snapshot, mutation });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const unavailable = /not supported|desktop-only|desktop shell|does not own/i.test(message);
-      results.push({ id: entry.id, status: unavailable ? 'unavailable' : 'failed', error: message });
+      results.push({ id: entry.id, ...(entry.itemIndex !== undefined ? { itemIndex: entry.itemIndex } : {}), status: unavailable ? 'unavailable' : 'failed', error: message, mutation: error instanceof ClientSettingConflict ? 'none' : mutation });
     }
   }
 

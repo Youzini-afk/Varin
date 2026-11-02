@@ -21,15 +21,22 @@ const UPGRADES: &[Upgrade] = &[
         to: 80,
         convert: |tx, _| usage_ledger::initialize(tx),
     },
-    // Delegated selection adds typed Operation intents and optional child metadata.
-    // Existing children retain their original inherited model binding. Sparse text
-    // indexes point into original content objects; no body is copied or work replayed.
-    // Generation 81 belongs to another schema and is
-    // deliberately not accepted until its conversion has been independently verified.
+    // These are distinct persisted layouts, not interchangeable generation labels.
+    // 81 contains Zone2 captures; standalone 82 contains indexed delegation history.
     Upgrade {
         from: 80,
-        to: 82,
+        to: 81,
+        convert: |tx, _| context_observations::initialize(tx),
+    },
+    Upgrade {
+        from: 81,
+        to: 83,
         convert: install_history_indexes,
+    },
+    Upgrade {
+        from: 82,
+        to: 83,
+        convert: |tx, _| context_observations::initialize(tx),
     },
 ];
 
@@ -41,6 +48,44 @@ pub(super) fn supports(mut version: i64) -> bool {
         version = step.to;
     }
     version == FORMAT
+}
+
+/// Standalone 82 does not contain Zone2. A blanket >=81 check would reject that
+/// valid asset or, worse, relabel a different layout without running its converter.
+pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> {
+    if matches!(version, 81 | 83) {
+        return context_observations::check_format(db);
+    }
+    let present: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('context_observation_captures','context_observation_imports','context_observation_queue_cursor','context_observation_queue_page'))",
+        [], |row| row.get(0))?;
+    if present {
+        return Err(RuntimeError::Invalid(format!(
+            "Catalog {version} does not define the Zone2 capture schema"
+        )));
+    }
+    Ok(())
+}
+
+/// 82 introduced sparse original-history references. Do not silently repair a
+/// current generation or defer an unbounded content scan to a dispatch request.
+/// Environment queue entries (including Zone2 captures) intentionally have a
+/// different representation and are not evidence of a missing history index.
+pub(super) fn check_history_indexes(db: &Connection, version: i64) -> Result<()> {
+    if !matches!(version, 82 | 83) {
+        return Ok(());
+    }
+    let missing: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM history WHERE json_extract(body,'$.source') IN ('user','assistant') AND json_type(body,'$.content.history_text') IS NOT 'object')",
+        [],
+        |row| row.get(0),
+    )?;
+    if missing {
+        return Err(RuntimeError::Invalid(format!(
+            "Catalog {version} original history text index is missing or malformed; data was preserved"
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn check_external_schema(db: &Connection, version: i64) -> Result<()> {
@@ -135,7 +180,11 @@ fn apply_before_commit(
     before_commit: impl FnOnce(&Transaction<'_>) -> Result<()>,
 ) -> Result<()> {
     let result = (|| {
-        let indexes = prepare_history_indexes(db, content)?;
+        let indexes = if matches!(from, 78 | 79 | 80 | 81) {
+            prepare_history_indexes(db, content)?
+        } else {
+            Vec::new()
+        };
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut version = inspect_catalog_format(&tx)?;
         if version != from {

@@ -960,3 +960,117 @@ fn repeated_preparation_does_not_replace_the_accepted_selector_recipe() {
     assert_eq!(actual.recipe.catalog, original.recipe.catalog);
     assert_eq!(actual.recipe.choices, original.recipe.choices);
 }
+
+#[test]
+fn standalone_v82_selection_assets_upgrade_without_replaying_paid_work() {
+    for completed in [false, true] {
+        let f = Fixture::new();
+        let mut db = f.open();
+        let child = child(&mut db, "chat", true);
+        let work = prepare(&mut db, &child.execution_id, owner("first"));
+        let inference = admit_generation(&mut db, &generation(&work));
+        db.dispatch_inference_generation(&inference).unwrap();
+        if completed {
+            settle_generation(&mut db, &inference);
+            commit(&mut db, &child.execution_id, owner("first")).unwrap();
+        }
+        let before = db.operation(&inference).unwrap();
+        let root_before = db.operation(&work.operation_id).unwrap();
+        let execution_before = db.delegated_execution(&child.execution_id).unwrap();
+        drop(db);
+        let raw = Connection::open(f.0.join("conversation.sqlite")).unwrap();
+        assert_eq!(
+            raw.query_row(
+                "SELECT count(*) FROM context_observation_captures",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            raw.query_row(
+                "SELECT count(*) FROM context_observation_imports",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        // Exact standalone82 layout, not a combined store with a different label.
+        // These native child/inference APIs are the original82 owners; only Zone2
+        // tables/indexes differ in83, and no Zone2 records have been fabricated.
+        raw.execute_batch("BEGIN;DROP TABLE context_observation_captures;DROP TABLE context_observation_imports;DROP INDEX context_observation_queue_cursor;DROP INDEX context_observation_queue_page;PRAGMA user_version=82;COMMIT;").unwrap();
+        assert_eq!(inspect_catalog_format(&raw).unwrap(), 82);
+        drop(raw);
+        let mut db = f.open();
+        assert_eq!(inspect_catalog_format(&db.db).unwrap(), 83);
+        assert_eq!(
+            db.delegated_execution(&child.execution_id)
+                .unwrap()
+                .configuration_ref,
+            execution_before.configuration_ref
+        );
+        let read = db
+            .read_delegation_model(&work.operation_id)
+            .unwrap()
+            .load()
+            .unwrap();
+        assert_eq!(read.recipe.catalog, work.recipe.catalog);
+        assert_eq!(read.recipe.choices, work.recipe.choices);
+        assert_eq!(read.inference.len(), 1);
+        if completed {
+            assert_eq!(db.operation(&inference).unwrap(), before);
+            assert_eq!(db.operation(&work.operation_id).unwrap(), root_before);
+            assert_eq!(
+                db.capture_goal("goal")
+                    .unwrap()
+                    .load()
+                    .unwrap()
+                    .usage
+                    .actual
+                    .output_tokens
+                    .known,
+                7
+            );
+            commit(&mut db, &child.execution_id, owner("first")).unwrap();
+        } else {
+            assert_eq!(read.inference[0].effect, Effect::Unknown);
+            assert_eq!(read.inference[0].outcome, Some(Outcome::Indeterminate));
+            // The original missing Goal charge also blocks new paid authorization.
+            assert!(matches!(
+                db.capture_delegation_model(PrepareParams {
+                    execution_id: child.execution_id.clone(),
+                    execution_owner: owner("second"),
+                    catalog: None
+                }),
+                Err(RuntimeError::RequestActivationHeld)
+            ));
+            let request = generation(&work);
+            let body = db
+                .prepare_inference_content()
+                .write(&serde_json::to_value(&request).unwrap())
+                .unwrap();
+            assert!(db.admit_inference_generation(&request, body).is_err());
+            assert!(commit(&mut db, &child.execution_id, owner("second")).is_err());
+        }
+        assert_eq!(
+            db.prepare_content_collection(Default::default())
+                .run()
+                .status,
+            ContentCollectionStatus::Completed
+        );
+        drop(db);
+        let db = f.open();
+        assert_eq!(
+            db.read_delegation_model(&work.operation_id)
+                .unwrap()
+                .load()
+                .unwrap()
+                .inference
+                .len(),
+            1
+        );
+        assert_eq!(db.db.query_row("SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=82 AND json_extract(data,'$.to')=83", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    }
+}

@@ -822,24 +822,34 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async listEvents(filter): Promise<StoredEvent[]> {
-        const nodes = lookup({ type: "event", sessionId: filter.sessionId }).filter(({ payload }) => {
-          if (payload["type"] !== "event" || payload["sessionId"] !== filter.sessionId) return false;
+        if (filter.limit !== undefined && (!Number.isSafeInteger(filter.limit) || filter.limit <= 0)) {
+          throw new RangeError('Event page size must be a positive integer');
+        }
+        // Legacy observation recovery selects the unconsumed IDs before loading
+        // payloads. An empty delta must not reread the session's whole history.
+        const ids = db.indexedLookup({ type: "event", sessionId: filter.sessionId }, GRAPH_RESULT_CEILING)
+          .filter(id => filter.afterId === undefined || id > filter.afterId)
+          .sort((left, right) => left - right);
+        const events: StoredEvent[] = [];
+        for (const id of ids) {
+          const payload = db.getPayload(id) as Record<string, unknown>;
           const turnIndex = payload["turnIndex"];
-          return filter.minTurnIndex === undefined
-            || (typeof turnIndex === "number" && turnIndex >= filter.minTurnIndex);
-        }).filter(({ id }) => filter.afterId === undefined || id > filter.afterId);
-        return nodes.map(({ id, payload }) => ({
-          id,
-          kind: payload["kind"] as EventKind,
-          at: payload["at"] as number,
-          sessionId: payload["sessionId"] as string,
-          ...(typeof payload["turnIndex"] === "number" ? { turnIndex: payload["turnIndex"] as number } : {}),
-          text: payload["text"] as string,
-          ...(payload["refs"] && typeof payload["refs"] === "object" ? { refs: payload["refs"] as EventRefs } : {}),
-          ...(payload["data"] && typeof payload["data"] === "object" ? { data: payload["data"] as Record<string, unknown> } : {}),
-          ...(typeof payload["dedupeKey"] === "string" ? { dedupeKey: payload["dedupeKey"] as string } : {}),
-          source: payload["source"] as EventSource,
-        })).sort((left, right) => left.id - right.id);
+          if (filter.minTurnIndex !== undefined && !(typeof turnIndex === "number" && turnIndex >= filter.minTurnIndex)) continue;
+          events.push({
+            id,
+            kind: payload["kind"] as EventKind,
+            at: payload["at"] as number,
+            sessionId: payload["sessionId"] as string,
+            ...(typeof turnIndex === "number" ? { turnIndex } : {}),
+            text: payload["text"] as string,
+            ...(payload["refs"] && typeof payload["refs"] === "object" ? { refs: payload["refs"] as EventRefs } : {}),
+            ...(payload["data"] && typeof payload["data"] === "object" ? { data: payload["data"] as Record<string, unknown> } : {}),
+            ...(typeof payload["dedupeKey"] === "string" ? { dedupeKey: payload["dedupeKey"] as string } : {}),
+            source: payload["source"] as EventSource,
+          });
+          if (events.length === filter.limit) break;
+        }
+        return events;
       },
 
       async getOrganizerProgress(key: string): Promise<OrganizerProgress | null> {

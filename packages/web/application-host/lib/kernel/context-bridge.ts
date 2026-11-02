@@ -1,3 +1,4 @@
+import type { EnvironmentObservationPreparation } from '../environment-observations/runtime.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { ContextPolicySnapshot } from './context-settings.js';
 import type { ContextSummaryRecipe } from './protocol.generated.js';
@@ -9,7 +10,7 @@ export type ContextQuery = {action:'prepare';runId:string;requestId:string;expec
   | {action:'decide';runId:string;input:VarinContextBudgetInput}
   | {action:'compact';runId:string;requestId:string;throughId:string;expectedRevision:number;block:boolean;summaryRecipe:ContextSummaryRecipe};
 export interface AcceptedContextJob { throughId:string; summaryRecipe:ContextSummaryRecipe; block:boolean }
-export type ContextResult = {environment?:import('./protocol.generated.js').ExecutionEnvironment;accepted?:AcceptedContextJob;status:'ready';policy?:ContextPolicySnapshot;timing?:ContextTiming;external?:boolean;decision?:VarinContextBudgetDecision;summaryRecipe?:ContextSummaryRecipe;published?:boolean;jobRunId?:string} | {status:'failed';code:string;accepted?:AcceptedContextJob};
+export type ContextResult = {observations?:EnvironmentObservationPreparation;environment?:import('./protocol.generated.js').ExecutionEnvironment;accepted?:AcceptedContextJob;status:'ready';policy?:ContextPolicySnapshot;timing?:ContextTiming;external?:boolean;decision?:VarinContextBudgetDecision;summaryRecipe?:ContextSummaryRecipe;published?:boolean;jobRunId?:string} | {status:'failed';code:string;accepted?:AcceptedContextJob};
 export interface ContextOwner {
   query(query:ContextQuery,signal:AbortSignal):Promise<ContextResult>;
   close():void;

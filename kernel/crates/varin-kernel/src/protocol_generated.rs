@@ -5,10 +5,15 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 75;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 76;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
+    "runtime.context.observations.importSources",
+    "runtime.context.observations.receipt",
+    "runtime.context.observations.snapshot",
+    "runtime.context.observations.read",
+    "runtime.context.observations.importPosition",
     "runtime.context.observations.sources",
     "workspace.inspect",
     "workspace.release",
@@ -101,6 +106,12 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.context.observations.importSources",
+    "runtime.context.observations.capture",
+    "runtime.context.observations.receipt",
+    "runtime.context.observations.snapshot",
+    "runtime.context.observations.importPosition",
+    "runtime.context.observations.import",
     "runtime.context.observations.sources",
     "runtime.context.observations.admit",
     "workspace.inspect",
@@ -207,6 +218,8 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.sendNow", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.context.observations.capture",
+    "runtime.context.observations.import",
     "runtime.context.observations.admit",
     "runtime.knowledge_inference.admit",
     "runtime.knowledge_inference.read",
@@ -236,6 +249,55 @@ pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationImportSources {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationCaptureBatch {
+    pub(crate) owner: varin_runtime::catalog::context_observations::ContextObservationSource,
+    pub(crate) captures:
+        Vec<varin_runtime::catalog::context_observations::ContextObservationCapture>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationReceiptLookup {
+    pub(crate) owner: varin_runtime::catalog::context_observations::ContextObservationSource,
+    pub(crate) capture_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationSnapshot {
+    pub(crate) run_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationRead {
+    pub(crate) run_id: String,
+    pub(crate) id: String,
+    pub(crate) offset: Option<i64>,
+    pub(crate) limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationImportPosition {
+    pub(crate) owner: varin_runtime::catalog::context_observations::ContextObservationSource,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationImport {
+    pub(crate) owner: varin_runtime::catalog::context_observations::ContextObservationSource,
+    pub(crate) after_id: i64,
+    pub(crate) through_id: i64,
+    pub(crate) events: Vec<varin_runtime::catalog::context_observations::ContextObservationFact>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -3096,6 +3158,82 @@ pub(crate) type SourceHandoffClaimParams = crate::source_resources::SourceHandof
 
 pub(crate) type SourceEffectReceiptParams = crate::source_resources::SourceEffectReceiptParams;
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationHostDiagnostics {
+    pub(crate) accepted_cursor: i64,
+    pub(crate) sources:
+        Vec<varin_runtime::catalog::context_observations::ContextObservationProducerStatus>,
+    pub(crate) retired_gaps:
+        Option<Vec<varin_runtime::catalog::context_observations::ContextObservationRetiredGap>>,
+    pub(crate) producer_pending: i64,
+    pub(crate) producer_gaps:
+        Vec<varin_runtime::catalog::context_observations::ContextObservationProducerGap>,
+}
+
+pub(crate) type ContextObservationProducerStatus =
+    varin_runtime::catalog::context_observations::ContextObservationProducerStatus;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationGap {
+    pub(crate) count: i64,
+    pub(crate) first_capture_id: String,
+    pub(crate) last_capture_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationRetiredGap {
+    pub(crate) workspace_id: String,
+    pub(crate) count: i64,
+    pub(crate) first_capture_id: String,
+    pub(crate) last_capture_id: String,
+}
+
+pub(crate) type ContextObservationProducerGap =
+    varin_runtime::catalog::context_observations::ContextObservationProducerGap;
+
+pub(crate) type EnvironmentObservationEvent =
+    varin_runtime::catalog::context_observations::ContextObservationRawEvent;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EnvironmentObservationCapture {
+    pub(crate) capture_id: String,
+    pub(crate) event: varin_runtime::catalog::context_observations::ContextObservationRawEvent,
+}
+
+pub(crate) type EnvironmentObservationReceipt =
+    varin_runtime::catalog::context_observations::ContextObservationCaptureReceipt;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EnvironmentObservationSnapshot {
+    pub(crate) cursor: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationOriginal {
+    pub(crate) owner: varin_runtime::catalog::context_observations::ContextObservationSource,
+    pub(crate) id: String,
+    pub(crate) raw_ref: String,
+    pub(crate) raw_digest: String,
+    pub(crate) offset: i64,
+    pub(crate) next_offset: i64,
+    pub(crate) total_bytes: i64,
+    pub(crate) text: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextObservationImportReceipt {
+    pub(crate) through_id: i64,
+    pub(crate) receipts:
+        Vec<varin_runtime::catalog::context_observations::ContextObservationReceipt>,
+}
+
 #[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CodeRetrievalDiagnostic {
@@ -3735,6 +3873,41 @@ pub(crate) struct ContextFragment {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.context.observations.importSources" => {
+            serde_json::from_value::<ContextObservationImportSources>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.context.observations.capture" => {
+            serde_json::from_value::<ContextObservationCaptureBatch>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.context.observations.receipt" => {
+            serde_json::from_value::<ContextObservationReceiptLookup>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.context.observations.snapshot" => {
+            serde_json::from_value::<ContextObservationSnapshot>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.context.observations.read" => {
+            serde_json::from_value::<ContextObservationRead>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.context.observations.importPosition" => {
+            serde_json::from_value::<ContextObservationImportPosition>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.context.observations.import" => {
+            serde_json::from_value::<ContextObservationImport>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.context.observations.sources" => {
             serde_json::from_value::<ContextObservationSources>(params.clone())
                 .map(|_| ())

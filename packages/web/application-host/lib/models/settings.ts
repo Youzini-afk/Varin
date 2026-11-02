@@ -9,6 +9,18 @@ import { parseCompactionSettings } from './compaction-settings.js';
 import { readResourceSettings } from '../agent-resources/configuration.js';
 import { ConfigurationFile, ModelConfigurationError, object } from './configuration.js';
 
+const permissionMode = (document: Record<string, unknown>): unknown => {
+  const harness = object(document.harness) ? document.harness : {};
+  return object(harness.permissions) ? harness.permissions.mode : undefined;
+};
+const assertSupportedPermissionChange = (previous: unknown, document: Record<string, unknown>): void => {
+  const next = permissionMode(document);
+  if (next !== previous && (next === 'smart' || next === 'accept-edits')) {
+    throw new ModelConfigurationError('permission_mode_unavailable',
+      `${next} approval is not implemented by the Host permission owner. Choose normal or bypass; existing saved values are read as normal.`);
+  }
+};
+
 export function validateAgentSettings(document: Record<string, unknown>): Record<string, JsonValue> {
   if (document.titleUpdateInterval !== undefined && (typeof document.titleUpdateInterval !== 'number' || !Number.isSafeInteger(document.titleUpdateInterval) || document.titleUpdateInterval < 0)) {
     throw new ModelConfigurationError('invalid_settings', 'titleUpdateInterval must be a non-negative integer; zero keeps only initial naming');
@@ -68,19 +80,35 @@ export class AgentSettingsService {
     if (!['global', 'project'].includes(input.scope) || !object(input.set) || !Array.isArray(input.remove)
       || input.remove.some(key => typeof key !== 'string') || typeof input.expectedRevision !== 'string') throw new ModelConfigurationError('invalid_settings', 'Invalid settings update');
     if (input.scope === 'project' && (!input.cwd || !this.projectTrusted(input.cwd))) throw new ModelConfigurationError('project_not_trusted', 'Project configuration requires a trusted workspace', 403);
+    // Resolve contextual layers before the commit; a later observation failure
+    // must never hide a successful write or replace its receipt with another edit.
+    let observed: AgentSettingsSnapshot;
+    try { observed = await this.snapshot(input.cwd); }
+    catch (error) {
+      if (input.scope !== 'global' || !input.cwd) throw error;
+      // A malformed/unavailable project cannot prevent an independent global edit.
+      // Keep that missing observation explicit rather than inventing project defaults.
+      observed = { ...await this.snapshot(), effectiveUnavailable: 'Project settings could not be read; effective configuration is unavailable.' };
+    }
     const file = input.scope === 'global' ? this.global : this.#project(input.cwd!);
-    await file.update(input.expectedRevision, document => {
+    const committed = await file.update(input.expectedRevision, document => {
+      const previousMode = permissionMode(document);
       if (input.scope === 'project' && !this.projectTrusted(input.cwd!)) throw new ModelConfigurationError('project_trust_revoked', 'Project trust changed while saving settings', 403);
       for (const key of input.remove) delete document[key];
       Object.assign(document, input.set);
+      assertSupportedPermissionChange(previousMode, document);
       return document;
     });
-    return this.snapshot(input.cwd);
+    return input.scope === 'global'
+      ? { ...observed, global: committed.document, globalRevision: committed.revision }
+      : { ...observed, project: committed.document, projectRevision: committed.revision };
   }
   read() { return this.global.read(); }
   async updateHarness(expectedRevision: string, update: (harness: Record<string, JsonValue>) => Record<string, JsonValue>) {
     return this.global.update(expectedRevision, document => {
+      const previousMode = permissionMode(document);
       document.harness = update(structuredClone((document.harness ?? {}) as Record<string, JsonValue>));
+      assertSupportedPermissionChange(previousMode, document);
       return document;
     });
   }

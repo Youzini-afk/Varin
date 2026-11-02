@@ -2,7 +2,7 @@
 
 Ordinary Agent notes and editable system instructions use the Rust typed-record authority
 described in [Memory ownership](../memory/DOCUMENTATION.md). They bypass semantic recall and
-background memory organization. This module still owns plans, observations, symbol indexes,
+background memory organization. This module still owns plans, symbol indexes,
 and Bot/user long-term knowledge; these are separate from ordinary Agent notes.
 
 The KnowledgeStore authority, derived vector stores and inference ledger use TriviumDB 0.9.0.
@@ -100,18 +100,27 @@ remain queued. The boundary snapshots arguments on admission. `removeFileSymbols
 cancellation applies before dispatch; after dispatch the caller receives the actual
 native result, not a false cancellation of an already-committed mutation.
 
-Shell start/completion knowledge observations run on their existing owned queue after command verification,
-without holding PTY admission, command results or writer release behind an index checkpoint. The next
-model request synchronizes that session's observations. Zone 2 reads stop waiting when their request is
-cancelled, and do not schedule subsequent reads or recall after that cancellation; accepted storage work
-keeps its original durability and outcome. No database writer is killed to satisfy a caller timeout.
+## Environment observations: legacy import only
 
-Workspace observations are auxiliary to the conversation's native history. A failed KnowledgeStore
-open or event read reports a content-free availability reason and defers only that workspace's
-notification publication; it cannot prevent the next model request. The original cursor remains
-unacknowledged and is retried at the next preparation boundary. No empty store, automatic database
-replacement or fabricated event is substituted. Source identity, event integrity, native admission
-and receipt failures still fail preparation; cancellation remains cancellation.
+New environment facts belong to the native Catalog and ContentStore, not this writer.
+[The environment coordinator](../environment-observations/README.md) receives committed
+Documents changes, tagged user-terminal completions and Git status samples. It owns only
+bounded volatile admission/reconciliation; native receipts own durability and model delivery.
+Bot knowledge recall and plans retain their existing KnowledgeStore ownership.
+
+`context-publication.ts` is a read-only importer for original event journals. It reads
+existing stores in numeric-ID pages, filters metadata before loading payloads, and submits
+each page plus its scanned prefix to one native import transaction. Agent-origin records
+are skipped without losing prefix progress. Original `observation:<run>:<node>` IDs and
+stored text/data remain unchanged; the importer never applies today's new projection to
+an old fact or treats a changed digest as a duplicate. New captures never write this log.
+
+Recovery runs independently of request preparation. An absent store stays absent; a failed
+open or event read retains its original files and reports unavailability. No empty store,
+automatic replacement or synthetic replay is substituted. Ambiguous native acknowledgement
+is reconciled against original import progress and exact idempotent page admission, not
+against a different current Source. Cancellation of a request does not cancel accepted
+storage work, and no database writer is killed to satisfy a caller timeout.
 
 ## Checkpoints and acknowledgement
 
@@ -119,7 +128,7 @@ and receipt failures still fail preparation; cancellation remains cancellation.
 Authoritative stores use TriviumDB `syncMode: "full"` for user state: payload/edge writes
 fsync their incremental WAL before returning. Derived symbol callbacks keep their
 existing `normal` WAL mode and deferred snapshot; the synchronous writer restores
-`full` before another operation can enter. Plans, events and memories are
+`full` before another operation can enter. Plans and memories are
 acknowledged on that durable write, without rewriting the entire symbol catalog.
 Full snapshots run on the existing 30-second deadline and at close. Contiguous
 requests in a store group publish notifications at the end of the group; a batch

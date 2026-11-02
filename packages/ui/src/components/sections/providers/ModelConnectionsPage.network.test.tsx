@@ -204,13 +204,50 @@ test('a late save failure from the previous Host cannot poison the new editor', 
   expect(button('settings.models.save').disabled).toBe(true);
 });
 
+const suspendedSignIns = ['openai-codex', 'anthropic', 'github-copilot', 'opencode', 'kimi-coding', 'xai', 'meta'];
+
+test.each(suspendedSignIns)('%s has no new or replacement sign-in entry, while its saved credential remains editable', async provider => {
+  snapshot.channels[0]!.type = provider;
+  snapshot.channels[0]!.authentication = { kind: 'credential', reference: 'existing-account' };
+  snapshot.types[0]!.id = provider;
+  snapshot.types[0]!.authentication = ['credential'];
+  snapshot.types[0]!.oauthProviders = [{ id: provider, name: provider }];
+  await open();
+  expect([...container.querySelectorAll('button')].some(button => button.textContent?.startsWith('settings.mcp.signIn'))).toBe(false);
+  const key = container.querySelector('[aria-label="settings.models.apiKey"]') as HTMLInputElement;
+  expect(key.placeholder).toBe('settings.models.credentialSaved');
+  expect(key.disabled).toBe(false);
+  expect(button('settings.models.removeCredential')).toBeDefined();
+  await edit('settings.models.name', 'Renamed connection');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[0]![0].authentication).toEqual({ kind: 'credential', reference: 'existing-account' });
+  expect(fixtures.api.signIn).not.toHaveBeenCalled();
+  expect(fixtures.api.storeCredential).not.toHaveBeenCalled();
+});
+
+test('the new-service picker advertises only OpenRouter account sign-in and keeps its login flow', async () => {
+  const template = snapshot.types[0]!;
+  snapshot.types = [...suspendedSignIns, 'openrouter'].map(id => ({ ...template, id, name: id,
+    authentication: ['credential'], oauthProviders: [{ id, name: id }] }));
+  await act(async () => root.render(<ModelConnectionsPage />));
+  await click('settings.models.addChannel');
+  const offers = [...container.querySelectorAll('button')].filter(button => button.textContent?.includes('settings.models.accountSignIn'));
+  expect(offers).toHaveLength(1);
+  expect(offers[0]!.textContent).toContain('openrouter');
+  await act(async () => offers[0]!.click());
+  fixtures.api.signIn.mockResolvedValue({ id: 'openrouter-flow', status: 'pending' });
+  fixtures.api.authorization.mockResolvedValue({ id: 'openrouter-flow', status: 'pending' });
+  await click('settings.mcp.signIn · openrouter');
+  expect(fixtures.api.signIn).toHaveBeenCalledWith('openrouter', expect.stringMatching(/^model:/));
+});
+
 test('Host switching waits for an in-flight sign-in handle and cancels it on the original owner', async () => {
   snapshot.channels[0]!.authentication = { kind: 'credential', reference: 'original' };
-  snapshot.types[0]!.authentication = ['credential']; snapshot.types[0]!.oauthProviders = [{ id: 'oauth', name: 'OAuth' }];
+  snapshot.types[0]!.authentication = ['credential']; snapshot.types[0]!.oauthProviders = [{ id: 'openrouter', name: 'OpenRouter' }];
   let resolve!: (state: { id: string; status: 'pending' }) => void;
   fixtures.api.signIn.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   fixtures.api.authorization.mockResolvedValue({ id: 'flow', status: 'pending' });
-  await open(); await click('settings.mcp.signIn · OAuth');
+  await open(); await click('settings.mcp.signIn · OpenRouter');
   let completed = false;
   const switching = Promise.all([...fixtures.blockers].map(blocker => blocker())).then(() => { completed = true; });
   await act(async () => { await Promise.resolve(); }); expect(completed).toBe(false);
@@ -220,10 +257,10 @@ test('Host switching waits for an in-flight sign-in handle and cancels it on the
 
 test('unmounting during sign-in cancels the handle when it arrives', async () => {
   snapshot.channels[0]!.authentication = { kind: 'credential', reference: 'original' };
-  snapshot.types[0]!.authentication = ['credential']; snapshot.types[0]!.oauthProviders = [{ id: 'oauth', name: 'OAuth' }];
+  snapshot.types[0]!.authentication = ['credential']; snapshot.types[0]!.oauthProviders = [{ id: 'openrouter', name: 'OpenRouter' }];
   let resolve!: (state: { id: string; status: 'pending' }) => void;
   fixtures.api.signIn.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  await open(); await click('settings.mcp.signIn · OAuth');
+  await open(); await click('settings.mcp.signIn · OpenRouter');
   await act(async () => root.render(null));
   await act(async () => resolve({ id: 'late-flow', status: 'pending' }));
   expect(fixtures.api.cancelAuthorization).toHaveBeenCalledWith('late-flow'); expect(fixtures.api.authorization).not.toHaveBeenCalled();

@@ -7,6 +7,7 @@ import {
   createDocumentAuthority,
   type DocumentAuthority,
   type DocumentAuthorityOptions,
+  type DocumentMutationObservation,
 } from './authority.js';
 import {
   createDocumentAuthorityHarness,
@@ -728,7 +729,8 @@ it('preserves every physical alias in an immutable Thread source capture', async
 });
 
 it('publishes committed document mutations without letting an observer fail the write', async () => {
-  const events: Array<{ resourceId: string; kind: string; owner: { kind: string } }> = [];
+  const events: DocumentMutationObservation[] = [];
+  const operationId = randomUUID();
   const harness = await createDocumentAuthorityHarness({
     authority: {
       onMutation: (event) => {
@@ -745,10 +747,25 @@ it('publishes committed document mutations without letting an observer fail the 
       encoding: 'utf-8',
       bom: false,
       expectedRevision: null,
-      operationId: randomUUID(),
+      operationId,
     });
     expect(result.status).toBe('written');
-    expect(events).toMatchObject([{ resourceId: 'observed.ts', kind: 'created', owner: { kind: 'web-route' } }]);
+    expect(events).toMatchObject([{ resourceId: 'observed.ts', kind: 'created', operationId, owner: { kind: 'web-route' } }]);
+    expect(events[0]!.changeId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(events[0]!.observedAt).toBeGreaterThan(0);
+    const moveOperationId = randomUUID();
+    const moved = await harness.authority.move({
+      from: harness.resource('observed.ts'), to: harness.resource('moved.ts'),
+      token: harness.token(undefined, { kind: 'web-route', id: 'editor' }),
+      expectedRevision: requireStatus(result, 'written').revision, operationId: moveOperationId,
+    });
+    expect(moved.status).toBe('moved');
+    expect(events.slice(1)).toMatchObject([
+      {resourceId: 'observed.ts', kind: 'deleted', operationId: moveOperationId},
+      {resourceId: 'moved.ts', kind: 'created', operationId: moveOperationId},
+    ]);
+    expect(new Set(events.map(event => event.changeId)).size).toBe(3);
+
   } finally {
     await harness.cleanup();
   }

@@ -51,7 +51,7 @@ it.each(['main', 'child'])('stages a %s candidate, measures only new work, and r
   let summaryConfiguration: unknown;
   const release = vi.fn();
   const listeners = new Set<(event: { stream: string }) => void>();
-  const parent = { id: 'parent', thread_id: `thread:${role}`, branch_id: `branch:${role}`, state: 'running', cancel_requested: false, configuration: { model: 'same-model' } };
+  const parent = { id: 'parent', thread_id: `thread:${role}`, branch_id: `branch:${role}`, state: 'running', cancel_requested: false, configuration: { model: 'same-model', contextWindowTokens: 8000 } };
   const successor = { ...parent, id: 'next' };
   const checkpoint = { id: 'original', revision: 1, proposal: { memory_checkpoint: 'original-memory', effective_system_prompt: '', instruction_sources: [] } };
   const recipe = { strategy: { kind: 'builtin', name: 'capacity', version: '1' }, mode: 'background', configurationIdentity: 'settings', additionalInstructions: null } as const;
@@ -114,29 +114,29 @@ it.each(['main', 'child'])('stages a %s candidate, measures only new work, and r
   } finally { service.close(); }
 });
 
-it('waits for source-bound observation publication before preparing policy and honors cancellation', async () => {
-  const run = { id:'run', thread_id:'thread', branch_id:'branch', state:'running', cancel_requested:false, configuration:{} };
+it('reads the committed observation frontier before preparing policy and honors cancellation', async () => {
+  const run = { id:'run', thread_id:'thread', branch_id:'branch', state:'running', cancel_requested:false, configuration:{contextWindowTokens:8000} };
   const runtime = { run:async()=>run,launch:async()=>null };
   const prepare = Object.assign(async()=>{throw new Error('not initial');},{main:async()=>{throw new Error('not initial');}}) as ContextPreparer;
   const policy = vi.fn(async()=>({policy:{configurationIdentity:'settings',enabled:false,reserveTokens:0,keepRecentTokens:0,explicitKeepRecentTokens:null,backgroundPreparation:false,preparationWaterline:1},scope:{threadId:'thread'}}));
   const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare, policy, async()=>{},null);
   let release!:()=>void; const held=new Promise<void>(done=>{release=done;});
-  const publish=vi.fn(async(_run:unknown,signal:AbortSignal)=>waitWithSignal(held,signal)); service.bindObservations(publish);
+  const publish=vi.fn(async(_run:unknown,signal:AbortSignal)=>{ await waitWithSignal(held,signal); return {acceptedCursor:7,sources:[],producerPending:2,producerGaps:[]}; }); service.bindObservations(publish);
   const controller=new AbortController(); const work=service.query({action:'prepare',runId:'run',requestId:'request',expectedRevision:1},controller.signal);
   const rejected=expect(work).rejects.toThrow(); await vi.waitFor(()=>expect(publish).toHaveBeenCalledOnce()); expect(policy).not.toHaveBeenCalled();
   controller.abort(); await rejected; release(); expect(policy).not.toHaveBeenCalled();
-  await service.query({action:'prepare',runId:'run',requestId:'next-request',expectedRevision:1},new AbortController().signal); expect(policy).toHaveBeenCalledOnce(); service.close();
+  expect(await service.query({action:'prepare',runId:'run',requestId:'next-request',expectedRevision:1},new AbortController().signal)).toMatchObject({observations:{acceptedCursor:7,producerPending:2}}); expect(policy).toHaveBeenCalledOnce(); service.close();
 });
 
 it('closes old observation preparation and admits a fresh owner generation', async () => {
-  const run = { id: 'run', thread_id: 'thread', branch_id: 'branch', state: 'running', cancel_requested: false, configuration: {} };
+  const run = { id: 'run', thread_id: 'thread', branch_id: 'branch', state: 'running', cancel_requested: false, configuration: { contextWindowTokens: 8000 } };
   const runtime = { run: vi.fn(async () => run), launch: vi.fn(async () => null) };
   const prepare = Object.assign(async () => { throw new Error('not initial'); }, { main: async () => { throw new Error('not initial'); } }) as ContextPreparer;
   const policy = vi.fn(async (): Promise<import('./context-service.js').ContextPolicyPreparation> => { throw new Error('A closed owner cannot prepare policy'); });
   const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare, policy, async () => {}, null);
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
-  const publish = vi.fn((_run: unknown, _signal: AbortSignal) => held);
+  const publish = vi.fn(async (_run: unknown, _signal: AbortSignal) => { await held; return {acceptedCursor:7,sources:[],producerPending:0,producerGaps:[]}; });
   service.bindObservations(publish);
   const query = { action: 'prepare', runId: 'run', requestId: 'request', expectedRevision: 1 } as const;
   const work = service.query(query, new AbortController().signal);
@@ -152,4 +152,21 @@ it('closes old observation preparation and admits a fresh owner generation', asy
   expect(runtime.run).toHaveBeenCalledTimes(2);
   expect(publish.mock.calls[1]![1].aborted).toBe(false);
   service.close();
+});
+
+it.each([undefined, null])('prepares durable observations without a capacity-provider dependency when the model window is %s', async capacity => {
+  const runtime = {run: async () => ({id: 'run', thread_id: 'thread', branch_id: 'branch', state: 'running', cancel_requested: false,
+    configuration: {contextWindowTokens: capacity}}), launch: vi.fn(async () => { throw new Error('Capacity launch not needed'); })};
+  const prepare = Object.assign(async () => { throw new Error('No initial context'); }, {main: async () => { throw new Error('No main context'); }}) as ContextPreparer;
+  const policy = vi.fn(async () => { throw new Error('Capacity policy unavailable'); });
+  const service = new ContextService(runtime as unknown as AgentRuntimeClient, prepare, policy, async () => {}, null);
+  const diagnostics = {acceptedCursor: 7, sources: [], producerPending: 2, producerGaps: []};
+  const observations = vi.fn(async () => diagnostics); service.bindObservations(observations);
+  const query = {action: 'prepare', runId: 'run', requestId: 'request', expectedRevision: 0} as const;
+  try {
+    await expect(service.query(query, new AbortController().signal)).resolves.toEqual({status: 'ready', external: false, observations: diagnostics});
+    expect(policy).not.toHaveBeenCalled(); expect(runtime.launch).not.toHaveBeenCalled();
+    observations.mockRejectedValueOnce(new Error('Catalog unavailable'));
+    await expect(service.query(query, new AbortController().signal)).rejects.toThrow('Catalog unavailable');
+  } finally { service.close(); }
 });

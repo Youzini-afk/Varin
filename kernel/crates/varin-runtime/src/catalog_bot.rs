@@ -369,6 +369,8 @@ impl Catalog {
             format!("DELETE FROM child_tasks WHERE id {op}"),
             format!("DELETE FROM followup_occurrences WHERE followup_id IN (SELECT id FROM followups WHERE source_run_id {r})"),
             format!("DELETE FROM followups WHERE source_run_id {r}"),
+            format!("DELETE FROM context_observation_imports WHERE id {r}"),
+            format!("DELETE FROM context_observation_captures WHERE source_run_id {r}"),
             format!("DELETE FROM input_history_content WHERE input_id IN (SELECT id FROM input_queue WHERE branch_id {b})"),
             format!("DELETE FROM input_queue WHERE branch_id {b}"),
             format!("DELETE FROM resumptions WHERE run_id {r}"),

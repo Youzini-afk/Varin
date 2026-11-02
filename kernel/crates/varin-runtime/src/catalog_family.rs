@@ -1211,6 +1211,19 @@ impl FamilyRead {
         }
         Ok((anchor, item.clone()))
     }
+    /// Expand the raw original behind a versioned environment projection. The normal
+    /// signed history view and family/tool authorization, not source selection today,
+    /// authorize access to this historical fact.
+    pub fn observation(self, request: ItemRequest, cancel: &dyn Fn() -> bool) -> Result<Value> {
+        let (anchor, _) = self.original_item(request.run_id.as_deref(),request.anchor.as_deref(),&request.item_id,cancel)?;
+        let db=self.open(cancel)?;
+        let original=super::context_observations::read_original(&db,&self.content,&request.item_id,request.offset,request.max_bytes,cancel)?;
+        self.finish(cancel)?;
+        Ok(json!({"threadId":anchor.thread,"branchId":anchor.branch,"runId":anchor.run,
+            "headId":anchor.head,"anchor":self.sign(&anchor)?,"observationId":original.id,
+            "format":"environment_observation_json","owner":original.owner,"rawRef":original.raw_ref,"rawDigest":original.raw_digest,
+            "text":original.text,"offset":original.offset,"nextOffset":(original.next_offset<original.total_bytes).then_some(original.next_offset),"totalBytes":original.total_bytes}))
+    }
     pub fn item(self, request: ItemRequest, cancel: &dyn Fn() -> bool) -> Result<ItemPage> {
         let (anchor, item) = self.original_item(request.run_id.as_deref(), request.anchor.as_deref(), &request.item_id, cancel)?;
         let (body, _) = self.semantic(&item, cancel)?;
