@@ -351,7 +351,8 @@ dependency version, builds from the fixed source revision, and checks the result
 Verified payloads and hash receipts are cached under `~/.cache/varin-native`; release jobs cache
 only those outputs, not source checkouts or build directories.
 The two addon packages are staged outside ASAR so the private checkpoint process can load
-them under Node mode. The helper runs only when an existing uncheckpointed 0.8 WAL requires
+them under Node mode. Packaging retains only the target platform/architecture addon in
+both packages; a missing target in either package fails the build. The helper runs only when an existing uncheckpointed 0.8 WAL requires
 it; normal KnowledgeStore work uses 0.9. See [Knowledge storage](../web/application-host/lib/knowledge/DOCUMENTATION.md).
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.

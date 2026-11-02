@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { protocolVersion } = require('../../../kernel/protocol/schema.json');
+const pruneTriviumRuntime = require('./prune-trivium-runtime.cjs');
 const {
   defaultKernelTargetTriple,
   detectKernelBinaryIdentity,
@@ -63,10 +64,7 @@ module.exports = (context) => {
     // nested app bundles with the enclosing app's identity. Unsigned packaging
     // retains the explicit ad-hoc development signature.
   }
-  const trivium = path.join(unpackedNodeModulesPath, 'triviumdb');
-  const suffix = context.electronPlatformName === 'win32' ? '-msvc' : context.electronPlatformName === 'linux' ? '-gnu' : '';
-  const triviumBinary = 'triviumdb.' + context.electronPlatformName + '-' + targetArchitecture + suffix + '.node';
-  if (!fs.existsSync(path.join(trivium, triviumBinary))) throw new Error('Missing target TriviumDB binary: ' + triviumBinary);
+  pruneTriviumRuntime(unpackedNodeModulesPath, context.electronPlatformName, targetArchitecture);
   const rg = path.join(resourcesPath, 'tools', context.electronPlatformName === 'win32' ? 'rg.exe' : 'rg');
   const rgIdentity = detectKernelBinaryIdentity(fs.readFileSync(rg));
   if (rgIdentity.platform !== context.electronPlatformName || rgIdentity.arch !== targetArchitecture) throw new Error('Packaged ripgrep architecture mismatch');
@@ -80,7 +78,6 @@ module.exports = (context) => {
     if (!output.startsWith('ripgrep ')) throw new Error('Packaged ripgrep did not execute');
     execFileSync(rg, ['--no-config', '--fixed-strings', '--quiet', 'Copyright (c) 2015 Andrew Gallant', path.join(resourcesPath, 'tools', 'ripgrep-MIT-LICENSE.txt')], options);
   }
-  for (const name of fs.readdirSync(trivium)) if (name.endsWith('.node') && name !== triviumBinary) fs.rmSync(path.join(trivium, name));
   for (const optional of ['@huggingface/transformers', 'onnxruntime-node', 'onnxruntime-web']) {
     if (fs.existsSync(path.join(unpackedNodeModulesPath, optional))) {
       throw new Error(`Optional local inference dependency entered the base installer: ${optional}`);
