@@ -18,11 +18,8 @@ impl Storage {
     pub(super) fn load_node(&self, hash: &str) -> Result<TrieNode, KernelError> {
         let encoded: Option<String> = self
             .conn
-            .query_row(
-                "SELECT children_json, state_json FROM trie_nodes WHERE hash = ?1",
-                params![hash],
-                |row| row.get(0),
-            )
+            .prepare_cached("SELECT children_json, state_json FROM trie_nodes WHERE hash = ?1")?
+            .query_row(params![hash], |row| row.get(0))
             .optional()?;
         let encoded =
             encoded.ok_or_else(|| KernelError::Storage(format!("missing trie node {hash}")))?;
@@ -35,10 +32,13 @@ impl Storage {
 
     pub(super) fn store_node(&mut self, node: &TrieNode) -> Result<String, KernelError> {
         let hash = node_hash(node);
-        self.conn.execute(
-            "INSERT OR IGNORE INTO trie_nodes(hash, children_json, state_json) VALUES (?1, ?2, ?3)",
-            params![hash, serde_json::to_string(node)?, Option::<String>::None],
-        )?;
+        self.conn
+            .prepare_cached("INSERT OR IGNORE INTO trie_nodes(hash, children_json, state_json) VALUES (?1, ?2, ?3)")?
+            .execute(params![
+                hash,
+                serde_json::to_string(node)?,
+                Option::<String>::None
+            ])?;
         Ok(hash)
     }
 

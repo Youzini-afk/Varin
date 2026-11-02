@@ -7,6 +7,46 @@ struct Fixture {
     directory: PathBuf,
 }
 
+#[test]
+fn workspace_tree_cached_statements_recheck_rows_and_observe_rollback() {
+    let mut f = Fixture::new();
+    let root = f.storage.empty_root().unwrap();
+    f.storage.load_node(&root).unwrap();
+    f.storage.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let changed = TrieNode::Path {
+        state: None,
+        children: Some(root.clone()),
+    };
+    f.storage
+        .conn
+        .execute(
+            "UPDATE trie_nodes SET children_json = ?1 WHERE hash = ?2",
+            params![serde_json::to_string(&changed).unwrap(), root],
+        )
+        .unwrap();
+    assert!(
+        matches!(f.storage.load_node(&root), Err(KernelError::Storage(message)) if message.contains("corrupt trie node"))
+    );
+    f.storage.conn.execute_batch("ROLLBACK").unwrap();
+    assert!(matches!(
+        f.storage.load_node(&root).unwrap(),
+        TrieNode::Path {
+            state: None,
+            children: None
+        }
+    ));
+    // Reusing a prepared insert after rollback still publishes its actual row.
+    f.storage.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let candidate = f.storage.store_node(&changed).unwrap();
+    f.storage.conn.execute_batch("ROLLBACK").unwrap();
+    assert!(
+        matches!(f.storage.load_node(&candidate), Err(KernelError::Storage(message)) if message.contains("missing trie node"))
+    );
+    assert_eq!(f.storage.store_node(&changed).unwrap(), candidate);
+    f.storage.load_node(&candidate).unwrap();
+    f.close();
+}
+
 #[cfg(unix)]
 #[test]
 fn new_workspace_file_metadata_roundtrips_to_ordinary_host_files() {
