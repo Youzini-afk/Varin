@@ -29,7 +29,7 @@ vi.mock('./BotNameDialog', () => ({ BotNameDialog: ({ open, onNameChange, onSubm
   <button type="button" onClick={() => onNameChange('New name')}>set-name</button><button type="submit">save-name</button>
 </form> : null }));
 
-const bot = (id: string, archived = false): BotSummary => ({ id, name: id, archived, homeDir: `/bots/${id}`,
+const bot = (id: string, archived = false): BotSummary => ({ revision: 1, id, name: id, archived, homeDir: `/bots/${id}`,
   coordinatorHostId: 'host', entry: { runtime: 'agent', threadId: `thread:${id}`, branchId: `branch:${id}` }, instructions: null, model: null, createdAt: '', updatedAt: '' });
 let container: HTMLDivElement;
 let root: Root;

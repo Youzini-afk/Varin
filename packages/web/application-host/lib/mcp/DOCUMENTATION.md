@@ -37,6 +37,16 @@ in `mcpPolicies` through the raw configuration editor. Closing a settings view r
 connection holders and sign-in flows. A connected server can belong to other consumers; settings first
 acquires its own holder before offering view-local disconnect. Reconnect uses the current definition
 without retargeting other consumers' retained leases. Failed or cancelled initial preparation releases the undisclosed view.
+
+Agent settings reads expose the source revision and structured server fields, but header/environment
+values, command arguments, OAuth secrets and URL credentials are presence facts rather than secrets.
+`document/patch` changes named server fields in the original JSONC source, preserving omitted values,
+unrelated fields and comments. Explicit `reset` removes a field; editing a sanitized projection is not
+a full-document replacement. The existing file owner validates the complete candidate and performs
+revision CAS. Source persistence and activation are separate receipt facts: a failed reload after a
+successful save reports persisted content with unavailable activation, and a later read can retry
+observation without replaying the write. Project trust and the prohibition on project-selected user
+model accounts apply to these patches exactly as they do to complete document saves.
 Malformed sources keep their last valid snapshot and report an error; invalid individual entries
 do not disable independent valid servers. Actual source removal and explicit disablement have their
 own withdrawal semantics. Reads never clear or rewrite a bad file. The common project-trust reader

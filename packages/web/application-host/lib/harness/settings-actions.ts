@@ -8,10 +8,16 @@
  * `unavailable`; nothing here fakes an install, login, or connection.
  */
 
-import { type SettingsCatalogEntry } from '@varin/application-client';
+import { type SettingsCatalogEntry, type SettingsActionContract } from '@varin/application-client';
 import type { SettingsActionResult } from '@varin/protocol';
 import { HarnessServiceError } from './service-error.js';
-import type { AppPersistOutcome, SettingsServiceCaller } from './settings-service.js';
+import { ModelConfigurationError } from '../models/configuration.js';
+import { HostError } from '../configuration-errors.js';
+import { settingsDocumentRevision, type AppPersistOutcome, type SettingsServiceCaller } from './settings-service.js';
+import { compileToolJsonSchema, describeToolSchemaFailure } from '../models/schema.js';
+import { getSettingsActionContracts } from './settings-action-contracts.js';
+import { patchModelChannel, sanitizeModelConnections, sanitizeMcpDocument, type McpDocumentWriteReceipt } from './settings-domain-patches.js';
+import { createSelfBotAdapter, createSelfConversationAdapter, type SelfSettingsDeps } from './settings-self-actions.js';
 
 export interface SettingsActionContext {
   caller: SettingsServiceCaller;
@@ -26,12 +32,16 @@ export interface ActionStatus {
   data?: unknown;
   /** Verbs the owner can actually execute right now. */
   verbs?: string[];
+  /** Exact executable owner argument contracts for the disclosed verbs. */
+  actions?: Record<string, SettingsActionContract>;
   /** Why the domain is not operable (offline, missing dep, …). */
   unavailable?: string;
 }
 
 export interface ActionInvocation {
   status: SettingsActionResult['status'];
+  /** Independent of success: a failure can follow a confirmed owner save. */
+  mutation?: 'none' | 'applied' | 'unknown';
   detail?: string;
   data?: unknown;
   operation?: SettingsActionResult['operation'];
@@ -53,6 +63,7 @@ export interface SettingsActionCapabilities {
 export interface SettingsActionAdapter {
   /** Verbs this adapter implements; catalog declarations are intersected with this list. */
   verbs: readonly string[];
+  contracts?(entry: SettingsCatalogEntry): Record<string, SettingsActionContract>;
   describe(ctx: SettingsActionContext, entry: SettingsCatalogEntry): Promise<ActionStatus>;
   invoke(
     ctx: SettingsActionContext,
@@ -130,6 +141,8 @@ export interface GitIdentityStore {
 }
 
 export interface SettingsActionDeps {
+  /** Lazy because Bot/Thread services are created after the settings facade. */
+  self?(): SelfSettingsDeps | null;
   embeddingRequests?(): ReturnType<typeof import('../knowledge/vectors/request-settings.js').createEmbeddingRequestSettings>;
   models?(): import('../models/service.js').ModelsService | null;
   modelFetch?: import('./egress.js').EgressFetch;
@@ -170,38 +183,13 @@ const needString = (args: Record<string, unknown>, key: string): string => {
   return value;
 };
 
-const unavailable = (detail: string): ActionInvocation => ({ status: 'unavailable', detail });
+const unavailable = (detail: string): ActionInvocation => ({ status: 'unavailable', mutation: 'none', detail });
 
 const wrapError = (error: unknown): ActionInvocation => ({
   status: 'failed',
+  ...((error instanceof ModelConfigurationError || error instanceof HostError) && error.code === 'config_conflict' ? { mutation: 'none' as const } : {}),
   detail: error instanceof Error ? error.message : String(error),
 });
-
-const sanitizeUrl = (value: unknown): unknown => {
-  if (typeof value !== 'string') return value;
-  try {
-    const parsed = new URL(value);
-    parsed.username = '';
-    parsed.password = '';
-    for (const key of [...parsed.searchParams.keys()]) {
-      if (/token|secret|key|password|credential/i.test(key)) parsed.searchParams.set(key, '[present]');
-    }
-    return parsed.toString();
-  } catch {
-    return value;
-  }
-};
-
-const sanitizeTextDocument = (value: unknown): unknown => {
-  if (!isRecord(value)) return value;
-  const content = typeof value.content === 'string' ? value.content : undefined;
-  return {
-    ...Object.fromEntries(['exists', 'format', 'path', 'revision', 'root', 'scope'].flatMap((key) => (
-      value[key] === undefined ? [] : [[key, value[key]]]
-    ))),
-    content: { isSet: content !== undefined && content.length > 0, ...(content !== undefined ? { bytes: Buffer.byteLength(content) } : {}) },
-  };
-};
 
 const authorizationResult = (state: import('@varin/application-client').AuthorizationState, operationId = state.id): ActionInvocation => ({
   status: state.status === 'pending' ? 'pending' : state.status === 'completed' ? 'applied' : 'failed',
@@ -210,20 +198,13 @@ const authorizationResult = (state: import('@varin/application-client').Authoriz
     ...(state.status === 'pending' ? { cancelVerb: 'cancel' } : {}) },
 });
 
-/** Connection headers and account secrets never enter agent-visible settings results. */
-const safeModels = (snapshot: import('@varin/application-client').ModelConnectionsSnapshot) => ({
-  revision: snapshot.revision, types: snapshot.types, issues: snapshot.issues,
-  channels: snapshot.channels.map(({ connection, baseUrl, ...channel }) => ({ ...channel, baseUrl: sanitizeUrl(baseUrl),
-    ...(connection ? { connection: { paths: connection.paths, headersConfigured: Boolean(connection.headers && Object.keys(connection.headers).length),
-      ...(connection.proxy ? { proxy: { ...connection.proxy, ...('url' in connection.proxy ? { url: sanitizeUrl(connection.proxy.url) } : {}) } } : {}) } } : {}) })),
-});
 const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['list', 'status', 'read', 'save', 'remove', 'connect', 'login', 'disconnect', 'discover-models', 'models', 'reply'],
+  verbs: ['list', 'status', 'read', 'save', 'patch', 'remove', 'connect', 'login', 'disconnect', 'discover-models', 'models', 'reply'],
   async describe() {
     const owner = deps.models?.();
     if (!owner) return { unavailable: 'Native model settings are unavailable' };
     const snapshot = await owner.read();
-    return { summary: `${snapshot.channels.length} native model channels`, data: safeModels(snapshot) };
+    return { summary: `${snapshot.channels.length} native model channels`, data: sanitizeModelConnections(snapshot) };
   },
   capabilities(_ctx, _entry, verb) {
     return ['connect', 'login'].includes(verb)
@@ -244,9 +225,10 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
     if (!owner) return unavailable('Native model settings are unavailable');
     try {
       switch (verb) {
-        case 'list': case 'status': case 'read': return { status: 'applied', data: safeModels(await owner.read()) };
-        case 'save': return { status: 'applied', data: safeModels(await owner.save(args.channel as import('@varin/application-client').ModelChannel, needString(args, 'expectedRevision'))) };
-        case 'remove': return { status: 'applied', data: safeModels(await owner.remove(needString(args, 'id'), needString(args, 'expectedRevision'))) };
+        case 'list': case 'status': case 'read': return { status: 'applied', data: sanitizeModelConnections(await owner.read()) };
+        case 'patch': return { status: 'applied', detail: 'Channel saved for future selections; existing accepted inference stays unchanged. Background model-directory discovery may continue.', data: sanitizeModelConnections(await patchModelChannel(owner, args)) };
+        case 'save': return { status: 'applied', detail: 'Channel saved for future selections; existing accepted inference stays unchanged. Background model-directory discovery may continue.', data: sanitizeModelConnections(await owner.save(args.channel as import('@varin/application-client').ModelChannel, needString(args, 'expectedRevision'))) };
+        case 'remove': return { status: 'applied', data: sanitizeModelConnections(await owner.remove(needString(args, 'id'), needString(args, 'expectedRevision'))) };
         case 'connect': case 'login': return authorizationResult(owner.signIn(needString(args, 'provider'), needString(args, 'reference')));
         case 'reply': {
           const id = needString(args, 'operationId');
@@ -285,7 +267,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => {
     return { view: parsed[0] as string, id: parsed[1] as string };
   };
   return {
-    verbs: ['status', 'read', 'write', 'reconnect', 'connect', 'disconnect', 'login', 'reply'],
+    verbs: ['status', 'read', 'write', 'patch', 'reconnect', 'connect', 'disconnect', 'login', 'reply'],
     async describe(ctx) {
       if (!deps.mcpSettings?.()) return { unavailable: 'Native MCP settings are unavailable' };
       const snapshot = await call('read', { view: await view(ctx) }, ctx.caller.signal) as import('@varin/application-client').McpConfigurationSnapshot;
@@ -308,11 +290,13 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => {
         switch (verb) {
           case 'status': return { status: 'applied', data: await call('read', { view: selected }, ctx.caller.signal) };
           case 'read': return { status: 'applied', data: str(args, 'path')
-            ? sanitizeTextDocument(await call('document/read', { view: selected, path: needString(args, 'path') }, ctx.caller.signal))
+            ? sanitizeMcpDocument(await call('document/read', { view: selected, path: needString(args, 'path') }, ctx.caller.signal))
             : await call('read', { view: selected }, ctx.caller.signal) };
-          case 'write': {
-            if (typeof args.content !== 'string') throw new Error('content is required');
-            return { status: 'applied', data: sanitizeTextDocument(await call('document/save', { view: selected, path: needString(args, 'path'), content: args.content, expectedRevision: needString(args, 'expectedRevision') }, ctx.caller.signal)) };
+          case 'write': case 'patch': {
+            const receipt = await call(verb === 'patch' ? 'document/patch' : 'document/save',
+              { ...args, view: selected }, ctx.caller.signal) as McpDocumentWriteReceipt;
+            return { status: 'applied', mutation: 'applied', data: sanitizeMcpDocument(receipt),
+              ...(receipt.activation?.state === 'unavailable' ? { detail: `Source saved; MCP activation is unavailable: ${receipt.activation.detail ?? 'read runtime status before using it'}` } : {}) };
           }
           case 'connect': case 'reconnect': case 'disconnect': return { status: 'applied', data: await call('command', { view: selected, name: needString(args, 'name'), command: verb }, ctx.caller.signal) };
           case 'login': {
@@ -365,11 +349,17 @@ const agentsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
     if (!owner) return unavailable('Native Agent profiles are unavailable');
     try {
       if (['list', 'status', 'read'].includes(verb)) return { status: 'applied', data: await owner.read({ runtime: 'agent' }, ctx.caller.signal) };
-      const expectedRevision = needString(args, 'expectedRevision');
+      let expectedRevision = needString(args, 'expectedRevision');
+      let current: Awaited<ReturnType<typeof owner.read>> | undefined;
+      const transition = ctx.caller.permissionSettingsRevision;
+      if (transition && expectedRevision === transition.before) {
+        current = await owner.read({ runtime: 'agent' }, ctx.caller.signal);
+        if (current.revision === transition.after) expectedRevision = transition.after;
+      }
       if (verb === 'delete') return { status: 'applied', data: await owner.remove({ runtime: 'agent', expectedRevision, id: needString(args, 'id') }, ctx.caller.signal) };
       let config = args.config as import('@varin/application-client').AgentProfileConfig;
       if (verb === 'enable' || verb === 'disable') {
-        const current = await owner.read({ runtime: 'agent' }, ctx.caller.signal);
+        current ??= await owner.read({ runtime: 'agent' }, ctx.caller.signal);
         const profile = current.profiles.find(value => value.id === needString(args, 'id'));
         if (!profile) throw new Error('Agent profile is unavailable');
         config = profile.config.kind === 'builtin'
@@ -459,15 +449,18 @@ const gitAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const projectsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['rename', 'set-default-model', 'set-default-work-focus', 'set-color', 'set-icon'],
+  verbs: ['rename', 'set-default-work-focus', 'set-color', 'set-icon'],
   async describe() {
     const document = await deps.readAppSettings();
     const projects = Array.isArray(document.projects) ? document.projects : [];
-    return { summary: `${projects.length} projects`, data: projects };
+    return { summary: `${projects.length} projects`, data: { projects, revision: settingsDocumentRevision(document) } };
   },
   async invoke(_ctx, entry, verb, args) {
     try {
       const document = await deps.readAppSettings();
+      const expectedRevision = needString(args, 'expectedRevision');
+      const snapshotRevision = settingsDocumentRevision(document);
+      if (expectedRevision !== snapshotRevision) return { status: 'failed', mutation: 'none', detail: 'Project metadata changed; re-read before retrying', data: { revision: snapshotRevision } };
       const projects = Array.isArray(document.projects) ? [...document.projects] : [];
       const projectId = str(args, 'projectId') ?? str(args, 'id');
       const findIndex = () => {
@@ -479,11 +472,12 @@ const projectsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
         if (index < 0) return { status: 'failed', detail: `unknown project "${projectId ?? ''}"` };
         const next = [...projects];
         next[index] = { ...(next[index] as Record<string, unknown>), ...patch };
-        const outcome = await deps.persistAppSettings({ projects: next }, [], str(args, 'expectedRevision'));
+        const outcome = await deps.persistAppSettings({ projects: next }, [], snapshotRevision);
         if (outcome.conflict) {
-          return { status: 'failed', detail: `revision conflict — re-read and retry (current ${outcome.revision})` };
+          return { status: 'failed', mutation: 'none', detail: `revision conflict — re-read and retry (current ${outcome.revision})`, data: { revision: outcome.revision } };
         }
-        return { status: 'applied', detail: 'project updated', data: next[index] };
+        const saved = Array.isArray(outcome.document.projects) ? outcome.document.projects.find(p => isRecord(p) && (p.id === projectId || p.path === projectId)) : undefined;
+        return { status: 'applied', mutation: 'applied', detail: 'project metadata saved', data: { project: saved, revision: outcome.revision } };
       };
       switch (verb) {
         case 'rename': {
@@ -491,10 +485,8 @@ const projectsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           if (!label) throw new HarnessServiceError('invalid-params', 'verb argument "name" or "label" is required');
           return patchProject({ label });
         }
-        case 'set-default-model':
-          return patchProject({ defaultModel: str(args, 'model') ?? null });
         case 'set-default-work-focus':
-          return patchProject({ defaultWorkFocus: needString(args, 'focus') ?? needString(args, 'workFocus') });
+          return patchProject({ defaultWorkFocus: needString(args, 'focus') });
         case 'set-color':
           return patchProject({ color: str(args, 'color') ?? null });
         case 'set-icon':
@@ -544,7 +536,7 @@ const remoteInstancesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter
           };
         case 'revoke': {
           if (!clients.revokeClient) return unavailable('client revoke not supported by this service');
-          const id = needString(args, 'clientId') ?? needString(args, 'id');
+          const id = needString(args, 'clientId');
           return { status: 'applied', data: await clients.revokeClient(id) };
         }
         default:
@@ -587,7 +579,8 @@ const selectWorkbenchShell = async (
     };
   };
   const document = state.workbench?.document;
-  const revision = document?.revision;
+  const revision = args.expectedRevision;
+  if (revision !== document?.revision) return { status: 'failed', mutation: 'none', detail: 'Workbench changed; re-read before retrying', data: { revision: document?.revision } };
   if (!document || typeof revision !== 'number') {
     return { status: 'unavailable', detail: 'workbench document has no readable revision' };
   }
@@ -649,7 +642,7 @@ const workbenchExtensionsAdapter = (deps: SettingsActionDeps): SettingsActionAda
             data: await runtime.setEnabled(
               extensionId,
               verb === 'enable',
-              Number.isFinite(revision) ? revision : 0,
+              revision,
             ),
           };
         }
@@ -663,7 +656,8 @@ const workbenchExtensionsAdapter = (deps: SettingsActionDeps): SettingsActionAda
             const state = await runtime.state() as {
               workbench?: { document?: { revision?: number; profiles?: { id: string }[] } };
             };
-            const revision = state.workbench?.document?.revision;
+            const revision = args.expectedRevision;
+            if (revision !== state.workbench?.document?.revision) return { status: 'failed', mutation: 'none', detail: 'Workbench changed; re-read before retrying', data: { revision: state.workbench?.document?.revision } };
             if (typeof revision !== 'number') {
               return { status: 'unavailable', detail: 'workbench document has no readable revision' };
             }
@@ -839,6 +833,37 @@ const notificationsAdapter = (): SettingsActionAdapter => ({
   },
 });
 
+/** Discovery and admission use the same schema, without coercing or stripping
+ * mistakes into apparently successful writes. The actual owner remains final. */
+function withActionContracts(adapter: SettingsActionAdapter): SettingsActionAdapter {
+  const contracts = (entry: SettingsCatalogEntry) => Object.fromEntries(Object.entries(getSettingsActionContracts(entry))
+    .filter(([verb]) => adapter.verbs.includes(verb)));
+  const validators = new Map<string, ReturnType<typeof compileToolJsonSchema>>();
+  return {
+    ...adapter, contracts,
+    async describe(ctx, entry) {
+      const status = await adapter.describe(ctx, entry);
+      const actions = Object.fromEntries(Object.entries(contracts(entry)).filter(([verb]) => !status.verbs || status.verbs.includes(verb)));
+      return { ...status, verbs: Object.keys(actions), actions };
+    },
+    async invoke(ctx, entry, verb, args) {
+      const contract = contracts(entry)[verb];
+      if (!contract) return unavailable(`Action ${verb} is not available on ${entry.id}`);
+      const key = `${entry.id}:${verb}`;
+      let validate = validators.get(key);
+      if (!validate) { validate = compileToolJsonSchema(contract.inputSchema); validators.set(key, validate); }
+      if (!validate(args)) return { status: 'failed', mutation: 'none', detail: describeToolSchemaFailure(validate, args) };
+      try {
+        const result = await adapter.invoke(ctx, entry, verb, args);
+        return { ...result, mutation: result.mutation ?? (contract.mutation === 'none' || result.status === 'unavailable' ? 'none'
+          : result.status === 'applied' ? 'applied' : 'unknown') };
+      } catch (error) {
+        return { status: 'failed', mutation: contract.mutation === 'none' ? 'none' : 'unknown', detail: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  };
+}
+
 /* ── registry ───────────────────────────────────────────────────────────── */
 
 export function createSettingsActionRegistry(deps: SettingsActionDeps) {
@@ -866,6 +891,8 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
         } catch (error) { return wrapError(error); }
       },
     }],
+    ['service:self-bot', createSelfBotAdapter(() => deps.self?.())],
+    ['service:self-conversation', createSelfConversationAdapter(() => deps.self?.())],
     ['runtime:providers', providersAdapter(deps)],
     ['runtime:mcp', mcpAdapter(deps)],
     ['service:extension-packages', extensionPackagesAdapter(deps)],
@@ -879,6 +906,7 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
     ['service:notifications', notificationsAdapter()],
   ]);
 
+  for (const [domain, adapter] of adapters) adapters.set(domain, withActionContracts(adapter));
   return {
     adapterFor(domain: string | undefined): SettingsActionAdapter | null {
       return domain ? adapters.get(domain) ?? null : null;

@@ -8,6 +8,9 @@ import { failedReadToolReceipt, unknownToolReceipt, type ToolExecutionReceipt } 
 import type { HostCapabilityCallContext, HostInvocationScope, HostServiceOwnerIdentity } from '@varin/extension-host';
 import { toolOperationId, validToolOrigin, type ExecutorOwner, type LaunchSource, type ToolOrigin } from './protocol.generated.js';
 
+/** Causal CAS transition made by this invocation's own persistent permission choice.
+ * Never supplied by an extension, and never a general stale-revision exemption. */
+export interface PermissionSettingsRevision { readonly before: string; readonly after: string }
 export interface ToolInvocationAuthority {
   readonly invocationId: string;
   readonly runId: string;
@@ -21,6 +24,7 @@ export interface ToolInvocationAuthority {
   readonly operation: 'read' | 'effect';
   readonly completion: 'result' | 'job';
   readonly configurationIdentity?: string | null;
+  readonly permissionSettingsRevision?: PermissionSettingsRevision;
   readonly arguments: unknown;
 }
 interface Registration {
@@ -66,6 +70,7 @@ export async function withToolInvocation<T>(options: {
     || (origin.kind === 'policy_action' && origin.node_id !== authority.callId)) {
     throw new Error('tool_invocation_identity_invalid');
   }
+  if (authority.permissionSettingsRevision) Object.freeze(authority.permissionSettingsRevision);
   Object.freeze(authority.origin);
   Object.freeze(authority.executorOwner);
   if (authority.source) {

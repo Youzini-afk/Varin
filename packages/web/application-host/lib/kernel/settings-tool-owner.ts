@@ -33,6 +33,7 @@ export function createSettingsToolOwner(options: {
         if (run.thread_id !== authority.threadId) throw new Error('Settings invocation Thread changed');
         const caller: SettingsServiceCaller = { threadId: run.thread_id, branchId: run.branch_id,
           runId: authority.runId, operationId: authority.operationId, invocation: authority,
+          ...(authority.permissionSettingsRevision ? { permissionSettingsRevision: authority.permissionSettingsRevision } : {}),
           workspaceId: options.localWorkspace?.(authority) ?? null, signal: context.signal,
           onMutationState(state) {
             if (state === 'started') pendingWrites++;

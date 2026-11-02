@@ -129,6 +129,8 @@ export interface ModelConnectionTestResult { requestId: string; modelId: string;
 export interface AgentSettingsSnapshot {
   global: Record<string, JsonValue>; globalRevision: string;
   project: Record<string, JsonValue>; projectRevision: string; projectTrusted: boolean;
+  /** The target commit is known, but contextual effective configuration could not be observed. */
+  effectiveUnavailable?: string;
 }
 export class ModelConnectionsError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }

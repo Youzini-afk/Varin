@@ -4,7 +4,7 @@ import { it } from 'node:test';
 import { BotRequestError, createBotsHttpAPI } from '../src/bots-http.js';
 import { switchRuntimeEndpoint } from '../src/transport/runtime-switch.js';
 const entry = { runtime: 'agent' as const, threadId: 'thread-original', branchId: 'branch-original' };
-const bot = { id: 'bot', name: 'Bot', instructions: null, model: null, coordinatorHostId: 'host', homeDir: '/bot', entry, archived: false, createdAt: '', updatedAt: '' };
+const bot = { revision: 1, id: 'bot', name: 'Bot', instructions: null, model: null, coordinatorHostId: 'host', homeDir: '/bot', entry, archived: false, createdAt: '', updatedAt: '' };
 it('consumes tagged native entry and changed memory sources; refuses mismatched navigation identity', async () => {
   const original = globalThis.fetch; let mismatch = false;
   globalThis.fetch = async input => String(input).endsWith('/source')
@@ -89,5 +89,14 @@ it('reads Bot activity pages and presence, and refuses another Bot or an unknown
     kind = 'quiet'; owner = 'other';
     await assert.rejects(api.activity(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
     await assert.rejects(api.presence(bot.id), error => error instanceof BotRequestError && error.code === 'invalid-response');
+  } finally { globalThis.fetch = original; }
+});
+
+it('keeps a confirmed saved Bot receipt when live profile propagation is unavailable', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ code: 'propagation-failed', error: 'Profile saved; model preparation offline', saved: true, bot: { ...bot, revision: 8 } }, { status: 503 });
+  try {
+    await assert.rejects(createBotsHttpAPI().update(bot.id, { expectedRevision: 1, name: 'Renamed' }), error =>
+      error instanceof BotRequestError && error.savedBot?.revision === 8 && error.code === 'propagation-failed');
   } finally { globalThis.fetch = original; }
 });
