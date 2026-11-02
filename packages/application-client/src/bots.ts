@@ -25,7 +25,7 @@ export type BotEntry = ThreadIdentity;
 export type BotReadyEntry = ThreadIdentity;
 export interface BotEntryResult { bot: BotSummary; entry: BotReadyEntry; model: BotModelSelection | null }
 export interface BotCreateInput { name?: string; instructions?: string; model?: BotModelSelection }
-export interface BotUpdateInput { name?: string; instructions?: string | null; model?: BotModelSelection | null; pinned?: boolean }
+export interface BotUpdateInput { expectedRevision?: number; name?: string; instructions?: string | null; model?: BotModelSelection | null; pinned?: boolean }
 
 export interface BotSleepMachine {
   machineId: string;
@@ -76,6 +76,8 @@ export interface BotProfile {
 }
 
 export interface BotSummary extends BotProfile {
+  /** Exact native profile record revision; pass expectedRevision for optimistic edits. */
+  revision: number;
   archived: boolean;
 }
 

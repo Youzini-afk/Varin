@@ -19,6 +19,22 @@ import type {
   BotWorkItem,
 } from "@varin/application-client";
 
+export class BotProfileConflictError extends Error {
+  constructor(readonly revision: number) {
+    super(`Bot profile changed; re-read before retrying (current revision ${revision})`);
+    this.name = 'BotProfileConflictError';
+  }
+}
+
+/** The native record was saved, but a dependent live projection did not finish.
+ * Callers must retain this receipt rather than report that nothing changed. */
+export class BotProfileMutationError extends Error {
+  constructor(readonly bot: BotSummary, readonly stage: 'execution-publication' | 'profile-propagation', cause: unknown) {
+    super(`Bot profile saved at revision ${bot.revision}; ${stage} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'BotProfileMutationError';
+  }
+}
+
 export interface BotLifecycleRuntime {
   planWork(bot: BotSummary): Promise<BotSleepWork[]>;
   planMachines(bot: BotSummary): Promise<BotSleepMachine[]>;
@@ -179,7 +195,7 @@ export function createBotService(options: BotServiceOptions): BotService {
   };
   const toSummary = (record: KernelRecordResult): BotSummary | null => {
     const profile = parseProfile(record);
-    return profile ? { ...profile, archived: record.state === "archived" } : null;
+    return profile ? { ...profile, revision: record.recordRevision, archived: record.state === "archived" } : null;
   };
 
   const recordFor = async (botId: string): Promise<KernelRecordResult | null> => {
@@ -243,9 +259,11 @@ export function createBotService(options: BotServiceOptions): BotService {
       references: [],
       ...(typeof revision === "number" ? { expectedRecordRevision: revision } : {}),
     });
-    const summary = toSummary(result) ?? { ...next, archived: state === "archived" };
-    await publishExecutionGate(result);
-    options.onChange?.(summary);
+    const summary = toSummary(result) ?? { ...next, revision: result.recordRevision, archived: state === "archived" };
+    try {
+      await publishExecutionGate(result);
+      options.onChange?.(summary);
+    } catch (error) { throw new BotProfileMutationError(summary, 'execution-publication', error); }
     return summary;
   };
 
@@ -302,6 +320,10 @@ export function createBotService(options: BotServiceOptions): BotService {
   const update: BotService["update"] = (botId, patch) => serialize(botId, async () => {
     const existing = await recordFor(botId);
     if (!existing || existing.state === "archived") return null;
+    if (patch.expectedRevision !== undefined && (!Number.isSafeInteger(patch.expectedRevision) || patch.expectedRevision < 0))
+      throw new HarnessServiceError('invalid-params', 'expectedRevision must be a non-negative safe integer');
+    if (patch.expectedRevision !== undefined && patch.expectedRevision !== existing.recordRevision)
+      throw new BotProfileConflictError(existing.recordRevision);
     if (parseProfile(existing)?.deletion) throw new HarnessServiceError('invalid-params', 'This Bot is being deleted');
     const updates: Partial<BotProfile> = {};
     if (patch.name !== undefined) {
@@ -314,10 +336,17 @@ export function createBotService(options: BotServiceOptions): BotService {
         ? patch.instructions.trim()
         : null;
     }
-    if (patch.model !== undefined) updates.model = patch.model;
+    if (patch.model !== undefined) {
+      if (patch.model !== null && (!parseModel(patch.model) || !patch.model.providerId.trim() || !patch.model.modelId.trim()))
+        throw new HarnessServiceError('invalid-params', 'Bot model must be a provider/model pair or null');
+      updates.model = patch.model;
+    }
     if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? (toSummary(existing)?.pinnedAt ?? new Date().toISOString()) : null;
     const summary = await write(botId, "active", updates, existing.recordRevision);
-    if (patch.instructions !== undefined || patch.model !== undefined) await options.agent.applyProfile?.(summary);
+    if (patch.instructions !== undefined || patch.model !== undefined) {
+      try { await options.agent.applyProfile?.(summary); }
+      catch (error) { throw new BotProfileMutationError(summary, 'profile-propagation', error); }
+    }
     return summary;
   });
 

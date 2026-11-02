@@ -237,6 +237,7 @@ import { createSettingsService, settingsDocumentRevision } from './lib/harness/s
 
 import { createClientSurfaceBridge } from './lib/harness/client-surfaces.js';
 import { createSettingsActionRegistry } from './lib/harness/settings-actions.js';
+import { createSettingsPermissionSubjects } from './lib/harness/settings-authority.js';
 import { createKernelSettingsActionOperationStore } from './lib/harness/settings-operation-store.js';
 import * as gitIdentityStorage from './lib/git/identity-storage.js';
 import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } from './lib/github/auth.js';
@@ -1249,6 +1250,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   // Agent tools and user settings surfaces share the same native owners and CAS.
   const settingsActionRegistry = createSettingsActionRegistry({
+    self: () => ({ runtime: agentRuntime, bots: botService, threads, resolveBotModel: botAgentModel }),
     embeddingRequests: () => embeddingRequestSettings,
     models: () => modelsService,
     modelFetch: (input, init) => egressRuntime.fetch(input, init),
@@ -1962,6 +1964,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // This is a user-scoped role. It does not inherit another Thread model binding.
     settings: async () => ({ global: await modelsService.readGlobalInferenceSettings() }),
   }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,
+    permissionSubjects: createSettingsPermissionSubjects({ models: () => modelsService }),
     subscribeConfiguration: listener => { extensionConfigurationListeners.add(listener); return () => extensionConfigurationListeners.delete(listener); },
     prepareConfiguration: async (run, required) => {
     if (!scriptRuntimeOwner.current) throw new Error('Script tool preparation is unavailable');

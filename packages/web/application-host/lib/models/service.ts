@@ -28,6 +28,7 @@ import { validTokenizer } from './tokenizer-metadata.js';
 import { followDirectory, validCatalogOverrides } from './directory-models.js';
 import type { CredentialScope, CredentialDispatch } from '../kernel/credential-owner.js';
 import type { SelectedModel, ModelExecutionAuthority } from '../kernel/model-authority.js';
+import { applyModelChannelPatch, type ModelChannelPatch } from './channel-patch.js';
 
 export interface InferenceProviderBinding {
   pricing?: import('../kernel/protocol.generated.js').UsagePricing;
@@ -185,7 +186,9 @@ export class ModelsService {
   }
   async read(): Promise<ModelConnectionsSnapshot> {
     await this.modelDirectory.ready;
-    const snapshot = await this.file.read();
+    return this.#configurationSnapshot(await this.file.read());
+  }
+  async #configurationSnapshot(snapshot: { document: ModelsDocument; revision: string }): Promise<ModelConnectionsSnapshot> {
     const { channels, issues } = await this.#resolved(snapshot.document);
     if (this.#contributionIssue) issues.push({ code: 'model-contributions-unavailable', message: this.#contributionIssue });
     return { revision: snapshot.revision, channels, types: this.types.list(), directory: this.modelDirectory.status(), ...(issues.length ? { issues } : {}) };
@@ -271,8 +274,9 @@ export class ModelsService {
     return { channels, issues };
   }
   async save(channel: ModelChannel, expectedRevision: string) {
+    await this.modelDirectory.ready;
     this.validate(channel);
-    await this.file.update(expectedRevision, document => {
+    const committed = await this.file.update(expectedRevision, document => {
       const index = document.channels.findIndex(entry => object(entry) && entry.id === channel.id);
       if (index < 0) document.channels.push(channel); else document.channels[index] = channel;
       return document;
@@ -281,13 +285,35 @@ export class ModelsService {
     if (channel.enabled) for (const model of channel.models) {
       if (model.enabled && model.tokenizer) void this.tokenizers.prepare(model.tokenizer);
     }
-    return this.read();
+    // Describe this commit, not an unrelated later read or a failed post-save observation.
+    return this.#configurationSnapshot(committed);
+  }
+  async patch(id: string, patch: ModelChannelPatch, expectedRevision: string) {
+    await this.modelDirectory.ready;
+    const committed = await this.file.update(expectedRevision, document => {
+      const index = document.channels.findIndex(entry => object(entry) && entry.id === id);
+      if (index < 0) return fail('model-channel-unavailable', 'The selected channel is missing');
+      const channel = applyModelChannelPatch(document.channels[index]!, patch);
+      this.validate(channel);
+      document.channels[index] = channel;
+      return document;
+    });
+    this.#queueDirectoryRefresh();
+    const channel = committed.document.channels.find(entry => entry.id === id)!;
+    if (channel.enabled) for (const model of channel.models) {
+      if (model.enabled && model.tokenizer) void this.tokenizers.prepare(model.tokenizer);
+    }
+    return this.#configurationSnapshot(committed);
   }
   async remove(id: string, expectedRevision: string) {
-    await this.file.update(expectedRevision, document => ({ ...document, channels: document.channels.filter(channel => !object(channel) || channel.id !== id) }));
+    await this.modelDirectory.ready;
+    const committed = await this.file.update(expectedRevision, document => ({ ...document, channels: document.channels.filter(channel => !object(channel) || channel.id !== id) }));
     this.#anthropic.forget(id);
-    await this.modelDirectory.forget(id);
-    return this.read();
+    let cleanupFailed = false;
+    try { await this.modelDirectory.forget(id); } catch { cleanupFailed = true; }
+    const snapshot = await this.#configurationSnapshot(committed);
+    if (cleanupFailed) snapshot.issues = [...(snapshot.issues ?? []), { channelId: id, code: 'model-directory-cleanup-unavailable', message: 'Channel removed; cached model directory cleanup could not be confirmed.' }];
+    return snapshot;
   }
   #changed(kind: 'channels' | 'credentials' | 'authorization' = 'channels') {
     if (kind === 'credentials') this.#queueDirectoryRefresh();

@@ -14,7 +14,7 @@ async function fixture() {
   const id = '10b6af44-89e4-4e1a-b042-4d03344fe8af';
   const scope = botScopeId(id);
   const key = knowledgeStoreKeyForScope(scope);
-  const bot: BotSummary = { id, name: 'Bot', homeDir: join(dataDir, 'bots', id), coordinatorHostId: 'host',
+  const bot: BotSummary = { revision: 1, id, name: 'Bot', homeDir: join(dataDir, 'bots', id), coordinatorHostId: 'host',
     archived: true, instructions: null, model: null, entry: { runtime: 'agent', threadId: 'entry', branchId: 'main' }, createdAt: '', updatedAt: '',
     deletion: { operationId: 'delete', error: null },
     activity: { state: 'asleep', operationId: 'sleep', planned: true, error: null, machines: [],

@@ -3,13 +3,19 @@ import { HostToolAdmissionError } from './tool-admission.js';
 import type { KernelClient } from './kernel-client.js';
 import type { Operation } from './protocol.generated.js';
 import type { HostToolCall } from './protocol.generated.js';
-import type { PermissionRule } from '@varin/protocol';
+import type { PermissionRule, PermissionSubject } from '@varin/protocol';
+import type { PermissionSettingsRevision } from './tool-invocation.js';
 
-export interface PermissionTarget { name: string; arguments: Record<string, unknown> }
-export interface PersistentPermissionScope { tool: string; scope: 'tool'; available: boolean }
+export interface PermissionTarget { name: string; arguments: Record<string, unknown>; subjects?: PermissionSubject[] }
+export interface PersistentPermissionScope {
+  tool: string;
+  scope: 'tool' | 'targets';
+  available: boolean;
+  targets?: { tool: string; authority?: string; label?: string; match?: PermissionRule['match'] }[];
+}
 export interface PermissionPersistence {
   prepare(runId: string, target: PermissionTarget): Promise<PersistentPermissionScope>;
-  save(runId: string, target: PermissionTarget, signal: AbortSignal): Promise<PermissionRule>;
+  save(runId: string, target: PermissionTarget, signal: AbortSignal): Promise<{ rules: PermissionRule | PermissionRule[]; settingsRevision?: PermissionSettingsRevision }>;
 }
 
 export interface PermissionScope {
@@ -27,7 +33,8 @@ interface Pending {
   target?: PermissionTarget;
   persistent?: PersistentPermissionScope;
   signal: AbortSignal;
-  persistedRule?: PermissionRule;
+  persistedRule?: PermissionRule | PermissionRule[];
+  settingsRevision?: PermissionSettingsRevision;
   flight?: Promise<Operation>;
   choice?: 'allow_once' | 'allow_always' | 'deny';
 }
@@ -40,7 +47,7 @@ export class PermissionService {
   constructor(private readonly kernel: KernelClient) {}
   setPersistence(persistence: PermissionPersistence) { this.persistence = persistence; }
 
-  async authorize(call: HostToolCall, scope: PermissionScope, signal: AbortSignal, target?: PermissionTarget): Promise<void> {
+  async authorize(call: HostToolCall, scope: PermissionScope, signal: AbortSignal, target?: PermissionTarget): Promise<PermissionSettingsRevision | undefined> {
     if (signal.aborted || this.pending.has(call.operationId)) throw new HostToolAdmissionError('permission_not_available');
     const permissionId = randomUUID();
     const exactCall = structuredClone(call);
@@ -67,6 +74,7 @@ export class PermissionService {
       if (await decision !== 'allow_once' || signal.aborted) throw new HostToolAdmissionError('permission_denied');
       await this.kernel.agentRuntimeRequest('runtime.permission.consume', { operationId: call.operationId, permissionId, call: exactCall, scope: exactScope }, signal);
       if (signal.aborted) throw new HostToolAdmissionError('permission_cancelled');
+      return this.pending.get(call.operationId)?.settingsRevision;
     } finally {
       if (this.pending.get(call.operationId)?.permissionId === permissionId) this.pending.delete(call.operationId);
       signal.removeEventListener('abort', abort);
@@ -97,7 +105,9 @@ export class PermissionService {
           const permission = original.result?.kind === 'control' ? (original.result.value as { permission?: { id?: string; decision?: string | null } })?.permission : undefined;
           if (original.phase !== 'waiting' || original.cancel_requested || permission?.id !== permissionId || permission.decision !== null)
             throw new HostToolAdmissionError('permission_expired');
-          pending.persistedRule = await this.persistence.save(pending.call.runId, pending.target, pending.signal);
+          const saved = await this.persistence.save(pending.call.runId, pending.target, pending.signal);
+          pending.persistedRule = saved.rules;
+          if (saved.settingsRevision) pending.settingsRevision = saved.settingsRevision;
         }
       }
       if (this.pending.get(operationId) !== pending || pending.signal.aborted) {
