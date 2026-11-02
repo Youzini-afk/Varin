@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest';
+import { KERNEL_PROTOCOL_VERSION } from '../kernel/protocol.generated.js';
 import type { AgentRuntimeStreamEvent, RuntimeEvent, ThreadSummary, ThreadTitleJob } from '../kernel/protocol.generated.js';
 import { createThreadTitleService } from './thread-titles.js';
 import type { ModelTextInput, ModelTextResult } from './service.js';
@@ -65,7 +66,7 @@ it('checks the durable completed user Run and ignores auxiliary Runs', async () 
   f.runtime.events.mockImplementation(async () => [event, { ...event, cursor: 2, subject: 'auxiliary', data: { state: 'completed', thread_id: 'model-text:title', branch_id: null } }]);
   const owner = createThreadTitleService(f.options);
   await vi.waitFor(() => expect(f.runtime.threads).toHaveBeenCalled());
-  notify({ v: 73, kind: 'runtime-event', kernelEpoch: 'fixture', stream: 'durable', cursor: 2 });
+  notify({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'fixture', stream: 'durable', cursor: 2 });
   await vi.waitFor(() => expect(f.runtime.finishThreadTitle).toHaveBeenCalledOnce());
   expect(f.modelText.generate).toHaveBeenCalledOnce();
   expect(f.runtime.prepareThreadTitle.mock.calls.every(([input]) => input.threadId === f.thread.thread_id)).toBe(true);
@@ -99,7 +100,7 @@ it.each([
   f.runtime.events.mockImplementation(async cursor => [completed,
     ...(status > completed.cursor ? [{ ...completed, cursor: status, kind: 'unrelated' }] : [])].filter(event => event.cursor > cursor));
   const owner = createThreadTitleService(f.options);
-  const wake = (cursor: number) => notify({ v: 73, kind: 'runtime-event', kernelEpoch: 'fixture', stream: 'durable', cursor });
+  const wake = (cursor: number) => notify({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'fixture', stream: 'durable', cursor });
   try {
     wake(first); ready({ eventCursor: status });
     await new Promise<void>(resolve => setImmediate(resolve));

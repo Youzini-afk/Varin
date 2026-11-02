@@ -47,11 +47,12 @@ Web / Electron / mobile renderer
 | 目录登记、文件根准入、版本化文档协调 | Host Documents |
 | 模型渠道、账号、用途设置、指令/skills 资源与 MCP | Host 对应领域服务；执行固定已准备的选择 |
 | 普通 Agent 笔记与指令编辑 | Host personalization / Rust typed record |
-| 计划、Bot 知识、观察、符号图 | KnowledgeStore 私有 writer |
+| 环境捕获原文、冻结的模型表示、输入游标及投递回执 | Rust Catalog / ContentStore；Host 只协调轻量生产者与有界待提交队列 |
+| 计划、Bot 知识、符号图 | KnowledgeStore 私有 writer |
 | 语义向量与索引 | 独立派生存储进程 |
 | 外壳、布局和视图状态 | UI kernel 与选中扩展 |
 
-Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 80；Storage 的 format 为 22，
+Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 81；Storage 的 format 为 22，
 SQLite `user_version` 为 16。版本以各自源码为准；Catalog 的升级链不能套用于 Storage。
 Storage 当前只接受自己的现行格式及 schema fingerprint，不提供旧格式转换，见[打开入口](../kernel/crates/varin-kernel/src/storage/core.rs)。
 

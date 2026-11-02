@@ -317,7 +317,7 @@ impl PreparedMemoryDeliveries {
     }
     fn include(&mut self, item: &ConversationItem) -> Result<()> {
         match (&item.provenance, &item.content) {
-            (Provenance::EnvironmentFact { event_id }, Content::Text { .. }) if event_id.starts_with("observation:") => {
+            (Provenance::EnvironmentFact { event_id }, Content::Text { .. }) if event_id.starts_with("observation:") || event_id.starts_with("capture:") => {
                 self.observations.push((event_id.clone(), super::context_observations::digest(&serde_json::to_value(item)?)?));
             }
             (Provenance::EnvironmentFact { event_id }, Content::Text { text })

@@ -227,7 +227,9 @@ impl InputEditPreparation {
         let mut stored = self.content.store_user_input(&self.id, &material)?;
         // Editing a queued message preserves its original sending time.
         if let Some(time) = previous.content.get("sentTime") {
-            if stored.is_string() { stored = json!({"text":stored}); }
+            if stored.is_string() {
+                stored = json!({"text":stored});
+            }
             stored["sentTime"] = time.clone();
         }
         // Omission preserves the exact captured revision. Only the owner can reuse these refs.
@@ -448,24 +450,51 @@ impl Catalog {
         head: Option<&str>,
     ) -> Result<InputDeliveryPreparation> {
         let run = validate_delivery(&self.db, run_id, epoch, head)?;
-        let mut statement=self.db.prepare("SELECT id FROM input_queue WHERE branch_id=?2 AND state='queued' AND mode!='next_run' AND (run_id=?1 OR activation='passive') ORDER BY cursor")?;
-        let ids = statement
+        // User/activating ingress retains its stronger boundary semantics. Passive environment
+        // facts are one finite committed page, not a barrier waiting for Host production to stop.
+        let observation_cursor =
+            super::super::context_observations::committed_cursor(&self.db, &run.branch_id)?;
+        let mut statement = self.db.prepare("SELECT id FROM input_queue WHERE branch_id=?2 AND state='queued' AND mode!='next_run' AND origin!='context_observation' AND (run_id=?1 OR activation='passive') ORDER BY cursor")?;
+        let mut ids = statement
             .query_map(params![run_id, run.branch_id], |row| {
                 row.get::<_, String>(0)
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let ids = if super::super::observations::next(&self.db, run_id)?.is_some() {
-            Vec::new()
-        } else {
-            ids
-        };
+        let has_observations:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM input_queue WHERE branch_id=?1 AND origin='context_observation' AND state='queued' AND cursor<=?2)",params![run.branch_id,sql_number(observation_cursor)?],|row|row.get(0))?;
+        if has_observations {
+            let sources = self.context_observation_sources(
+                &super::super::context_observations::ContextObservationSources {
+                    run_id: Some(run_id.into()),
+                },
+            )?;
+            let owners: Vec<_> = sources.into_iter().map(|source| source.run_id).collect();
+            let mut observations = self.db.prepare("SELECT id FROM input_queue WHERE branch_id=?1 AND origin='context_observation' AND state='queued' AND cursor<=?2 AND json_extract(body,'$.origin.owner.runId') IN (SELECT value FROM json_each(?3)) ORDER BY cursor LIMIT ?4")?;
+            ids.extend(
+                observations
+                    .query_map(
+                        params![
+                            run.branch_id,
+                            sql_number(observation_cursor)?,
+                            encode(&owners)?,
+                            super::super::context_observations::OBSERVATION_BOUNDARY_PAGE as i64
+                        ],
+                        |row| row.get::<_, String>(0),
+                    )?
+                    .collect::<std::result::Result<Vec<_>, _>>()?,
+            );
+        }
+        if super::super::observations::next(&self.db, run_id)?.is_some() {
+            ids.clear();
+        }
         let mut reads = Vec::new();
+        let mut holds = super::super::ingress::HoldBatch::default();
         for id in ids {
             let read = self.capture_input_row(&id)?;
-            if super::super::ingress::hold(&self.db, &read.metadata, Some(&run))?.is_none() {
+            if holds.hold(&self.db, &read.metadata, &run)?.is_none() {
                 reads.push(read);
             }
         }
+        reads.sort_by_key(|read| read.metadata.cursor);
 
         Ok(InputDeliveryPreparation {
             run,

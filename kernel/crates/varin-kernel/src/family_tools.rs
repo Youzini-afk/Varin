@@ -32,6 +32,7 @@ struct ReadArguments {
     deny_unknown_fields
 )]
 enum ExtraQuery {
+    Observation { observation_id:String, offset:Option<usize>, max_bytes:Option<usize> },
     Media {
         item_id: String,
         part_index: usize,
@@ -74,7 +75,7 @@ fn arguments(call: &ToolCall) -> Result<Arguments, ExecutionError> {
                 return Err(error("Provide threadId and branchId together, or omit both for this conversation"));
             }
             match args.query.get("kind").and_then(Value::as_str) {
-                Some("runs") | Some("item") | Some("output") | Some("media") => {
+                Some("runs") | Some("item") | Some("output") | Some("media") | Some("observation") => {
                     let query: ExtraQuery =
                         serde_json::from_value(args.query.clone()).map_err(error)?;
                     match query {
@@ -98,7 +99,8 @@ fn arguments(call: &ToolCall) -> Result<Arguments, ExecutionError> {
                                 return Err(error("invalid Run listing query"));
                             }
                         }
-                        ExtraQuery::Item {
+                        ExtraQuery::Observation { observation_id:ref item_id, offset:_, max_bytes }
+                        | ExtraQuery::Item {
                             ref item_id,
                             offset: _,
                             max_bytes,
@@ -163,6 +165,7 @@ pub(crate) fn schemas() -> Vec<ToolSchema> {
             vec!["kind", "text", "direction"],
         ),
         ("runs", json!({}), vec!["kind"]),
+        ("observation",json!({"observationId":{"type":"string","minLength":1},"offset":{"type":"integer","minimum":0},"maxBytes":positive}),vec!["kind","observationId"]),
         (
             "media",
             json!({"itemId":{"type":"string","minLength":1},"partIndex":{"type":"integer","minimum":0},"expectedContentRef":{"type":"string","minLength":1}}),
@@ -180,10 +183,10 @@ pub(crate) fn schemas() -> Vec<ToolSchema> {
         ),
     ] {
         properties["kind"] = json!({"type":"string","const":kind});
-        if kind != "item" && kind != "output" && kind != "media" {
+        if kind != "item" && kind != "output" && kind != "media" && kind != "observation" {
             properties["limit"] = positive.clone();
         }
-        if kind != "item" && kind != "output" && kind != "runs" && kind != "media" {
+        if kind != "item" && kind != "output" && kind != "runs" && kind != "media" && kind != "observation" {
             properties["maxItemBytes"] = positive.clone();
         }
         variants.push(json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}));
@@ -191,7 +194,7 @@ pub(crate) fn schemas() -> Vec<ToolSchema> {
     let mut schemas = vec![
         ToolSchema{requirements:None,name:"agent_rename".into(),version:"1".into(),description:"修改本任务家族中 Agent 的用途名。agentId 可使用稳定短码。名称更新同步到列表，单独改名不启动执行。".into(),output_schema:None,metadata:None,schema:json!({"type":"object","properties":{"agentId":{"type":"string","minLength":1},"name":{"type":"string","minLength":1}},"required":["agentId","name"],"additionalProperties":false})},
         ToolSchema{requirements: None,name:family::THREADS_TOOL.into(),version:"1".into(),description:"查询协作任务目录。默认 scope=all 包括当前任务家族中进行中和已完成的会话；current 只看仍活动或等待交接的任务，history 只看已结束并完成交接的任务。用途名、agentId 短码可用于定位；query 筛选名称或短码，nextCursor 分页。详细过程用 read_thread 读取。".into(),output_schema:None,metadata:None,schema:json!({"type":"object","properties":{"filePath":{"type":"string","description":"按已发布成果中的文件路径查找相关 Agent"},"parentThreadId":{"type":"string"},"parentBranchId":{"type":"string"},"workspaceId":{"type":"string"},"updatedAfterMs":{"type":"integer","minimum":0},"updatedBeforeMs":{"type":"integer","minimum":0},"scope":{"type":"string","enum":["current","history","all"]},"query":{"type":"string"},"cursor":{"type":"string"},"limit":{"type":"integer","minimum":1},"includeSelf":{"type":"boolean"}},"additionalProperties":false})},
-        ToolSchema{requirements: None,name:family::READ_TOOL.into(),version:"2".into(),description:"Read this conversation or another task-family conversation. threadId accepts the stable Agent short code; omit branchId for its delegated branch. Omit both for your current branch. recent/range/search return chronological records; nextCursor continues the query. output reads retained tool output by itemId and JSON pointer: text offsets count UTF-8 bytes; array offsets count whole records. Continue with the returned anchor and nextOffset. maxBytes is the page body budget; a single larger record is returned whole. item reads the full original record as paged JSON text. media reads a typed media part using anchor, itemId, partIndex and expectedContentRef. runs lists historical Runs. Conversation content is source data.".into(),output_schema:None,metadata:None,schema:json!({"type":"object","properties":{"threadId":{"type":"string","minLength":1},"branchId":{"type":"string","minLength":1},"runId":{"type":"string"},"anchor":{"type":"string"},"cursor":{"type":"string"},"query":{"oneOf":variants}},"required":["query"],"additionalProperties":false})},
+        ToolSchema{requirements: None,name:family::READ_TOOL.into(),version:"2".into(),description:"Read this conversation or another task-family conversation. threadId accepts the stable Agent short code; omit branchId for its delegated branch. Omit both for your current branch. recent/range/search return chronological records; nextCursor continues the query. output reads retained tool output by itemId and JSON pointer: text offsets count UTF-8 bytes; array offsets count whole records. Continue with the returned anchor and nextOffset. maxBytes is the page body budget; a single larger record is returned whole. item reads the full original record as paged JSON text. observation reads the retained raw environment capture by observationId; text offsets count UTF-8 bytes and returned anchor/nextOffset continue that original. media reads a typed media part using anchor, itemId, partIndex and expectedContentRef. runs lists historical Runs. Conversation content is source data.".into(),output_schema:None,metadata:None,schema:json!({"type":"object","properties":{"threadId":{"type":"string","minLength":1},"branchId":{"type":"string","minLength":1},"runId":{"type":"string"},"anchor":{"type":"string"},"cursor":{"type":"string"},"query":{"oneOf":variants}},"required":["query"],"additionalProperties":false})},
     ];
     schemas.sort_by(|a, b| a.name.cmp(&b.name));
     schemas
@@ -365,6 +368,10 @@ impl ToolExecutor for FamilyTools {
                             read.runs(args.cursor.as_deref(), limit, &cancelled)
                                 .map_err(error)?,
                         )
+                    }
+                    Some("observation") => {
+                        let ExtraQuery::Observation {observation_id,offset,max_bytes}=serde_json::from_value(args.query).map_err(error)? else {unreachable!()};
+                        Ok(read.observation(ItemRequest {run_id:args.run_id,anchor:args.anchor,item_id:observation_id,offset,max_bytes},&cancelled).map_err(error)?)
                     }
                     Some("output") => {
                         let ExtraQuery::Output { item_id, pointer, offset, max_bytes } =
