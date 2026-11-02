@@ -1,3 +1,4 @@
+import type { EnvironmentObservationPreparation } from '../environment-observations/runtime.js';
 import { KernelClientError } from './kernel-error.js';
 import { admitContextJobCandidate, contextCompactionScope } from './context-job-preparation.js';
 import type { ContextCompactionOwner } from './context-compaction.js';
@@ -45,8 +46,8 @@ export class ContextService implements ContextOwner {
   private compaction?:ContextCompactionOwner;
   private contextAgent?:ContextAgentOwner;
   bindContextAgent(owner:ContextAgentOwner):void {this.contextAgent=owner;}
-  private publishObservations?: (run:Run,signal:AbortSignal)=>Promise<void>;
-  bindObservations(publish:(run:Run,signal:AbortSignal)=>Promise<void>):void { this.publishObservations=publish; }
+  private publishObservations?: (run:Run,signal:AbortSignal)=>Promise<EnvironmentObservationPreparation>;
+  bindObservations(publish:(run:Run,signal:AbortSignal)=>Promise<EnvironmentObservationPreparation>):void { this.publishObservations=publish; }
   bindCompaction(owner:ContextCompactionOwner):void {this.compaction=owner;}
   private readonly observations=new Map<string,{requestId:string;identity:string}>();
   constructor(private readonly runtime:AgentRuntimeClient,
@@ -61,7 +62,15 @@ export class ContextService implements ContextOwner {
     const run=await this.runtime.run(query.runId,signal);
     signal.throwIfAborted();
     if(run.cancel_requested || ['completed','failed','cancelled'].includes(run.state)) return {status:'failed',code:'context_owner_closed'};
-    if(query.action==='prepare' && this.publishObservations) { await waitWithSignal(this.publishObservations(run,signal),signal); signal.throwIfAborted(); }
+    const observations = query.action === 'prepare' && this.publishObservations
+      ? await waitWithSignal(this.publishObservations(run, signal), signal) : undefined;
+    signal.throwIfAborted();
+    const capacity = (run.configuration as ModelSessionConfiguration).contextWindowTokens;
+    // Observation authority still participates when model capacity is unknown;
+    // optional capacity settings/extensions must not become a new dependency.
+    if (query.action === 'prepare' && (capacity === undefined || capacity === null)) {
+      return { status: 'ready', external: false, ...(observations ? { observations } : {}) };
+    }
     const launch=await this.runtime.launch(run.id,signal);
     signal.throwIfAborted();
     if (query.action === 'execution_environment') return { status: 'ready', environment: await this.runtime.executionEnvironmentForSource(launch?.selection.source, signal) };
@@ -80,9 +89,9 @@ export class ContextService implements ContextOwner {
         this.observations.set(run.branch_id,{requestId:query.requestId,identity});
         timing=this.timing.observe(run.branch_id,identity,query.requestId,query.expectedRevision,query.observation);
       }
-      if (!policy.enabled || !this.budget) return {status:'ready',policy,...(timing?{timing}:{}),external:false};
+      if (!policy.enabled || !this.budget) return {status:'ready',policy,...(timing?{timing}:{}),...(observations ? { observations } : {}),external:false};
       if (scope.threadId!==run.thread_id) throw new Error('Context budget scope belongs to another Thread');
-      if (query.action === 'prepare') return {status:'ready',policy,...(timing?{timing}:{}),external:await this.budget.selected(scope,signal)};
+      if (query.action === 'prepare') return {status:'ready',policy,...(timing?{timing}:{}),...(observations ? { observations } : {}),external:await this.budget.selected(scope,signal)};
       const input={...query.input, inputBudgetTokens:Math.max(0,query.input.capacityTokens-policy.reserveTokens),
         settings:{reserveTokens:policy.reserveTokens,keepRecentTokens:policy.keepRecentTokens,
           backgroundPreparation:policy.backgroundPreparation,preparationWaterline:policy.preparationWaterline}};

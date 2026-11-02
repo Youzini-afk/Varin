@@ -61,6 +61,8 @@ pub(crate) enum KernelError {
     SnapshotChanged(String),
     #[error("activation held: {0}")]
     ActivationHeld(String),
+    #[error("observation dispatch epoch changed; refresh the same immutable source before retrying")]
+    ContextObservationEpochChanged,
     #[error("context work already admitted for this owner checkpoint and model")]
     ContextJobAlreadyAdmitted,
     #[error("operation cancelled")]
@@ -95,6 +97,7 @@ impl From<KernelError> for varin_runtime::execution::ExecutionError {
 pub(crate) fn error_code(error: &KernelError) -> &str {
     match error {
         KernelError::Execution(error) => &error.code,
+        KernelError::ContextObservationEpochChanged => "context-observation-stale-epoch",
         KernelError::ContextJobAlreadyAdmitted => "context-job-already-admitted",
         KernelError::RecordRevisionConflict => "record-revision-conflict",
         KernelError::Protocol(_) => "protocol-error",
@@ -112,7 +115,7 @@ pub(crate) fn error_code(error: &KernelError) -> &str {
 
 pub(crate) fn response_error(id: &str, error: &KernelError) -> Value {
     let message = match error { KernelError::Execution(error) => error.message.clone(), _ => error.to_string() };
-    let mut value=serde_json::json!({"v": crate::protocol::PROTOCOL_VERSION, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": message, "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_))}});
+    let mut value=serde_json::json!({"v": crate::protocol::PROTOCOL_VERSION, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": message, "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_) | KernelError::ContextObservationEpochChanged)}});
     if let KernelError::Execution(error)=error {if let Some(details)=&error.details {value["error"]["details"]=details.clone();}}
     value
 }
@@ -130,4 +133,12 @@ mod tests {
             "cancelled"
         );
     }
+    #[test]
+    fn context_observation_epoch_has_a_typed_retryable_wire_fence() {
+        let error=crate::agent_runtime::domain(varin_runtime::RuntimeError::ObservationEpochChanged);
+        let value=super::response_error("original-capture",&error);
+        assert_eq!(value["error"]["code"],"context-observation-stale-epoch");
+        assert_eq!(value["error"]["retryable"],true);
+    }
+
 }

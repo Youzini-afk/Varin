@@ -1,4 +1,5 @@
 import React from 'react';
+import { accountSignInProviders } from './account-sign-in';
 import type { ModelChannel, ChannelTypeInfo, ModelConnectionOptions, ConnectionAuthentication, AuthorizationState } from '@varin/application-client';
 import type { JsonValue } from '@varin/protocol';
 import { SettingsSection, SettingsFieldRow } from '../shared/SettingsSection';
@@ -24,6 +25,7 @@ interface Props {
 }
 export function ConnectionSettings({ draft, type, busy, advanced, secret, authorization, edit, editConnection, validity, setSecret, cancelAuthorization, onSignIn, onSignOut, onAuthorizationReply, onAuthorizationCancel }: Props) {
   const { t } = useI18n();
+  const signInProviders = accountSignInProviders(type);
   const labels: Record<string, string> = { deployment: t('settings.models.parameter.deployment'), apiVersion: t('settings.models.parameter.apiVersion'), project: t('settings.models.parameter.project'), location: t('settings.models.parameter.location'), region: t('settings.models.parameter.region') };
   return <>
     <div hidden={advanced}>
@@ -34,7 +36,7 @@ export function ConnectionSettings({ draft, type, busy, advanced, secret, author
             <SelectTrigger size="settings" aria-label={t('settings.models.authentication')}><SelectValue /></SelectTrigger><SelectContent>{type.authentication.map(kind => <SelectItem key={kind} value={kind}>{t(`settings.models.auth.${kind}`)}</SelectItem>)}</SelectContent>
           </Select></SettingsFieldRow>
           {draft.authentication.kind === 'credential' ? <SettingsFieldRow controlClassName="w-full @xl:flex-1 @xl:max-w-xl" label={t('settings.models.apiKey')}><Input type="password" aria-label={t('settings.models.apiKey')} autoComplete="off" value={secret} disabled={busy} placeholder={draft.authentication.reference ? t('settings.models.credentialSaved') : ''} onChange={event => { setSecret(event.target.value); }} /></SettingsFieldRow> : null}
-          {draft.authentication.kind === 'credential' && type.oauthProviders?.length ? <div className="flex flex-wrap gap-2">{type.oauthProviders.map(provider => <Button key={provider.id} variant="outline" disabled={busy || authorization?.status === 'pending'} onClick={() => onSignIn(provider.id)}>{t('settings.mcp.signIn')} · {provider.name}</Button>)}</div> : null}
+          {draft.authentication.kind === 'credential' && signInProviders.length ? <div className="flex flex-wrap gap-2">{signInProviders.map(provider => <Button key={provider.id} variant="outline" disabled={busy || authorization?.status === 'pending'} onClick={() => onSignIn(provider.id)}>{t('settings.mcp.signIn')} · {provider.name}</Button>)}</div> : null}
           {draft.authentication.kind === 'credential' && draft.authentication.reference ? <Button size="sm" variant="ghost" disabled={busy || authorization?.status === 'pending'} onClick={onSignOut}>{t('settings.models.removeCredential')}</Button> : null}
           {authorization ? <AuthorizationPanel key={authorization.id} state={authorization} onReply={onAuthorizationReply} onCancel={onAuthorizationCancel} /> : null}
           {draft.authentication.kind === 'environment' ? <SettingsFieldRow controlClassName="w-full @xl:flex-1 @xl:max-w-xl" label={t('settings.models.environment')}><Input aria-label={t('settings.models.environment')} value={draft.authentication.variable} disabled={busy} onChange={event => edit({ authentication: { kind: 'environment', variable: event.target.value } })} /></SettingsFieldRow> : null}

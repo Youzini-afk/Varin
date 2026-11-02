@@ -28,6 +28,32 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
         };
         calls.push(ToolCall { call_id:"read-output".into(), name:"read_thread".into(), schema_version:"2".into(),
             arguments:json!({"threadId":"thread:parent","branchId":"branch:parent","query":{"kind":"output","itemId":output_id,"pointer":"/data/records","maxBytes":1}}) });
+        let original_command = "printf '原文🙂'\n".repeat(800);
+        let observation_id = {
+            use varin_runtime::catalog::context_observations::{ContextObservationCaptureBatch, ContextObservationSources};
+            let catalog = f.catalog();
+            let mut db = catalog.lock().unwrap();
+            // The delegated child uses a fixed branch, which correctly rejects live
+            // external captures. Its parent has a separate ordinary live-source branch.
+            let branch="branch:observations";
+            let head=db.head("branch:parent").unwrap();
+            db.fork_branch("branch:parent",branch,head.as_deref()).unwrap();
+            let binding:RequestBinding=serde_json::from_value(json!({"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":"fixture","provider_family":"fixture","model":"fixture","credential_ref":null,"configuration_generation":1,"tool_schema_generation":1,"tools":[],"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":branch,"ancestor_id":null,"leaf_id":head}})).unwrap();
+            let source=serde_json::from_value(json!({"resource_owner":{"kind":"local"},"mode":"live_root","workspace_id":"workspace-live","execution_workspace_id":"workspace-live","branch_id":null,"revision":null,"live_root":{"hostId":"host","rootId":"live","canonicalRoot":"/workspace-live"}})).unwrap();
+            let launch=LaunchSelection::from_binding(&binding,PolicyIdentity{name:"default".into(),version:"1".into()},Some(source));
+            let run=db.submit_with_launch(&varin_runtime::SubmitInput{key:"live-source".into(),thread_id:"thread:parent".into(),branch_id:branch.into(),expected_head:head,input:json!("Observe local changes"),configuration:json!({})},Some(launch)).unwrap();
+            let owner = db.context_observation_sources(&ContextObservationSources {run_id:Some(run.run_id.clone())}).unwrap().into_iter().find(|owner|owner.run_id==run.run_id).unwrap();
+            let command:ContextObservationCaptureBatch=serde_json::from_value(json!({"owner":owner,"captures":[{"captureId":"original-command","event":{"kind":"command","at":100,"source":"user","body":{"terminalId":"terminal","commandId":"command","command":original_command,"exitCode":7}}}]})).unwrap();
+            let prepared=db.prepare_context_observation_captures(command).unwrap().load().unwrap();
+            let receipt=db.admit_context_observation_captures(prepared).unwrap().remove(0);
+            assert!(receipt.representation.omitted);
+            let epoch=db.epoch();let head=db.head(branch).unwrap();
+            let prepared=db.prepare_input_delivery(&run.run_id,epoch,head.as_deref()).unwrap().load().unwrap();
+            assert!(db.admit_input_delivery(prepared).unwrap().is_some());
+            receipt.id
+        };
+        calls.push(ToolCall {call_id:"read-observation-original".into(),name:"read_thread".into(),schema_version:"2".into(),
+            arguments:json!({"threadId":"thread:parent","branchId":"branch:observations","query":{"kind":"observation","observationId":observation_id,"maxBytes":65536}})});
         let mut owner = OwnerReplies::default();
         execute(&f, model, calls.clone(), &mut owner, false);
         assert!(
@@ -46,7 +72,7 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(results.len(), 5);
+            assert_eq!(results.len(), 6);
             for result in &results {
                 let ToolCompletion::Result {
                     outcome,
@@ -88,6 +114,13 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
             let ToolCompletion::Result { content, .. } = &results[4].completion else { unreachable!() };
             assert_eq!(content.data["page"]["format"], "records");
             assert_eq!(content.data["page"]["value"], json!([{"body":"whole row"}]));
+            let ToolCompletion::Result {content,..}=&results[5].completion else {unreachable!()};
+            assert_eq!(content.data["page"]["format"],"environment_observation_json");
+            assert_eq!(content.data["page"]["observationId"],observation_id);
+            assert!(content.data["page"]["nextOffset"].is_null());
+            let raw:Value=serde_json::from_str(content.data["page"]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(raw["body"]["command"],original_command);
+            assert_eq!(raw["body"]["exitCode"],7);
         } else {
             let raw = rusqlite::Connection::open_with_flags(
                 f.root.join("conversation.sqlite"),
@@ -102,7 +135,7 @@ fn selected_family_tools_execute_from_real_model_and_policy_origins() {
                 .unwrap()
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
-            assert_eq!(receipts.len(), 5);
+            assert_eq!(receipts.len(), 6);
             for (_, outcome) in receipts {
                 assert_eq!(outcome, "\"succeeded\"");
             }

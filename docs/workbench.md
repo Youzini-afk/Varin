@@ -328,13 +328,32 @@ owner 保存。Thread PDF 和 typed media 使用当前 Thread 的 material/holde
 原生 Agent settings、绑定客户端或原领域 action owner。查询目录不安装软件、不启动推理，也不证明能力已接线。
 Owner/channel 缺失、平台不支持、只读和真实可执行动作分别表达。
 
-更新使用 owner revision 和局部语义变更。同 owner 的 app 字段可一次 CAS；跨 owner 返回各自真实结果，
-不承诺全局回滚。Saved、applied、awaiting restart、installed、authenticated 是不同事实。
-长动作只有具备原 owner 的 query/cancel authority 才暴露 operation handle；设置工具不能同步 reload
-正在等待该工具返回的同一会话。
+目录同时提供字段约束和逐动作 inputSchema。读回区分保存层、合并后的下次使用配置与当前 Run 已受理的配置；
+多字段条目逐字段给出来源，不把“保存成功”当作“本次推理已切换”。JSON set 替换声明路径的值；provider/MCP
+语义 patch 由原 owner 保留省略的凭据。原生 context 调优按叶字段更新，避免开关覆盖其他预算或时间设置。
 
-设备本地变更使用认证后的 session-to-Surface binding，并等待实际应用 acknowledgment。
-没有绑定客户端返回 unavailable，多个返回 ambiguous，不能广播修改。凭据留在原 owner，只暴露配置状态。
+app 与 Agent 文件组分别使用原 owner 的 CAS；冲突返回明确失败，不自动以新 revision 反复重写。
+跨 owner 返回带原输入序号、scope、revision、生效边界及 mutation 确定性的各自回执，不承诺全局回滚；
+后一个 owner 不可用不会抹掉前一个已保存的结果。Saved、active、awaiting restart、authenticated 是不同事实。
+长动作的查询临时失败不会将运行中操作改写为终态；后续仍查询同一 operation，而不是重执行作用。
+
+设备本地变更一次绑定到当前认证 Thread/branch 的唯一 Surface，并等待实际应用 acknowledgment。
+同步 UI store 在同一事件循环内提供真实 CAS；异步 Desktop owner 未提供原子条件写时明确声明 last-write-wins，
+拒绝无法兑现的 expectedRevision。没有绑定返回 unavailable，多个返回 ambiguous，不能广播修改。
+
+self.bot-profile 由受理 Thread 解析所属 Bot，使用 Bot 原记录 revision 修改名字、指令、模型；名字立即生效，
+指令/模型在该 Bot 直接会话的安全请求边界传播，不改委派工作。self.conversation-model 仅为当前受理 Run
+暂存模型选择，分别展示 desired/active，不修改 Bot、Agent preset 或未来会话默认值。保存后传播失败仍保留保存回执。
+
+Host 扩展/MCP approval policy 与 Rust Source/Storage grants 是不同权限。普通设置授权、通配 allow 和 bypass
+不隐含权限策略管理或凭据目的地授权；compound 每项先归一化为声明字段的真实语义目标。敏感字段的
+Allow always 明确委托该字段后续值的管理；provider 路由授权则固定 base URL/挂载点、账号、传输及不透明
+provider 参数。仅在既有挂载点下追加的合法 API 路径、普通模型/预算选择不扩大凭据目的地。项目策略只能收紧。
+Smart/accept-edits 尚无实现：旧值保留可读并标明有效行为为 normal，新保存只支持 normal/bypass。
+Allow always 自身保存规则造成的 revision 前进，仅能通过该次原调用的精确 before→after 回执衔接，不能忽略其他并发更新。
+
+旧 compactionRecovery、dispatch/worktree、auto-worktree/后台 auto-accept 与 permissionJudge 等无现行执行
+消费者的值保留可读，并明确标为 unsupported；这只是揭示既存缺口，不表示已实现对应恢复、调度或自动化能力。
 
 Agent profile 用 `AgentProfilesAPI` 管理模型、指令和工具选择。Editor 保留 Host 和打开时 revision，
 刷新不抹掉未保存草稿。省略 tools、显式空集合和 reset 含义不同；已受理 Run 保留冻结配置。
@@ -342,6 +361,8 @@ Agent profile 用 `AgentProfilesAPI` 管理模型、指令和工具选择。Edit
 设置按使用偏好、Agent、开发与项目、连接与扩展组织。目录中的 UI 路由只定位唯一管理页面，
 不能改变字段 owner。对话默认保留全局/受信任项目继承；Harness 页面编辑当前 Host 的全局配置，
 项目已有覆盖仍生效。模型服务管理连接与模型启用，各功能只选择已有模型；模型品牌与接入服务品牌分开。
+模型服务的账号登录入口暂时只展示 OpenRouter；其他内置 OAuth/device 登录与重新登录按钮及账号登录推荐不出现在 UI。
+API key、环境变量、云凭据配置及已有账号的查看、使用和主动移除仍保留；这不是后端认证禁用，也不会自动注销或删除凭据。
 技能保留目录/正文编辑，命令目录来自有效技能，并不提供另一套命令编辑 authority。
 
 草稿保存单元使用固定操作栏。切页、关闭、项目切换和 Host 切换先处理草稿；失败保存不能放行。

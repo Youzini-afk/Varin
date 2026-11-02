@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createShellIntegrationParser,
+  MAX_SHELL_INTEGRATION_FRAME_BYTES,
   encodeShellIntegrationPayload,
   formatVarinOscFrame,
   parseShellIntegrationBody,
@@ -66,4 +67,37 @@ describe("shell integration parser", () => {
     const second = parser.consume(`${osc("term-4", "E;two", 2)}${osc("term-4", "D;1", 2)}`);
     expect(second[0]?.commandId).toBe("term-4:2:1");
   });
+  it("bounds unfinished frames, reports their loss and never emits a truncated command", () => {
+    const parser = createShellIntegrationParser({ terminalId: "bounded" });
+    parser.consume(osc("bounded", "E;previous"));
+    expect(parser.consume(`\u001b]633;pi;bounded:0;E;${"x".repeat(MAX_SHELL_INTEGRATION_FRAME_BYTES)}`)).toEqual([]);
+    expect(parser.discardedFrames()).toBe(1);
+    for (let index = 0; index < 8; index += 1) expect(parser.consume("x".repeat(65_536))).toEqual([]);
+    expect(parser.consume(`\u0007${osc("bounded", "D;0")}`)).toEqual([]);
+    expect(parser.discardedFrames()).toBe(1);
+    expect(parser.consume(`${osc("bounded", "E;after")}${osc("bounded", "D;0")}`)[0]?.command).toBe("after");
+    parser.reset(1);
+    expect(parser.discardedFrames()).toBe(0);
+  });
+
+  it("applies the same frame budget to complete chunks and recovers a split ST terminator", () => {
+    const parser = createShellIntegrationParser({ terminalId: "bounded" });
+    const large = osc("bounded", `E;${"x".repeat(MAX_SHELL_INTEGRATION_FRAME_BYTES)}`);
+    expect(parser.consume(`${large}${osc("bounded", "D;0")}`)).toEqual([]);
+    expect(parser.discardedFrames()).toBe(1);
+    parser.consume(large.slice(0, -1)); parser.consume("\u001b");
+    expect(parser.consume(`\\${osc("bounded", "E;valid")}${osc("bounded", "D;2")}`)[0]).toMatchObject({command:"valid",exitCode:2});
+    expect(parser.discardedFrames()).toBe(2);
+  });
+
+  it.each([133, 633])("retains every split start of an OSC %i frame without retaining unrelated output", (code) => {
+    const frame = `\u001b]${code};pi;split:0;E;echo split\u0007`;
+    for (let split = 1; split < 7; split += 1) {
+      const parser = createShellIntegrationParser({terminalId: "split"});
+      expect(parser.consume(`ordinary output${frame.slice(0, split)}`)).toEqual([]);
+      const records = parser.consume(`${frame.slice(split)}${osc("split", "D;0")}`);
+      expect(records[0]?.command).toBe("echo split");
+    }
+  });
+
 });

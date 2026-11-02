@@ -189,6 +189,8 @@ impl Catalog {
         for table in ["operations", "model_steps", "model_selections", "policy_checkpoints", "policy_selections", "waits", "bot_run_holds", "context_jobs", "context_job_nodes", "context_job_steps", "resumptions"] {
             owned(&tx, table, &format!("SELECT rowid AS row_id,run_id FROM {table}"))?;
         }
+        owned(&tx, "context_observation_captures", "SELECT rowid AS row_id,source_run_id AS run_id FROM context_observation_captures")?;
+        owned(&tx, "context_observation_imports", "SELECT rowid AS row_id,id AS run_id FROM context_observation_imports")?;
         owned(&tx, "history", "SELECT rowid AS row_id,run_id FROM history")?;
         owned(&tx, "run_launches", "SELECT rowid AS row_id,id AS run_id FROM run_launches")?;
         owned(&tx, "computer_requests", "SELECT rowid AS row_id,requester_run_id AS run_id FROM computer_requests")?;

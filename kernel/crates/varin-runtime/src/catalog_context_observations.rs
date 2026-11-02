@@ -5,6 +5,11 @@ use crate::execution::{Content, ConversationItem, Provenance};
 use launches::SourceSelection;
 use serde::Deserialize;
 
+#[path = "catalog_context_captures.rs"]
+mod captures;
+pub use captures::*;
+pub(super) use captures::{initialize, check_format, read_original, committed_cursor};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextObservationSource {
@@ -76,64 +81,41 @@ fn canonical_source(mut source: SourceSelection, run: &str) -> SourceSelection {
 fn visible(db: &Connection, branch: &str, item: &str) -> Result<bool> {
     Ok(db.query_row("WITH RECURSIVE ancestors(id,parent) AS (SELECT h.id,h.parent FROM branches b JOIN history h ON h.id=b.head WHERE b.id=?1 UNION ALL SELECT h.id,h.parent FROM history h JOIN ancestors a ON h.id=a.parent) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)", params![branch,item], |row| row.get(0))?)
 }
-fn branch_sources(
-    db: &Connection,
-    branch: &str,
-    epoch: u64,
-) -> Result<Vec<ContextObservationSource>> {
+fn branch_sources(db: &Connection, branch: &str, epoch: u64) -> Result<Vec<ContextObservationSource>> {
     context_jobs::require_regular_branch(db, branch)?;
-    let mut statement = db.prepare("WITH RECURSIVE ancestors(id,parent,run_id,depth) AS (SELECT h.id,h.parent,h.run_id,0 FROM branches b JOIN history h ON h.id=b.head WHERE b.id=?1 UNION ALL SELECT h.id,h.parent,h.run_id,a.depth+1 FROM history h JOIN ancestors a ON h.id=a.parent) SELECT run_id FROM ancestors GROUP BY run_id ORDER BY min(depth)")?;
-    let ids = statement
-        .query_map([branch], |row| row.get::<_, String>(0))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    let mut result = Vec::new();
-    for id in ids {
-        let run: Run = record(db, "runs", &id)?;
-        // Inherited history is data; its former branch cannot become this branch's observer.
-        if run.branch_id != branch {
-            continue;
-        }
-        let Some(launch) =
-            optional_record::<launch_content::LaunchMetadata>(db, "run_launches", &id)?
-        else {
-            if result.is_empty() {
-                break;
-            } else {
-                continue;
-            }
+    // Traverse ancestry once and project only the fixed source metadata, not every history
+    // payload or a recursive visibility query per former Run.
+    let mut statement = db.prepare("WITH RECURSIVE ancestors(id,parent,run_id,depth) AS (
+        SELECT h.id,h.parent,h.run_id,0 FROM branches b JOIN history h ON h.id=b.head WHERE b.id=?1
+        UNION ALL SELECT h.id,h.parent,h.run_id,a.depth+1 FROM history h JOIN ancestors a ON h.id=a.parent),
+        owners AS (SELECT run_id,min(depth) AS depth FROM ancestors GROUP BY run_id),
+        sources AS (SELECT r.id,json_extract(r.body,'$.thread_id') AS thread_id,
+            json_extract(l.body,'$.selection.source') AS source,
+            (SELECT h.id FROM history h WHERE h.run_id=r.id ORDER BY h.rowid LIMIT 1) AS anchor,owners.depth
+            FROM owners JOIN runs r ON r.id=owners.run_id LEFT JOIN run_launches l ON l.id=r.id WHERE r.branch_id=?1)
+        SELECT id,thread_id,source,anchor,anchor IN (SELECT id FROM ancestors) FROM sources ORDER BY depth")?;
+    let rows=statement.query_map([branch],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,String>(3)?,row.get::<_,bool>(4)?)))?;
+    let mut result=Vec::new();
+    for row in rows {
+        let (run_id,thread_id,source,anchor_id,visible)=row?;
+        let Some(source)=source else {
+            if result.is_empty() {break;} else {continue;}
         };
-        let Some(source) = launch.selection.source else {
-            if result.is_empty() {
-                break;
-            } else {
-                continue;
-            }
-        };
-        let anchor: String = db.query_row(
-            "SELECT id FROM history WHERE run_id=?1 ORDER BY rowid LIMIT 1",
-            [&id],
-            |r| r.get(0),
-        )?;
-        if !visible(db, branch, &anchor)? {
-            continue;
-        }
-        result.push(ContextObservationSource {
-            thread_id: run.thread_id,
-            branch_id: branch.into(),
-            run_id: id,
-            anchor_id: anchor,
-            source,
-            epoch,
-        });
+        if !visible {continue;}
+        result.push(ContextObservationSource {thread_id,branch_id:branch.into(),run_id,anchor_id,source:serde_json::from_str(&source)?,epoch});
     }
     Ok(result)
 }
+
+pub(super) fn same_identity(left: &ContextObservationSource, right: &ContextObservationSource) -> bool {
+    left.thread_id == right.thread_id
+        && left.branch_id == right.branch_id
+        && left.run_id == right.run_id
+        && left.anchor_id == right.anchor_id
+        && left.source == right.source
+}
 fn validate_owner(db: &Connection, owner: &ContextObservationSource, epoch: u64) -> Result<()> {
-    if owner.epoch != epoch || !local(&owner.source) {
-        return Err(invalid(
-            "Observation source epoch or local authority changed",
-        ));
-    }
+    if !local(&owner.source) { return Err(invalid("Observation source local authority changed")); }
     threads::require_available(db, &owner.thread_id)?;
     let sources = branch_sources(db, &owner.branch_id, epoch)?;
     let current = sources
@@ -141,12 +123,13 @@ fn validate_owner(db: &Connection, owner: &ContextObservationSource, epoch: u64)
         .ok_or_else(|| invalid("Observation branch has no admitted source"))?;
     if canonical_source(current.source.clone(), &current.run_id)
         != canonical_source(owner.source.clone(), &owner.run_id)
-        || !sources.iter().any(|source| source == owner)
+        || !sources.iter().any(|source| same_identity(source,owner))
     {
         return Err(invalid(
             "Observation source is not on the current original branch ancestry",
         ));
     }
+    if owner.epoch != epoch { return Err(RuntimeError::ObservationEpochChanged); }
     Ok(())
 }
 impl Catalog {
@@ -159,7 +142,7 @@ impl Catalog {
             if run.cancel_requested || run.state.terminal() {
                 return Err(invalid("Observation consumer Run is closed"));
             }
-            let launch: launch_content::LaunchMetadata = record(&self.db, "run_launches", run_id)?;
+            let Some(launch) = optional_record::<launch_content::LaunchMetadata>(&self.db, "run_launches", run_id)? else { return Ok(Vec::new()); };
             let Some(source) = launch.selection.source else {
                 return Ok(Vec::new());
             };
@@ -175,25 +158,27 @@ impl Catalog {
                 })
                 .collect());
         }
+        self.observation_source_owners(false)
+    }
+    pub fn context_observation_import_sources(&self) -> Result<Vec<ContextObservationSource>> {
+        self.observation_source_owners(true)
+    }
+    fn observation_source_owners(&self, legacy:bool) -> Result<Vec<ContextObservationSource>> {
         let mut statement = self.db.prepare("SELECT b.id FROM branches b JOIN threads t ON t.id=b.thread_id WHERE t.deleted_at_ms IS NULL ORDER BY b.rowid")?;
-        let branches = statement
-            .query_map([], |r| r.get::<_, String>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut result = Vec::new();
+        let branches=statement.query_map([],|row|row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut result=Vec::new();
         for branch in branches {
-            if context_jobs::require_regular_branch(&self.db, &branch).is_err() {
-                continue;
-            }
-            if let Some(owner) = branch_sources(&self.db, &branch, self.epoch)?
-                .into_iter()
-                .next()
-                .filter(|owner| local(&owner.source))
-            {
-                result.push(owner);
-            }
+            if context_jobs::require_regular_branch(&self.db,&branch).is_err() {continue;}
+            let sources=branch_sources(&self.db,&branch,self.epoch)?;
+            let Some(current)=sources.first().filter(|owner|local(&owner.source)) else {continue;};
+            if legacy {
+                let source=canonical_source(current.source.clone(),&current.run_id);
+                result.extend(sources.into_iter().filter(|owner|local(&owner.source) && canonical_source(owner.source.clone(),&owner.run_id)==source));
+            } else { result.push(current.clone()); }
         }
         Ok(result)
     }
+
     pub fn prepare_context_observations(
         &self,
         command: ContextObservationAdmit,
@@ -210,55 +195,60 @@ impl Catalog {
         prepared: PreparedContextObservations,
     ) -> Result<Vec<ContextObservationReceipt>> {
         let tx = self.db.transaction()?;
-        validate_owner(&tx, &prepared.owner, self.epoch)?;
+        let receipts = admit_facts(&tx, &prepared, self.epoch)?;
+        tx.commit()?;
+        Ok(receipts)
+    }
+}
+fn admit_facts(tx: &Transaction<'_>, prepared: &PreparedContextObservations, epoch: u64) -> Result<Vec<ContextObservationReceipt>> {
         let mut receipts = Vec::new();
-        for (id, history, item_digest, change_id, notify) in prepared.facts {
-            let original = optional_record::<inputs::QueuedInputMetadata>(&tx, "input_queue", &id)?;
+        let mut validated=false;
+        for (id, history, item_digest, change_id, notify) in &prepared.facts {
+            let original = optional_record::<inputs::QueuedInputMetadata>(tx, "input_queue", id)?;
             if let Some(row) = original {
-                if !matches!(&row.origin, inputs::InputOrigin::ContextObservation { owner, item_digest: original } if owner.thread_id == prepared.owner.thread_id && owner.branch_id == prepared.owner.branch_id && owner.run_id == prepared.owner.run_id && owner.anchor_id == prepared.owner.anchor_id && owner.source == prepared.owner.source && original == &item_digest)
+                if !matches!(&row.origin, inputs::InputOrigin::ContextObservation { owner, item_digest: original } if owner.thread_id == prepared.owner.thread_id && owner.branch_id == prepared.owner.branch_id && owner.run_id == prepared.owner.run_id && owner.anchor_id == prepared.owner.anchor_id && owner.source == prepared.owner.source && original == item_digest)
                 {
                     return Err(invalid(
                         "Observation identity already has a different original fact",
                     ));
                 }
                 receipts.push(ContextObservationReceipt {
-                    id,
+                    id: id.clone(),
                     cursor: row.cursor,
                     state: row.state,
                 });
                 continue;
             }
+            if !validated { validate_owner(tx, &prepared.owner, epoch)?; validated=true; }
             let cursor = event(
-                &tx,
+                tx,
                 &id,
                 1,
                 "context.observed",
                 json!({"threadId":prepared.owner.thread_id,"branchId":prepared.owner.branch_id,"sourceRunId":prepared.owner.run_id}),
             )?;
             let row = ingress::insert_occurrence(
-                &tx,
+                tx,
                 id.clone(),
                 prepared.owner.thread_id.clone(),
                 prepared.owner.branch_id.clone(),
                 cursor,
                 inputs::InputOrigin::ContextObservation {
                     owner: prepared.owner.clone(),
-                    item_digest,
+                    item_digest: item_digest.clone(),
                 },
                 &history,
             )?;
             // The observation remains the task's passive original. Its assistant receives
             // a reference through the existing durable work-event ingress.
-            if notify { super::bot_work_events::observation(&tx, &prepared.owner, &id, change_id.as_deref())?; }
+            if *notify { super::bot_work_events::observation(tx, &prepared.owner, &id, change_id.as_deref())?; }
             receipts.push(ContextObservationReceipt {
-                id,
+                id: id.clone(),
                 cursor,
                 state: row.state,
             });
         }
-        tx.commit()?;
         Ok(receipts)
-    }
 }
 impl ContextObservationPreparation {
     pub fn load(self) -> Result<PreparedContextObservations> {
@@ -581,16 +571,11 @@ mod tests {
         assert_eq!(receipt[0].state, InputState::Queued);
         assert_eq!(db.head("main").unwrap(), Some(input.input_id.clone()));
         assert!(deliveries(&db, "stale").is_empty());
-        assert!(matches!(
-            db.commit_execution(
-                &input.run_id,
-                db.epoch,
-                &ExecutionRecord::RequestPrepared {
-                    snapshot: stale.into()
-                }
-            ),
-            Err(RuntimeError::InputPending)
-        ));
+        // A capture arriving after the frozen history snapshot is queued for a later legal
+        // boundary; passive environment production cannot force request recompilation.
+        db.commit_execution(&input.run_id,db.epoch,&ExecutionRecord::RequestPrepared {snapshot:stale.into()}).unwrap();
+        assert!(deliveries(&db,"stale").is_empty());
+        db.commit_execution(&input.run_id,db.epoch,&finish("stale",ModelOutcome::Cancelled)).unwrap();
         let items = consume(&mut db, &input.run_id);
         assert_eq!(items.len(), 1);
         assert!(matches!(
@@ -896,4 +881,6 @@ mod tests {
         assert_eq!(delivered.len(), 1);
         assert_eq!(delivered[0].id, format!("observation:{}:1", input.run_id));
     }
+    include!("catalog_context_captures_tests.rs");
+
 }

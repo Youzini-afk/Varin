@@ -1,4 +1,4 @@
-/** Shared permission policy validation and native tool admission. */
+/** Shared Host extension/MCP permission policy. Native resource grants retain their own authority. */
 
 export type PermissionMode = "normal" | "accept-edits" | "bypass" | "smart";
 export type PermissionDecision = "allow" | "ask" | "deny";
@@ -6,7 +6,19 @@ export type PermissionDecision = "allow" | "ask" | "deny";
 export interface PermissionRule {
   tool: string | "*";
   match?: { param: string; pattern: string };
+  /** Exact owner-declared management authority. A generic tool allow is not an authority grant. */
+  authority?: string;
   decision: PermissionDecision;
+}
+
+/** Canonical subjects supplied by a trusted tool owner, never by model arguments. */
+export interface PermissionSubject {
+  tool: string;
+  arguments: Record<string, unknown>;
+  authority?: string;
+  label?: string;
+  /** The owner can narrow a persistent approval to this semantic target. */
+  persistMatch?: PermissionRule['match'];
 }
 
 export interface PermissionPolicy {
@@ -17,6 +29,15 @@ export interface PermissionPolicy {
 export interface GateResult {
   decision: PermissionDecision;
   reason?: string;
+}
+
+/** Retain older saved choices without pretending their unimplemented automation is active. */
+export function resolvePermissionMode(configured: PermissionMode): {
+  configured: PermissionMode; effective: 'normal' | 'bypass'; unavailable?: 'accept-edits' | 'smart';
+} {
+  return configured === 'accept-edits' || configured === 'smart'
+    ? { configured, effective: 'normal', unavailable: configured }
+    : { configured, effective: configured };
 }
 
 export const MAX_PERMISSION_PATTERN_LENGTH = 512;
@@ -132,6 +153,9 @@ export function validatePermissionRule(rule: PermissionRule, source = "permissio
   if (rule.decision !== "allow" && rule.decision !== "ask" && rule.decision !== "deny") {
     throw new PermissionPolicyValidationError(`${source} rule has an invalid decision`);
   }
+  if (rule.authority !== undefined && (typeof rule.authority !== 'string' || !rule.authority.trim())) {
+    throw new PermissionPolicyValidationError(`${source} rule authority must be non-empty`);
+  }
   const match = (rule as PermissionRule & { match?: unknown }).match;
   if (match !== undefined) {
     if (!match || typeof match !== "object" || Array.isArray(match)) {
@@ -147,6 +171,7 @@ export function validatePermissionRule(rule: PermissionRule, source = "permissio
   return {
     tool: rule.tool,
     decision: rule.decision,
+    ...(rule.authority === undefined ? {} : { authority: rule.authority }),
     ...(match ? {
       match: {
         param: (match as Record<string, unknown>).param as string,
@@ -162,12 +187,17 @@ export function evaluateGate(
   tool: string,
   params: Record<string, unknown>,
   policy: PermissionPolicy,
+  authority?: string,
 ): GateResult {
   if (tool === "dispatch" && params.preset === undefined && params.capability === undefined && params.kind !== "discussion") {
     params = { ...params, preset: "worker" };
   }
   for (const rule of policy.rules) {
     if (rule.tool !== "*" && rule.tool !== tool) continue;
+    // Existing restrictions still constrain management calls. Existing broad allows,
+    // including '*', do not silently become credential or permission administration.
+    if (rule.authority !== undefined && rule.authority !== authority) continue;
+    if (authority !== undefined && rule.decision === 'allow' && rule.authority !== authority) continue;
 
     if (rule.match) {
       const paramValue = params[rule.match.param];
@@ -180,7 +210,7 @@ export function evaluateGate(
     return { decision: rule.decision, reason: `matched rule: tool=${rule.tool}` };
   }
 
-  if (policy.mode === "bypass") {
+  if (resolvePermissionMode(policy.mode).effective === "bypass" && authority === undefined) {
     return { decision: "allow", reason: "bypass mode" };
   }
 
@@ -188,8 +218,21 @@ export function evaluateGate(
   // tools not covered by explicit/generated rules ask rather than pass through.
   return {
     decision: "ask",
-    reason: "no matching permission rule; tool requires confirmation",
+    reason: authority === undefined
+      ? "no matching permission rule; tool requires confirmation"
+      : `explicit management authority required: ${authority}`,
   };
+}
+
+/** One invocation may contain several settings targets; every target must be admitted. */
+export function evaluatePermissionSubjects(subjects: readonly PermissionSubject[], policy: PermissionPolicy): GateResult {
+  let ask: GateResult | undefined;
+  for (const subject of subjects) {
+    const result = evaluateGate(subject.tool, subject.arguments, policy, subject.authority);
+    if (result.decision === 'deny') return result;
+    if (result.decision === 'ask') ask ??= result;
+  }
+  return ask ?? { decision: 'allow', reason: 'all semantic targets are allowed' };
 }
 
 

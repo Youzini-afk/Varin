@@ -46,6 +46,7 @@ interface PendingRequest {
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   surface: ClientSurfaceInfo;
+  entryIds: Set<string>;
 }
 
 export type ThreadSelection = Pick<SettingsServiceCaller, 'threadId' | 'branchId'>;
@@ -191,6 +192,7 @@ export function createClientSurfaceBridge({ writeSseEvent, isThreadLive }: Surfa
         reject,
         timer,
         surface,
+        entryIds: new Set(op.entries.map(entry => JSON.stringify([entry.id, entry.itemIndex]))),
       });
     });
     try {
@@ -230,6 +232,13 @@ export function createClientSurfaceBridge({ writeSseEvent, isThreadLive }: Surfa
     if (request.surface.id !== surfaceId
       || request.authKey !== authKey
       || !request.connectionIds.has(connectionId)) return false;
+    if (!Array.isArray(results) || results.some(result => !result || typeof result !== 'object'
+      || !request.entryIds.has(JSON.stringify([result.id, result.itemIndex])) || !['applied', 'failed', 'unavailable'].includes(result.status)
+      || result.revision !== undefined && typeof result.revision !== 'string'
+      || result.consistency !== undefined && !['compare-and-swap', 'last-write-wins'].includes(result.consistency)
+      || result.mutation !== undefined && !['none', 'applied', 'unknown'].includes(result.mutation)
+      || result.values !== undefined && (!result.values || typeof result.values !== 'object' || Array.isArray(result.values)))
+      || new Set(results.map(result => JSON.stringify([result.id, result.itemIndex]))).size !== results.length) return false;
     clearTimeout(request.timer);
     pending.delete(requestId);
     request.resolve({ surface: request.surface, results });

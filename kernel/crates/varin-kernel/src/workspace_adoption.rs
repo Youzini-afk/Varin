@@ -452,19 +452,56 @@ pub(crate) fn adopt(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    fn age_fixture_change_time(path: &Path) {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileBasicInfo, GetFileInformationByHandleEx, SetFileInformationByHandle,
+            FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES, FILE_WRITE_ATTRIBUTES,
+        };
+        let file = File::options()
+            .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES)
+            .share_mode(7)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path).unwrap();
+        let mut basic = FILE_BASIC_INFO::default();
+        assert_ne!(unsafe { GetFileInformationByHandleEx(file.as_raw_handle().cast(), FileBasicInfo,
+            (&mut basic as *mut FILE_BASIC_INFO).cast(), std::mem::size_of::<FILE_BASIC_INFO>() as u32) }, 0,
+            "fixture must read native change time: {}", std::io::Error::last_os_error());
+        // Give the real mutation a distinct baseline without assuming that two
+        // adjacent writes receive different filesystem clock ticks. Zero leaves
+        // all other timestamps/attributes unchanged, including the original mtime.
+        let mut baseline = FILE_BASIC_INFO { ChangeTime: basic.ChangeTime.checked_sub(10_000_000).unwrap(), ..Default::default() };
+        assert_ne!(unsafe { SetFileInformationByHandle(file.as_raw_handle().cast(), FileBasicInfo,
+            (&mut baseline as *mut FILE_BASIC_INFO).cast(), std::mem::size_of::<FILE_BASIC_INFO>() as u32) }, 0,
+            "fixture must set native change time: {}", std::io::Error::last_os_error());
+        drop(file);
+        assert_eq!(native_metadata::observe(path).unwrap().attributes.changed,
+            crate::storage::workspace_metadata::Timestamp::from_filetime(baseline.ChangeTime as u64),
+            "filesystem must retain the requested fixture change-time baseline");
+    }
     #[test]
     fn native_adoption_verifies_changes_without_reading_the_source_again() {
         let root = std::env::temp_dir().join(format!("varin-adoption-observe-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         let file = root.join("file");
         fs::write(&file, b"before").unwrap();
+        #[cfg(windows)]
+        age_fixture_change_time(&file);
         let before = native_metadata::observe(&file).unwrap();
         let modified = fs::metadata(&file).unwrap().modified().unwrap();
         fs::read(&file).unwrap();
         verify_observation(&file, &before).unwrap(); // access-time changes are harmless
         fs::write(&file, b"after!").unwrap();
         File::options().write(true).open(&file).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        let after = native_metadata::observe(&file).unwrap();
+        assert_eq!(after.identity, before.identity);
+        assert_eq!(after.length, before.length);
+        assert_eq!(after.attributes.modified, before.attributes.modified);
+        assert_ne!(after.attributes.changed, before.attributes.changed, "real mutation must advance native change time");
         assert!(verify_observation(&file, &before).is_err(), "same size and restored mtime must still detect the native change time");
+        #[cfg(windows)]
+        age_fixture_change_time(&root);
         let directory = native_metadata::observe(&root).unwrap();
         fs::write(root.join("new"), b"new member").unwrap();
         assert!(verify_observation(&root, &directory).is_err(), "namespace insertion changes its observed directory");

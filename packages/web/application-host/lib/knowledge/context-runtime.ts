@@ -1,42 +1,9 @@
-import type { DocumentMutationObservation } from "../documents/authority.js";
-import { randomUUID } from 'node:crypto';
 import { waitWithSignal } from "../cancellation.js";
-import type { ContextObservationSource } from '../kernel/protocol.generated.js';
 import type { KnowledgeRecallItem, KnowledgeRecallMaterial } from "./recall-material.js";
-import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalCommandEvent, type TerminalExitEvent } from "./observers.js";
-import type { KnowledgeScope, KnowledgeStore, RecallResult, StoredEvent } from "./store.js";
+import type { KnowledgeScope, KnowledgeStore, RecallResult } from "./store.js";
 import type { BotRecallContext, BotRecallWork } from '../memory/bot-recall-context.js';
 import type { MemoryRecallAssociation } from './vectors/index.js';
 
-/** Only the original admitted native launch can establish an observation owner. */
-export interface ThreadObservationIdentity { threadId: string; branchId: string; runId: string }
-export type ThreadObservationSource = ContextObservationSource;
-export interface ThreadObservationMaterial {
-  owner: ThreadObservationSource;
-  eventCursor: number;
-  events: Array<{ ref: string; event: StoredEvent }>;
-}
-/** Only storage reads are optional during request preparation; identity and receipt fences are not. */
-export class ObservationStoreUnavailableError extends Error {
-  readonly reason: 'corrupt' | 'unavailable';
-  constructor(readonly workspaceId: string, cause: unknown) {
-    super('Workspace change notifications are unavailable', { cause });
-    this.name = 'ObservationStoreUnavailableError';
-    // TriviumDB's structured code survives private storage IPC; localized/native
-    // diagnostic text is not a stable classification contract. Other failures,
-    // including I/O, closed handles and unknown errors, remain unavailable.
-    this.reason = cause instanceof Error && 'code' in cause && cause.code === 'TDB_CORRUPTED_FILE'
-      ? 'corrupt' : 'unavailable';
-  }
-}
-interface ObservationBinding extends ThreadObservationSource {
-  workspaceId: string;
-  fingerprint: string;
-  gitFingerprint: string | null;
-  observers: Promise<Observers | null> | null;
-  pendingUserPaths: Set<string>;
-  tail: Promise<void>;
-}
 export interface KnowledgeContextRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
   getUserStore?: () => Promise<KnowledgeStore | null>;
@@ -44,128 +11,11 @@ export interface KnowledgeContextRuntimeOptions {
   goalForThread?: (threadId: string) => Promise<string | undefined>;
   recallContextForThread?: (input: { threadId: string; query: string; work?: readonly BotRecallWork[]; signal?: AbortSignal }) => Promise<BotRecallContext>;
   recallForThread?: (input: { workspaceId: string; store: KnowledgeStore; threadId: string; query: string; associated?: MemoryRecallAssociation; goal?: string; signal?: AbortSignal }) => Promise<RecallResult[]>;
-  /** Reads original launch identities. No renderer or path-derived conversation binding. */
-  threadSources?(): Promise<ThreadObservationSource[]>;
-  /** Fires after the original Knowledge write settles, outside its source tail. */
-  onObservation?(owner: ThreadObservationSource): Promise<void>;
-  onError?: (error: unknown) => void;
 }
 const emptyMaterial = (): KnowledgeRecallMaterial => ({ knowledge: [] });
 
+/** Bot/user knowledge recall only. Environmental captures belong to the native Catalog. */
 export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOptions) {
-  const bindings = new Map<string, ObservationBinding>();
-  const pending = new Set<Promise<void>>();
-  let disposed = false;
-  let refresh: Promise<void> | undefined;
-  const track = (task: Promise<void>): void => {
-    pending.add(task);
-    void task.catch(error => options.onError?.(error)).finally(() => pending.delete(task));
-  };
-  const refreshBindings = (): Promise<void> => {
-    if (refresh) return refresh;
-    const task = (async () => {
-      if (disposed) return;
-      const sources = await options.threadSources?.() ?? [];
-      if (disposed) return;
-      const retained = new Set<string>();
-      for (const owner of sources) {
-        // Fixed/remote resources never borrow a local cwd or its notifications.
-        if (owner.source.resource_owner.kind !== 'local' || owner.source.mode === 'fixed_branch') continue;
-        const workspaceId = owner.source.execution_workspace_id;
-        if (!owner.threadId || !owner.branchId || !owner.runId || !workspaceId) throw new Error('Invalid admitted observation owner');
-        if (retained.has(owner.runId)) throw new Error('Ambiguous original Run observation source');
-        retained.add(owner.runId);
-        const fingerprint = JSON.stringify([owner.threadId, owner.branchId, owner.runId, owner.anchorId, owner.source]);
-        const current = bindings.get(owner.runId);
-        if (current?.fingerprint === fingerprint) { current.epoch = owner.epoch; continue; }
-        if (current) throw new Error('Original Run observation source changed');
-        bindings.set(owner.runId, { ...structuredClone(owner), workspaceId, fingerprint, gitFingerprint: null,
-          observers: null, pendingUserPaths: new Set(), tail: Promise.resolve() });
-      }
-      for (const id of bindings.keys()) if (!retained.has(id)) bindings.delete(id);
-    })();
-    refresh = task;
-    void task.finally(() => { if (refresh === task) refresh = undefined; }).catch(() => {});
-    return task;
-  };
-  const forWorkspace = async (workspaceId: string, visit: (observers: Observers, binding: ObservationBinding) => Promise<void>, target?: ThreadObservationIdentity, publish = false): Promise<void> => {
-    await refreshBindings();
-    await Promise.all([...bindings.values()].filter(binding => binding.workspaceId === workspaceId && (!target || binding.runId === target.runId && binding.threadId === target.threadId && binding.branchId === target.branchId)).map(binding => {
-      const task = binding.tail.then(async () => {
-        if (disposed) return;
-        const loading = binding.observers ??= options.getStore(binding.workspaceId).then(store => store ? createObservers({ store, sessionId: binding.runId }) : null);
-        let observers: Observers | null;
-        try { observers = await loading; } catch (error) { if (binding.observers === loading) binding.observers = null; throw error; }
-        if (observers) await visit(observers, binding);
-      });
-      binding.tail = task.catch(() => undefined);
-      return task.then(async () => {
-        if (!disposed && publish) await options.onObservation?.({ threadId: binding.threadId, branchId: binding.branchId,
-          runId: binding.runId, anchorId: binding.anchorId, source: binding.source, epoch: binding.epoch });
-      });
-    }));
-  };
-  const observeDocumentMutation = (event: DocumentMutationObservation): void => {
-    if (disposed) return;
-    const changeId = `document:${randomUUID()}`;
-    const agentWriterActive = event.owner.kind === 'harness' || event.owner.kind.startsWith('harness-') || event.owner.kind.startsWith('agent-') || event.owner.kind === 'agent-runtime';
-    track(forWorkspace(event.workspaceId, (observers, binding) => {
-      if (agentWriterActive) binding.pendingUserPaths.delete(event.resourceId); else binding.pendingUserPaths.add(event.resourceId);
-      return observers.onDocumentWrite({ workspaceId: event.workspaceId, path: event.resourceId, kind: event.kind, agentWriterActive, owner: event.owner, changeId,
-        source: agentWriterActive ? 'agent' : ['web-route', 'workspace-edit', 'resource-editor', 'recovery'].includes(event.owner.kind) ? 'user' : 'external' });
-    }, undefined, !agentWriterActive));
-  };
-  const observeTerminalCommand = async (event: TerminalCommandEvent | TerminalExitEvent, target?: ThreadObservationIdentity): Promise<boolean> => {
-    if (disposed) return false;
-    let inserted = false;
-    const task = forWorkspace(event.workspaceId, async observers => { inserted = await observers.onTerminalExit(event) || inserted; }, target, event.source === 'user');
-    track(task); await task; return inserted;
-  };
-  const observeDiagnostics = (event: DiagnosticEvent): void => {
-    if (disposed) return;
-    track(forWorkspace(event.workspaceId, async (observers, binding) => {
-      if (!binding.pendingUserPaths.delete(event.path)) return;
-      await observers.onDiagnostics(event);
-    }, undefined, true));
-  };
-  const observeGitStatus = (event: GitStatusEvent): void => {
-    if (disposed) return;
-    const fingerprint = JSON.stringify([event.branch ?? null, event.changed ?? null, event.note ?? null]);
-    const changeId = `git:${randomUUID()}`;
-    track(forWorkspace(event.workspaceId, async (observers, binding) => {
-      if (binding.gitFingerprint === fingerprint) return;
-      const branchChanged = binding.gitFingerprint !== null && JSON.parse(binding.gitFingerprint)[0] !== (event.branch ?? null);
-      await observers.onGitStatus({ ...event, changeId, notifyAssistant: branchChanged }); binding.gitFingerprint = fingerprint;
-    }, undefined, true));
-  };
-  const drain = async (): Promise<void> => { while (pending.size) await Promise.allSettled([...pending]); };
-  const observationsForSource = async (owner: ThreadObservationSource, request: { afterEventId?: number; signal?: AbortSignal } = {}): Promise<ThreadObservationMaterial> => {
-    if (owner.source.resource_owner.kind !== 'local' || owner.source.mode === 'fixed_branch') throw new Error('Observation source is not a local live resource');
-    const binding = bindings.get(owner.runId);
-    if (binding) {
-      if (JSON.stringify([binding.threadId, binding.branchId, binding.anchorId, binding.source]) !== JSON.stringify([owner.threadId, owner.branchId, owner.anchorId, owner.source])) throw new Error('Observation request changed original Run');
-      await waitWithSignal(binding.tail, request.signal);
-    }
-    let events: StoredEvent[];
-    try {
-      const store = await waitWithSignal(options.getStore(owner.source.execution_workspace_id), request.signal);
-      if (!store) throw new Error('Observation source store is unavailable');
-      events = await waitWithSignal(store.listEvents({ sessionId: owner.runId, ...(request.afterEventId === undefined ? {} : { afterId: request.afterEventId }) }), request.signal);
-    } catch (error) {
-      request.signal?.throwIfAborted();
-      throw new ObservationStoreUnavailableError(owner.source.execution_workspace_id, error);
-    }
-    request.signal?.throwIfAborted();
-    return { owner: structuredClone(owner), eventCursor: events.at(-1)?.id ?? request.afterEventId ?? 0,
-      events: events.map(event => ({ ref: `observation:${owner.runId}:${event.id}`, event })) };
-  };
-  const observationsForRun = async (request: ThreadObservationIdentity & { afterEventId?: number; signal?: AbortSignal }): Promise<ThreadObservationMaterial | null> => {
-    await waitWithSignal(refreshBindings(), request.signal);
-    const binding = bindings.get(request.runId);
-    if (!binding) return null;
-    if (binding.threadId !== request.threadId || binding.branchId !== request.branchId) throw new Error('Observation request changed original Run');
-    return observationsForSource({ threadId: binding.threadId, branchId: binding.branchId, runId: binding.runId, anchorId: binding.anchorId, epoch: binding.epoch, source: binding.source }, request);
-  };
   type RecallRequest = { threadId: string; query?: string; work?: BotRecallWork[]; knownMaterial?: Record<string, string>; signal?: AbortSignal };
   type RecallBinding = { workspaceId: string; recallCache: { query: string; workspaceRevision: string; userRevision: string | null; sessionRevision: string | null; results: RecallResult[] } | null };
   const threadBindings = new Map<string, RecallBinding>();
@@ -299,11 +149,6 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     return material;
   };
 
-  return {
-    knowledgeForThread, observationsForRun, observationsForSource, observeDocumentMutation, observeDiagnostics, observeGitStatus,
-    observeTerminalCommand, observeTerminalExit: observeTerminalCommand, drain,
-    listBoundOwners: async (workspaceId: string): Promise<ThreadObservationIdentity[]> => { await refreshBindings(); return [...bindings.values()].filter(binding => binding.workspaceId === workspaceId).map(({ threadId, branchId, runId }) => ({ threadId, branchId, runId })); },
-    dispose: async (): Promise<void> => { disposed = true; bindings.clear(); threadBindings.clear(); await drain(); },
-  };
+  return { knowledgeForThread, dispose: async (): Promise<void> => { threadBindings.clear(); } };
 }
 export type KnowledgeContextRuntime = ReturnType<typeof createKnowledgeContextRuntime>;
