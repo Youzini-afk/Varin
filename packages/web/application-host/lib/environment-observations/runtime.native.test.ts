@@ -115,7 +115,7 @@ it('uses the actual TS/native bridge for canonical Unicode raw bytes, omitted mo
   }
   expect(JSON.parse(text)).toEqual(capture.event);
   expect(JSON.parse(text)).not.toHaveProperty('text');
-  expect((await f.runtime.inputs('branch')).filter(input => input.id === receipt!.id)).toHaveLength(1);
+  expect((await f.runtime.historyPage({ branchId: 'branch', limit: 20 })).items.filter(item => item.id === receipt!.id)).toHaveLength(1);
 }, 30_000);
 
 it('reconciles a real lost acknowledgement after kernel termination using the original receipt across a new epoch', async () => {
@@ -137,13 +137,14 @@ it('reconciles a real lost acknowledgement after kernel termination using the or
   coordinator.wake(); await expect.poll(() => coordinator.inspect()[0]?.pending).toEqual([]);
   expect(submissions).toHaveBeenCalledOnce(); expect(receiptReads).toHaveBeenCalledExactlyOnceWith(owner, [capture.captureId]);
   expect(await f.port.receipt(owner, [capture.captureId])).toEqual(committed);
-  expect((await f.runtime.inputs('branch')).filter(input => input.id === committed[0]!.id)).toHaveLength(1);
+  expect((await f.runtime.events(0, 1000)).filter(event => event.kind === 'context.observed' && event.subject === committed[0]!.id)).toHaveLength(1);
   expect(f.probe.sent.filter(request => request.method === 'runtime.context.observations.capture')).toHaveLength(1);
   expect(errors).toHaveLength(1); await coordinator.close();
 }, 30_000);
 
 it('imports the actual old Knowledge journal under Run A after Run B exists, preserving the old digest and durable prefix', async () => {
-  const f = await fixture(), original = (await f.port.sources())[0]!;
+  const provider = await localProvider();
+  const f = await fixture(provider.endpoint), original = (await f.port.sources())[0]!;
   const legacy = await openKnowledgeStoreEngine({ dataDir: path.join(f.root, 'legacy'), hostId: f.hostId, workspaceId: f.workspaceId, embedding: null });
   cleanups.push(() => legacy.close());
   const old = { kind: 'command' as const, at: 9, sessionId: original.runId, source: 'user' as const,
@@ -161,12 +162,13 @@ it('imports the actual old Knowledge journal under Run A after Run B exists, pre
   importer.wake(preparation.sources.map(status => status.owner));
   expect((await importer.close()).every(source => source.state === 'ready')).toBe(true); await coordinator.close();
   expect(errors).toEqual([]);
-  const id = `observation:${original.runId}:${saved.id}`, input = await f.runtime.input(id);
-  expect(JSON.stringify(input.content)).toContain(old.text);
+  const id = `observation:${original.runId}:${saved.id}`;
+  const admissions = (await f.runtime.events(0, 1000)).filter(event => event.kind === 'context.observed' && event.subject === id);
+  expect(admissions).toHaveLength(1);
   const fact: ContextObservationFact = { id: saved.id, kind: old.kind, at: old.at, text: old.text, source: old.source, refs: old.refs, data: old.data };
   const replay = await f.kernel.agentRuntimeRequest<ContextObservationReceipt[], 'runtime.context.observations.admit'>(
     'runtime.context.observations.admit', { owner: original, events: [fact] });
-  expect(replay).toMatchObject([{ id, cursor: input.cursor }]);
+  expect(replay).toMatchObject([{ id, cursor: admissions[0]!.cursor }]);
   await expect(f.kernel.agentRuntimeRequest('runtime.context.observations.admit', { owner: original, events: [{ ...fact, text: 'new renderer must not replace old text' }] })).rejects.toThrow(/different|conflict/i);
   const importCalls = () => f.probe.sent.filter(request => request.method === 'runtime.context.observations.import').length;
   expect(importCalls()).toBe(1);
@@ -174,6 +176,16 @@ it('imports the actual old Knowledge journal under Run A after Run B exists, pre
   importer = createContextObservationPublication(f.kernel, { getLegacyStore: async () => legacy }); await importer.recover(); await importer.close();
   expect(reads.mock.calls.find(([filter]) => filter.sessionId === original.runId)?.[0].afterId).toBe(saved.id);
   expect(importCalls()).toBe(1);
+  f.kernel.setContextOwner({ close() {}, query: async (query, signal) => ({ status: 'ready',
+    ...(query.action === 'execution_environment' ? { environment: await f.runtime.executionEnvironmentForSource((await f.runtime.launch(query.runId, signal))?.selection.source, signal) } : {}),
+  }) });
+  await f.runtime.startFromSource({ runId: successor.run_id, workspaceId: f.workspaceId, executionWorkspaceId: f.workspaceId,
+    resourceOwner: { kind: 'local' }, mode: 'live_root', liveRoot: f.liveRoot, tools: [] });
+  await expect.poll(async () => (await f.runtime.run(successor.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  expect(provider.requests).toHaveLength(1);
+  const history = (await f.runtime.historyPage({ branchId: 'branch', limit: 20 })).items.filter(item => item.id === id);
+  expect(history).toHaveLength(1);
+  expect(JSON.stringify(await f.runtime.historyItem(history[0]!))).toContain(old.text);
 }, 30_000);
 
 it('round-trips the actual Host preparation diagnostics, including retired/source/producer gaps, through native context preparation', async () => {
