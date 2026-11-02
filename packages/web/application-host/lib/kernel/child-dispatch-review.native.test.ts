@@ -18,7 +18,7 @@ import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import { createAgentPolicy } from './agent-policy.js';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { configureRuntimeUrlResolver, createAgentProfilesHttpAPI, createThreadsHttpAPI, setRuntimeExtraHeaders, type ThreadIdentity } from '@varin/application-client';
-import { AgentSettingsService } from '../models/settings.js';
+import { ModelsService } from '../models/service.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { openUserKnowledgeStore } from '../harness/recall-tool.js';
@@ -31,6 +31,8 @@ import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
+import { createDelegationModelSelection } from './delegation-model-selection.js';
+import { createModelAuthority } from './model-authority.js';
 import { createChildProfilePreparer } from './child-profiles.js';
 import { createAgentProfilesAPI } from './agent-profiles.js';
 import { registerAgentProfileRoutes } from './agent-profile-routes.js';
@@ -289,7 +291,9 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       if (![configuration.model, retrievalConfiguration.model].includes(selected.model)) throw new Error('Unknown fixture model');
       return resolvedOwner(selected.model === retrievalConfiguration.model ? retrievalConfiguration : configuration);
     } };
-    const settings = new AgentSettingsService(agentDir, () => false);
+    const modelSettings = new ModelsService(agentDir, { projectTrusted: () => false,
+      fetch: async () => { throw new Error('The disabled fixture selector must not contact a model directory'); } });
+    const settings = modelSettings.settings;
     const externalProcesses = options.external ? createKernelProcessService({ client: kernel, resolveIdentity: async cwd => {
       const { workspaceId } = await documents.resolveWorkspace({ path: cwd }); return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot: cwd };
     } }) : undefined;
@@ -317,7 +321,13 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
       try { return await prepareSource(...args); }
       catch (error) { console.error('Source preparation fixture failed', error); throw error; }
     };
-    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: liveSources.validate, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Read-only dispatch must not capture the directory"); } }, runtime,  prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
+    // Install the same preparation owner advertised by the production profile catalog.
+    // The default selector is disabled, so free dispatch commits its original inherited
+    // binding through Catalog without an auxiliary request, not a fixture shortcut.
+    const delegationModels = createDelegationModelSelection({ kernel, runtime, authority: modelSettings,
+      models: createModelAuthority(modelSettings), inference: { kernel, runtime,
+        egress: { prepare: async () => { throw new Error('The disabled fixture selector must not perform auxiliary inference'); } } } });
+    const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: liveSources.validate, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Read-only dispatch must not capture the directory"); } }, runtime, prepareModel: delegationModels.prepare, prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
     registerThreadRoutes(app, adapter, (request, response, next) => {
@@ -334,7 +344,7 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
     let closed = false; let crashed = false;
     const close = async () => {
       if (closed) return; closed = true;
-      collaboration?.stop(); await external?.close(); await externalProcesses?.dispose(); await host.close(); await extensions?.stop(); await knowledge?.close();
+      collaboration?.stop(); await delegationModels.close(); await external?.close(); await externalProcesses?.dispose(); await host.close(); await extensions?.stop(); await knowledge?.close();
       await sources?.dispose();await compute?.dispose();
       await recovery?.dispose();
       try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
@@ -342,7 +352,7 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
     };
     disposers.push(close);
     const crash = async () => {
-      collaboration?.stop();
+      collaboration?.stop(); await delegationModels.close();
       if (!kernelProcess || kernelProcess.exitCode !== null || kernelProcess.signalCode !== null) throw new Error('Fixture kernel is not running');
       crashed = true;
       const exited = once(kernelProcess, 'exit');
@@ -1041,6 +1051,11 @@ it.each([
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 20_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
   expect(child.selected_profile.work_mode).toBe('shared');
+  const execution = (await h.runtime.childExecutions(operationId))[0]!;
+  const selectionReceipt = await h.kernel.agentRuntimeRequest<import('./protocol.generated.js').DelegationModelSelection | null, 'runtime.child.model.read'>('runtime.child.model.read', { executionId: execution.execution_id });
+  if ('preset' in selection) expect(selectionReceipt).toBeNull();
+  else expect(selectionReceipt).toMatchObject({ result: { model: 'inherit' }, inference: [],
+    recipe: { catalog: { selector: null, candidates: [] }, inheritedBinding: { configuration: { model: model.modelId } } } });
   expect(child.report, JSON.stringify({ report: child.report, errors: h.errors.map(error => error instanceof Error ? `${error}: ${error.cause}` : String(error)), source: child.source })).toMatchObject({ outcome: 'succeeded' });
   expect(child.source.kind).toBe('shared');
   expect(child.code_result.kind).toBe('shared_source');
