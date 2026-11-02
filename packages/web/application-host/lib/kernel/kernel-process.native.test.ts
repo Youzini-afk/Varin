@@ -361,6 +361,57 @@ it("kernel death invalidates the Host handle without manufacturing an exit event
   } finally { unsubscribe(); await service.dispose(); }
 }, 30_000);
 
+vitestIt.skipIf(!available || process.platform !== "win32")("Windows recovers surviving writers through its owned Job after guardian death", async () => {
+  const f = await fixture();
+  const ready = path.join(f.workspace, "child", "guardian-ready.json");
+  const gate = path.join(f.workspace, "child", "kill-guardian");
+  const counter = path.join(f.workspace, "child", "executions.txt");
+  // Pipe mode spawns Node directly: capture the original guardian before any
+  // teardown. No shell, process-name lookup, or production fault hook is used.
+  // The kernel retains that guardian's handle, preventing PID reuse before release.
+  const params = f.spawn("guardian-loss", [
+    "const fs=require('node:fs'),guardianPid=process.ppid;",
+    `fs.appendFileSync(${JSON.stringify(counter)},'once\\n');`,
+    `fs.writeFileSync(${JSON.stringify(ready + ".tmp")},JSON.stringify({pid:process.pid,guardianPid}));`,
+    `fs.renameSync(${JSON.stringify(ready + ".tmp")},${JSON.stringify(ready)});`,
+    "let killed=false;setInterval(()=>{",
+    `if(!killed&&fs.existsSync(${JSON.stringify(gate)})){`,
+    "killed=true;process.kill(guardianPid,'SIGKILL');}",
+    "},10);",
+  ].join("\n"));
+  await f.client.processSpawn(params);
+  await expect.poll(() => fs.stat(ready).then(() => true, error => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  })).toBe(true);
+  const identity = JSON.parse(await fs.readFile(ready, "utf8")) as { pid: number; guardianPid: number };
+  assert.ok(Number.isSafeInteger(identity.pid) && identity.pid > 0);
+  assert.ok(Number.isSafeInteger(identity.guardianPid) && identity.guardianPid > 0);
+  assert.ok(f.kernelChild.pid);
+  assert.notEqual(identity.guardianPid, identity.pid);
+  assert.notEqual(identity.guardianPid, f.kernelChild.pid);
+  assert.notEqual(identity.guardianPid, process.pid);
+  const running = await waitFor(f.client, params.processId, snapshot => snapshot.pid !== null);
+  assert.equal(running.pid, identity.pid);
+  assert.equal(running.writerActive, true);
+  await assert.rejects(f.client.processRelease({ workspaceId: "ws", processId: params.processId }), /in use|unconfirmed/);
+
+  // The target remains alive after killing only its guardian. Kernel recovery
+  // must terminate the retained Job, not send another request to the dead pipe.
+  await fs.writeFile(gate, "go");
+  const stopped = await waitFor(f.client, params.processId, snapshot => !snapshot.writerActive);
+  assert.equal(stopped.status, "exited");
+  assert.equal(stopped.exitCode, null);
+  assert.equal(stopped.signal, null);
+  assert.match(stopped.reason ?? "", /target exit status unavailable/);
+  assert.throws(() => process.kill(identity.pid, 0), { code: "ESRCH" });
+  assert.equal(f.host.isReady, true);
+  assert.equal((await f.client.processSpawn(params)).status, "exited");
+  assert.equal(await fs.readFile(counter, "utf8"), "once\n");
+  await f.client.processRelease({ workspaceId: "ws", processId: params.processId });
+  await f.client.fileRemove({ ...f.address, operationId: "guardian-loss-remove", path: "child", recursive: true, force: true });
+}, 30_000);
+
 
 it("revoking a process actor requests native stop and leaves exit confirmation to maintenance", async () => {
   const f = await fixture();

@@ -561,8 +561,15 @@ impl ProcessManager {
             #[cfg(windows)]
             {
                 if !live.containment.empty()? {
-                    live.control.stop(true)?;
+                    // The guardian can no longer consume a stop request. The kernel
+                    // still owns the original Job, including any surviving writers.
+                    let guardian = live
+                        .guardian
+                        .lock()
+                        .map_err(|_| failure("guardian control poisoned"))?;
+                    live.containment.terminate(&guardian, true)?;
                 }
+                // Termination acceptance is not proof that all Job members exited.
                 if live.containment.empty()? {
                     status = "exited";
                     reason = Some("native Job exited; target exit status unavailable".into());
