@@ -1,6 +1,6 @@
 {
   "name": "@varin/electron",
-  "version": "0.9.35",
+  "version": "0.9.36",
   "license": "AGPL-3.0-only",
   "private": true,
   "description": "Varin desktop runtime",
@@ -102,7 +102,11 @@
       {
         "from": "resources/web-dist",
         "to": "web-dist",
-        "filter": ["**/*", "!companion-assets{,/**/*}", "!companion-review-director{,/**/*}"]
+        "filter": [
+          "**/*",
+          "!companion-assets{,/**/*}",
+          "!companion-review-director{,/**/*}"
+        ]
       },
       {
         "from": "resources/kernel",
