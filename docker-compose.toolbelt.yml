@@ -7,4 +7,4 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-base:main}
+        RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-base:latest}

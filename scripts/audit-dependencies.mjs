@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const args = process.argv.slice(2);
+if (args.some(arg => arg !== '--local-only')) throw new Error('Usage: audit-dependencies.mjs [--local-only]');
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const repairs = [
   ['braces@3.0.3', 'GHSA-vfj7-8cjw-p6xm'],
@@ -31,4 +33,6 @@ function run(command, args) {
 // excluding their version-based reports; every other advisory still fails the audit.
 run(process.execPath, ['--test', 'scripts/dependency-security.test.mjs', 'scripts/glob-security.test.mjs']);
 for (const [dependency, advisory] of repairs) console.log(`[audit] Verified local repair: ${dependency}; exclude version report ${advisory}`);
-run('bun', ['audit', ...repairs.flatMap(([, advisory]) => ['--ignore', advisory])]);
+// Ordinary code checks retain the deterministic security regressions. Live
+// advisory discovery runs on dependency changes, qualification and releases.
+if (!args.includes('--local-only')) run('bun', ['audit', ...repairs.flatMap(([, advisory]) => ['--ignore', advisory])]);

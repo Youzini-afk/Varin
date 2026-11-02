@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
-if (args.some((arg) => arg !== '--build' && arg !== '--build-only' && !arg.startsWith('--vitest-file='))) {
-  throw new Error('Usage: node scripts/test-kernel-authority.mjs [--build | --build-only] [--vitest-file=<path>]');
+if (args.some((arg) => arg !== '--build' && arg !== '--build-only' && arg !== '--platform' && !arg.startsWith('--vitest-file='))) {
+  throw new Error('Usage: node scripts/test-kernel-authority.mjs [--build | --build-only] [--platform] [--vitest-file=<path>]');
 }
 const vitestFiles = args.filter((arg) => arg.startsWith('--vitest-file=')).map((arg) => arg.slice('--vitest-file='.length));
 const buildOnly = args.includes('--build-only');
@@ -60,7 +60,8 @@ if (vitestFiles.length === 0) {
 // stores or OS process trees runs here and nowhere else. These tests start real
 // native resources, so serialize files on every runner; concurrency within
 // each test remains exercised without coupling teardown to another fixture.
-run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/web/vitest.kernel.config.ts',
+const config = args.includes('--platform') ? 'packages/web/vitest.kernel.platform.config.ts' : 'packages/web/vitest.kernel.config.ts';
+run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', config,
   ...vitestFiles,
   '--no-file-parallelism',
 ], { collectFailure: true });
