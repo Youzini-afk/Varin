@@ -1,4 +1,5 @@
 import { existsSync, readlinkSync } from "node:fs";
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
@@ -61,6 +62,9 @@ describe("live shell integration", () => {
   }, 35_000);
   it.skipIf(!liveShell)("observes a real user-terminal command on Windows Git Bash or PowerShell", async () => {
     const shell = liveShell!;
+    const cwd = await fs.mkdtemp(path.join(tmpdir(), 'varin-live-shell-'));
+    const started = performance.now();
+    const phase = (name: string) => console.info(`[live shell] ${name}: ${Math.round(performance.now() - started)}ms`);
     const runtime = createIsolatedTerminalSessionApi({
       isExecutable: (value: string) => existsSync(value),
       searchPathFor: (name: string) => {
@@ -73,14 +77,18 @@ describe("live shell integration", () => {
     const seen: TerminalCommandRecord[] = [];
     const subscription = runtime.subscribeCommands((event) => { seen.push(event); });
     try {
+      phase('creating');
       const handle = await runtime.createTerminalSession({
         sessionId: "live-user",
-        cwd: tmpdir(),
+        cwd,
         owner: "user",
         shell: shell.shell,
       });
+      phase('created');
       await vi.waitFor(() => expect(runtime.inspectSession(handle.id)?.integration).toBe('ready'), { timeout: 15_000 });
+      phase('integration ready');
       await handle.write("echo varin-live-probe\r");
+      phase('input acknowledged');
       await vi.waitFor(() => expect(seen).toContainEqual(expect.objectContaining({
         command: expect.stringContaining("echo varin-live-probe"),
         owner: "user",
@@ -88,10 +96,15 @@ describe("live shell integration", () => {
         terminalId: "live-user",
         exitCode: 0,
       })), { timeout: 15_000 });
+      phase('command observed');
       await handle.destroy();
+      phase('destroyed');
     } finally {
       subscription.dispose();
+      phase('shutting down');
       await runtime.shutdown();
+      phase('shutdown complete');
+      await fs.rm(cwd, { recursive: true, force: true });
     }
   // Match the Store-shell case: startup, two observed phases and native teardown
   // cannot share the old 20s outer budget while each phase permits 15s.
