@@ -3,17 +3,24 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 73 as const;
+export const KERNEL_PROTOCOL_VERSION = 74 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
-export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
-export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.context.observations.sources","runtime.context.observations.admit","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.knowledge_inference.status","runtime.knowledge_inference.cancel","runtime.knowledge_inference.finish","runtime.model_text.admit","runtime.model_text.read","runtime.model_text.status","runtime.model_text.cancel","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.importSources","runtime.context.observations.receipt","runtime.context.observations.snapshot","runtime.context.observations.read","runtime.context.observations.importPosition","runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
+export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.context.observations.importSources","runtime.context.observations.capture","runtime.context.observations.receipt","runtime.context.observations.snapshot","runtime.context.observations.importPosition","runtime.context.observations.import","runtime.context.observations.sources","runtime.context.observations.admit","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.knowledge_inference.status","runtime.knowledge_inference.cancel","runtime.knowledge_inference.finish","runtime.model_text.admit","runtime.model_text.read","runtime.model_text.status","runtime.model_text.cancel","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId","runtime.input.sendNow":"inputId"} as const;
-export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v73" as const;
+export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.context.observations.capture","runtime.context.observations.import","runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v74" as const;
 
 export type KernelMethod =
+  | "runtime.context.observations.importSources"
+  | "runtime.context.observations.capture"
+  | "runtime.context.observations.receipt"
+  | "runtime.context.observations.snapshot"
+  | "runtime.context.observations.read"
+  | "runtime.context.observations.importPosition"
+  | "runtime.context.observations.import"
   | "runtime.context.observations.sources"
   | "runtime.context.observations.admit"
   | "model.adapters.retain"
@@ -549,6 +556,94 @@ export interface ModelRetryEvaluateParams {
 export interface KernelTokenizerCountParams {
   leaseId: string;
   texts: string[];
+}
+
+export interface ContextObservationHostDiagnostics {
+  acceptedCursor: number;
+  sources: ContextObservationProducerStatus[];
+  retiredGaps?: ContextObservationRetiredGap[];
+  producerPending: number;
+  producerGaps: ContextObservationProducerGap[];
+}
+
+export interface ContextObservationProducerStatus {owner:ContextObservationSource;availability:"ready"|"pending"|"unknown"|"gap"|"unavailable";pending:string[];unknown:string[];gap:ContextObservationGap|null}
+
+export interface ContextObservationGap {
+  count: number;
+  firstCaptureId: string;
+  lastCaptureId: string;
+}
+
+export interface ContextObservationRetiredGap {
+  workspaceId: string;
+  count: number;
+  firstCaptureId: string;
+  lastCaptureId: string;
+}
+
+export interface ContextObservationProducerGap {workspaceId:string;count:number;firstCaptureId:string;lastCaptureId:string;reason:"queue_budget"|"source_unavailable"|"closed"}
+
+export type ContextObservationImportSources = Record<string, never>;
+
+export type EnvironmentObservationEvent = {kind:"edit";at:number;source:"user"|"external";body:{path:string;kind:"created"|"modified"|"deleted";owner?:{kind:string;id:string;generation?:number};changeId?:string;operationId?:string}} | {kind:"command";at:number;source:"user"|"external";body:{terminalId:string;commandId:string;command:string;exitCode:number;cwd?:string;integration?:"osc-633";startedAt?:number;endedAt?:number;changeId?:string}} | {kind:"source";at:number;source:"user"|"external";body:{type:"git";branch?:string;changed?:number;note?:string;notifyAssistant?:boolean;changeId?:string}};
+
+export interface EnvironmentObservationCapture {
+  captureId: string;
+  event: EnvironmentObservationEvent;
+}
+
+export interface EnvironmentObservationReceipt {captureId:string;id:string;cursor:number;rawDigest:string;rawRef:string;representation:{version:number;digest:string;bytes:number;bodyBudgetBytes:number;omitted:boolean};admission:{cursor:number;state:InputState}}
+
+export interface EnvironmentObservationSnapshot {
+  cursor: number;
+}
+
+export interface ContextObservationCaptureBatch {
+  owner: ContextObservationSource;
+  captures: EnvironmentObservationCapture[];
+}
+
+export interface ContextObservationReceiptLookup {
+  owner: ContextObservationSource;
+  captureIds: string[];
+}
+
+export interface ContextObservationSnapshot {
+  runId: string;
+}
+
+export interface ContextObservationRead {
+  runId: string;
+  id: string;
+  offset?: number;
+  limit?: number;
+}
+
+export interface ContextObservationOriginal {
+  owner: ContextObservationSource;
+  id: string;
+  rawRef: string;
+  rawDigest: string;
+  offset: number;
+  nextOffset: number;
+  totalBytes: number;
+  text: string;
+}
+
+export interface ContextObservationImportPosition {
+  owner: ContextObservationSource;
+}
+
+export interface ContextObservationImport {
+  owner: ContextObservationSource;
+  afterId: number;
+  throughId: number;
+  events: ContextObservationFact[];
+}
+
+export interface ContextObservationImportReceipt {
+  throughId: number;
+  receipts: ContextObservationReceipt[];
 }
 
 export interface ContextObservationSource {
@@ -2696,7 +2791,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 73; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 74; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -6480,6 +6575,13 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
 ];
 
 export type KernelMethodParams = {
+  "runtime.context.observations.importSources": ContextObservationImportSources;
+  "runtime.context.observations.capture": ContextObservationCaptureBatch;
+  "runtime.context.observations.receipt": ContextObservationReceiptLookup;
+  "runtime.context.observations.snapshot": ContextObservationSnapshot;
+  "runtime.context.observations.read": ContextObservationRead;
+  "runtime.context.observations.importPosition": ContextObservationImportPosition;
+  "runtime.context.observations.import": ContextObservationImport;
   "runtime.context.observations.sources": ContextObservationSources;
   "runtime.context.observations.admit": ContextObservationAdmit;
   "model.adapters.retain": ModelAdaptersRetainParams;
@@ -6910,6 +7012,69 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context.observations.importSources";
+      params: ContextObservationImportSources;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context.observations.capture";
+      params: ContextObservationCaptureBatch;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context.observations.receipt";
+      params: ContextObservationReceiptLookup;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context.observations.snapshot";
+      params: ContextObservationSnapshot;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context.observations.read";
+      params: ContextObservationRead;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context.observations.importPosition";
+      params: ContextObservationImportPosition;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.context.observations.import";
+      params: ContextObservationImport;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

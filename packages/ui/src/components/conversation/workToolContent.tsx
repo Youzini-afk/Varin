@@ -95,7 +95,7 @@ export function workToolContent(call: ChatToolCall, data: Record<string, unknown
         {item.summary !== undefined && <JsonSummaryView data={item.summary} />}</dd></div>)}</dl>;
     if (!fields.length && !items.length && !data.appliedAt && !data.operation && !Object.keys(effective).length) return null;
     const fieldList = (entries: Record<string, unknown>[], values: Record<string, unknown> = {}) => <dl className="tool-setting-fields">{entries.map((field, index) => {
-      const path = toolText(field.path), returned = Object.hasOwn(values, path) ? values[path] : field.saved;
+      const path = toolText(field.path), resolved = toolRecord(field.effective), returned = Object.hasOwn(values, path) ? values[path] : Object.hasOwn(resolved, 'value') ? resolved.value : field.saved;
       return <div key={path || index}><dt className="font-mono">{path}</dt><dd>
         {returned !== undefined && <pre>{valueText(returned)}</pre>}
         {typeof field.status === 'string' && <span className={field.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}>{toolValueLabel(field.status, t)}</span>}
@@ -107,8 +107,11 @@ export function workToolContent(call: ChatToolCall, data: Record<string, unknown
     return <div className="tool-settings-changes">
       {fields.length > 0 && fieldList(fields, effective)}
       {items.map((item, index) => <div key={toolText(item.id) || index}><p className="typography-meta">{toolText(item.id)} · {toolText(item.status)}</p>
-        {fieldList(records(item.fields))}{typeof item.error === 'string' && <p className="text-destructive">{item.error}</p>}</div>)}
+        {fieldList(records(item.fields), toolRecord(item.effective))}
+        {Boolean(item.scope || item.appliedAt) && <p className="typography-micro text-muted-foreground">{toolText(item.scope)} · {toolText(item.appliedAt)}</p>}
+        {typeof item.error === 'string' && <p className="text-destructive">{item.error}</p>}</div>)}
       {Object.hasOwn(effective, 'value') && <JsonSummaryView data={effective.value} />}
+      {data.mutation === 'unknown' && <p className="typography-micro text-muted-foreground">{toolValueLabel('unknown', t)}</p>}
       {typeof data.appliedAt === 'string' && <p className="typography-micro text-muted-foreground">{t('chat.tools.takesEffect')} · {toolValueLabel(data.appliedAt, t)}</p>}
       {typeof action.state === 'string' && <p className="typography-meta">{action.state} · {toolText(action.detail)}</p>}
     </div>;

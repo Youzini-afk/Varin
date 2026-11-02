@@ -2,7 +2,8 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { McpConfigurationSnapshot } from '@varin/application-client';
+import type { McpConfigurationSnapshot, McpConfigurationDocument } from '@varin/application-client';
+import type { McpDocumentWriteReceipt } from './configuration-patch.js';
 import { McpAuthority, type McpAuthorityScope, type McpAuthorityOptions } from './authority.js';
 import { McpOAuthCredentialStore } from './auth.js';
 import { createMcpSettings } from './settings.js';
@@ -27,6 +28,62 @@ async function configuredFixture(options: McpAuthorityOptions = {}) {
   await writeFile(join(directory, 'mcp.json'), JSON.stringify({ mcpServers: { test: { url: 'http://localhost:1234/mcp' } } }));
   return createSettings(directory, options);
 }
+
+test('structured source patches retain hidden credentials and use the original document CAS', async () => {
+  const { settings, directory } = await configuredFixture({ fetch: async () => { throw new Error('Unexpected patch test network'); } });
+  const path = join(directory, 'mcp.json');
+  await writeFile(path, '{\n// retained source comment\n"mcpServers":{"test":{"url":"https://example.test/mcp","headers":{"Authorization":"private-token"},"enabled":false}}\n}');
+  const view = await settings.invoke('open', {}) as McpConfigurationSnapshot;
+  const document = await settings.invoke('document/read', { view: view.view, path }) as McpConfigurationDocument;
+  const saved = await settings.invoke('document/patch', { view: view.view, path, expectedRevision: document.revision, name: 'test', set: { description: 'Updated safely' } }) as McpDocumentWriteReceipt;
+  expect(saved.activation.state).toBe('ready');
+  expect(saved.content).toContain('// retained source comment');
+  expect(saved.content).toMatch(/"Authorization"\s*:\s*"private-token"/);
+  expect(saved.content).toContain('Updated safely');
+  await expect(settings.invoke('document/patch', { view: view.view, path, expectedRevision: document.revision, name: 'test', set: { enabled: true } })).rejects.toMatchObject({ code: 'config_conflict' });
+  const concurrent = await Promise.allSettled([
+    settings.invoke('document/patch', { view: view.view, path, expectedRevision: saved.revision, name: 'test', set: { description: 'First' } }),
+    settings.invoke('document/patch', { view: view.view, path, expectedRevision: saved.revision, name: 'test', set: { description: 'Second' } }),
+  ]);
+  // Keep an unexpected filesystem failure's original syscall and stack visible;
+  // matching only the settled-result shape hides the cause on platform runners.
+  for (const result of concurrent) {
+    if (result.status === 'rejected' && result.reason?.code !== 'config_conflict') throw result.reason;
+  }
+  expect(concurrent.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+  expect(concurrent.filter(result => result.status === 'rejected')).toMatchObject([{ reason: { code: 'config_conflict' } }]);
+  expect(await readFile(path, 'utf8')).toContain('private-token');
+});
+
+test('source persistence remains confirmed when subsequent MCP activation fails', async () => {
+  const { authority, settings, directory } = await configuredFixture();
+  const path = join(directory, 'mcp.json'), view = await settings.invoke('open', {}) as McpConfigurationSnapshot;
+  const document = await settings.invoke('document/read', { view: view.view, path }) as McpConfigurationDocument;
+  vi.spyOn(authority, 'reload').mockRejectedValueOnce(new Error('Temporary activation failure'));
+  const saved = await settings.invoke('document/patch', { view: view.view, path, expectedRevision: document.revision, name: 'test', set: { enabled: false } }) as McpDocumentWriteReceipt;
+  expect(saved.activation).toMatchObject({ state: 'unavailable' });
+  expect(JSON.parse(await readFile(path, 'utf8')).mcpServers.test.enabled).toBe(false);
+  const observed = await settings.invoke('read', { view: view.view }) as McpConfigurationSnapshot;
+  expect(observed.servers[0]?.enabled).toBe(false);
+});
+
+test('structured project patches preserve source trust and cannot select a user model account', async () => {
+  const { authority, directory, scope } = await configuredFixture();
+  let trusted = true;
+  const settings = createMcpSettings({ authority, changed() {}, resolveScope: async () => ({ ...scope, projectTrusted: trusted }) });
+  cleanup.push(() => settings.close());
+  const path = join(directory, '.mcp.json');
+  const original = JSON.stringify({ mcpServers: { project: { url: 'https://example.test/mcp', enabled: false } } });
+  await writeFile(path, original);
+  const opened = await settings.invoke('open', { cwd: directory }) as McpConfigurationSnapshot;
+  expect(opened.sources.find(source => source.path === path)?.scope).toBe('project');
+  const document = await settings.invoke('document/read', { view: opened.view, path }) as McpConfigurationDocument;
+  await expect(settings.invoke('document/patch', { view: opened.view, path, expectedRevision: document.revision, name: 'project', set: { auth: { provider: 'user-account' } } })).rejects.toMatchObject({ code: 'mcp-project-account' });
+  expect(await readFile(path, 'utf8')).toBe(original);
+  trusted = false;
+  await expect(settings.invoke('document/patch', { view: opened.view, path, expectedRevision: document.revision, name: 'project', set: { description: 'not authorized' } })).rejects.toMatchObject({ code: 'mcp-project-trust-revoked' });
+  expect(await readFile(path, 'utf8')).toBe(original);
+});
 
 test('a failed initial settings snapshot releases the undisclosed view and its watcher', async () => {
   const { authority, settings, unwatch } = fixture();

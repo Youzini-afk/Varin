@@ -388,6 +388,10 @@ export type DurableMutationStorageFn = <T>(
 ) => Promise<T>;
 
 export interface DocumentMutationObservation {
+  /** Original mutation/subchange identity; observer retries retain this value. */
+  changeId: string;
+  observedAt: number;
+  operationId?: string;
   workspaceId: string;
   resourceId: string;
   kind: 'created' | 'modified' | 'deleted';
@@ -498,10 +502,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if (!disposed) options.onSourceRetentionChanged?.();
   });
 
-  const publishMutation = (event: DocumentMutationObservation): void => {
+  const publishMutation = (event: Omit<DocumentMutationObservation, 'changeId' | 'observedAt'>): void => {
+    // One operation can apply, undo and redo the same resource. Its receipt is
+    // provenance, not the identity of an individual committed mutation.
+    const changeId = randomUUID();
+    const observedAt = Date.now();
     onIntegrationParentChanged(event.workspaceId, [event.resourceId]);
     try {
-      void Promise.resolve(onMutation({ ...event, owner: { ...event.owner } })).catch((error: unknown) => {
+      void Promise.resolve(onMutation({ ...event, changeId, observedAt, owner: { ...event.owner } })).catch((error: unknown) => {
         console.warn(`[Documents] Mutation observer failed: ${(error as Error)?.message || error}`);
       });
     } catch (error) {
@@ -1148,6 +1156,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         workspaceId: request.resource.workspaceId,
         resourceId: request.resource.resourceId,
         kind: current.status === 'missing' ? 'created' : 'modified',
+        ...(request.operationId ? { operationId: request.operationId } : {}),
         owner: writer.owner,
       });
       return result;
@@ -1254,12 +1263,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         workspaceId: request.from.workspaceId,
         resourceId: request.from.resourceId,
         kind: 'deleted',
+        ...(request.operationId ? { operationId: request.operationId } : {}),
         owner: writer.owner,
       });
       publishMutation({
         workspaceId: request.to.workspaceId,
         resourceId: request.to.resourceId,
         kind: 'created',
+        ...(request.operationId ? { operationId: request.operationId } : {}),
         owner: writer.owner,
       });
       return result;
@@ -1334,6 +1345,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         workspaceId: request.resource.workspaceId,
         resourceId: request.resource.resourceId,
         kind: 'deleted',
+        ...(request.operationId ? { operationId: request.operationId } : {}),
         owner: writer.owner,
       });
       return { status: 'deleted', resource: request.resource };
@@ -2401,7 +2413,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       const states = reversed ? action.before : action.after;
       for (const [resourceId, state] of Object.entries(states)) publishMutation({ workspaceId, resourceId,
         kind: state.kind === 'missing' ? 'deleted' : (reversed ? action.after : action.before)[resourceId]?.kind === 'missing' ? 'created' : 'modified',
-        owner: { kind: 'workspace-edit', id: 'documents' } });
+        operationId, owner: { kind: 'workspace-edit', id: operationId } });
     },
   });
 

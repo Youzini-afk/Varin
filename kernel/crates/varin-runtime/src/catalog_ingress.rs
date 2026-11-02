@@ -24,6 +24,20 @@ pub(super) fn hold(
         _ => Ok(None),
     }
 }
+/// One closed Catalog authority section and one consuming Run. Repeated facts from
+/// the same immutable source share an eligibility check; this never survives an unlock.
+#[derive(Default)]
+pub(super) struct HoldBatch(Vec<(context_observations::ContextObservationSource,Option<String>)>);
+impl HoldBatch {
+    pub(super) fn hold(&mut self, db:&Connection, row:&QueuedInputMetadata, run:&Run)->Result<Option<String>> {
+        if let InputOrigin::ContextObservation {owner,..}=&row.origin {
+            if let Some((_,held))=self.0.iter().find(|(source,_)|context_observations::same_identity(source,owner)) {return Ok(held.clone());}
+            let held=hold(db,row,Some(run))?;
+            self.0.push((owner.clone(),held.clone()));
+            Ok(held)
+        } else {hold(db,row,Some(run))}
+    }
+}
 pub(super) fn refresh_goal(tx: &Transaction<'_>, row: &mut QueuedInputMetadata) -> Result<()> {
     followups::refresh_ingress_goal(tx, row)
 }

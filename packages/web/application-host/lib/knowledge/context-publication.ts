@@ -1,76 +1,155 @@
-/** Host notifications become immutable passive native ingress before request preparation. */
-import { isDeepStrictEqual } from 'node:util';
-import { waitWithSignal } from '../cancellation.js';
+/** Read-only legacy journal import. New environmental captures never enter KnowledgeStore. */
+import { KernelRequestError } from '../kernel/kernel-error.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
-import type { ContextObservationFact, ContextObservationReceipt, ContextObservationSource, Run } from '../kernel/protocol.generated.js';
-import { ObservationStoreUnavailableError, type createKnowledgeContextRuntime, type ThreadObservationMaterial } from './context-runtime.js';
+import { KERNEL_REQUEST_WINDOW, type ContextObservationFact, type ContextObservationImportReceipt,
+  type ContextObservationSource } from '../kernel/protocol.generated.js';
+import { observationSourceKey } from '../environment-observations/coordinator.js';
+import type { KnowledgeStore } from './store.js';
 
+export class ObservationStoreUnavailableError extends Error {
+  readonly reason: 'corrupt' | 'unavailable';
+  constructor(readonly workspaceId: string, cause: unknown) {
+    super('Legacy workspace change notifications are unavailable', { cause });
+    this.name = 'ObservationStoreUnavailableError';
+    this.reason = cause instanceof Error && 'code' in cause && cause.code === 'TDB_CORRUPTED_FILE' ? 'corrupt' : 'unavailable';
+  }
+}
+interface ImportPage { owner: ContextObservationSource; afterId: number; throughId: number; events: ContextObservationFact[] }
+interface ImportSource { owner: ContextObservationSource; throughId: number | null; page: ImportPage | null;
+  state: 'pending' | 'ready' | 'unknown' | 'unavailable'; running: boolean; uncertain: boolean; wakeRequested: boolean }
 export function createContextObservationPublication(kernel: Pick<KernelClient, 'agentRuntimeRequest'>, options: {
+  /** Existing stores only; absence is not permission to create a legacy journal. */
+  getLegacyStore(workspaceId: string): Promise<Pick<KnowledgeStore, 'listEvents'> | null>;
   onUnavailable?(error: ObservationStoreUnavailableError, owner: ContextObservationSource): void;
-} = {}) {
-  // This is only a read optimization. Catalog identity deduplication is the durable receipt.
-  const cursors = new Map<string, number>();
-  const reportedUnavailable = new Map<string, ObservationStoreUnavailableError['reason']>();
-  const sources = (runId?: string, signal?: AbortSignal) => kernel.agentRuntimeRequest<ContextObservationSource[], 'runtime.context.observations.sources'>(
-    'runtime.context.observations.sources', runId ? { runId } : {}, signal);
-  type Context = Pick<ReturnType<typeof createKnowledgeContextRuntime>, 'observationsForSource' | 'drain'>;
-  const publishOwners = async (context: Context, owners: readonly ContextObservationSource[], signal: AbortSignal): Promise<void> => {
-    signal.throwIfAborted();
-    const unavailable = new Set<string>();
-    for (const owner of owners.toReversed()) {
-      signal.throwIfAborted();
-      const workspaceId = owner.source.execution_workspace_id;
-      if (unavailable.has(workspaceId)) continue;
-      const key = JSON.stringify([owner.epoch, owner.threadId, owner.branchId, owner.runId, owner.anchorId, owner.source]);
-      const afterEventId = cursors.get(key) ?? 0;
-      let material: ThreadObservationMaterial;
-      try { material = await waitWithSignal(context.observationsForSource(owner, { afterEventId, signal }), signal); }
-      catch (error) {
-        signal.throwIfAborted();
-        if (!(error instanceof ObservationStoreUnavailableError) || error.workspaceId !== workspaceId) throw error;
-        unavailable.add(workspaceId);
-        if (reportedUnavailable.get(workspaceId) !== error.reason) {
-          reportedUnavailable.set(workspaceId, error.reason);
-          try { options.onUnavailable?.(error, owner); } catch { /* Diagnostics cannot fail the main request. */ }
+  onError?(error: unknown): void;
+}) {
+  const sources = new Map<string, ImportSource>();
+  const ready = new Set<ImportSource>();
+  const work = new Set<Promise<void>>();
+  const unavailable = new Map<string, ObservationStoreUnavailableError['reason']>();
+  let running = 0, closed = false, scheduled = false;
+  let recovery: Promise<void> | undefined;
+  const position = (owner: ContextObservationSource) => kernel.agentRuntimeRequest<{ throughId: number }, 'runtime.context.observations.importPosition'>(
+    'runtime.context.observations.importPosition', { owner });
+  const step = async (source: ImportSource): Promise<void> => {
+    try {
+      if (source.throughId === null || source.uncertain) {
+        const committed = (await position(source.page?.owner ?? source.owner)).throughId;
+        if (!source.page || committed >= source.page.throughId) { source.throughId = committed; source.page = null; source.uncertain = false; }
+        // Below the pending prefix permits only the same atomic/idempotent page,
+        // never a new render, owner lookup, or a fresh event identity.
+        source.state = 'pending';
+      }
+      if (!source.page) {
+        let store: Pick<KnowledgeStore, 'listEvents'> | null;
+        let events;
+        try {
+          store = await options.getLegacyStore(source.owner.source.execution_workspace_id);
+          events = store ? await store.listEvents({ sessionId: source.owner.runId, afterId: source.throughId!, limit: 32 }) : [];
+        } catch (error) {
+          const failure = new ObservationStoreUnavailableError(source.owner.source.execution_workspace_id, error);
+          source.state = 'unavailable';
+          if (unavailable.get(failure.workspaceId) !== failure.reason) {
+            unavailable.set(failure.workspaceId, failure.reason); options.onUnavailable?.(failure, source.owner);
+          }
+          return;
         }
-        // No material was read and no cursor is acknowledged. The next preparation
-        // retries this original source, while the conversation keeps its own history.
-        continue;
+        unavailable.delete(source.owner.source.execution_workspace_id);
+        if (!events.length) { source.state = 'ready'; return; }
+        let cursor = source.throughId!;
+        const facts: ContextObservationFact[] = [];
+        for (const event of events) {
+          if (!Number.isSafeInteger(event.id) || event.id <= cursor || event.sessionId !== source.owner.runId) {
+            throw new Error('Legacy observation material changed its original event identity');
+          }
+          cursor = event.id;
+          if (event.source === 'agent' || !['edit', 'command', 'diagnostic', 'source'].includes(event.kind)) continue;
+          // The original text/data is the legacy digest input. Never re-render it
+          // through today's bounded environmental representation.
+          facts.push({ id: event.id, kind: event.kind as ContextObservationFact['kind'], at: event.at, text: event.text, source: event.source,
+            ...(event.refs === undefined ? {} : { refs: event.refs }), ...(event.data === undefined ? {} : { data: event.data }) });
+        }
+        source.page = structuredClone({ owner: source.owner, afterId: source.throughId!, throughId: cursor, events: facts });
       }
-      reportedUnavailable.delete(workspaceId);
-      signal.throwIfAborted();
-      if (!isDeepStrictEqual(material.owner, owner)) throw new Error('Observation material changed its original owner');
-      let eventCursor = afterEventId;
-      const events: ContextObservationFact[] = [];
-      for (const { ref, event } of material.events) {
-        if (!Number.isSafeInteger(event.id) || event.id <= eventCursor || event.sessionId !== owner.runId
-          || ref !== `observation:${owner.runId}:${event.id}`) throw new Error('Observation material changed its original event identity');
-        eventCursor = event.id;
-        if (event.source === 'agent' || !['edit', 'command', 'diagnostic', 'source'].includes(event.kind)) continue;
-        events.push({ id: event.id, kind: event.kind as ContextObservationFact['kind'], at: event.at, text: event.text, source: event.source,
-          ...(event.refs !== undefined ? { refs: event.refs } : {}), ...(event.data !== undefined ? { data: event.data } : {}) });
+      const page = source.page = { ...source.page, owner: { ...source.page.owner, epoch: source.owner.epoch } };
+      let receipt: ContextObservationImportReceipt;
+      try {
+        receipt = await kernel.agentRuntimeRequest<ContextObservationImportReceipt, 'runtime.context.observations.import'>(
+          'runtime.context.observations.import', page);
+      } catch (error) {
+        source.uncertain ||= !(error instanceof KernelRequestError);
+        source.state = source.uncertain ? 'unknown' : 'unavailable';
+        throw error;
       }
-      if (material.eventCursor !== eventCursor) throw new Error('Observation material has no complete event cursor');
-      if (events.length) {
-        const receipts = await waitWithSignal(kernel.agentRuntimeRequest<ContextObservationReceipt[], 'runtime.context.observations.admit'>(
-          'runtime.context.observations.admit', { owner, events }, signal), signal);
-        const receiptIds = new Set(receipts.map(receipt => receipt.id));
-        if (receipts.length !== events.length || receiptIds.size !== events.length
-          || receipts.some(receipt => !Number.isSafeInteger(receipt.cursor) || receipt.cursor <= 0 || !['queued', 'delivered'].includes(receipt.state))
-          || events.some(event => !receiptIds.has(`observation:${owner.runId}:${event.id}`))) throw new Error('Observation publication has no original receipt');
+      const ids = new Set(receipt.receipts.map(item => item.id));
+      if (receipt.throughId !== page.throughId || ids.size !== page.events.length || receipt.receipts.length !== page.events.length
+        || page.events.some(event => !ids.has(`observation:${page.owner.runId}:${event.id}`))) {
+        source.state = 'unknown'; source.uncertain = true; throw new Error('Legacy observation import has no original Catalog receipt');
       }
-      signal.throwIfAborted();
-      // Overlapping preparations may settle out of order; a late receipt cannot rewind the frontier.
-      cursors.set(key, Math.max(cursors.get(key) ?? 0, eventCursor));
+      source.throughId = receipt.throughId; source.page = null; source.uncertain = false; source.state = 'pending';
+    } catch (error) {
+      if (source.state !== 'unknown') source.state = 'unavailable';
+      options.onError?.(error);
     }
   };
-  const publish = async (context: Context, run: Run, signal: AbortSignal): Promise<void> => {
-    await waitWithSignal(context.drain(), signal);
-    // Oldest source owner first; every event still has its original native Run identity.
-    await publishOwners(context, await sources(run.id, signal), signal);
+  const schedule = (): void => {
+    if (scheduled) return;
+    scheduled = true;
+    setImmediate(() => { scheduled = false; pump(); });
   };
-  return { sources, publish,
-    publishSource: (context: Context, owner: ContextObservationSource) => publishOwners(context, [owner], new AbortController().signal),
-    recover: async (context: Context) => publishOwners(context, await sources(), new AbortController().signal),
+  const pump = (): void => {
+    for (const source of ready) {
+      if (running >= KERNEL_REQUEST_WINDOW) break;
+      ready.delete(source);
+      if (source.running) continue;
+      source.running = true; running += 1;
+      const task = step(source).finally(() => {
+        source.running = false; running -= 1; work.delete(task);
+        if (source.state === 'pending' || source.wakeRequested && source.state !== 'ready') ready.add(source);
+        source.wakeRequested = false;
+        schedule();
+      });
+      work.add(task); void task.catch(error => options.onError?.(error));
+    }
+  };
+  const wake = (owners: readonly ContextObservationSource[]): void => {
+    if (closed) return;
+    for (const owner of [...owners].reverse()) {
+      if (owner.source.resource_owner.kind !== 'local' || owner.source.mode === 'fixed_branch') continue;
+      const key = observationSourceKey(owner);
+      let source = sources.get(key);
+      if (!source) { source = { owner: structuredClone(owner), throughId: null, page: null, state: 'pending', running: false, uncertain: false, wakeRequested: false }; sources.set(key, source); }
+      if (source.state === 'ready') continue; // The original journal has no new writers.
+      source.owner = structuredClone(owner);
+      if (source.running) { source.wakeRequested = true; continue; }
+      // Renew only the dispatch fence after confirming the same immutable key,
+      // and never mutate an in-flight transport argument.
+      if (source.page) source.page = { ...source.page, owner: { ...source.page.owner, epoch: owner.epoch } };
+      ready.add(source);
+    }
+    schedule();
+  };
+  const recover = (): Promise<void> => {
+    if (recovery) return recovery;
+    const task = (async () => {
+      if (closed) return;
+      const owners = await kernel.agentRuntimeRequest<ContextObservationSource[], 'runtime.context.observations.importSources'>(
+        'runtime.context.observations.importSources', {});
+      if (closed) return;
+      wake(owners);
+    })();
+    recovery = task;
+    void task.finally(() => { if (recovery === task) recovery = undefined; }).catch(() => {});
+    return task;
+  };
+  return { recover, wake,
+    inspect: () => [...sources.values()].map(source => ({ owner: structuredClone(source.owner), throughId: source.throughId, state: source.state })),
+    close: async () => {
+      closed = true;
+      // Finish this finite imported prefix without accepting another wake. Source
+      // journals are read-only, so no producer can extend this work underneath us.
+      while (ready.size || work.size) { pump(); if (work.size) await Promise.all([...work]); else ready.clear(); }
+      return [...sources.values()].map(source => ({ owner: structuredClone(source.owner), throughId: source.throughId, state: source.state }));
+    },
   };
 }

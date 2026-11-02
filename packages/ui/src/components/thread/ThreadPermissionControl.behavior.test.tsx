@@ -58,11 +58,12 @@ it('loads the conversation workspace, changes permission mode, and preserves rul
   await render('/conversation-project');
   expect(trigger().disabled).toBe(false);
   expect(fixture.read).toHaveBeenCalledWith(fixture.host, '/conversation-project');
-  expect(option('smart').disabled).toBe(true);
-  await click('accept-edits');
+  expect(option('smart')).toBeUndefined();
+  expect(option('accept-edits')).toBeUndefined();
+  await click('bypass');
   expect(fixture.write).toHaveBeenCalledWith(fixture.host, { cwd: '/conversation-project', scope: 'global', expectedRevision: 'initial',
-    set: { harness: { permissions: { mode: 'accept-edits', rules: [{ tool: 'example', decision: 'ask' }] }, shell: 'auto' } }, remove: [] });
-  expect(trigger().getAttribute('aria-label')).toContain('mode.accept-edits');
+    set: { harness: { permissions: { mode: 'bypass', rules: [{ tool: 'example', decision: 'ask' }] }, shell: 'auto' } }, remove: [] });
+  expect(trigger().getAttribute('aria-label')).toContain('mode.bypass');
 });
 
 it('reflects trusted project constraints and external settings changes, and retries failed saves with current settings', async () => {
@@ -73,7 +74,8 @@ it('reflects trusted project constraints and external settings changes, and retr
   expect(container.textContent).toContain('settings.common.scope.project');
   settings.project = {}; settings.global = { harness: { permissions: { mode: 'accept-edits' }, shell: 'wsl' } }; settings.globalRevision = 'external';
   await act(async () => { fixture.events.forEach(listener => listener({ type: 'settings-changed', owner: 'agent-settings', scope: 'global', revision: 'external', ids: [] })); });
-  expect(trigger().getAttribute('aria-label')).toContain('mode.accept-edits');
+  expect(trigger().getAttribute('aria-label')).toContain('mode.normal');
+  expect(container.textContent).toContain('settings.permissions.modeUnavailable');
   fixture.write.mockRejectedValueOnce(new Error('Settings changed'));
   await click('bypass'); expect(container.querySelector('[role="alert"]')?.textContent).toContain('Settings changed');
   settings.global = { harness: { permissions: { mode: 'accept-edits' }, shell: 'auto', tools: { example: false } } }; settings.globalRevision = 'latest';
@@ -94,5 +96,6 @@ it('keeps late saves with the original Host and refreshes the new Host without b
   await act(async () => finish({ ...settings, global: { harness: { permissions: { mode: 'bypass' } } } }));
   expect(fixture.write.mock.calls.map(([host]) => host)).toEqual([original]);
   expect(fixture.read.mock.lastCall).toEqual([fixture.host, undefined]);
-  expect(trigger().getAttribute('aria-label')).toContain('mode.accept-edits');
+  expect(trigger().getAttribute('aria-label')).toContain('mode.normal');
+  expect(container.textContent).toContain('settings.permissions.modeUnavailable');
 });

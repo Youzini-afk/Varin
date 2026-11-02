@@ -11,6 +11,7 @@ import { AuthorizationFlows } from '../authorization-flows.js';
 import { parse, type ParseError } from 'jsonc-parser';
 import { object, ModelConfigurationError } from '../models/configuration.js';
 import { waitWithSignal } from '../cancellation.js';
+import { patchMcpServerDocument, type McpServerPatch, type McpDocumentWriteReceipt } from './configuration-patch.js';
 
 interface View { cwd: string | undefined; spec: McpAuthorityScope; scopes: Set<string>; connections: Map<string, { scope: string; handle: string }>; flows: AuthorizationFlows; closed: boolean; unwatch?: () => void }
 export function createMcpSettings(options: {
@@ -74,6 +75,30 @@ export function createMcpSettings(options: {
     views.delete(id); view.closed = true; view.flows.close(); view.unwatch?.();
     for (const scope of view.scopes) options.authority.closeScope(scope);
   };
+  const saveDocument = async (input: Record<string, unknown>): Promise<McpDocumentWriteReceipt> => {
+    const view = requireView(input.view), file = editor(view, input.path);
+    if (typeof input.content !== 'string' || typeof input.expectedRevision !== 'string') throw new ModelConfigurationError('invalid-params', 'Invalid configuration document');
+    const errors: ParseError[] = [], document: unknown = parse(input.content, errors, { allowTrailingComma: true });
+    if (errors.length || !object(document) || validateMcpDocument(document))
+      throw new ModelConfigurationError('mcp-config-invalid', 'MCP configuration must be a JSON object with valid sources and policies');
+    for (const [name, policy] of Object.entries(document.mcpPolicies ?? {})) {
+      const issue = validateMcpPolicy(policy); if (issue) throw new ModelConfigurationError('mcp-config-invalid', `${name}: ${issue}`);
+    }
+    for (const [name, definition] of Object.entries(document.mcpServers ?? {})) {
+      const issue = validateMcpServerConfig(name, definition);
+      if (typeof issue === 'string') throw new ModelConfigurationError('mcp-config-invalid', `${name}: ${issue}`);
+      if (input.path === config(view).projectConfig && 'url' in issue && issue.auth) throw new ModelConfigurationError('mcp-project-account', 'Project configuration cannot select a user model account');
+    }
+    const result: McpConfigurationDocument = { path: input.path as string, ...await file.update(input.content, input.expectedRevision) };
+    try {
+      await options.authority.reload(view.spec);
+      options.changed();
+      return { ...result, activation: { state: 'ready' } };
+    } catch {
+      // The source commit already happened. Publishing/observing it is not a second write.
+      return { ...result, activation: { state: 'unavailable', detail: 'Source saved; MCP activation could not be confirmed. Read status to retry observation.' } };
+    }
+  };
   const actions: Record<string, (input: Record<string, unknown>, signal: AbortSignal) => unknown | Promise<unknown>> = {
     open: async (input, signal) => {
       if (input.cwd !== undefined && typeof input.cwd !== 'string') throw new ModelConfigurationError('invalid-params', 'Invalid workspace');
@@ -94,23 +119,18 @@ export function createMcpSettings(options: {
     read: async input => { await options.authority.reload(requireView(input.view).spec); return snapshot(input.view as string); },
     close: input => { close(input.view as string); return {}; },
     'document/read': async input => ({ path: input.path, ...await editor(requireView(input.view), input.path).read() }),
-    'document/save': async input => {
-      const view = requireView(input.view), file = editor(view, input.path);
-      if (typeof input.content !== 'string' || typeof input.expectedRevision !== 'string') throw new ModelConfigurationError('invalid-params', 'Invalid configuration document');
-      const errors: ParseError[] = [], document: unknown = parse(input.content, errors, { allowTrailingComma: true });
-      if (errors.length || !object(document) || validateMcpDocument(document))
-        throw new ModelConfigurationError('mcp-config-invalid', 'MCP configuration must be a JSON object with valid sources and policies');
-      for (const [name, policy] of Object.entries(document.mcpPolicies ?? {})) {
-        const issue = validateMcpPolicy(policy); if (issue) throw new ModelConfigurationError('mcp-config-invalid', `${name}: ${issue}`);
-      }
-      for (const [name, definition] of Object.entries(document.mcpServers ?? {})) {
-        const issue = validateMcpServerConfig(name, definition);
-        if (typeof issue === 'string') throw new ModelConfigurationError('mcp-config-invalid', `${name}: ${issue}`);
-        if (input.path === config(view).projectConfig && 'url' in issue && issue.auth) throw new ModelConfigurationError('mcp-project-account', 'Project configuration cannot select a user model account');
-      }
-      const result: McpConfigurationDocument = { path: input.path as string, ...await file.update(input.content, input.expectedRevision) };
-      await options.authority.reload(view.spec);
-      options.changed(); return result;
+    'document/save': saveDocument,
+    'document/patch': async input => {
+      if (typeof input.expectedRevision !== 'string' || typeof input.name !== 'string') throw new ModelConfigurationError('invalid-params', 'MCP server name and expectedRevision are required');
+      const current = await editor(requireView(input.view), input.path).read();
+      if (current.revision !== input.expectedRevision) throw new ModelConfigurationError('config_conflict', 'MCP source changed. Reload before saving.', 409);
+      const content = patchMcpServerDocument(current.content, {
+        name: input.name,
+        ...(input.set !== undefined ? { set: input.set as NonNullable<McpServerPatch['set']> } : {}),
+        ...(input.reset !== undefined ? { reset: input.reset as NonNullable<McpServerPatch['reset']> } : {}),
+      });
+      // saveDocument revalidates the complete resulting definition and performs the real file CAS.
+      return saveDocument({ view: input.view, path: input.path, expectedRevision: input.expectedRevision, content });
     },
     command: async (input, signal) => {
       const view = requireView(input.view);

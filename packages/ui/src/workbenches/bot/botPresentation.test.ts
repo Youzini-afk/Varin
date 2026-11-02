@@ -8,7 +8,7 @@ import { withEarlierPage, withNewestPage } from './useBotFacts';
 const facts = (patch: Partial<BotFigureFacts> = {}): BotFigureFacts => ({ offline: false, activity: 'awake', inactive: false, needs: 0, thinking: false, working: 0, listening: false, ...patch });
 const own = (patch: Partial<BotOwnPose>): BotOwnPose => ({ phase: 'thinking', tool: null, subject: null, count: 0, ...patch });
 const run = (patch: Partial<Run>): Run => ({ id: 'run', thread_id: 't', branch_id: 'b', state: 'executing', waiting_on: null, revision: 1, epoch: 1, configuration: null, cancel_requested: false, ...patch });
-const bot: BotSummary = { id: 'a', name: 'Varin', entry: { runtime: 'agent', threadId: 'entry', branchId: 'main' }, archived: false, homeDir: '/a', coordinatorHostId: 'h', instructions: null, model: null, createdAt: '', updatedAt: '' };
+const bot: BotSummary = { revision: 1, id: 'a', name: 'Varin', entry: { runtime: 'agent', threadId: 'entry', branchId: 'main' }, archived: false, homeDir: '/a', coordinatorHostId: 'h', instructions: null, model: null, createdAt: '', updatedAt: '' };
 
 describe('Bot presentation', () => {
   it('takes the figure state in the documented priority order', () => {

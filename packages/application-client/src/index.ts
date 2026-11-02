@@ -6,6 +6,7 @@ export * from "./chat-memory.js";
 export * from "./chat-layout.js";
 export * from "./speech-models.js";
 export * from "./settings-catalog.js";
+export { AGENT_PROFILE_CONFIG_SCHEMA, HARNESS_MODEL_BINDING_SCHEMA } from "./settings-value-schemas.js";
 export { settingsSearchTranslations } from './settings-search-translations.js';
 export * from "./thread-history.js";
 export * from "./desktop.js";

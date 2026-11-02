@@ -18,11 +18,8 @@ impl Storage {
     pub(super) fn load_node(&self, hash: &str) -> Result<TrieNode, KernelError> {
         let encoded: Option<String> = self
             .conn
-            .query_row(
-                "SELECT children_json, state_json FROM trie_nodes WHERE hash = ?1",
-                params![hash],
-                |row| row.get(0),
-            )
+            .prepare_cached("SELECT children_json, state_json FROM trie_nodes WHERE hash = ?1")?
+            .query_row(params![hash], |row| row.get(0))
             .optional()?;
         let encoded =
             encoded.ok_or_else(|| KernelError::Storage(format!("missing trie node {hash}")))?;
@@ -35,10 +32,13 @@ impl Storage {
 
     pub(super) fn store_node(&mut self, node: &TrieNode) -> Result<String, KernelError> {
         let hash = node_hash(node);
-        self.conn.execute(
-            "INSERT OR IGNORE INTO trie_nodes(hash, children_json, state_json) VALUES (?1, ?2, ?3)",
-            params![hash, serde_json::to_string(node)?, Option::<String>::None],
-        )?;
+        self.conn
+            .prepare_cached("INSERT OR IGNORE INTO trie_nodes(hash, children_json, state_json) VALUES (?1, ?2, ?3)")?
+            .execute(params![
+                hash,
+                serde_json::to_string(node)?,
+                Option::<String>::None
+            ])?;
         Ok(hash)
     }
 
@@ -521,18 +521,96 @@ impl Storage {
         if children.is_none() {
             return self.build_path_tree(BuildTree { state: next_state, children: patch.children });
         }
-        let mut next_children = children;
-        for (name, child_patch) in patch.children {
-            let previous = self.index_get(next_children.as_ref(), &name)?;
-            let child = match previous.as_ref() {
-                Some(previous) => self.apply_path_tree(previous, child_patch)?,
-                None => self.build_path_tree(child_patch)?,
-            };
-            if previous.as_ref() != Some(&child) {
-                next_children = Some(self.index_set(next_children, name, child)?);
-            }
-        }
+        let next_children = self.apply_child_index(children, patch.children)?;
         self.store_node(&TrieNode::Path { state: next_state, children: next_children })
+    }
+
+    /// Patch each shared index ancestor once, not once per incoming child.
+    /// Unselected subtrees retain their hashes; new gaps are built balanced.
+    fn apply_child_index(
+        &mut self,
+        root: Option<String>,
+        mut patches: BTreeMap<String, BuildTree>,
+    ) -> Result<Option<String>, KernelError> {
+        self.check_cancelled()?;
+        if patches.is_empty() {
+            return Ok(root);
+        }
+        let Some(root) = root else {
+            let mut children = Vec::with_capacity(patches.len());
+            for (key, patch) in patches {
+                children.push((key, self.build_path_tree(patch)?));
+            }
+            return self.build_index_balanced(&children, 0, children.len());
+        };
+        let TrieNode::Index {
+            key,
+            child,
+            left,
+            right,
+            ..
+        } = self.load_node(&root)?
+        else {
+            return Err(KernelError::Storage("path node used as index".into()));
+        };
+        let mut right_patches = patches.split_off(&key);
+        let next_child = match right_patches.remove(&key) {
+            Some(patch) => self.apply_path_tree(&child, patch)?,
+            None => child.clone(),
+        };
+        let next_left = self.apply_child_index(left.clone(), patches)?;
+        let next_right = self.apply_child_index(right.clone(), right_patches)?;
+        if next_child == child && next_left == left && next_right == right {
+            return Ok(Some(root));
+        }
+        self.join_child_index(next_left, key, next_child, next_right)
+            .map(Some)
+    }
+
+    /// Join two ordered AVL subtrees around one child. A whole batch can change
+    /// their relative heights by more than one, so descend the taller spine
+    /// before using the ordinary single-step rebalance.
+    fn join_child_index(
+        &mut self,
+        left: Option<String>,
+        key: String,
+        child: String,
+        right: Option<String>,
+    ) -> Result<String, KernelError> {
+        self.check_cancelled()?;
+        let left_height = self.index_height(left.as_ref())?;
+        let right_height = self.index_height(right.as_ref())?;
+        if left_height > right_height + 1 {
+            let TrieNode::Index {
+                key: pivot,
+                child: pivot_child,
+                left: outer,
+                right: inner,
+                ..
+            } = self.load_node(left.as_ref().expect("height proves left index"))?
+            else {
+                return Err(KernelError::Storage("path node used as index".into()));
+            };
+            let joined = self.join_child_index(inner, key, child, right)?;
+            let root = self.make_index(pivot, pivot_child, outer, Some(joined))?;
+            self.balance_index(root)
+        } else if right_height > left_height + 1 {
+            let TrieNode::Index {
+                key: pivot,
+                child: pivot_child,
+                left: inner,
+                right: outer,
+                ..
+            } = self.load_node(right.as_ref().expect("height proves right index"))?
+            else {
+                return Err(KernelError::Storage("path node used as index".into()));
+            };
+            let joined = self.join_child_index(left, key, child, inner)?;
+            let root = self.make_index(pivot, pivot_child, Some(joined), outer)?;
+            self.balance_index(root)
+        } else {
+            self.make_index(key, child, left, right)
+        }
     }
 
     pub(super) fn root_restore_from_base(
@@ -625,6 +703,7 @@ impl Storage {
         start: usize,
         end: usize,
     ) -> Result<Option<String>, KernelError> {
+        self.check_cancelled()?;
         if start >= end {
             return Ok(None);
         }
