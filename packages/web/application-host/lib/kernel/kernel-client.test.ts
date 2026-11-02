@@ -1145,7 +1145,10 @@ test("branch creation streams a normal input larger than one control frame", { t
     state: { kind: "symlink" as const, symlinkTarget: target },
   }));
   assert.ok(Buffer.byteLength(JSON.stringify(entries), "utf8") > 16 * 1024 * 1024);
+  const started = performance.now();
+  t.diagnostic("large branch: dispatching streamed create");
   const created = await client.createBranch({ operationId: "large-branch-create", branchId: "large-branch", workspaceId: "large-branch-workspace", draftBasePaths: [], captureScopes: [], entries });
+  t.diagnostic(`large branch: create committed after ${Math.round(performance.now() - started)}ms`);
   assert.equal(created.created, true);
   assert.equal((await client.readBranch({ branchId: "large-branch" })).writeRevision, 0);
   const added = await client.writeBranch({
@@ -1154,7 +1157,9 @@ test("branch creation streams a normal input larger than one control frame", { t
     expectedWriteRevision: 0,
     changes: [{ path: "wide/999999", state: { kind: "directory" } }],
   });
+  t.diagnostic(`large branch: revision write committed after ${Math.round(performance.now() - started)}ms`);
   const diff = await client.diffRoots({ leftRoot: String(created.root), rightRoot: added.root });
+  t.diagnostic(`large branch: diff completed after ${Math.round(performance.now() - started)}ms`);
   assert.deepEqual(diff.added, ["wide/999999"]);
   assert.deepEqual(diff.changed, []);
   assert.deepEqual(diff.removed, []);
