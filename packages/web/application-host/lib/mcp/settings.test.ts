@@ -45,6 +45,11 @@ test('structured source patches retain hidden credentials and use the original d
     settings.invoke('document/patch', { view: view.view, path, expectedRevision: saved.revision, name: 'test', set: { description: 'First' } }),
     settings.invoke('document/patch', { view: view.view, path, expectedRevision: saved.revision, name: 'test', set: { description: 'Second' } }),
   ]);
+  // Keep an unexpected filesystem failure's original syscall and stack visible;
+  // matching only the settled-result shape hides the cause on platform runners.
+  for (const result of concurrent) {
+    if (result.status === 'rejected' && result.reason?.code !== 'config_conflict') throw result.reason;
+  }
   expect(concurrent.filter(result => result.status === 'fulfilled')).toHaveLength(1);
   expect(concurrent.filter(result => result.status === 'rejected')).toMatchObject([{ reason: { code: 'config_conflict' } }]);
   expect(await readFile(path, 'utf8')).toContain('private-token');
