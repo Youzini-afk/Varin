@@ -77,6 +77,15 @@ impl Fixture {
         tx.commit().unwrap();
         fixture
     }
+    fn v80() -> Self {
+        let fixture=Self::v79();
+        let mut raw=fixture.raw();
+        let tx=raw.transaction().unwrap();
+        usage_ledger::initialize(&tx).unwrap();
+        tx.pragma_update(None,"user_version",80).unwrap();
+        tx.commit().unwrap();
+        fixture
+    }
     fn raw(&self) -> Connection {
         Connection::open(self.0.join("conversation.sqlite")).unwrap()
     }
@@ -377,7 +386,7 @@ fn catalog_upgrade_v79_starts_an_empty_usage_ledger_with_its_format_marker() {
         reopened
             .db
             .query_row(
-                "SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=79 AND json_extract(data,'$.to')=80",
+                "SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=79 AND json_extract(data,'$.to')=81",
                 [],
                 |row| row.get::<_, i64>(0)
             )
@@ -408,4 +417,21 @@ fn new_catalog_installs_the_usage_ledger_and_rejects_a_store_missing_its_start()
             .unwrap(),
         0
     );
+}
+
+#[test]
+fn catalog_upgrade_v80_initializes_capture_owner_without_rewriting_original_bodies() {
+    let fixture=Fixture::v80();
+    let bodies=fixture.bodies();
+    let raw=fixture.raw();
+    let original:Vec<(String,String)>=raw.prepare("SELECT id,body FROM input_queue ORDER BY id").unwrap().query_map([],|r|Ok((r.get(0)?,r.get(1)?))).unwrap().collect::<std::result::Result<_,_>>().unwrap();
+    drop(raw);
+    let catalog=Catalog::open(&fixture.0).unwrap();
+    assert_eq!(inspect_catalog_format(&catalog.db).unwrap(),81);
+    let queue:Vec<(String,String)>=catalog.db.prepare("SELECT id,body FROM input_queue ORDER BY id").unwrap().query_map([],|r|Ok((r.get(0)?,r.get(1)?))).unwrap().collect::<std::result::Result<_,_>>().unwrap();
+    assert_eq!(queue,original);
+    assert_eq!(fixture.bodies(),bodies);
+    assert_eq!(catalog.db.query_row("SELECT count(*) FROM context_observation_captures",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+    assert_eq!(catalog.db.query_row("SELECT count(*) FROM context_observation_imports",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+    assert_eq!(catalog.db.query_row("SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=80 AND json_extract(data,'$.to')=81",[],|r|r.get::<_,i64>(0)).unwrap(),1);
 }

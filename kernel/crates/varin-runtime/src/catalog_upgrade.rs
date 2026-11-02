@@ -21,6 +21,7 @@ const UPGRADES: &[Upgrade] = &[
         to: 80,
         convert: usage_ledger::initialize,
     },
+    Upgrade { from: 80, to: 81, convert: context_observations::initialize },
 ];
 
 pub(super) fn supports(mut version: i64) -> bool {

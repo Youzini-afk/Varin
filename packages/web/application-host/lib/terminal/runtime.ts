@@ -974,6 +974,7 @@ export function createTerminalRuntime({
       id: session.id,
       cwd: session.cwd,
       integration: session.owner === 'user' ? session.integrationParser.status() : 'not-observed',
+      ...(session.owner === 'user' ? { discardedIntegrationFrames: session.integrationParser.discardedFrames() } : {}),
       owner: session.owner,
       retainWhenDetached: session.retainWhenDetached,
       status: session.status,
