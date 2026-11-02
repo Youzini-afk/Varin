@@ -159,6 +159,26 @@ impl Launch {
                 while let Some(frame) = read_frame(&mut stdout)? {
                     let value: Value = serde_json::from_slice(&frame)?;
                     match value["type"].as_str() {
+                        Some("diagnostic") => {
+                            let stage = value["stage"].as_str().filter(|stage| worker::diagnostic_stage(stage));
+                            if value["processId"].as_str() != Some(process_id.as_str())
+                                || value["kernelEpoch"].as_str() != Some(kernel_epoch.as_str())
+                                || value["guardianPid"].as_u64().is_none_or(|pid| pid == 0 || pid > u32::MAX as u64)
+                                || value["elapsedMs"].as_u64().is_none()
+                                || stage.is_none()
+                            {
+                                return Err(io::Error::other("invalid native process diagnostic"));
+                            }
+                            if std::env::var("VARIN_PROCESS_TRACE").as_deref() == Ok("1") {
+                                eprintln!("[native process stage] {}", json!({
+                                    "processId":process_id, "guardianPid":value["guardianPid"],
+                                    "elapsedMs":value["elapsedMs"], "stage":stage,
+                                }));
+                            }
+                            // Diagnostic traffic must not reconcile state or wake a
+                            // waiter and accidentally mask the path being measured.
+                            continue;
+                        }
                         Some("ready") => reader_control.ready().map_err(io::Error::other)?,
                         Some("started") => {
                             reader_shared.lock().pid = value["pid"].as_u64().map(|pid| pid as u32)

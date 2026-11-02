@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createIsolatedTerminalSessionApi } from "./isolated-session-api.test-helper.js";
 import type { TerminalCommandRecord } from "./session-api.js";
 import { createPlatformEnvironmentRuntime } from '../platform/environment-runtime.js';
-import { createNativeProcessTestHarness, hasNativeProcessKernel } from '../process/native-process.test-helper.js';
+import { createNativeProcessTestHarness, hasNativeProcessKernel, type NativeProcessDiagnostic } from '../process/native-process.test-helper.js';
 
 const gitBashCandidates = [
   process.env.VARIN_TERMINAL_SHELL,
@@ -68,7 +68,14 @@ describe("live shell integration", () => {
     // Avoid diagnostic console I/O between the observed command and native stop.
     const nativePhases: Array<{ name: string; atMs: number }> = [];
     const nativePhase = (name: string) => { nativePhases.push({ name, atMs: Math.round(performance.now() - started) }); };
-    const native = createNativeProcessTestHarness();
+    const nativeStages: NativeProcessDiagnostic[] = [];
+    let reportPendingStages = false;
+    const native = createNativeProcessTestHarness(undefined, { onProcessDiagnostic: event => {
+      nativeStages.push(event);
+      // Once the original teardown is already stalled, retain visibility of
+      // later progress without console I/O in the command-to-stop race window.
+      if (reportPendingStages) console.info('[live shell] pending native stage', event);
+    } });
     let lastControl: Record<string, unknown> | undefined;
     let lastData: Record<string, unknown> | undefined;
     let nativeRoot: string | undefined;
@@ -162,7 +169,8 @@ describe("live shell integration", () => {
       // process.list/read call could reconcile state and mask a missed wakeup.
       // This timer neither settles destroy nor releases its original process.
       const diagnostic = setTimeout(() => {
-        console.info('[live shell] pending destroy', { nativePhases, lastControl, lastData });
+        reportPendingStages = true;
+        console.info('[live shell] pending destroy', { nativePhases, nativeStages, lastControl, lastData });
         if (!nativeRoot) return;
         const directory = path.join(nativeRoot, 'storage', 'process-receipts');
         void fs.readdir(directory).then(async names => {
@@ -187,8 +195,8 @@ describe("live shell integration", () => {
         }).catch(() => phase('native receipt metadata unavailable'));
       }, 5_000);
       try { await handle.destroy(); }
-      finally { clearTimeout(diagnostic); }
-      console.info('[live shell] native teardown', nativePhases);
+      finally { clearTimeout(diagnostic); reportPendingStages = false; }
+      console.info('[live shell] native teardown', { nativePhases, nativeStages });
       phase('destroyed');
     } finally {
       subscription.dispose();
