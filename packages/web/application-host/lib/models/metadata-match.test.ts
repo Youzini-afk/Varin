@@ -56,3 +56,23 @@ test('uses the actual upstream ID and preserves routing, explicit values and exp
   expect(changed.thinking).toBeUndefined();
   expect(changed.parameters).toEqual(model.parameters);
 });
+
+
+test('only supplied introductions follow confirmed metadata matches, and identity changes clear inherited descriptions', () => {
+  const metadata = new ModelMetadataIndex({ openai: { npm: '@ai-sdk/openai', models: {
+    'gpt-described': { ...language, description: 'Supplied introduction' },
+    'gpt-undescribed': { ...language },
+  } } }, types);
+  const model = { id: 'alias', requestModelId: 'gpt-described', name: 'A local name', enabled: true, operations: ['chat' as const] };
+  const defaults = modelDirectoryDefaults(metadata, generic, model, [])!;
+  expect(defaults.description).toBe('Supplied introduction');
+  expect(metadata.lookup(generic, { id: 'gpt-undescribed' })?.description).toBeUndefined();
+  expect(metadata.lookup(generic, { id: 'unknown', requestModelId: 'unknown' })?.description).toBeUndefined();
+  const resolved = applyModelDirectoryDefaults(model, defaults);
+  expect(resolved.description).toBe('Supplied introduction');
+  expect(applyModelDirectoryDefaults({ ...resolved, requestModelId: 'unknown' }).description).toBeUndefined();
+  const edited = { ...resolved, description: 'My own guidance', catalog: { ...resolved.catalog!, overrides: [...resolved.catalog!.overrides, 'description' as const] } };
+  expect(applyModelDirectoryDefaults({ ...edited, requestModelId: 'unknown' }).description).toBe('My own guidance');
+  const service = { ...model, catalog: { source: 'service' as const, overrides: [] } };
+  expect(modelDirectoryDefaults(metadata, generic, model, [service])?.description).toBe('Supplied introduction');
+});

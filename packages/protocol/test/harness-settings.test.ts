@@ -5,6 +5,7 @@ import {
   resolveHarnessContextSettings,
   formatMessageTime,
   resolveHarnessNextStepSettings,
+  resolveHarnessDelegationModelSelectionSettings,
   resolveHarnessDocumentReadingSettings,
   resolveHarnessCodeRetrievalSettings,
   HarnessSettingsValidationError,
@@ -14,6 +15,29 @@ import {
 } from "../src/index.js";
 
 describe("harness settings", () => {
+  it("keeps delegation selection disabled by default and owned only by the user's model choices", () => {
+    assert.deepEqual(mergeHarnessSettings({}, {}).delegationModelSelection, { enabled: false });
+    const selection = { enabled: true, model: { providerId: "account-one", modelId: "selector" }, thinkingLevel: "high" as const };
+    const merged = mergeHarnessSettings({ delegationModelSelection: selection }, {
+      delegationModelSelection: { enabled: true, model: { providerId: "project", modelId: "redirected" }, thinkingLevel: "low" },
+    });
+    assert.deepEqual(merged.delegationModelSelection, selection);
+    assert.notEqual(merged.delegationModelSelection.model, selection.model);
+    assert.deepEqual(mergeHarnessSettings({}, { delegationModelSelection: selection }).delegationModelSelection, { enabled: false });
+    assert.deepEqual(resolveHarnessDelegationModelSelectionSettings({ enabled: true, model: selection.model }), { enabled: true, model: selection.model });
+    assert.deepEqual(resolveHarnessDelegationModelSelectionSettings({ enabled: false }), { enabled: false });
+    assert.deepEqual(resolveHarnessDelegationModelSelectionSettings({ ...selection, enabled: false }), { ...selection, enabled: false });
+  });
+
+  it("rejects malformed selector settings without inventing another model or thinking level", () => {
+    for (const value of [null, [], true, { enabled: 'yes' }, { enabled: true },
+      { model: {} }, { model: { providerId: ' ', modelId: 'm' } },
+      { model: { providerId: 'p', modelId: 'm', endpoint: 'https://other.invalid' } },
+      { thinkingLevel: 'invented' }, { preference: 'fast' }]) {
+      assert.throws(() => resolveHarnessDelegationModelSelectionSettings(value), HarnessSettingsValidationError);
+    }
+  });
+
   it("keeps execution Shell owned by the actual Host's user settings", () => {
     const merged = mergeHarnessSettings(
       { shell: "powershell" },

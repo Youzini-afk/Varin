@@ -37,6 +37,7 @@ export interface ThreadCollaborationOwners {
   recoverCheckpoints?(signal: AbortSignal): Promise<void>;
   settleRunCheckpoints?(runId: string, signal: AbortSignal): Promise<void>;
   prepareContext: ContextPreparer;
+  prepareModel?(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution>;
   prepareSkillInput?: ThreadSkillInputPreparer;
   prepareMaterials?(threadId: string, signal: AbortSignal): Promise<void>;
   reconcileDomainReceipts?(signal: AbortSignal): Promise<void>;
@@ -631,6 +632,13 @@ export class ThreadCollaboration {
     };
     try {
       if (child.state === 'preparing' && !child.receipt && !child.report) {
+        if (child.selected_profile.model_selection_required && child.trigger.kind === 'dispatch') {
+          stage = 'Selecting child execution model'; progress({ phase: 'model_selection' });
+          if (!this.owners.prepareModel) throw new Error('Delegated model preparation is unavailable');
+          child = await this.owners.prepareModel(child, signal);
+          signal.throwIfAborted();
+        }
+        stage = 'Preparing child source';
         progress({ phase: 'source' });
         child = await this.prepareSource(child, signal, progress);
         stage = 'Preparing child context';

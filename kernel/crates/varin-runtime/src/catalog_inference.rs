@@ -4,6 +4,7 @@ use super::*;
 use crate::execution::{UsageMeasurement, UsageReceipt};
 use crate::providers::auth::CredentialScope;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 #[path = "catalog_inference_generation.rs"]
 pub mod generation;
 
@@ -200,6 +201,7 @@ enum InferenceCaller {
     Operation,
     MemoryWork,
     ModelText,
+    Delegation,
     Knowledge,
     Query {
         context: crate::execution::ToolExecutionContext,
@@ -251,6 +253,7 @@ pub struct InferencePreparation {
 pub struct InferenceBody {
     pub(super) reference: Value,
     pub(super) input_fingerprint: Option<String>,
+    logical_input_fingerprint: Option<String>,
     _preparation: InferencePreparation,
 }
 impl InferencePreparation {
@@ -258,6 +261,10 @@ impl InferencePreparation {
         Ok(InferenceBody {
             reference: self.content.save(body)?,
             input_fingerprint: knowledge_inference::input_fingerprint(body)?,
+            logical_input_fingerprint: body.get("input")
+                .filter(|input| input["purpose"] == "delegation-model-selection")
+                .map(|input| serde_json::to_vec(input).map(|bytes| hex::encode(Sha256::digest(bytes))))
+                .transpose()?,
             _preparation: self,
         })
     }
@@ -294,6 +301,13 @@ fn caller_owned(op: &Operation, owner: &ExecutorOwner) -> Result<()> {
     Ok(())
 }
 fn parent_live(db: &Connection, op: &Operation, i: &Intent, epoch: u64) -> Result<()> {
+    if matches!(i.caller, InferenceCaller::Delegation) {
+        let parent: Operation = record(db, "operations", &i.parent_operation_id)?;
+        if parent.run_id != op.run_id || op.epoch != epoch || op.cancel_requested { return Err(RuntimeError::DispatchCancelled); }
+        delegation_model::parent_live(db, &parent, &i.caller_owner, epoch)?;
+        goals::check_delegated_dispatch(db, &parent.run_id, i.goal.as_ref())?;
+        return Ok(());
+    }
     if matches!(i.caller, InferenceCaller::Knowledge) {
         let parent: Operation = record(db,"operations",&i.parent_operation_id)?;
         if parent.run_id != op.run_id || i.goal.is_some() { return Err(conflict()); }
@@ -311,7 +325,7 @@ fn parent_live(db: &Connection, op: &Operation, i: &Intent, epoch: u64) -> Resul
         return Err(RuntimeError::DispatchCancelled);
     }
     let context = match &i.caller {
-        InferenceCaller::ModelText | InferenceCaller::Knowledge => unreachable!("standalone caller handled above"),
+        InferenceCaller::ModelText | InferenceCaller::Knowledge | InferenceCaller::Delegation => unreachable!("standalone caller handled above"),
         InferenceCaller::MemoryWork => {
             let parent: Operation = record(db, "operations", &i.parent_operation_id)?;
             if parent.run_id != op.run_id || i.goal.is_some() { return Err(conflict()); }
@@ -398,7 +412,7 @@ impl Catalog {
             })
         {
             { let parent=self.operation(&p.parent_operation_id)?;
-              let caller=if knowledge_inference::is_work(&parent) { InferenceCaller::Knowledge } else if memory_work::is_stage(&parent) { InferenceCaller::MemoryWork } else { InferenceCaller::Operation };
+              let caller=if delegation_model::is_selection(&parent) { InferenceCaller::Delegation } else if knowledge_inference::is_work(&parent) { InferenceCaller::Knowledge } else if memory_work::is_stage(&parent) { InferenceCaller::MemoryWork } else { InferenceCaller::Operation };
               self.admit_inference_for(p, body, caller, false) }
         } else {
             scopes.with_inference_context(&p.parent_operation_id, &p.execution_owner, |context| {
@@ -437,7 +451,54 @@ impl Catalog {
             }
             return self.inference_status_unfenced(&id, &p.execution_owner);
         }
+        let mut delegated_parent = None;
         let (run_id, goal) = match &caller {
+            InferenceCaller::Delegation => {
+                let mut parent = self.operation(&p.parent_operation_id)?;
+                delegation_model::parent_live(&self.db, &parent, &p.execution_owner, self.epoch)?;
+                if p.binding.purpose != "delegation-model-selection" { return Err(conflict()); }
+                if !native {
+                    let selector = &parent.intent["selector"];
+                    if selector["operation"] != "decision"
+                        || selector["providerId"].as_str() != Some(p.binding.provider_id.as_str())
+                        || selector["modelId"].as_str() != Some(p.binding.model_id.as_str()) {
+                        return Err(conflict());
+                    }
+                    let fingerprint = body.logical_input_fingerprint.as_ref().ok_or_else(conflict)?;
+                    let binding = json!({"configurationId":p.binding.configuration_id,"executor":match &p.binding.executor {
+                        InferenceExecutor::Http { api, credential_scope, .. } => json!({"api":api,"credentialScope":credential_scope}),
+                        InferenceExecutor::LocalComponent { .. } => return Err(conflict()),
+                    }});
+                    if let Some(original) = parent.intent.get("logicalInputFingerprint") {
+                        if original.as_str() != Some(fingerprint.as_str()) || parent.intent["selectorBinding"] != binding {
+                            return Err(conflict());
+                        }
+                    } else {
+                        parent.intent["logicalInputFingerprint"] = json!(fingerprint);
+                        parent.intent["selectorBinding"] = binding;
+                        parent.revision += 1;
+                        delegated_parent = Some(parent.clone());
+                    }
+                    if p.binding.request_kind == InferenceRequestKind::ModelCompute {
+                        let mut query = self.db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='inference_request_v1' AND json_extract(body,'$.intent.parentOperationId')=?1 AND json_extract(body,'$.intent.binding.requestKind')='model_compute'")?;
+                        for row in query.query_map([&parent.id], |row| row.get::<_, String>(0))? {
+                            let previous: Operation = serde_json::from_str(&row?)?;
+                            let previous_state = state(&previous)?;
+                            if previous.phase != OperationPhase::Terminal || previous_state.recovered || previous_state.receipt_pending
+                                || previous.execution_owner.as_ref() != Some(&p.execution_owner)
+                                || !previous_state.receipt.as_ref().is_some_and(|receipt| receipt.local_executor_stopped
+                                    && matches!((previous.outcome, receipt.problem),
+                                        (Some(Outcome::Failed), Some(InferenceProblem::HttpRejected))
+                                        | (Some(Outcome::Indeterminate), Some(InferenceProblem::TransportFailed)))) {
+                                return Err(conflict());
+                            }
+                        }
+                    }
+                }
+                let execution = delegated::execution(&self.db, parent.intent["executionId"].as_str().ok_or_else(conflict)?)?;
+                let relation = delegated::relation(&self.db, &execution.child_operation_id)?;
+                (parent.run_id, goals::origin_goal(&self.db, &relation.origin)?)
+            }
             InferenceCaller::Knowledge => {
                 let parent = self.operation(&p.parent_operation_id)?;
                 knowledge_inference::parent_live(&self.db,&parent,&p.execution_owner,self.epoch)?;
@@ -487,12 +548,12 @@ impl Catalog {
             outcome: None,
             effect: Effect::None,
             cancel_requested: false,
-            lifetime: Lifetime::Run,
+            lifetime: if matches!(i.caller, InferenceCaller::Delegation) { Lifetime::Thread } else { Lifetime::Run },
             // A query's caller may detach immediately. Its authenticated External owner
             // independently retains the actual HTTP request and original receipt. This
             // transfers foreground responsibility, never the Run cancellation scope or
             // permission to dispatch after the query closes.
-            handed_off: matches!(i.caller, InferenceCaller::Query { .. }),
+            handed_off: matches!(i.caller, InferenceCaller::Query { .. } | InferenceCaller::Delegation),
             executor: Some(
                 if native {
                     "inference.model.v1"
@@ -520,7 +581,21 @@ impl Catalog {
             call_completion: None,
         };
         let tx = self.db.transaction()?;
-        parent_live(&tx, &op, &i, self.epoch)?;
+        if let Err(error) = parent_live(&tx, &op, &i, self.epoch) {
+            if matches!(i.caller, InferenceCaller::Delegation) && matches!(error, RuntimeError::GoalChanged) {
+                let accepted: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM operations WHERE json_extract(body,'$.intent.kind')='inference_request_v1' AND json_extract(body,'$.intent.parentOperationId')=?1)",
+                    [&i.parent_operation_id], |row| row.get(0))?;
+                // Nothing has entered an inference owner yet: preserve the original
+                // pending child across a pause without inventing a replayable receipt.
+                if !accepted { return Err(RuntimeError::RequestActivationHeld); }
+            }
+            return Err(error);
+        }
+        if let Some(parent) = delegated_parent {
+            put(&tx, "operations", &parent.id, &parent)?;
+            event(&tx, &parent.id, parent.revision, "child.model_selection_request_frozen", Value::Null)?;
+        }
         tx.execute(
             "INSERT INTO operations(id,run_id,body) VALUES(?1,?2,?3)",
             params![id, op.run_id, encode(&op)?],
@@ -587,7 +662,7 @@ impl Catalog {
         let caller = intent(&self.operation(&p.operation_id)?)?.caller;
         let scopes = self.nested_tools.clone();
         match caller {
-            InferenceCaller::Operation | InferenceCaller::MemoryWork | InferenceCaller::ModelText | InferenceCaller::Knowledge => self.dispatch_inference_held(p),
+            InferenceCaller::Operation | InferenceCaller::MemoryWork | InferenceCaller::ModelText | InferenceCaller::Knowledge | InferenceCaller::Delegation => self.dispatch_inference_held(p),
             InferenceCaller::Query { context } => {
                 scopes.with_inference_context(&context.operation_id, &p.execution_owner, |_| {
                     self.dispatch_inference_held(p)
@@ -617,7 +692,7 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         parent_live(&tx, &op, &i, self.epoch)?;
-        if !matches!(i.caller, InferenceCaller::ModelText | InferenceCaller::Knowledge) { goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?; }
+        if !matches!(i.caller, InferenceCaller::ModelText | InferenceCaller::Knowledge | InferenceCaller::Delegation) { goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?; }
         if i.binding.request_kind == InferenceRequestKind::ModelCompute {
             if let Some(goal) = &i.goal {
                 goals::dispatched(&tx, goal)?;
@@ -875,7 +950,9 @@ pub(super) fn cancel_children(
     parent: Option<&str>,
     run: Option<&str>,
 ) -> Result<()> {
-    let mut query = tx.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='inference_request_v1' AND ((?1 IS NOT NULL AND json_extract(body,'$.intent.parentOperationId')=?1) OR (?2 IS NOT NULL AND run_id=?2))")?;
+    // Accepted child work outlives its dispatcher's Run. Its exact child/tree cancellation
+    // targets the preparation root, not unrelated parent-Run cancellation or completion.
+    let mut query = tx.prepare("SELECT body FROM operations WHERE json_extract(body,'$.intent.kind')='inference_request_v1' AND ((?1 IS NOT NULL AND json_extract(body,'$.intent.parentOperationId')=?1) OR (?2 IS NOT NULL AND run_id=?2 AND json_extract(body,'$.intent.caller.kind')!='delegation'))")?;
     let operations = query
         .query_map(params![parent, run], |r| r.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;

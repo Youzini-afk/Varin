@@ -10,7 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { agentProfileLabels } from './agent-profile-presentation';
 import { useAgentProfiles } from './useAgentProfiles';
-import { createAgentProfile, selectAgentProfile, setAgentProfilesQuery, setAgentProfilesShowAllFocuses } from './agent-profiles-store';
+import { createAgentProfile, selectAgentProfile, selectDelegationModelSelection, setAgentProfilesQuery, setAgentProfilesShowAllFocuses } from './agent-profiles-store';
 
 export function AgentsSidebar({ onItemSelect }: { onItemSelect?: () => void }) {
   const profiles = useAgentProfiles();
@@ -38,6 +38,9 @@ function ProfileSidebar({ state, snapshot, refresh, onItemSelect }: ReturnType<t
       <label className="flex items-center gap-2 typography-micro text-muted-foreground"><input type="checkbox" checked={state.showAllFocuses} onChange={event => { setAgentProfilesShowAllFocuses(event.target.checked); }} />{t('settings.agents.allModes')}</label>
     </div>
   } footer={<div className="border-t px-3 py-2 typography-micro text-muted-foreground">{t('settings.agents.currentFocus', { focus: t(`workFocus.${focus}`) })}</div>}>
+    <SettingsSidebarItem title={t('settings.delegationModelSelection.title')}
+      selected={state.view === 'delegation-model-selection'} icon={<Icon name="settings-3" className="size-5" />}
+      onSelect={() => { selectDelegationModelSelection(); onItemSelect?.(); }} />
     {state.error && <p role="alert" className="px-1 py-2 typography-meta text-destructive">{state.error}</p>}
     {profiles.map(profile => <div key={profile.id} data-agent-id={profile.id}>
       <SettingsSidebarItem title={agentProfileLabels(profile, t).name} selected={state.view === 'profiles' && !state.creating && state.selectedId === profile.id}

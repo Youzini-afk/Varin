@@ -5,23 +5,39 @@ use super::*;
 struct Upgrade {
     from: i64,
     to: i64,
-    convert: fn(&Transaction<'_>) -> Result<()>,
+    convert: fn(&Transaction<'_>, &[HistoryIndex]) -> Result<()>,
 }
 
 const UPGRADES: &[Upgrade] = &[
     Upgrade {
         from: 78,
         to: 79,
-        convert: external::initialize_new,
+        convert: |tx, _| external::initialize_new(tx),
     },
     // The ledger starts empty: earlier receipts lack settle time and attribution, so they are
     // not backfilled. Its start time commits with the format marker.
     Upgrade {
         from: 79,
         to: 80,
-        convert: usage_ledger::initialize,
+        convert: |tx, _| usage_ledger::initialize(tx),
     },
-    Upgrade { from: 80, to: 81, convert: context_observations::initialize },
+    // These are distinct persisted layouts, not interchangeable generation labels.
+    // 81 contains Zone2 captures; standalone 82 contains indexed delegation history.
+    Upgrade {
+        from: 80,
+        to: 81,
+        convert: |tx, _| context_observations::initialize(tx),
+    },
+    Upgrade {
+        from: 81,
+        to: 83,
+        convert: install_history_indexes,
+    },
+    Upgrade {
+        from: 82,
+        to: 83,
+        convert: |tx, _| context_observations::initialize(tx),
+    },
 ];
 
 pub(super) fn supports(mut version: i64) -> bool {
@@ -34,6 +50,44 @@ pub(super) fn supports(mut version: i64) -> bool {
     version == FORMAT
 }
 
+/// Standalone 82 does not contain Zone2. A blanket >=81 check would reject that
+/// valid asset or, worse, relabel a different layout without running its converter.
+pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> {
+    if matches!(version, 81 | 83) {
+        return context_observations::check_format(db);
+    }
+    let present: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('context_observation_captures','context_observation_imports','context_observation_queue_cursor','context_observation_queue_page'))",
+        [], |row| row.get(0))?;
+    if present {
+        return Err(RuntimeError::Invalid(format!(
+            "Catalog {version} does not define the Zone2 capture schema"
+        )));
+    }
+    Ok(())
+}
+
+/// 82 introduced sparse original-history references. Do not silently repair a
+/// current generation or defer an unbounded content scan to a dispatch request.
+/// Environment queue entries (including Zone2 captures) intentionally have a
+/// different representation and are not evidence of a missing history index.
+pub(super) fn check_history_indexes(db: &Connection, version: i64) -> Result<()> {
+    if !matches!(version, 82 | 83) {
+        return Ok(());
+    }
+    let missing: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM history WHERE json_extract(body,'$.source') IN ('user','assistant') AND json_type(body,'$.content.history_text') IS NOT 'object')",
+        [],
+        |row| row.get(0),
+    )?;
+    if missing {
+        return Err(RuntimeError::Invalid(format!(
+            "Catalog {version} original history text index is missing or malformed; data was preserved"
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn check_external_schema(db: &Connection, version: i64) -> Result<()> {
     if version >= 79 {
         external::check_format(db)?;
@@ -41,16 +95,96 @@ pub(super) fn check_external_schema(db: &Connection, version: i64) -> Result<()>
     Ok(())
 }
 
-pub(super) fn apply(db: &mut Connection, from: i64) -> Result<()> {
-    apply_before_commit(db, from, |_| Ok(()))
+struct HistoryIndex {
+    table: &'static str,
+    key: &'static str,
+    id: String,
+    before: String,
+    after: String,
+}
+
+// Prepare the derived metadata before taking the write transaction. Read only stored
+// JSON payloads: never hydrate referenced attachments, provider media or tool outputs.
+fn prepare_history_indexes(
+    db: &Connection,
+    content: &crate::content::ContentStore,
+) -> Result<Vec<HistoryIndex>> {
+    let mut indexes = Vec::new();
+    for (table, key, query) in [
+        (
+            "history",
+            "id",
+            "SELECT id,body FROM history WHERE json_extract(body,'$.source') IN ('user','assistant') AND json_type(body,'$.content.history_text') IS NULL",
+        ),
+        (
+            "input_history_content",
+            "input_id",
+            "SELECT input_id,body FROM input_history_content WHERE json_type(body,'$.history_text') IS NULL",
+        ),
+    ] {
+        let mut statement = db.prepare(query)?;
+        for row in statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })? {
+            let (id, before) = row?;
+            let mut body: Value = serde_json::from_str(&before)?;
+            let reference = if table == "history" {
+                &mut body["content"]
+            } else {
+                &mut body
+            };
+            let payload = content.load(reference)?;
+            *reference = content.index_history_text(reference.clone(), &payload)?;
+            indexes.push(HistoryIndex {
+                table,
+                key,
+                id,
+                before,
+                after: encode(&body)?,
+            });
+        }
+    }
+    Ok(indexes)
+}
+
+fn install_history_indexes(tx: &Transaction<'_>, indexes: &[HistoryIndex]) -> Result<()> {
+    for index in indexes {
+        let changed = tx.execute(
+            &format!(
+                "UPDATE {} SET body=?1 WHERE {}=?2 AND body=?3",
+                index.table, index.key
+            ),
+            params![index.after, index.id, index.before],
+        )?;
+        if changed != 1 {
+            return Err(RuntimeError::Conflict(
+                "Original history changed during catalog upgrade".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn apply(
+    db: &mut Connection,
+    from: i64,
+    content: &crate::content::ContentStore,
+) -> Result<()> {
+    apply_before_commit(db, from, content, |_| Ok(()))
 }
 
 fn apply_before_commit(
     db: &mut Connection,
     from: i64,
+    content: &crate::content::ContentStore,
     before_commit: impl FnOnce(&Transaction<'_>) -> Result<()>,
 ) -> Result<()> {
     let result = (|| {
+        let indexes = if matches!(from, 78 | 79 | 80 | 81) {
+            prepare_history_indexes(db, content)?
+        } else {
+            Vec::new()
+        };
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut version = inspect_catalog_format(&tx)?;
         if version != from {
@@ -63,7 +197,7 @@ fn apply_before_commit(
                 .iter()
                 .find(|step| step.from == version)
                 .ok_or(RuntimeError::Format(version))?;
-            (step.convert)(&tx)?;
+            (step.convert)(&tx, &indexes)?;
             version = step.to;
             tx.pragma_update(None, "user_version", version)?;
         }

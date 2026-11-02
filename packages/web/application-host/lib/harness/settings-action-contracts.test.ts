@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SETTINGS_CATALOG, getSettingsCatalogEntry } from '@varin/application-client';
-import { parseHarnessModelSlots, parseHarnessAgent, parseModelRetrySettings } from '@varin/protocol';
+import { parseHarnessModelSlots, parseHarnessAgent, parseModelRetrySettings, resolveHarnessDelegationModelSelectionSettings } from '@varin/protocol';
 import { compileToolJsonSchema } from '../models/schema.js';
 import { parseCompactionSettings } from '../models/compaction-settings.js';
 import { getSettingsActionContracts } from './settings-action-contracts.js';
@@ -36,6 +36,22 @@ describe('settings owner action contracts', () => {
     expect(compileToolJsonSchema(byPath.get('favoriteModels')!)({ malformed: true })).toBe(false);
     expect(compileToolJsonSchema(byPath.get('favoriteModels')!)([{ providerID: 'p', modelID: 'm' }])).toBe(true);
     expect(compileToolJsonSchema(byPath.get('harness.permissions.rules')!)([{ tool: 'settings_update', decision: 'allow', authority: 'permission-policy', match: { param: 'id', pattern: '^harness\\.permissions' } }])).toBe(true);
+  });
+  it('discloses the strict native delegation selector shape, including disabled and configured-default thinking', () => {
+    const entry = getSettingsCatalogEntry('harness.delegationModelSelection')!;
+    const validate = compileToolJsonSchema(entry.field!.schema!);
+    for (const value of [{}, { enabled: false }, { enabled: true, model: { providerId: 'account', modelId: 'selector' } },
+      { enabled: false, model: { providerId: 'account', modelId: 'selector' }, thinkingLevel: 'high' }]) {
+      expect(validate(value)).toBe(true);
+      expect(() => resolveHarnessDelegationModelSelectionSettings(value)).not.toThrow();
+    }
+    for (const value of [{ enabled: true }, { enabled: 'true' }, { model: { providerId: ' ', modelId: 'selector' } },
+      { model: { providerId: 'account', modelId: 'selector', endpoint: 'https://foreign.example' } },
+      { thinkingLevel: 'invented' }, { enabled: false, fallback: 'parent' }]) {
+      expect(validate(value)).toBe(false);
+      expect(() => resolveHarnessDelegationModelSelectionSettings(value)).toThrow();
+    }
+    expect(entry).toMatchObject({ apply: 'next-request', field: { scope: 'user' } });
   });
   it('requires the read project document revision and reports the actual saved owner value', async () => {
     let document: Record<string, unknown> = { projects: [{ id: 'p', path: '/p', label: 'Old' }] };

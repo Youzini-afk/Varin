@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 74;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 76;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2906,6 +2906,23 @@ pub(crate) struct ChildProgressParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DelegationModelCommitParams {
+    pub(crate) execution_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) choice: varin_runtime::catalog::delegation_model::Choice,
+    pub(crate) binding: varin_runtime::catalog::dispatch::ChildModelBinding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DelegationModelPrepareParams {
+    pub(crate) execution_id: String,
+    pub(crate) execution_owner: varin_runtime::ExecutorOwner,
+    pub(crate) catalog: Option<varin_runtime::catalog::delegation_model::SelectionCatalog>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TreeCancelParams {
     pub(crate) target: varin_runtime::catalog::dispatch::TreeCancelTarget,
     pub(crate) expected_parent_thread_id: Option<String>,
@@ -5396,6 +5413,21 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.child.progress" => serde_json::from_value::<ChildProgressParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.child.model.commit" => {
+            serde_json::from_value::<DelegationModelCommitParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.child.model.prepare" => {
+            serde_json::from_value::<DelegationModelPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.child.model.read" => {
+            serde_json::from_value::<ChildExecutionParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.child.cancel" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

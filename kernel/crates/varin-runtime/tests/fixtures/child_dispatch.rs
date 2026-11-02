@@ -365,7 +365,7 @@ impl Fixture {
             db.publish_bot_gate(varin_runtime::catalog::bot::BotGate { bot_id:bot.into(), profile_revision:1, activity_operation_id:Some("sleep".into()), permitted:true }).unwrap();
             db.create_bot_thread("thread:parent", "branch:parent", bot).unwrap();
         } else { db.create_thread("thread:parent", "branch:parent").unwrap(); }
-        let mut input = DispatchInput { project_id:None, background:Vec::new(), source_path: None,
+        let mut input = DispatchInput { model:None,thinking:None,input_types:Vec::new(),project_id:None, background:Vec::new(), source_path: None,
             inherit_context: false,
         source_agent: None,
             name: None,
@@ -402,7 +402,7 @@ impl Fixture {
             credential_scope: launch.credential_scope.clone(),
         };
         launch.connection_identity = model.connection_identity().unwrap();
-        launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { projects:input.project_id.as_ref().map(|id|varin_runtime::catalog::dispatch::ChildProjectSource{id:id.clone(),name:"Project B".into(),path:"/registered/project-B".into(),resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local}).into_iter().collect(),
+        launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { model_selection_preparation:false,projects:input.project_id.as_ref().map(|id|varin_runtime::catalog::dispatch::ChildProjectSource{id:id.clone(),name:"Project B".into(),path:"/registered/project-B".into(),resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local}).into_iter().collect(),
             native_capabilities: launch.tools.iter().map(|tool| {
                 use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
                 ChildCapabilityDescriptor { process: matches!(tool.name.as_str(), "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process"), name: tool.name.clone(), version: tool.version.clone(),

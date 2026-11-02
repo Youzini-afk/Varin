@@ -357,7 +357,10 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: observed.rawUsage,
               providerRequestId: response.headers.get('x-request-id') ?? response.headers.get('request-id') } }); }
             catch (error) { controller.abort(cancelled()); throw error; }
-            if ((!response.ok || !observed.valid) && await waitForRetry(options.kernel, retrySettings,
+            // Selection cannot retry semantic failures into a different model choice.
+            // HTTP/transport failures still use the ordinary frozen retry policy.
+            const retryInvalid = selectedBinding.purpose !== 'delegation-model-selection';
+            if ((!response.ok || !observed.valid && retryInvalid) && await waitForRetry(options.kernel, retrySettings,
               { ...responseRetryFailure(response, raw), ...(response.ok ? { code: 'invalid_response' } : {}) }, retriesUsed, requestSignal)) continue;
             // The SDK receives exactly these already drained bytes. Cancellation cannot erase their usage.
             return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });

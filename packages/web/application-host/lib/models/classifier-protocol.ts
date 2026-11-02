@@ -5,7 +5,7 @@ export interface Question { type: 'bool' | 'choice' | 'score'; instructions: str
 export interface ClassifierContext { state: unknown; questions: Record<string, Question> }
 export interface ClassifierModel<A extends string = string> { api: A; id: string; baseUrl?: string; [key: string]: unknown }
 interface Answer { type: 'bool' | 'choice' | 'score'; probability?: number; choice?: string; score?: number; probabilities?: Record<string, number>; confidence?: number }
-export type ClassifierFunction = (model: ClassifierModel, context: ClassifierContext, options: { apiKey?: string; headers?: Record<string, string>; signal?: AbortSignal; fetch: typeof fetch }) => Promise<{ answers: Record<string, Answer>; stopReason: 'stop' | 'error' | 'aborted'; usage?: { input: number; output: number } }>;
+export type ClassifierFunction = (model: ClassifierModel, context: ClassifierContext, options: { apiKey?: string; headers?: Record<string, string>; signal?: AbortSignal; adaptiveReadout?: boolean; fetch: typeof fetch }) => Promise<{ answers: Record<string, Answer>; stopReason: 'stop' | 'error' | 'aborted'; usage?: { input: number; output: number } }>;
 export const llamaServerRoot = (base: string) => {
   const url = modelEndpoint(base);
   url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/v1$/, '');
@@ -91,7 +91,9 @@ export const classifyLlama: ClassifierFunction = async (model, context, options)
       const prompt = template.prompt.endsWith('<think>') ? `${template.prompt}</think>` : template.prompt;
       let logs: (number | undefined)[] = [];
       const firstDepth = Math.max(256, ids.length * 16);
-      for (const depth of [firstDepth, ...[4096, 32768].filter(value => value > firstDepth)]) {
+      // Selection performs a single normal readout at the adapter's existing full depth.
+      const depths = options.adaptiveReadout === false ? [32768] : [firstDepth, ...[4096, 32768].filter(value => value > firstDepth)];
+      for (const depth of depths) {
         const completion = await post('completion', { prompt, n_predict: 1, n_probs: depth, post_sampling_probs: false, temperature: 0, cache_prompt: true });
         const first: unknown = Array.isArray(completion.completion_probabilities) ? completion.completion_probabilities[0] : undefined;
         if (!object(first) || !Array.isArray(first.top_logprobs)) throw new Error('Classifier probability readout is invalid');

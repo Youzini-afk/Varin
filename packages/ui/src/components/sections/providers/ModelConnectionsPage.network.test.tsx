@@ -420,3 +420,17 @@ test('model capabilities save declared effort choices, image input and capacitie
   expect(fixtures.api.save.mock.calls[0]?.[0].models[0]).toMatchObject({ reasoning: true, input: ['text', 'image'],
     thinking: { mode: 'levels', levels: ['low', 'high'], allowOff: true }, contextWindow: 128000, maxOutputTokens: 8192 });
 });
+
+test('model descriptions save as user overrides and an explicit empty description does not restore directory text', async () => {
+  const model = { id: 'described', name: 'Described model', enabled: true, operations: ['chat' as const], description: 'Service introduction', catalog: { overrides: [] } };
+  snapshot.channels[0]!.models = [model]; snapshot.types[0]!.catalog = [model];
+  await open(); await click('Described model');
+  await edit('settings.models.modelDescription', 'My experience on this channel');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[0]?.[0].models[0]).toMatchObject({ description: 'My experience on this channel', catalog: { overrides: ['description'] } });
+  await edit('settings.models.modelDescription', '');
+  await click('settings.models.save');
+  expect(fixtures.api.save.mock.calls[1]?.[0].models[0]).toMatchObject({ description: '', catalog: { overrides: ['description'] } });
+  await configureOpenedModel();
+  expect(container.querySelector('[aria-label="settings.models.modelDescription"]')?.getAttribute('data-rendered-value')).toBe('');
+});

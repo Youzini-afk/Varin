@@ -4378,6 +4378,7 @@ export const dict = {
   "chat.children.preparation.verify": "Verifying files",
   "chat.children.preparation.publish": "Preparing workspace",
   "chat.children.preparation.context": "Preparing context",
+  "chat.children.preparation.modelSelection": "Selecting execution model",
   "chat.children.preparation.admission": "Starting task",
   "chat.children.trigger.dispatch": "Assigned task",
   "chat.children.trigger.user": "User continuation",
