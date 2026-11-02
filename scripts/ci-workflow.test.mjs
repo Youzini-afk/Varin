@@ -60,6 +60,7 @@ test('reusable release quality uses exact source and cannot recurse into contain
   assert.equal(scope.toolbelt, false);
   for (const name of surfaces.filter(name => !['container', 'toolbelt'].includes(name))) assert.equal(scope[name], true, name);
   assert.equal(workflow.on.workflow_call.inputs.source_sha.required, true);
+  assert.equal(workflow.jobs.changes.outputs.full, '${{ steps.surface.outputs.full }}');
 });
 
 test('prose and known renderer edits avoid unrelated native/platform products', t => {
@@ -69,7 +70,7 @@ test('prose and known renderer edits avoid unrelated native/platform products', 
   f.commit('packages/ui/src/components/titlebar.tsx');
   const scope = f.detect('push');
   assert.equal(scope.code, true); assert.equal(scope.frontend, true);
-  for (const name of ['native', 'rust', 'windows', 'macos', 'production', 'container']) assert.equal(scope[name], false, name);
+  for (const name of ['native', 'rust', 'windows', 'macos', 'production', 'container', 'full']) assert.equal(scope[name], false, name);
 });
 
 test('owner/dependency/build input decisions include the actual downstream boundaries', () => {

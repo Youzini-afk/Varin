@@ -6,7 +6,7 @@ import path from 'node:path';
 // These are product/owner boundaries, not a second package dependency graph.
 // Unknown inputs deliberately select the complete qualification path.
 export const surfaces = ['code', 'frontend', 'native', 'rust', 'windows', 'macos',
-  'production', 'container', 'toolbelt', 'android', 'security'];
+  'production', 'container', 'toolbelt', 'android', 'security', 'full'];
 const empty = () => Object.fromEntries(surfaces.map(name => [name, false]));
 const all = () => Object.fromEntries(surfaces.map(name => [name, true]));
 const prose = /(?:^docs\/|^packages\/docs\/|^\.github\/readme\/|(?:^|\/)(?:README(?:\.[a-z]{2}(?:-[A-Z]{2})?)?|DOCUMENTATION|AGENTS|CHANGELOG)\.md$)/u;

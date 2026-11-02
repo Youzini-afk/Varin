@@ -42,7 +42,7 @@ jobs:
       toolbelt: ${{ steps.surface.outputs.toolbelt }}
       android: ${{ steps.surface.outputs.android }}
       security: ${{ steps.surface.outputs.security }}
-      full: ${{ inputs.full || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      full: ${{ steps.surface.outputs.full }}
     steps:
       - uses: actions/checkout@v7
         with:
