@@ -299,6 +299,13 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
     ui: { page: 'harness-permissions', titleKey: 'settings.harness.role.permissionJudge', keywords: ["permissionJudge", "agent", "model", "enable", "disable"] },
   },
   {
+    id: 'harness.delegationModelSelection', category: 'agents', owner: 'agent-settings',
+    field: { path: 'harness.delegationModelSelection', kind: 'json', scope: 'user',
+      note: '{enabled: boolean, model?: {providerId, modelId}, thinkingLevel?: ThinkingLevel}. Disabled by default; enabling requires a configured chat or decision model. The selector uses its own model thinking default when omitted. Consumed at the next native free delegation model-preparation boundary, even within the current Run. Does not change the current Run model or an accepted delegation recipe/binding; explicit presets and fixed execution choices are retained.' },
+    apply: 'next-request', ui: { page: 'agents', titleKey: 'settings.delegationModelSelection.title',
+      descriptionKey: 'settings.delegationModelSelection.description', keywords: ['dispatch', 'delegation', 'selector', 'model', 'thinking', '派发', '模型选择'] },
+  },
+  {
     id: 'harness.agents', category: 'agents', owner: 'agent-settings',
     field: { path: 'harness.agents', kind: 'json', scope: 'user',
       note: 'ID → {name, description, instructions, enabled, tools?: string[], workFocus: ("code"|"research")[], model?: {providerId,modelId}}. Empty workFocus means both. Native dispatch uses preset:"custom:ID"; models inherit only when omitted. Prefer agents.catalog actions for editing one definition with its catalog revision.' },

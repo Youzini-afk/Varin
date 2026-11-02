@@ -1,4 +1,15 @@
 export const settingsDict = {
+  "settings.models.modelDescription": "簡介",
+  "settings.models.modelDescriptionHint": "在這裡記錄模型特點、使用經驗和通道偏好。目錄更新不會覆蓋你的修改。",
+  "settings.delegationModelSelection.title": "派發模型選擇",
+  "settings.delegationModelSelection.description": "透過一次輔助請求，為新建的原生派發選擇執行模型和思考設定。保留已明確指定的設定和選定的預設，預設不啟用。",
+  "settings.delegationModelSelection.enabled": "啟用自動選擇",
+  "settings.delegationModelSelection.model": "選擇模型",
+  "settings.delegationModelSelection.thinking": "選擇者的思考設定",
+  "settings.delegationModelSelection.thinkingHint": "只影響選擇者自身，與執行者的思考設定相互獨立。預設使用所選模型設定。",
+  "settings.delegationModelSelection.chooseModel": "請先選擇一個已啟用的對話或決策模型。",
+  "settings.delegationModelSelection.unavailable": "儲存的模型無法使用或已停用。請選擇其他設定，系統不會自動替換。",
+
   'settings.titleUpdates.label': '標題自動更新',
   'settings.titleUpdates.description': '首次產生標題，此後每完成指定輪數的使用者與 Agent 交流，檢查是否需要更新。0 表示僅首次產生。手動命名的會話會保留標題。',
   'settings.titleUpdates.unit': '輪',

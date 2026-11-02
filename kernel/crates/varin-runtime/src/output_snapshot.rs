@@ -198,7 +198,11 @@ pub(super) fn save(
         },
         serialized: &snapshot.serialized,
     };
-    store.save_with_dependencies(&stored, projection.dependencies)
+    let mut reference = store.save_with_dependencies(&stored, projection.dependencies)?;
+    // Original request metadata permits dispatch preparation without loading unrelated
+    // history, provider payloads or attachment binaries. It is not a second history copy.
+    reference["dispatch"] = serde_json::json!({"requestId":view.request_id,"runId":view.run_id,"childDispatch":view.binding.child_dispatch});
+    Ok(reference)
 }
 
 #[cfg(test)]

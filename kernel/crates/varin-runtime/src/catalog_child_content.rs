@@ -16,6 +16,7 @@ pub struct ChildAdmissionPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildAdmission {
+    pub(super) model_selection_required: bool,
     pub(super) project:Option<super::dispatch::ChildProjectSource>,
     pub(super) source_path:Option<String>,
     pub(super) background: Vec<super::background::BackgroundReference>,
@@ -40,7 +41,7 @@ pub struct PreparedChildAdmission {
 impl ChildAdmissionPreparation {
     pub fn load(self) -> Result<PreparedChildAdmission> {
         self.input.validate()?;
-        let original = self.invocation.load()?;
+        let original = self.invocation.load_for(self.input.inherit_context)?;
         let resolved = original.resolve(&self.input)?;
         if resolved.frozen_reference != self.launch.frozen_reference
             || resolved.profile != self.launch.selected_profile
@@ -133,6 +134,7 @@ impl ChildAdmissionPreparation {
             })
         } else { None };
         Ok(PreparedChildAdmission {
+            model_selection_required: resolved.profile.model_selection_required,
             project:original.project(&self.input)?,
             source_path:self.input.source_path.clone().filter(|p|p!="."),
             background: self.input.background.clone(),

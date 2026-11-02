@@ -100,7 +100,7 @@ impl Catalog {
         if !self.inference_status(id, &i.caller_owner)?.live { return Err(RuntimeError::DispatchCancelled); }
         let tx = self.db.transaction()?;
         parent_live(&tx, &op, &i, self.epoch)?;
-        if !matches!(i.caller, InferenceCaller::ModelText | InferenceCaller::Knowledge) { goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?; }
+        if !matches!(i.caller, InferenceCaller::ModelText | InferenceCaller::Knowledge | InferenceCaller::Delegation) { goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?; }
         if let Some(goal) = &i.goal { goals::dispatched(&tx, goal)?; }
         s.accounted = false;
         s.attempt += 1;
@@ -115,7 +115,7 @@ impl Catalog {
         p: &InferenceGenerateParams,
         body: InferenceBody,
     ) -> Result<InferenceStatus> {
-        if !matches!(p.purpose.as_str(), "explore" | "memory-organizer" | "git-commit" | "review" | "title" | "text") || p.system_prompt.trim().is_empty() || p.user.trim().is_empty() {
+        if !matches!(p.purpose.as_str(), "explore" | "memory-organizer" | "git-commit" | "review" | "title" | "text" | "delegation-model-selection") || p.system_prompt.trim().is_empty() || p.user.trim().is_empty() {
             return Err(RuntimeError::Invalid(
                 "invalid tool-free inference request".into(),
             ));
@@ -146,6 +146,18 @@ impl Catalog {
         if matches!(p.purpose.as_str(), "git-commit" | "review" | "title" | "text") {
             model_text::validate_generation(&self.db,p,&body.reference,self.epoch)?;
             return self.admit_inference_for(&params,body,InferenceCaller::ModelText,true);
+        }
+        if p.purpose == "delegation-model-selection" {
+            let parent = self.operation(&p.parent_operation_id)?;
+            delegation_model::parent_live(&self.db, &parent, &p.caller_owner, self.epoch)?;
+            let selector = &parent.intent["selector"];
+            if p.ordinal != 1 || selector["operation"] != "chat"
+                || selector["providerId"].as_str() != p.configuration.provider_id.as_deref()
+                || selector["modelId"].as_str() != Some(p.configuration.catalog_model_id.as_deref().unwrap_or(&p.configuration.model))
+                || selector["thinkingLevel"].as_str() != p.configuration.thinking_level.as_deref() {
+                return Err(conflict());
+            }
+            return self.admit_inference_for(&params, body, InferenceCaller::Delegation, true);
         }
         if p.purpose == "memory-organizer" {
             memory_work::generation_parent(&self.db, &p.parent_operation_id, &p.caller_owner, self.epoch)?.ok_or_else(conflict)?;
@@ -199,7 +211,7 @@ impl Catalog {
         let op = self.operation(id)?;
         kernel_owned(&op, self.epoch)?;
         let i = intent(&op)?;
-        if matches!(i.caller, InferenceCaller::MemoryWork | InferenceCaller::ModelText) {
+        if matches!(i.caller, InferenceCaller::MemoryWork | InferenceCaller::ModelText | InferenceCaller::Delegation) {
             return self.dispatch_inference_executor(&InferenceOwnerParams {operation_id:id.into(),execution_owner:i.caller_owner},true);
         }
         let InferenceCaller::Query { context } = i.caller else {

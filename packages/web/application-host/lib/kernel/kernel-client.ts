@@ -742,6 +742,17 @@ export class KernelClient {
     if (!this.handshakeResult) await this.start();
     await this.credentialBridge.retainQueuedModel(runId, owner);
   }
+  async retainSelectedChildModel(child: import('./protocol.generated.js').DelegatedExecution,
+    owner: ExistingHostCredentialOwner, signal?: AbortSignal): Promise<CredentialScope> {
+    const operation = await this.agentRuntimeRequest<import('./protocol.generated.js').Operation, 'runtime.operation.inspect'>(
+      'runtime.operation.inspect', { operationId: child.child_operation_id }, signal);
+    if (!operation.execution_owner || operation.cancel_requested || child.cancel_requested || child.report) {
+      throw new Error('delegated-model-handoff-stale');
+    }
+    return this.credentialBridge.retainSelectedChildModel({ operationId: operation.id, parentRunId: operation.run_id,
+      executionOwner: operation.execution_owner, executionEpoch: operation.epoch }, owner,
+    { mcp: child.launch.mcp_binding, extensions: child.launch.extension_bindings }, signal);
+  }
   releaseQueuedModelCredentialOwner(runId: string, owner: ExistingHostCredentialOwner): void { this.credentialBridge.releaseQueuedModel(runId, owner); }
   unregisterCredentialOwner(runId: string, bindingId?: string | null): void { this.credentialBridge.unregister(runId, bindingId); }
   async registerMcpOwner(runId: string, lease: McpToolLease): Promise<McpBinding> {

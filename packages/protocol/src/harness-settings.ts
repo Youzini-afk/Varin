@@ -18,12 +18,43 @@ import { mergePolicies, type PermissionMode, type PermissionRule } from "./permi
 import { parseHarnessAgents, type HarnessCustomAgent } from "./harness-agents.js";
 import { parseHarnessModelSlots, type HarnessModelBinding } from "./harness-model-slots.js";
 import { parseHarnessImageSettings, type HarnessImageSettings } from './harness-images.js';
+import { THINKING_LEVELS, type ThinkingLevel } from "./types.js";
 import { isTimeZone, type MessageTimeSettings } from './message-time.js';
 
 /** A provider + model pair, as stored in a model slot. */
 export interface ModelSelection {
   providerId: string;
   modelId: string;
+}
+
+/** User-owned one-shot selector; its own thinking is independent of the delegated executor. */
+export interface HarnessDelegationModelSelectionSettings {
+  enabled: boolean;
+  model?: ModelSelection;
+  /** Omitted means the selector model's configured default, never the parent's thinking. */
+  thinkingLevel?: ThinkingLevel;
+}
+
+export function resolveHarnessDelegationModelSelectionSettings(value: unknown): HarnessDelegationModelSelectionSettings {
+  if (value === undefined) return { enabled: false };
+  const fail = (message: string): never => { throw new HarnessSettingsValidationError(`harness.delegationModelSelection ${message}`); };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fail("must be an object");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some(key => key !== "enabled" && key !== "model" && key !== "thinkingLevel")) return fail("contains an unknown field");
+  if (input.enabled !== undefined && typeof input.enabled !== "boolean") return fail("enabled must be a boolean");
+  let model: ModelSelection | undefined;
+  if (input.model !== undefined) {
+    if (!input.model || typeof input.model !== "object" || Array.isArray(input.model)) return fail("model requires providerId and modelId");
+    const selected = input.model as Record<string, unknown>;
+    if (Object.keys(selected).some(key => key !== "providerId" && key !== "modelId")
+      || typeof selected.providerId !== "string" || !selected.providerId.trim()
+      || typeof selected.modelId !== "string" || !selected.modelId.trim()) return fail("model requires providerId and modelId");
+    model = { providerId: selected.providerId, modelId: selected.modelId };
+  }
+  if (input.enabled === true && !model) return fail("enabled selection requires a model");
+  if (input.thinkingLevel !== undefined && !(THINKING_LEVELS as readonly unknown[]).includes(input.thinkingLevel)) return fail("thinkingLevel must be a supported thinking level");
+  return { enabled: input.enabled === true, ...(model ? { model } : {}),
+    ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel as ThinkingLevel }) };
 }
 
 /** Auto assigns action and selection duties independently; explicit modes keep one judgment path. */
@@ -262,11 +293,12 @@ export function resolveHarnessContextSettings(
   };
 }
 
-export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "nextStep" | "documentReading" | "codeRetrieval"> & {
+export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "nextStep" | "documentReading" | "codeRetrieval" | "delegationModelSelection"> & {
   context?: HarnessContextSettingsInput;
   nextStep?: Partial<HarnessNextStepSettings>;
   documentReading?: HarnessDocumentReadingSettingsInput;
   codeRetrieval?: Partial<HarnessCodeRetrievalSettings>;
+  delegationModelSelection?: Partial<HarnessDelegationModelSelectionSettings>;
 };
 
 export interface HarnessSettings {
@@ -278,6 +310,8 @@ export interface HarnessSettings {
   /** User-owned profiles dispatched through the ordinary native Thread runtime. */
   agents: Record<string, HarnessCustomAgent>;
   codeRetrieval: HarnessCodeRetrievalSettings;
+  /** User-owned optional selector for new native free delegations; disabled by default. */
+  delegationModelSelection: HarnessDelegationModelSelectionSettings;
   dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
   knowledge: {
     eventRetentionDays: number;
@@ -346,6 +380,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   models: {},
   agents: {},
   codeRetrieval: { decision: "auto" },
+  delegationModelSelection: { enabled: false },
   dispatch: { concurrency: 12, askBefore: {} },
   knowledge: {
     eventRetentionDays: 30,
@@ -424,6 +459,7 @@ export function mergeHarnessSettings(
     fastDecision: userFastDecision,
     rerank: userRerank,
     nextStep: userNextStep,
+    delegationModelSelection: userDelegationModelSelection,
     codeRetrieval: userCodeRetrieval,
     computer: userComputer,
     images: userImages,
@@ -436,6 +472,7 @@ export function mergeHarnessSettings(
     fastDecision: _workspaceFastDecision,
     rerank: _workspaceRerank,
     nextStep: _workspaceNextStep,
+    delegationModelSelection: _workspaceDelegationModelSelection,
     codeRetrieval: _workspaceCodeRetrieval,
     computer: _workspaceComputer,
     images: _workspaceImages,
@@ -514,6 +551,8 @@ export function mergeHarnessSettings(
     // Next-step suggestions are user-owned. A project cannot enable them when
     // the user has opted out, and project settings cannot redirect the model.
     nextStep: resolveHarnessNextStepSettings(userNextStep),
+    // Projects cannot enable a selector or redirect its model and credential.
+    delegationModelSelection: resolveHarnessDelegationModelSelectionSettings(userDelegationModelSelection),
     // Embedding and rerank bindings are user-owned. A repository cannot
     // redirect remote inference or select another provider credential.
     ...((() => {

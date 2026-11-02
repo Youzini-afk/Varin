@@ -597,7 +597,7 @@ impl Catalog {
             "child.accepted",
             json!({"child_thread_id":child.child_thread_id,"parent_run_id":run.id,"acceptedAtMs":accepted_at_ms}),
         )?;
-        delegated::insert_initial(&tx, &child)?;
+        delegated::insert_initial(&tx, &child, prepared.model_selection_required)?;
         super::goals::bind_child(&tx, &op.id, &run.id)?;
         tx.commit()?;
         Ok(child)
@@ -796,6 +796,7 @@ impl Catalog {
         proposal: context::ContextProposal,
         basis: personalization::PersonalizationBasis,
     ) -> Result<ChildPreparation> {
+        super::delegation_model::require_ready(&self.db, operation_id)?;
         let child = self.execution_task(operation_id)?;
         let admitted = child
             .receipt

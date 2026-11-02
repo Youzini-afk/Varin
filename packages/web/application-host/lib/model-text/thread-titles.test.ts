@@ -1,6 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { KERNEL_PROTOCOL_VERSION } from '../kernel/protocol.generated.js';
-import type { AgentRuntimeStreamEvent, RuntimeEvent, ThreadSummary, ThreadTitleJob } from '../kernel/protocol.generated.js';
+import { KERNEL_PROTOCOL_VERSION, type AgentRuntimeStreamEvent, type RuntimeEvent, type ThreadSummary, type ThreadTitleJob } from '../kernel/protocol.generated.js';
 import { createThreadTitleService } from './thread-titles.js';
 import type { ModelTextInput, ModelTextResult } from './service.js';
 type Runtime = Parameters<typeof createThreadTitleService>[0]['runtime'];

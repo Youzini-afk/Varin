@@ -1,6 +1,7 @@
 import React from 'react';
 import { MODEL_THINKING_EFFORTS, modelThinkingConfiguration, type ChannelModel } from '@varin/application-client';
 import { isModelThinkingConfiguration } from '@varin/protocol';
+import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -28,6 +29,12 @@ export function ModelCommonSettings({ model, disabled, onChange, validity }: Pro
   React.useEffect(() => { validity('thinking', !invalidThinking); validity('capacity', !invalidCapacity); }, [invalidThinking, invalidCapacity, validity]);
 
   return <div className="space-y-5 @container">
+    <div className="space-y-2">
+      <label htmlFor={`${id}-description`} className="block typography-meta">{t('settings.models.modelDescription')}</label>
+      <Textarea id={`${id}-description`} aria-label={t('settings.models.modelDescription')} value={model.description ?? ''}
+        disabled={disabled} rows={3} onChange={event => update({ description: event.target.value })} />
+      <p className="typography-micro text-muted-foreground">{t('settings.models.modelDescriptionHint')}</p>
+    </div>
     {chat ? <>
     <div className="grid gap-4 @lg:grid-cols-2">
       <div className="flex items-center justify-between gap-4"><label htmlFor={`${id}-image`} className="typography-meta">{t('settings.models.imageInput')}</label><Switch id={`${id}-image`} aria-label={t('settings.models.imageInput')} checked={model.input?.includes('image') ?? false} disabled={disabled} onCheckedChange={enabled => update({ input: enabled ? ['text', 'image'] : ['text'] })} /></div>

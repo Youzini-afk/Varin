@@ -26,6 +26,7 @@ const preparationPhases: Record<ChildPreparationProgress['phase'], I18nKey> = {
   source: 'chat.children.preparation.source', source_wait: 'chat.children.preparation.sourceWait',
   inventory: 'chat.children.preparation.inventory', capture: 'chat.children.preparation.capture',
   verify: 'chat.children.preparation.verify', publish: 'chat.children.preparation.publish',
+  model_selection: 'chat.children.preparation.modelSelection',
   context: 'chat.children.preparation.context', admission: 'chat.children.preparation.admission',
 };
 export function ChildPreparation({ progress }: { progress: ChildPreparationProgress }) {

@@ -149,3 +149,17 @@ it('strips only the llama.cpp pathname /v1 suffix and preserves query on prepara
   expect(seen).toEqual(new Set(['/gateway/tokenize', '/gateway/apply-template', '/gateway/completion']));
   expect(result).toMatchObject({ answers: [{ id: 'one', score: 0 }], missing: [], usage: { inputTokens: 13, outputTokens: 1 } });
 });
+
+
+it.each([true, false])('single normal probability readout preserves original usage and never corrects missing labels (complete=%s)', async complete => {
+  const depths: number[] = [];
+  const work = requestClassifier({ ...request, adaptiveReadout: false, fetchImpl: async (url, init) => {
+    const body = bodyOf(init);
+    if (String(url).endsWith('/tokenize')) return tokenize(body);
+    if (String(url).endsWith('/apply-template')) return Response.json({ prompt: body.messages[1]!.content });
+    depths.push(body.n_probs); return completion(17, complete ? ['0', '1'] : ['0']);
+  } });
+  if (complete) expect(await work).toMatchObject({ answers: [{ id: 'one', score: 0 }], usage: { inputTokens: 17, outputTokens: 1 } });
+  else await expect(work).rejects.toMatchObject({ result: { answers: [], missing: ['one'], usage: { inputTokens: 17, outputTokens: 1 } } });
+  expect(depths).toEqual([32768]);
+});
