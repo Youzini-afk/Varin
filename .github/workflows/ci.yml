@@ -209,8 +209,9 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
+      - uses: actions/cache/restore@v6
+        id: rust-cache
+        if: needs.changes.outputs.rust == 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -271,6 +272,16 @@ jobs:
         # the step if any binary fails, and the execution timeout bounds hangs.
         run: bun run test:rust --no-fail-fast
 
+      - if: ${{ !cancelled() && steps.rust-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        name: Preserve compiled Rust test inputs
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target/debug
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+
   windows-runtime:
     name: Windows runtime
     runs-on: windows-latest
@@ -296,8 +307,9 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
+      - uses: actions/cache/restore@v6
+        id: rust-cache
+        if: needs.changes.outputs.native == 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -351,6 +363,18 @@ jobs:
         name: Test Windows input targeting without desktop access
         shell: pwsh
         run: ./packages/computer-driver/windows/test-targeting.ps1
+      # Successful compilation is reusable even if a later native assertion
+      # fails. Save before acceptance: a red teardown must not force another
+      # cold Rust build, and a cache never substitutes for those assertions.
+      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        name: Preserve compiled Windows Rust inputs
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
       - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
         name: Verify Windows native resources and teardown
         shell: bash
@@ -385,8 +409,9 @@ jobs:
             ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v6
-        if: needs.changes.outputs.code == 'true'
+      - uses: actions/cache/restore@v6
+        id: rust-cache
+        if: needs.changes.outputs.rust == 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -425,9 +450,20 @@ jobs:
       # changing the runner's system-extension policy. Actual mount tests remain
       # explicit qualification on a machine with an already-enabled component.
       - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
+        id: rust-compile
         name: Compile macOS workspace callbacks without system installation
         working-directory: kernel
         run: cargo check -p varin-kernel --all-targets --features workspace-mount --locked
+
+      - if: ${{ !cancelled() && steps.rust-compile.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        name: Preserve compiled macOS Rust inputs
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target/debug
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   production-build:
     name: Production build
