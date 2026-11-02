@@ -8,11 +8,20 @@ export const record = (value: unknown): RecordValue =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as RecordValue) : {};
 export const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
+/** Protocol errors retain machine-readable codes without logging payloads or credentials. */
+export class HarnessProtocolError extends Error {
+  constructor(readonly method: string, readonly code: number | string | undefined, message: string, readonly data?: unknown) {
+    super(message);
+    this.name = 'HarnessProtocolError';
+  }
+}
+export interface HarnessRequestOptions { signal?: AbortSignal; timeoutMs?: number }
+
 /** LF-framed bytes preserve both split UTF-8 and Unicode separators inside JSON strings. */
 export class HarnessTransport {
   private parts: Buffer[] = [];
   private bytes = 0;
-  private pending = new Map<string, { resolve(value: RecordValue): void; reject(error: Error): void }>();
+  private pending = new Map<string, { method: string; resolve(value: RecordValue): void; reject(error: Error): void; cleanup(): void }>();
   private failed?: Error;
   private listeners = new Set<(message: RecordValue) => void>();
   private exits = new Set<(error: Error) => void>();
@@ -61,17 +70,35 @@ export class HarnessTransport {
       this.child.stdin.write(`${JSON.stringify(value)}\n`, (error) => (error ? reject(error) : resolve())),
     );
   }
-  request(method: string, params: RecordValue = {}): Promise<RecordValue> {
+  request(method: string, params: RecordValue = {}, options: HarnessRequestOptions = {}): Promise<RecordValue> {
     if (this.failed) return Promise.reject(this.failed);
+    if (options.signal?.aborted) return Promise.reject(options.signal.reason ?? new Error('External request cancelled'));
     const id = randomUUID();
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abort);
+      };
+      const cancel = (error: Error) => {
+        if (!this.pending.delete(id)) return;
+        cleanup();
+        // An abandoned response is not evidence that the native operation was cancelled.
+        reject(error);
+      };
+      const abort = () => cancel(options.signal?.reason instanceof Error ? options.signal.reason : new Error('External request cancelled'));
+      this.pending.set(id, { method, resolve, reject, cleanup });
+      options.signal?.addEventListener('abort', abort, { once: true });
+      if (options.timeoutMs !== undefined) {
+        if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
+          cancel(new Error('External request timeout must be positive'));
+          return;
+        }
+        timer = setTimeout(() => cancel(new HarnessProtocolError(method, 'request_timeout', `${method} did not acknowledge before the control deadline`)), options.timeoutMs);
+      }
       void this.send(
         this.protocol === 'pi' ? { ...params, type: method, id } : { jsonrpc: '2.0', id, method, params },
-      ).catch((error) => {
-        this.pending.delete(id);
-        reject(error);
-      });
+      ).catch((error) => cancel(error instanceof Error ? error : new Error(String(error))));
     });
   }
   close(): Promise<void> {
@@ -92,7 +119,7 @@ export class HarnessTransport {
   private fail(value: unknown) {
     if (this.failed) return;
     this.failed = value instanceof Error ? value : new Error(String(value));
-    for (const waiter of this.pending.values()) waiter.reject(this.failed);
+    for (const waiter of this.pending.values()) { waiter.cleanup(); waiter.reject(this.failed); }
     this.pending.clear();
     for (const listener of this.exits) listener(this.failed);
   }
@@ -122,23 +149,28 @@ export class HarnessTransport {
   private receive(message: RecordValue) {
     const id = message.id === undefined ? undefined : String(message.id);
     if (
-      id &&
+      id !== undefined &&
       (Object.hasOwn(message, 'result') || Object.hasOwn(message, 'error') || message.type === 'response')
     ) {
       const waiter = this.pending.get(id);
       if (waiter) {
         this.pending.delete(id);
+        waiter.cleanup();
         if (message.error || message.success === false)
           waiter.reject(
-            new Error(
+            new HarnessProtocolError(
+              waiter.method,
+              typeof record(message.error).code === 'number' || typeof record(message.error).code === 'string'
+                ? record(message.error).code as number | string : undefined,
               text(record(message.error).message) || text(message.error) || 'External Agent request failed',
+              record(message.error).data,
             ),
           );
         else waiter.resolve(record(this.protocol === 'pi' ? message.data : message.result));
       }
       return;
     }
-    if (id && typeof message.method === 'string') {
+    if (this.protocol === 'rpc' && id !== undefined && typeof message.method === 'string') {
       const handler = this.requestHandler;
       void (
         handler

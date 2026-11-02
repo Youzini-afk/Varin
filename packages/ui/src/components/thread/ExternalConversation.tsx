@@ -3,8 +3,8 @@ import {
   createExternalAgentsHttpAPI,
   ExternalAgentError,
   getRuntimeEndpointGeneration,
+  subscribeRuntimeEndpointChanged,
   type ExternalConversationSnapshot,
-  type ExternalInteraction,
   type ExternalItem,
   type ExternalTurn,
   type ExternalObservation,
@@ -28,7 +28,6 @@ import {
 } from '@/components/chat/composer/imageAttachments';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { ConversationScrollbar } from '@/components/conversation/ConversationScrollbar';
 import { ExternalOverview } from './ExternalOverview';
 import { ChatFileChangePreview } from '@/components/conversation/ChatFileChangePreview';
@@ -37,6 +36,10 @@ import { PartialJson } from '@/lib/interactive-ui/partial-json';
 import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
 import { toast } from '@/components/ui';
 import { ChatAgentMessageBubble } from '@/components/conversation/ChatAgentMessageBubble';
+import { ExternalInteractionForm } from './ExternalInteractionForm';
+import { ExternalSessionControls } from './ExternalSessionControls';
+import { externalSessionInput } from './externalSessionChoice';
+import { ExternalAuthentication } from './ExternalAuthentication';
 
 const describe = (value: unknown): string =>
   typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2);
@@ -363,122 +366,24 @@ function Messages({
     </>
   );
 }
-function Interaction({
-  request,
-  pending,
-  respond,
-}: {
-  request: ExternalInteraction;
-  pending: boolean;
-  respond(value: { optionId?: string; answers?: Record<string, string[]>; text?: string }): void;
-}) {
-  const { t } = useI18n();
-  const [answers, setAnswers] = React.useState<Record<string, string[]>>({});
-  const [free, setFree] = React.useState<Record<string, string>>({});
-  const [value, setValue] = React.useState('');
-  return (
-    <section
-      className="mb-3 max-h-[50vh] overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-lg"
-      aria-label={request.title}
-    >
-      <p className="mb-3 font-medium">{request.title}</p>
-      {request.detail && (
-        <pre className="mb-3 whitespace-pre-wrap break-all typography-meta text-muted-foreground">
-          {request.detail}
-        </pre>
-      )}
-      <form
-        className="space-y-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          respond({
-            answers: Object.fromEntries(
-              (request.questions ?? []).map((q) => [
-                q.id,
-                [...(answers[q.id] ?? []), ...(free[q.id]?.trim() ? [free[q.id]!] : [])],
-              ]),
-            ),
-            text: value,
-          });
-        }}
-      >
-        {request.questions?.map((q) => (
-          <fieldset key={q.id} className="space-y-2">
-            <legend className="mb-2 typography-meta font-medium">{q.question}</legend>
-            {q.options?.map((option) => (
-              <label
-                key={option.label}
-                className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/70 p-3 typography-meta hover:bg-muted"
-              >
-                <input
-                  className="mt-1 shrink-0 accent-[var(--primary)]"
-                  type={q.multiple ? 'checkbox' : 'radio'}
-                  name={q.id}
-                  disabled={pending}
-                  checked={answers[q.id]?.includes(option.label) ?? false}
-                  onChange={(event) =>
-                    setAnswers((old) => ({
-                      ...old,
-                      [q.id]: q.multiple
-                        ? event.target.checked
-                          ? [...(old[q.id] ?? []), option.label]
-                          : (old[q.id] ?? []).filter((v) => v !== option.label)
-                        : [option.label],
-                    }))
-                  }
-                />
-                <span className="min-w-0 break-words">
-                  {option.label}
-                  {option.description && (
-                    <span className="mt-1 block text-muted-foreground">{option.description}</span>
-                  )}
-                </span>
-              </label>
-            ))}
-            <textarea
-              className="min-h-16 w-full rounded-lg border border-border bg-background p-3 typography-meta"
-              aria-label={`${q.question} · ${t('external.answer')}`}
-              value={free[q.id] ?? ''}
-              onChange={(event) => setFree((old) => ({ ...old, [q.id]: event.target.value }))}
-            />
-          </fieldset>
-        ))}
-        {request.options.map((option) => (
-          <Button
-            key={option.id}
-            type="button"
-            variant="outline"
-            disabled={pending}
-            onClick={() => respond({ optionId: option.id })}
-            className="mr-2 whitespace-normal text-left"
-          >
-            {option.label}
-          </Button>
-        ))}
-        {!request.options.length && !request.questions?.length && (
-          <textarea
-            className="min-h-20 w-full rounded-lg border border-border bg-background p-3"
-            aria-label={t('external.answer')}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-          />
-        )}
-        {!request.options.length && (
-          <Button type="submit" disabled={pending}>
-            {t('external.confirm')}
-          </Button>
-        )}
-      </form>
-    </section>
-  );
-}
 export function ExternalConversationView({ id, readOnly = false }: { id: string; readOnly?: boolean }) {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <ExternalConversationSession key={`${host}:${id}`} id={id} host={host} readOnly={readOnly} />;
+}
+function ExternalConversationSession({ id, host, readOnly }: { id: string; host: number; readOnly: boolean }) {
   const { t } = useI18n();
-  const host = getRuntimeEndpointGeneration();
   const api = React.useMemo(() => createExternalAgentsHttpAPI(host), [host]);
   const [snapshot, setSnapshot] = React.useState<ExternalConversationSnapshot>();
   const [error, setError] = React.useState('');
   const [pending, setPending] = React.useState(false);
+  const [failure, setFailure] = React.useState<unknown>();
+  const [terminating, setTerminating] = React.useState(false);
+  const acting = React.useRef(false);
+  const terminatingRef = React.useRef(false);
+  const refreshView = React.useRef<() => Promise<void>>(async () => {});
+  const mounted = React.useRef(true);
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const isCurrent = () => mounted.current && host === getRuntimeEndpointGeneration();
   const [details, setDetails] = React.useState(false);
   const [earlier, setEarlier] = React.useState<ExternalItem[]>([]);
   const [previous, setPrevious] = React.useState<number | null>();
@@ -544,7 +449,7 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
         while (dirty && !controller.signal.aborted) {
           dirty = false;
           const value = await api.read(id, undefined, controller.signal);
-          if (!controller.signal.aborted) {
+          if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) {
             current = value;
             setSnapshot(value);
             setPrevious((old) => (old === undefined ? (value.previous ?? null) : old));
@@ -559,11 +464,13 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
           frame = requestAnimationFrame(render);
       }
     };
+    refreshView.current = refresh;
     void refresh();
     void api
       .observe(
         id,
         (event) => {
+          if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
           if (event.kind === 'unavailable') {
             setError(event.message);
             return;
@@ -583,8 +490,9 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
     return () => {
       controller.abort();
       cancelAnimationFrame(frame);
+      refreshView.current = async () => {};
     };
-  }, [api, id]);
+  }, [api, id, host]);
   React.useLayoutEffect(() => {
     if (follow.current && viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight;
   }, [snapshot]);
@@ -601,16 +509,18 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
       return;
     useThreadDraftStore.getState().patch(key, { externalInput: undefined });
   }, [snapshot?.turns, draft.externalInput, key]);
-  const act = async (operation: () => Promise<unknown>) => {
-    setPending(true);
-    setError('');
+  const act = async (operation: () => Promise<unknown>, refresh = false) => {
+    if (acting.current || !isCurrent()) return;
+    acting.current = true;
+    setPending(true); setError(''); setFailure(undefined);
     try {
       await operation();
+      if (refresh && isCurrent()) await refreshView.current();
     } catch (error) {
-      if (host === getRuntimeEndpointGeneration())
-        setError(error instanceof Error ? error.message : String(error));
+      if (isCurrent()) setFailure(error);
     } finally {
-      if (host === getRuntimeEndpointGeneration()) setPending(false);
+      acting.current = false;
+      if (isCurrent()) setPending(false);
     }
   };
   const addFiles = async (files: File[]) => {
@@ -620,10 +530,12 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
     try {
       for (const file of files) {
         if (!file.type.startsWith('image/')) throw new Error(t('external.attachments'));
-        insertion.append(await fileToImageAttachment(file));
+        const image = await fileToImageAttachment(file);
+        if (!isCurrent()) return;
+        insertion.append(image);
       }
     } catch (error) {
-      setError(String(error));
+      if (isCurrent()) setError(String(error));
     } finally {
       insertion.dispose();
     }
@@ -642,95 +554,15 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
   const model = draft.externalModels?.[c.configurationId] ?? '';
   const unresolvedInput = Boolean(draft.externalInput && !pending);
   const options = draft.externalOptions?.[c.configurationId] ?? {};
-  const option = (value: { thinking?: string; mode?: string }) =>
-    patch({ externalOptions: { ...draft.externalOptions, [c.configurationId]: { ...options, ...value } } });
-  const thinking = snapshot.capabilities?.models.find((m) => m.id === model)?.thinkingLevels;
+  const choice = { model, ...options };
+  const changeChoice = (value: import('./externalSessionChoice').ExternalSessionChoice) => patch({
+    externalModels: { ...draft.externalModels, [c.configurationId]: value.model ?? '' },
+    externalOptions: { ...draft.externalOptions, [c.configurationId]: { thinking: value.thinking, mode: value.mode, config: value.config } },
+  });
+  const authentication = failure instanceof ExternalAgentError ? failure.details?.authentication : undefined;
+  const errorText = failure instanceof Error ? failure.message : failure ? String(failure) : error;
   const messages = [...new Map([...earlier, ...snapshot.items].map((item) => [item.id, item])).values()];
-  const controls = (
-    <>
-      {thinking?.length ? (
-        <Select
-          value={options.thinking || '__default'}
-          onValueChange={(value) => option({ thinking: value === '__default' ? '' : value })}
-        >
-          <SelectTrigger
-            className="h-7 w-auto border-none bg-transparent typography-meta"
-            aria-label={t('chat.context.thinking')}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__default">{t('chat.modelControls.default')}</SelectItem>
-            {thinking.map((level) => (
-              <SelectItem key={level} value={level}>
-                {level}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : null}
-      {snapshot.capabilities?.models.length ? (
-        <Select
-          value={model || '__default'}
-          disabled={pending}
-          onValueChange={(value) =>
-            patch({
-              externalModels: {
-                ...draft.externalModels,
-                [c.configurationId]: value === '__default' ? '' : value,
-              },
-            })
-          }
-        >
-          <SelectTrigger className="h-7 w-auto max-w-56 border-none bg-transparent typography-meta">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__default">{t('external.inherit')}</SelectItem>
-            {snapshot.capabilities.models.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                {m.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : (
-        <input
-          className="w-40 min-w-0 bg-transparent typography-meta text-muted-foreground outline-none"
-          aria-label={t('external.model')}
-          placeholder={t('external.inherit')}
-          value={model}
-          onChange={(event) =>
-            patch({ externalModels: { ...draft.externalModels, [c.configurationId]: event.target.value } })
-          }
-        />
-      )}
-      <button type="button" title={t('external.details')} onClick={() => setDetails(true)}>
-        <HarnessSelector value={c.configurationId} />
-      </button>
-      {snapshot.capabilities?.modes?.length ? (
-        <Select
-          value={options.mode || '__default'}
-          onValueChange={(value) => option({ mode: value === '__default' ? '' : value })}
-        >
-          <SelectTrigger
-            className="h-7 w-auto border-none bg-transparent typography-meta"
-            aria-label={t('external.mode')}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__default">{t('external.inherit')}</SelectItem>
-            {snapshot.capabilities.modes.map((mode) => (
-              <SelectItem key={mode.id} value={mode.id}>
-                {mode.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : null}
-    </>
-  );
+  const controls = <button type="button" title={t('external.details')} onClick={() => setDetails(true)}><HarnessSelector value={c.configurationId} /></button>;
   return (
     <section className="regular-chat-view relative flex h-full min-h-0 min-w-0 flex-col">
       <div ref={track} className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
@@ -752,6 +584,7 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
                     onClick={() =>
                       void act(async () => {
                         const page = await api.read(id, previous);
+                        if (!isCurrent()) return;
                         const node = viewport.current;
                         if (node) prepend.current = { height: node.scrollHeight, top: node.scrollTop };
                         follow.current = false;
@@ -771,28 +604,39 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
             <div className="shrink-0 pb-4 pt-2">
               <div className="chat-input-column">
                 {snapshot.interactions.map((request) => (
-                  <Interaction
+                  <ExternalInteractionForm
                     key={request.id}
                     request={request}
                     pending={pending}
-                    respond={(answer) => void act(() => api.respond(id, request.id, answer))}
+                    respond={(answer) => void act(() => api.respond(id, request.id, answer), true)}
                   />
                 ))}
-                {error && (
+                {errorText && (
                   <p role="alert" className="mb-3 break-words typography-meta text-destructive">
-                    {error}
+                    {errorText}
                   </p>
                 )}
+                {authentication && <ExternalAuthentication authentication={authentication} pending={pending}
+                  authenticate={methodId => void act(() => api.authenticate(id, methodId), true)} />}
+                {!snapshot.connected && <div className="mb-3 space-y-2 typography-meta text-muted-foreground">
+                  <p>{t('external.prepareHint')}</p>
+                  <Button type="button" variant="outline" disabled={pending} onClick={() => void act(() => api.connect(id), true)}>{t('external.connect')}</Button>
+                </div>}
+                {snapshot.capabilities && <div className="mb-3"><ExternalSessionControls capabilities={snapshot.capabilities} choice={choice}
+                  onRetryModels={() => void act(() => api.connect(id), true)}
+                  disabled={pending || unresolvedInput} onChange={changeChoice} onCommand={text => { patch({ text: `${draft.text}${draft.text ? '\n' : ''}${text}` }); editor.current?.focus(); }} /></div>}
                 {unresolvedInput && (
                   <div className="mb-3 typography-meta text-muted-foreground">
                     <p>{t('external.sendUnconfirmed')}</p>
                     <p className="line-clamp-2 whitespace-pre-wrap">{draft.externalInput!.text}</p>
                     <Button
                       variant="ghost"
+                      disabled={pending || !snapshot.connected || c.needsReview}
                       onClick={() =>
                         void act(async () => {
                           const request = draft.externalInput!;
                           await api.send(id, request.key, request);
+                          if (!isCurrent()) return;
                           patch({ externalInput: undefined });
                         })
                       }
@@ -806,13 +650,26 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
                     {t('external.review')}
                     <Button
                       variant="ghost"
-                      disabled={pending}
-                      onClick={() => void act(() => api.connect(id))}
+                      disabled={pending || !snapshot.connected}
+                      onClick={() => void act(() => api.continueConversation(id), true)}
                     >
-                      {t('external.connect')}
+                      {t('external.continue')}
                     </Button>
                   </div>
                 )}
+                {active?.status === 'stopping' && <div className="mb-3 space-y-2 typography-meta text-muted-foreground">
+                  <p>{t('external.terminateHint')}</p>
+                  <Button type="button" variant="outline" disabled={terminating} onClick={() => {
+                    if (terminatingRef.current || !isCurrent()) return;
+                    terminatingRef.current = true; setTerminating(true);
+                    void api.stop(id, active.id, true).then(async () => {
+                      if (!isCurrent()) return;
+                      await refreshView.current();
+                    }).catch(error => { if (isCurrent()) setFailure(error); }).finally(() => {
+                      terminatingRef.current = false; if (isCurrent()) setTerminating(false);
+                    });
+                  }}>{t('external.terminate')}</Button>
+                </div>}
                 {queued.length > 0 && (
                   <p className="mb-2 typography-meta text-muted-foreground">
                     {t('external.queued')} · {queued.length}
@@ -822,13 +679,12 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (pending || unresolvedInput || (!draft.text.trim() && !draft.images.length)) return;
+                  if (acting.current || pending || unresolvedInput || !snapshot.connected || c.needsReview || snapshot.capabilities?.images === false && draft.images.length || (!draft.text.trim() && !draft.images.length)) return;
                   const request = draft.externalInput ?? {
                     key: crypto.randomUUID(),
                     text: draft.text,
                     images: draft.images.map((v) => ({ data: v.data, mimeType: v.mimeType })),
-                    ...(model ? { model } : {}),
-                    ...options,
+                    ...externalSessionInput(choice, snapshot.capabilities),
                   };
                   patch({ externalInput: request });
                   const originalText = draft.text,
@@ -838,7 +694,7 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
                       await api.send(id, request.key, request);
                     } catch (error) {
                       if (
-                        error instanceof ExternalAgentError &&
+                        isCurrent() && error instanceof ExternalAgentError &&
                         error.status >= 400 &&
                         error.status < 500 &&
                         error.code !== 'host_changed' &&
@@ -847,6 +703,7 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
                         patch({ externalInput: undefined });
                       throw error;
                     }
+                    if (!isCurrent()) return;
                     const current = useThreadDraftStore.getState().drafts[key];
                     patch({
                       ...(current?.text === originalText ? { text: '' } : {}),
@@ -884,7 +741,7 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
                   modelDisabled={pending}
                   attachmentDisabled={pending}
                   imageDisabled={snapshot.capabilities?.images === false}
-                  sendDisabled={pending || unresolvedInput || (!draft.text.trim() && !draft.images.length)}
+                  sendDisabled={pending || unresolvedInput || !snapshot.connected || Boolean(c.needsReview) || snapshot.capabilities?.images === false && Boolean(draft.images.length) || (!draft.text.trim() && !draft.images.length)}
                   pending={pending}
                   active={Boolean(active)}
                   retrying={false}
@@ -935,15 +792,13 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
               <dt>{snapshot.connected ? t('external.connected') : t('external.disconnected')}</dt>
               <dd className="break-all text-muted-foreground">{c.sessionId}</dd>
             </div>
+            {snapshot.capabilities?.protocol && <div><dt>{t('external.protocol')}</dt><dd className="text-muted-foreground">
+              {snapshot.capabilities.protocol.name} · {snapshot.capabilities.protocol.version} · {snapshot.capabilities.protocol.agentVersion}
+            </dd></div>}
           </dl>
           <Button
-            disabled={pending}
-            onClick={() =>
-              void act(async () => {
-                await api.connect(id);
-                setSnapshot(await api.read(id));
-              })
-            }
+            disabled={pending || readOnly}
+            onClick={() => void act(() => api.connect(id), true)}
           >
             {t('external.connect')}
           </Button>

@@ -307,7 +307,7 @@ const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
 createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);const reply=result=>send({jsonrpc:'2.0',id:m.id,result});
 if(m.method==='initialize')reply({});if(m.method==='thread/start'||m.method==='thread/resume')reply({thread:{id:'external-native-session'}});
 if(m.method==='model/list')reply({data:[]});if(m.method==='turn/start'){reply({turn:{id:'external-native-turn'}});writeFileSync('external-result.txt','External harness wrote this');
-send({method:'item/completed',params:{threadId:'external-native-session',item:{id:'external-answer',type:'agentMessage',text:'EXTERNAL_HARNESS_RESULT'}}});
+send({method:'item/completed',params:{threadId:'external-native-session',turnId:'external-native-turn',item:{id:'external-answer',type:'agentMessage',text:'EXTERNAL_HARNESS_RESULT'}}});
 send({method:'turn/completed',params:{threadId:'external-native-session',turn:{id:'external-native-turn',status:'completed'}}});}});`);
       const configuration = await external.settings();
       await external.configure({ defaultAgent: null, agents: [{ id: 'fixture', name: 'External fixture', harness: 'codex', enabled: true, command: process.execPath, args: [executable] }] }, configuration.revision, 'external-fixture');

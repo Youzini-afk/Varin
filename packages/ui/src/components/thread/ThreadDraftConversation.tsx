@@ -2,8 +2,12 @@ import React from 'react';
 import { createExternalAgentsHttpAPI, ExternalAgentError } from '@varin/application-client';
 import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { HarnessSelector } from './HarnessSelector';
+import { ExternalSessionControls } from './ExternalSessionControls';
+import { externalSessionInput, type ExternalSessionChoice } from './externalSessionChoice';
+import { ExternalAuthentication } from './ExternalAuthentication';
+import { useExternalDraftPreparation } from './useExternalDraftPreparation';
 import { documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
-import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
+import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
 import { ThreadComposer } from './ThreadComposer';
 import { ThreadAgentControls } from './ThreadAgentControls';
 import { useThreadWorkFocus } from './useThreadWorkFocus';
@@ -36,10 +40,12 @@ import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { Departure } from '@/components/motion/Departure';
 import { tapHaptic } from '@/lib/motion/haptics';
 
-/** Local composition has no execution identity. The first explicit send creates one. */
+/** Native composition stays local until send; external preparation binds a session without model input. */
 export function ThreadDraftConversation({ api, draftKey, handoff }: { api: ThreadsAPI; draftKey: string; handoff: MessageHandoff }) {
   const externalSettings = useExternalAgents();
   const [externalBusy, setExternalBusy] = React.useState(false);
+  const externalSending = React.useRef(false);
+  const [externalFailure, setExternalFailure] = React.useState<unknown>();
   const { t } = useI18n();
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const workFocus = useThreadWorkFocus(draftKey, draft.workspacePath);
@@ -56,15 +62,29 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const pdfInput = React.useRef<HTMLInputElement>(null);
   const reading = React.useRef<object | null>(null);
   const [readingFiles, setReadingFiles] = React.useState(false);
-  const generation = getRuntimeEndpointGeneration();
+  const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  const sourcePath = draft.sourceSelection?.path ?? draft.workspacePath;
+  const preparation = useExternalDraftPreparation({ draftKey, host: generation, configurationId: draft.harnessId, cwd: sourcePath, name: external?.name });
+  const capabilities = preparation.snapshot?.capabilities;
+  const externalReady = Boolean(preparation.snapshot?.connected && capabilities && !preparation.snapshot.conversation.needsReview);
+  const externalChoice = draft.harnessId ? { model: draft.externalModels?.[draft.harnessId], ...draft.externalOptions?.[draft.harnessId] } : {};
+  const changeExternalChoice = (choice: ExternalSessionChoice) => {
+    if (!draft.harnessId) return;
+    patch({ externalModels: { ...draft.externalModels, [draft.harnessId]: choice.model ?? '' },
+      externalOptions: { ...draft.externalOptions, [draft.harnessId]: { thinking: choice.thinking, mode: choice.mode, config: choice.config } } });
+  };
+  const preparationFailure = externalFailure ?? preparation.error;
+  const authentication = preparationFailure instanceof ExternalAgentError ? preparationFailure.details?.authentication : undefined;
+  const preparationError = preparationFailure instanceof Error ? preparationFailure.message : preparationFailure ? String(preparationFailure) : undefined;
   const reducedMotion = usePrefersReducedMotion();
   React.useLayoutEffect(() => { handoff.select(String(generation), draftKey, true, reducedMotion); }, [handoff, generation, draftKey, reducedMotion]);
   const mounted = React.useRef(true);
   const currentDraft = React.useRef(draftKey);
   currentDraft.current = draftKey;
-  React.useEffect(() => { reading.current = null; setReadingFiles(false); }, [draftKey, generation]);
+  React.useEffect(() => { reading.current = null; setReadingFiles(false); externalSending.current = false; setExternalBusy(false); setExternalFailure(undefined); setError(undefined); }, [draftKey, generation]);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   React.useEffect(() => {
+    if (draft.harnessId) return;
     let active = true; let request = 0;
     const refresh = () => {
       const id = ++request;
@@ -76,13 +96,13 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       if (event.type === 'stream-ready' || event.type === 'settings-changed' && event.owner === 'agent-settings') { refresh(); refreshSettings(); }
     });
     return () => { active = false; unsubscribe(); };
-  }, [api, t]);
+  }, [api, draft.harnessId, t]);
   const availableThinking = models.find(item => item.providerId === draft.model?.providerId && item.modelId === draft.model?.modelId)?.thinkingLevels;
   const model = draft.model && availableThinking?.length ? { ...draft.model,
     thinkingLevel: draft.model.thinkingLevel && availableThinking.includes(draft.model.thinkingLevel) ? draft.model.thinkingLevel : availableThinking[0],
   } : draft.model;
   React.useEffect(() => {
-    if (model?.providerId || model?.modelId) return;
+    if (draft.harnessId || model?.providerId || model?.modelId) return;
     const controller = new AbortController();
     void createModelConnectionsHttpAPI(generation).readSettings(draft.workspacePath, controller.signal).then(settings => {
       if (controller.signal.aborted || generation !== getRuntimeEndpointGeneration()) return;
@@ -94,7 +114,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       } });
     }).catch(cause => { if (!controller.signal.aborted) setModelError(cause instanceof Error ? cause.message : String(cause)); });
     return () => controller.abort();
-  }, [generation, model?.providerId, model?.modelId, draft.workspacePath, patch, settingsRevision]);
+  }, [generation, draft.harnessId, model?.providerId, model?.modelId, draft.workspacePath, patch, settingsRevision]);
   React.useSyncExternalStore(subscribeEditorContextAttachments, getEditorContextAttachmentsRevision, () => 0);
   const editorContext = listEditorContextAttachments(threadHostKey(), draftKey);
   const buckets = useInlineCommentDraftStore(state => state.drafts);
@@ -103,20 +123,13 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   });
   const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
   const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.pdfs?.length || editorContext.length || inlineDrafts.length);
-  const acceptsImages = draft.harnessId ? undefined : models.find(item => item.providerId === model?.providerId && item.modelId === model?.modelId)?.acceptsImages;
-  const sending = externalBusy || draft.firstSend?.status === 'sending';
-  const locked = externalBusy || Boolean(draft.firstSend) || Boolean(draft.externalInput);
-  const sourcePath = draft.sourceSelection?.path ?? draft.workspacePath;
+  const acceptsImages = draft.harnessId ? capabilities?.images : models.find(item => item.providerId === model?.providerId && item.modelId === model?.modelId)?.acceptsImages;
+  const sending = externalBusy || preparation.busy || draft.firstSend?.status === 'sending';
+  const locked = externalBusy || preparation.busy || Boolean(draft.firstSend) || Boolean(draft.externalInput);
   const changeHarness = (harnessId: string | null) => {
-    if (!draft.externalConversationId) { patch({ harnessId }); return; }
-    setExternalBusy(true);
-    void (async () => {
-      const api = createExternalAgentsHttpAPI(generation), original = await api.read(draft.externalConversationId!);
-      if (original.turns.length) { await useExternalAgentStore.getState().refresh(); useExternalAgentStore.getState().select(original.conversation.id); return; }
-      await api.update(original.conversation.id, original.conversation.revision, { deleted: true });
-      patch({ harnessId, externalConversationId: undefined, externalInput: undefined });
-      await useExternalAgentStore.getState().refresh();
-    })().catch(error => setError(error instanceof Error ? error.message : String(error))).finally(() => setExternalBusy(false));
+    if (harnessId === draft.harnessId || externalSending.current) return;
+    setError(undefined); setExternalFailure(undefined);
+    void preparation.change({ harnessId });
   };
   const firstMessage = useFirstMessagePreview(draftKey, false, handoff);
   const addFiles = async (files: File[]) => {
@@ -140,10 +153,12 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { insertion.dispose(); if (current()) { reading.current = null; setReadingFiles(false); } }
   };
-  const sourceChanged = React.useCallback((sourceSelection: DraftSourceSelection) => patch({ sourceSelection,
-    workspacePath: sourceSelection.resourceOwner.kind === 'local' ? sourceSelection.path || undefined : undefined }), [patch]);
+  const sourceChanged = (sourceSelection: DraftSourceSelection) => {
+    if (externalSending.current) return;
+    void preparation.change({ sourceSelection, workspacePath: sourceSelection.resourceOwner.kind === 'local' ? sourceSelection.path || undefined : undefined });
+  };
   const ignorePrepared = React.useCallback(() => {}, []);
-  const sendDisabled = sending || readingFiles || !hasInput || (draft.harnessId ? !external?.enabled : !model?.providerId || !model.modelId) || acceptsImages === false && Boolean(draft.images.length);
+  const sendDisabled = sending || readingFiles || !hasInput || (draft.harnessId ? !external?.enabled || !externalReady : !model?.providerId || !model.modelId) || acceptsImages === false && Boolean(draft.images.length);
   return <section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Conversation draft">
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -157,29 +172,31 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         <h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{sourcePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(sourcePath) }) : t('chat.emptyState.draftTitle')}</h1>
       </Departure>
       <form className="space-y-2" onSubmit={event => {
-        event.preventDefault(); if (sendDisabled || reading.current) return;
+        event.preventDefault(); if (sendDisabled || reading.current || externalSending.current) return;
         if (draft.harnessId) {
           const owner = generation;
+          const current = () => mounted.current && currentDraft.current === draftKey && owner === getRuntimeEndpointGeneration();
           if (draft.pdfs?.length) { setError(t('external.attachments')); return; }
           if (draft.sourceSelection && (draft.sourceSelection.resourceOwner.kind !== 'local' || draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return; }
-          const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext), images: draft.images.map(image => ({ data: image.data, mimeType: image.mimeType })), ...(draft.externalModels?.[draft.harnessId] ? { model: draft.externalModels[draft.harnessId] } : {}) };
-          patch({ externalInput: request }); setExternalBusy(true); setError(undefined);
+          const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext), images: draft.images.map(image => ({ data: image.data, mimeType: image.mimeType })), ...externalSessionInput(externalChoice, capabilities) };
+          patch({ externalInput: request }); externalSending.current = true; setExternalBusy(true); setError(undefined); setExternalFailure(undefined);
           void (async () => {
             const externalApi = createExternalAgentsHttpAPI(owner);
-            const conversation = draft.externalConversationId ? { id: draft.externalConversationId } : await externalApi.create({ key: draftKey, configurationId: draft.harnessId!, ...(sourcePath ? { cwd: sourcePath } : {}), title: request.text.split('\n')[0]?.slice(0, 120) || external?.name || 'Agent' });
-            patch({ externalConversationId: conversation.id });
+            const conversation = preparation.snapshot!.conversation;
+            if (draft.externalConversationHost !== owner || conversation.id !== draft.externalConversationId) throw new Error(t('external.prepareHint'));
             await externalApi.send(conversation.id, request.key, request);
+            if (!current()) return;
             await useExternalAgentStore.getState().refresh();
-            if (owner === getRuntimeEndpointGeneration()) {
+            if (current()) {
               const current = useThreadDraftStore.getState().drafts[draftKey];
-              useThreadDraftStore.getState().patch(`external-draft:${owner}:${conversation.id}`, { externalModels: current?.externalModels,
+              useThreadDraftStore.getState().patch(`external-draft:${owner}:${conversation.id}`, { externalModels: current?.externalModels, externalOptions: current?.externalOptions,
                 ...(current?.text !== draft.text ? { text: current?.text ?? '' } : {}), ...(current?.images !== draft.images ? { images: current?.images ?? [] } : {}) });
               useExternalAgentStore.getState().select(conversation.id); useThreadDraftStore.getState().remove(draftKey);
             }
-          })().catch(error => { if (owner === getRuntimeEndpointGeneration()) {
+          })().catch(error => { if (current()) {
             if (error instanceof ExternalAgentError && error.status >= 400 && error.status < 500 && error.code !== 'host_changed' && error.code !== 'input_changed') patch({ externalInput: undefined });
-            setError(error instanceof Error ? error.message : String(error));
-          } }).finally(() => { if (mounted.current && owner === getRuntimeEndpointGeneration()) setExternalBusy(false); });
+            setExternalFailure(error);
+          } }).finally(() => { if (current()) { externalSending.current = false; setExternalBusy(false); } });
           return;
         }
         const settings = useUIStore.getState();
@@ -195,13 +212,37 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           if (inputId && generation === getRuntimeEndpointGeneration()) handoff.accepted(request.key, inputId);
         }, () => { handoff.cancelSubmission(request.key); });
       }}>
-        {(error || modelError || draft.firstSend?.error) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || modelError || draft.firstSend?.error}</p>}
+        {(error || (!draft.harnessId && modelError) || draft.firstSend?.error || preparationError) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || preparationError || (!draft.harnessId && modelError) || draft.firstSend?.error}</p>}
+        {draft.harnessId && <div className="chat-input-column space-y-3">
+          {authentication && <ExternalAuthentication authentication={authentication} pending={sending} authenticate={methodId => {
+            setExternalFailure(undefined); void preparation.authenticate(methodId);
+          }} />}
+          {!externalReady && <div className="space-y-2 typography-meta text-muted-foreground">
+            <p>{t('external.prepareHint')}</p>
+            <Button type="button" variant="outline" disabled={sending || !external?.enabled} onClick={() => {
+              setError(undefined); setExternalFailure(undefined);
+              if (draft.sourceSelection && (draft.sourceSelection.resourceOwner.kind !== 'local' || draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return; }
+              void preparation.prepare();
+            }}>{t(preparation.busy ? 'external.connecting' : 'external.prepare')}</Button>
+            {preparation.busy && draft.externalConversationId && draft.externalConversationHost === generation && <Button type="button" variant="ghost" disabled={preparation.cancelling}
+              onClick={() => void preparation.cancel()}>{t('external.cancelConnection')}</Button>}
+          </div>}
+          {Boolean(preparation.snapshot?.turns.length) && <Button type="button" variant="outline" disabled={sending} onClick={() => {
+            const id = preparation.snapshot!.conversation.id;
+            void useExternalAgentStore.getState().refresh().then(() => {
+              if (mounted.current && currentDraft.current === draftKey && generation === getRuntimeEndpointGeneration()) useExternalAgentStore.getState().select(id);
+            }).catch(cause => { if (generation === getRuntimeEndpointGeneration()) setError(String(cause)); });
+          }}>{t('external.openPrepared')}</Button>}
+          {capabilities && <ExternalSessionControls capabilities={capabilities} choice={externalChoice} disabled={locked} onChange={changeExternalChoice}
+            onRetryModels={() => void preparation.prepare()}
+            onCommand={text => { patch({ text: `${draft.text}${draft.text ? '\n' : ''}${text}` }); editor.current?.focus(); }} />}
+        </div>}
         <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments" onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         <input ref={pdfInput} type="file" accept={DOCUMENT_FILE_ACCEPT} multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         {!draft.harnessId && draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
         <ThreadComposer editorRef={editor} value={draft.text} onChange={text => patch({ text })} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
           agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} onHarnessChange={changeHarness} />}
-          backendControls={draft.harnessId ? <><input aria-label={t('external.model')} className="w-40 min-w-0 bg-transparent px-2 py-1 typography-meta text-muted-foreground placeholder:text-muted-foreground/60 outline-none" placeholder={t('external.inherit')} disabled={locked} value={draft.externalModels?.[draft.harnessId] ?? ''} onChange={event => patch({ externalModels: { ...draft.externalModels, [draft.harnessId!]: event.target.value } })} /><HarnessSelector value={draft.harnessId} disabled={locked} onChange={changeHarness} /></> : undefined}
+          backendControls={draft.harnessId ? <HarnessSelector value={draft.harnessId} disabled={locked} onChange={changeHarness} /> : undefined}
           models={models} providerId={model?.providerId ?? ''} modelId={model?.modelId ?? ''} thinkingLevel={model?.thinkingLevel ?? 'off'}
           onModelChange={(providerId, modelId, thinkingLevel) => patch({ model: { providerId, modelId, thinkingLevel } })}
           modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={acceptsImages === false}
@@ -238,7 +279,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       onOpenChange={setWorkspaceOpen} onCompactChange={() => {}} onSelect={() => {}}>
       {workspaceOpen && <div className="min-h-0 overflow-y-auto"><ThreadSourcePicker api={api} identity={null} initialPath={draft.workspacePath} draftSelection={draft.sourceSelection}
         onDraftSelection={sourceChanged} active={locked} launch={null} prepared={null} onPrepared={ignorePrepared} onPreparingChange={ignorePrepared}
-        onUseChatOnly={() => patch({ workspacePath: undefined, sourceSelection: undefined, preparedSource: null })} /></div>}
+        onUseChatOnly={() => { if (!externalSending.current) void preparation.change({ workspacePath: undefined, sourceSelection: undefined, preparedSource: null }); }} /></div>}
     </WorkOverviewControl>
     </div>
   </section>;
