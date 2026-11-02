@@ -258,6 +258,8 @@ fn tool_output_preview_keeps_records_and_cursors_and_explicit_pages_intact() {
         ("file_read", json!({"path":"source.rs","length":9000})),
         ("process_read", json!({"processId":"process"})),
         ("read_thread", json!({"query":{"kind":"output","itemId":"list","pointer":"/data/records"}})),
+        ("read_thread", json!({"query":{"kind":"observation","observationId":"capture:original","maxBytes":9000}})),
+        ("tool_invoke", json!({"reference":{"name":"read_thread","version":"2"},"arguments":{"query":{"kind":"observation","observationId":"capture:original","maxBytes":9000}}})),
         ("tool_invoke", json!({"reference":{"name":"read_thread","version":"2"},"arguments":{"query":{"kind":"item","itemId":"list"}}})),
     ] {
         request.history.clear();

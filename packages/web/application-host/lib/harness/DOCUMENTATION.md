@@ -114,9 +114,56 @@ execution. Sleep, wake, deletion and Computer cleanup retain their actual stop/r
 owns desktop assignments. Catalog owns follow-up definitions, occurrences, waits and ingress; Host
 observers described in [kernel adapters](../kernel/DOCUMENTATION.md) are transient subscriptions.
 
-Settings actions route to actual owners and frozen Surface targets. Exposure, readiness and permission
-are separate. Project schedules use their existing scheduler and Source Host receipts. See
-[scheduled tasks](../scheduled-tasks/DOCUMENTATION.md) and [MCP authority](../mcp/DOCUMENTATION.md).
+## Settings self-control
+
+`settings_search/read/update/action` share the catalog's field constraints and executable per-verb
+schemas. Discovery does not prove owner availability. Saved layers, merged **configured next-use**
+values and an active Run snapshot are distinct: accepted model requests retain their configuration.
+JSON `set` replaces its declared path; native context tuning exposes leaf fields, while provider/MCP
+patch actions preserve omitted secret fields through their actual owner. Secrets are status-only.
+
+App and Agent-file groups use their original serialized CAS writers. A conflict does not silently
+retry against a new revision. Compound receipts retain original input index, scope, revision, mutation
+certainty and consumption timing; later owner failure never rolls back or erases an earlier commit.
+There is no cross-owner transaction. An owner-normalized/rejected value is returned as actual saved
+state, not falsely acknowledged as the requested input. Async observation failure preserves the last
+known operation identity/state; subsequent status calls retry observation, never the effect. Durable
+status updates compare the original observed record revision and cannot overwrite terminal receipts.
+
+Client writes resolve one authenticated Thread/branch-to-Surface binding for the entire client batch.
+Synchronous UI stores offer same-turn compare-and-swap with value-sensitive opaque revisions. Async
+Desktop IPC owners advertise last-write-wins and refuse a CAS guard they cannot enforce. Missing,
+ambiguous, disconnected or unacknowledged surfaces never imply success.
+
+`self.bot-profile` resolves the admitted Thread's Bot, not a supplied Bot id. Its real record revision
+protects name/instructions/model edits. Name is immediate; instructions/model propagate to the Bot's
+direct conversations at safe request boundaries, not delegated work. A saved profile with failed
+propagation retains the committed revision and reports the separate propagation problem.
+`self.conversation-model` addresses only the admitted Run and uses the original Operation identity for
+selection idempotency. Desired, active and admitted model controls are separate; changing this selection
+does not change Bot profiles, Agent presets or future-session defaults.
+
+The Host extension/MCP approval policy is not Rust Source/Storage authority. Tool enablement selects
+availability, not native grants. Ordinary preference grants do not grant permission-policy management
+or credential routing: compound items are normalized to declared field targets before the gate.
+Static sensitive fields expose explicit management delegation for that field's future values; provider
+credential destination grants instead include the exact base URL/mount, account, transport and opaque
+provider parameters. Validated suffix paths remain below that mount and ordinary model/budget choices
+do not change the credential destination. Custom provider parameters remain conservatively sensitive
+until their owner declares routing semantics; the approval explains that scope. Bypass does
+not silently delegate those management powers. Project policy remains narrowing-only. Smart and
+accept-edits are retained as readable legacy values but are not implemented; their effective behavior
+is normal, and new writes use supported normal/bypass choices. Allow-always's own Agent-settings write
+can advance a submitted global CAS only through that exact admitted before→after transition; any other
+concurrent write still conflicts.
+
+Project schedules use their existing scheduler and Source Host receipts. See [scheduled tasks](../scheduled-tasks/DOCUMENTATION.md)
+and [MCP authority](../mcp/DOCUMENTATION.md).
+
+Compatibility-only compaction recovery, dispatch/worktree knobs, old auto-worktree/auto-accept
+preferences and the unused permission-judge slot remain readable with their stored values, but are
+explicitly unsupported rather than advertised as functioning controls. This does not add a native
+recovery/dispatch/worktree execution implementation; original Source and runtime owners remain intact.
 
 ## Verification
 

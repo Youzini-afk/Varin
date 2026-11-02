@@ -75,6 +75,8 @@ export interface TerminalSessionInfo {
   cwd: string;
   id: string;
   integration: "not-observed" | "ready";
+  /** Oversized OSC frames discarded in this terminal generation, not completed commands. */
+  discardedIntegrationFrames?: number;
   owner: TerminalSessionOwner;
   retainWhenDetached: boolean;
   status: "exited" | "running" | "error";

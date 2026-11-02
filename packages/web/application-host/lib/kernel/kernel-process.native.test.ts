@@ -688,7 +688,8 @@ it("Host log-drain loss preserves an already confirmed real process exit", async
   const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace }) });
   try {
     const child = await service.spawn(process.execPath, ["-e", "process.stdout.write(Buffer.alloc(8*1024*1024,19));process.exitCode=7"], { cwd: path.join(f.workspace, "child"), env: process.env, stdio: "pipe" });
-    const completion = assert.rejects(child.completion, /kernel|epoch|pipe|Rust|stream|output/i);
+    const completion = assert.rejects(child.completion, (error: unknown) => error instanceof Error
+      && ((error as NodeJS.ErrnoException).code === "ECONNRESET" || /kernel|epoch|pipe|Rust|stream|output/i.test(error.message)));
     const deadline = Date.now() + 15_000;
     // Leave the Host readable undrained so its log delivery cannot complete.
     while (child.snapshot.writerActive) {

@@ -14,10 +14,11 @@ import {
   type VarinExtensionHostStateSnapshot,
 } from '@varin/extension-contract';
 import {
-  evaluateGate,
+  evaluatePermissionSubjects,
   validatePermissionMode,
   validatePermissionRule,
   type PermissionPolicy,
+  type PermissionSubject,
   type WorkFocusId,
 } from '@varin/protocol';
 import { compileToolJsonSchema, describeToolSchemaFailure } from '../models/schema.js';
@@ -42,6 +43,7 @@ import { HostToolAdmissionError } from './tool-admission.js';
 import {
   withToolInvocation,
   type ToolInvocationAuthority,
+  type PermissionSettingsRevision,
 } from './tool-invocation.js';
 const object = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -143,6 +145,8 @@ export interface ExtensionToolOwnerOptions {
   runtime: ApplicationExtensionRuntime;
   kernel: KernelClient;
   currentPolicy(runId: string): Promise<PermissionPolicy>;
+  /** Trusted domain normalization; batch items and sensitive management targets keep their real scope. */
+  permissionSubjects?(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<PermissionSubject[] | undefined>;
   /** Domain configuration is captured once by the ordinary Run preparation owner. */
   prepareConfiguration?(run: ExtensionToolRun, required: readonly ExtensionToolBinding[]): Promise<ExtensionToolConfiguration>;
   configurationIdentity?: ExtensionToolConfiguration;
@@ -192,7 +196,7 @@ export async function retainExtensionTool(
       throw new Error('extension_tool_exact_binding_unavailable');
     const validateInput = compileToolJsonSchema(schema.schema),
       validateOutput = compileToolJsonSchema(schema.output_schema);
-    const approved = new Map<string, { identity: string; policy: string; arguments: ReturnType<typeof parseVarinToolJson> }>();
+    const approved = new Map<string, { identity: string; policy: string; subjects: PermissionSubject[]; permissionSettingsRevision?: PermissionSettingsRevision; arguments: ReturnType<typeof parseVarinToolJson> }>();
     let released = false;
     const policy = async (run: string) => {
       const current = await options.currentPolicy(run);
@@ -227,12 +231,11 @@ export async function retainExtensionTool(
       }
       return args;
     };
-    const gate = (call: HostToolCall, current: PermissionPolicy) =>
-      evaluateGate(
-        call.name,
-        object(call.arguments) ? call.arguments : { input: call.arguments },
-        current,
-      );
+    const permissionSubjects = async (call: HostToolCall, signal: AbortSignal) => {
+      const args = object(call.arguments) ? call.arguments : { input: call.arguments };
+      const declared = await options.permissionSubjects?.(call.name, args, signal);
+      return { subjects: declared ?? [{ tool: call.name, arguments: args }], semantic: declared !== undefined };
+    };
     const authority = async (
       call: HostToolCall,
       signal: AbortSignal,
@@ -314,18 +317,20 @@ export async function retainExtensionTool(
         const combined = AbortSignal.any([signal, pin.revocationSignal]);
         combined.throwIfAborted();
         const args = validate(call), identity = canonical(call);
+        const { subjects, semantic } = await permissionSubjects(call, combined);
         let current = await policy(call.runId);
-        const decision = gate(call, current.value),
+        const decision = evaluatePermissionSubjects(subjects, current.value),
           previous = approved.get(call.operationId);
         if (
           decision.decision === 'deny' ||
           (previous &&
             (previous.identity !== identity ||
-              previous.policy !== current.identity))
+              previous.policy !== current.identity || !isDeepStrictEqual(previous.subjects, subjects)))
         )
           throw new Error('extension_tool_permission_changed');
+        let permissionSettingsRevision = previous?.permissionSettingsRevision;
         if (!previous && decision.decision === 'ask')
-          await permissionService(kernel).authorize(
+          permissionSettingsRevision = await permissionService(kernel).authorize(
             call,
             {
               ownerReference: binding.providerKey,
@@ -335,16 +340,17 @@ export async function retainExtensionTool(
               reason: decision.reason ?? 'Extension tool permission required',
             },
             combined,
-            { name: call.name, arguments: object(call.arguments) ? call.arguments : { input: call.arguments } },
+            { name: call.name, arguments: object(call.arguments) ? call.arguments : { input: call.arguments },
+              ...(semantic ? { subjects } : {}) },
           );
         combined.throwIfAborted();
         assertAvailable(call);
         const latest = await policy(call.runId);
         if (latest.identity !== current.identity) {
-          if (gate(call, latest.value).decision !== 'allow') throw new HostToolAdmissionError('extension_tool_permission_changed');
+          if (evaluatePermissionSubjects(subjects, latest.value).decision !== 'allow') throw new HostToolAdmissionError('extension_tool_permission_changed');
           current = latest;
         }
-        approved.set(call.operationId, { identity, policy: current.identity, arguments: args });
+        approved.set(call.operationId, { identity, policy: current.identity, subjects: structuredClone(subjects), ...(permissionSettingsRevision ? { permissionSettingsRevision } : {}), arguments: args });
       },
       async execute(call, signal, owner): Promise<ToolExecutionReceipt> {
         const combined = AbortSignal.any([signal, pin.revocationSignal]);
@@ -355,16 +361,19 @@ export async function retainExtensionTool(
           assertAvailable(call);
           const previous = approved.get(call.operationId),
             current = await policy(call.runId);
+          const { subjects } = await permissionSubjects(call, combined);
           approved.delete(call.operationId);
           if (
             !previous ||
             previous.identity !== canonical(call) ||
             previous.policy !== current.identity ||
-            gate(call, current.value).decision === 'deny'
+            !isDeepStrictEqual(previous.subjects, subjects) ||
+            evaluatePermissionSubjects(subjects, current.value).decision === 'deny'
           )
             throw new Error('authorization changed');
           args = previous.arguments;
-          context = await authority(call, combined, owner);
+          context = { ...await authority(call, combined, owner),
+            ...(previous.permissionSettingsRevision ? { permissionSettingsRevision: previous.permissionSettingsRevision } : {}) };
           combined.throwIfAborted();
           assertAvailable(call);
         } catch {

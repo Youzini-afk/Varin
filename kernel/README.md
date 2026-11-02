@@ -72,7 +72,10 @@ retryable and cannot be reported as successful zero-byte cleanup.
 Branch imports build unpublished immutable candidates in finite upload transactions. Active builders
 retain their base/candidate roots through GC; abort or original-grant revocation releases that retention.
 Final publication checks content ownership again before publishing the branch and original receipt.
-Namespace batches share ancestor rebuilds and leave untouched subtrees intact. Temporary content owners
+Namespace batches share both path and child-index ancestor rebuilds and leave untouched subtrees intact.
+Sorted child patches are applied together with height-aware AVL joins, rather than retaining an
+intermediate index spine for every inserted child. Existing roots and publication receipts are unchanged.
+Temporary content owners
 can be released in transport-sized batches under their original workspace/grant, without one queued
 request per object; a failed cleanup keeps the Host ownership hints available for retry.
 

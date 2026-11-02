@@ -246,6 +246,7 @@ pub(crate) enum Command {
 }
 pub(crate) fn domain(error: varin_runtime::RuntimeError) -> KernelError {
     match error {
+        varin_runtime::RuntimeError::ObservationEpochChanged => KernelError::ContextObservationEpochChanged,
         varin_runtime::RuntimeError::ContextJobAlreadyAdmitted => {
             KernelError::ContextJobAlreadyAdmitted
         }

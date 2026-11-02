@@ -115,6 +115,15 @@ export function createKernelSettingsActionOperationStore(options: {
         if (previous && (previous.threadId !== caller.threadId || previous.branchId !== caller.branchId)) {
           throw new Error('settings operation belongs to a different Thread/branch');
         }
+        if (previous && (previous.entryId !== operation.entryId || previous.verb !== operation.verb)) {
+          throw new Error('settings operation identity cannot change its entry or originating verb');
+        }
+        if (operation.expectedRecordRevision !== undefined && existing?.recordRevision !== operation.expectedRecordRevision) {
+          throw new Error('settings operation observation revision conflict; query the same operation again');
+        }
+        if (previous && !['running', 'unavailable'].includes(previous.state) && previous.state !== operation.state) {
+          throw new Error('a stale observation cannot replace a terminal owner receipt');
+        }
         const now = new Date().toISOString();
         const payload: StoredOperation = {
           id: operation.id,
@@ -136,7 +145,7 @@ export function createKernelSettingsActionOperationStore(options: {
           payloadJson: JSON.stringify(payload),
           threadId: caller.threadId,
           branchId: caller.branchId,
-          ...(typeof existing?.recordRevision === 'number' ? { expectedRecordRevision: existing.recordRevision } : {}),
+          ...(typeof existing?.recordRevision === 'number' ? { expectedRecordRevision: operation.expectedRecordRevision ?? existing.recordRevision } : {}),
         });
       });
     },

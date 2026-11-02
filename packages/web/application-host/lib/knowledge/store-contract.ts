@@ -428,7 +428,7 @@ export interface KnowledgeStore {
   /** O(1) in-process revision for accepted/suggested knowledge mutations. */
   knowledgeRevision(): string;
   putEvent(e: EventInput): Promise<PutEventResult>;
-  listEvents(filter: { sessionId: string; afterId?: NodeId; minTurnIndex?: number }): Promise<StoredEvent[]>;
+  listEvents(filter: { sessionId: string; afterId?: NodeId; minTurnIndex?: number; limit?: number }): Promise<StoredEvent[]>;
   /** Read one organizer coverage row, or null when the source is untouched. */
   getOrganizerProgress(key: string): Promise<OrganizerProgress | null>;
   /** Upsert one organizer coverage row by key. */
