@@ -239,6 +239,9 @@ Windows 启动时将规范化路径转换为子进程可用的目录表示，内
 进程已退出时，输入和 resize 明确返回 `process_exited`；正在停止时返回 `process_stopping`。
 
 Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。
+Windows PTY 在创建控制台后、执行用户命令前保留原 Job 基础进程的对象句柄。主进程退出后，先终止并重新核验
+后来加入同一 Job 的用户子进程，再关闭 ConPTY 并读取到真实 EOF；原控制台进程保留到最后输出排空之后才清理。
+保护对象按原句柄比较，不按进程名或初始数量推断。启动期间无法确认这些对象时，不发布已完成进程树清理的回执。
 Host 对可能仍存在 executor 的启动/停止失败保留 owner，不用旧 PID、HTTP abort 或 Promise reject 虚构退出码。
 进程启动与文本修改遇到短时文件租约时，进入既有物理资源 FIFO；只有冲突范围等待，Storage 控制线程继续服务。
 等待沿用原操作的授权与取消，获准后重新校验来源和物理路径；进程登记启动意图后就释放临时目录租约，不锁住整个进程生命周期。

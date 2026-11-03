@@ -60,6 +60,8 @@ struct Spawned {
     input: Option<Input>,
     master: Option<Box<dyn MasterPty + Send>>,
     readers: Vec<Reader>,
+    #[cfg(windows)]
+    infrastructure: Option<platform::PtyInfrastructure>,
 }
 fn send(output: &Output, event: Value) -> io::Result<()> {
     write_frame(
@@ -126,7 +128,47 @@ fn child_cwd(path: &std::path::Path) -> std::borrow::Cow<'_, std::path::Path> {
     std::borrow::Cow::Borrowed(path)
 }
 
-fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
+#[cfg(windows)]
+#[derive(Debug)]
+struct UnconfirmedPtySpawn(Box<dyn std::error::Error>);
+#[cfg(windows)]
+impl std::fmt::Display for UnconfirmedPtySpawn {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "native PTY setup failed without an exit receipt: {}",
+            self.0
+        )
+    }
+}
+#[cfg(windows)]
+impl std::error::Error for UnconfirmedPtySpawn {}
+#[cfg(windows)]
+fn failed_pty_setup(
+    job: &platform::WorkerJob,
+    pair: Option<portable_pty::PtyPair>,
+    error: Box<dyn std::error::Error>,
+) -> Box<dyn std::error::Error> {
+    let error = match job.abort() {
+        Ok(()) => error,
+        Err(abort) => {
+            io::Error::other(format!("{error}; original Job abort failed: {abort}")).into()
+        }
+    };
+    // TerminateJobObject includes this guardian. If it failed or termination is
+    // still pending, do not let ClosePseudoConsole block this error before any
+    // reader exists. run() propagates this typed error directly to main's exit;
+    // the OS releases these handles and the kernel retains the same Job for
+    // guardian-loss recovery. This is not a successful tree-cleanup receipt.
+    if let Some(pair) = pair {
+        std::mem::forget(pair);
+    }
+    Box::new(UnconfirmedPtySpawn(error))
+}
+fn spawn(
+    config: &Config,
+    #[cfg(windows)] job: &platform::WorkerJob,
+) -> Result<Spawned, Box<dyn std::error::Error>> {
     let executable = super::program::resolve(config)?;
     #[cfg(target_os = "linux")]
     platform::prepare_guardian()?;
@@ -136,32 +178,53 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             cols: config.cols,
             pixel_width: 0,
             pixel_height: 0,
-        })?;
-        let reader = pair.master.try_clone_reader()?;
-        let mut input = pair.master.take_writer()?;
-        // portable-pty creates a fresh ConPTY with INHERIT_CURSOR. There is no
-        // pre-existing surface cursor to inherit: supply the fresh terminal
-        // origin before launching user code, including detached Harness shells.
+        });
         #[cfg(windows)]
-        {
-            input.write_all(b"\x1b[1;1R")?;
-            input.flush()?;
-        }
-        let mut command = CommandBuilder::new(&executable);
-        command.args(&config.args);
-        command.cwd(child_cwd(&config.cwd).as_os_str());
-        command.env_clear();
-        for entry in &config.env {
-            command.env(&entry.name, &entry.value);
-        }
-        let child = pair.slave.spawn_command(command)?;
+        let pair = pair.map_err(|error| failed_pty_setup(job, None, error.into()))?;
+        #[cfg(not(windows))]
+        let pair = pair?;
+        // Keep the master outside this fallible setup: on Windows, failure must
+        // invalidate native infrastructure before its potentially blocking Drop.
+        let prepared = (|| -> Result<Spawned, Box<dyn std::error::Error>> {
+            #[cfg(windows)]
+            let infrastructure = job.capture_pty_infrastructure()?;
+            let reader = pair.master.try_clone_reader()?;
+            let mut input = pair.master.take_writer()?;
+            // portable-pty creates a fresh ConPTY with INHERIT_CURSOR. There is no
+            // pre-existing surface cursor to inherit: supply the fresh terminal
+            // origin before launching user code, including detached Harness shells.
+            #[cfg(windows)]
+            {
+                input.write_all(b"\x1b[1;1R")?;
+                input.flush()?;
+            }
+            let mut command = CommandBuilder::new(&executable);
+            command.args(&config.args);
+            command.cwd(child_cwd(&config.cwd).as_os_str());
+            command.env_clear();
+            for entry in &config.env {
+                command.env(&entry.name, &entry.value);
+            }
+            let child = pair.slave.spawn_command(command)?;
+            Ok(Spawned {
+                child,
+                input: Some(input),
+                master: None,
+                readers: vec![("stdout".into(), reader)],
+                #[cfg(windows)]
+                infrastructure: Some(infrastructure),
+            })
+        })();
+        let mut spawned = match prepared {
+            Ok(spawned) => spawned,
+            #[cfg(windows)]
+            Err(error) => return Err(failed_pty_setup(job, Some(pair), error)),
+            #[cfg(not(windows))]
+            Err(error) => return Err(error),
+        };
         drop(pair.slave);
-        Ok(Spawned {
-            child,
-            input: Some(input),
-            master: Some(pair.master),
-            readers: vec![("stdout".into(), reader)],
-        })
+        spawned.master = Some(pair.master);
+        Ok(spawned)
     } else {
         let mut command = Command::new(&executable);
         command
@@ -169,7 +232,11 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             .current_dir(child_cwd(&config.cwd))
             .env_clear()
             .envs(config.env.iter().map(|v| (&v.name, &v.value)))
-            .stdin(if config.stdin_mode.as_deref() == Some("null") { Stdio::null() } else { Stdio::piped() })
+            .stdin(if config.stdin_mode.as_deref() == Some("null") {
+                Stdio::null()
+            } else {
+                Stdio::piped()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         #[cfg(windows)]
@@ -220,6 +287,8 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             input,
             master: None,
             readers,
+            #[cfg(windows)]
+            infrastructure: None,
         })
     }
 }
@@ -280,14 +349,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         send(&output, json!({"type":"receipt","value":value}))?;
         return Ok(());
     }
+    #[cfg(windows)]
+    let spawned = spawn(&config, &job);
+    #[cfg(not(windows))]
+    let spawned = spawn(&config);
     let Spawned {
         mut child,
         input,
         master,
         readers,
-    } = match spawn(&config) {
+        #[cfg(windows)]
+        infrastructure,
+    } = match spawned {
         Ok(spawned) => spawned,
         Err(error) => {
+            #[cfg(windows)]
+            if error.is::<UnconfirmedPtySpawn>() {
+                return Err(error);
+            }
             let value = json!({"processId": config.process_id, "kernelEpoch": config.kernel_epoch,
                 "status": "failed", "pid": null, "exitCode": null, "signal": null,
                 "reason": format!("process spawn failed: {error}"), "treeConfirmed": true,"spawned":false,"stopApplied":false});
@@ -592,7 +671,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // owning kernel and this control pipe remain alive.
         STOP.store(2, Ordering::Release);
         #[cfg(windows)]
-        control_job.abort();
+        let _ = control_job.abort();
     });
     let mut stop_started: Option<Instant> = None;
     let mut stop_applied = false;
@@ -630,6 +709,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             thread::sleep(Duration::from_millis(10));
         };
     trace(&diagnostic, "target-exit-observed");
+    // A terminated primary can leave clients holding the console open. Stop
+    // those original-Job descendants before either ClosePseudoConsole (which
+    // blocks on older Windows) or EOF, without killing the original host's tail.
+    #[cfg(windows)]
+    if let Some(infrastructure) = &infrastructure {
+        let drain_started = Instant::now();
+        while !job
+            .drain_pty_clients(infrastructure)
+            .map_err(|error| io::Error::other(format!("native PTY client drain: {error}")))?
+        {
+            if drain_started.elapsed() >= Duration::from_secs(5) {
+                return Err(io::Error::other("native PTY clients did not confirm exit").into());
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
     // Close ConPTY while its reader is still draining, not after joining it.
     trace(&diagnostic, "pty-master-lock-started");
     {
@@ -640,10 +735,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         drop(master.take());
     }
     trace(&diagnostic, "pty-close-returned");
-    // ConPTY's console host owns the final screen flush. Killing Job members
-    // before its output pipe reaches EOF can truncate the last output and race
-    // a conhost already tearing down. ClosePseudoConsole above runs alongside
-    // the reader; only then drain any remaining Job descendants.
+    // The retained original console host owns the final screen flush. Only
+    // user-created Job members were stopped above. Keep original infrastructure
+    // alive until actual EOF, then drain every remaining descendant.
     #[cfg(windows)]
     if config.mode == "pty" {
         trace(&diagnostic, "pty-reader-join-started");

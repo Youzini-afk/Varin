@@ -338,6 +338,32 @@ it("a failed native spawn rejects the Host launch without leaving a live writer"
   } finally { await service.dispose(); }
 }, 30_000);
 
+vitestIt.skipIf(!available || process.platform !== "win32")("Windows PTY spawn failure reconciles its owned Job without fabricating a guardian receipt", async () => {
+  const f = await fixture();
+  const processId = "failed-pty-spawn";
+  // Absolute commands bypass PATH lookup. The missing executable fails inside
+  // PTY spawn, after the guardian has created the real ConPTY infrastructure.
+  // Raw process.spawn acknowledges admission, not successful executable launch.
+  const admitted = await f.client.processSpawn({
+    ...f.spawn(processId, "", "pty"),
+    command: path.join(f.workspace, "child", "missing-executable.exe"), args: [],
+  });
+  assert.equal(admitted.pid, null);
+  const stopped = await waitFor(f.client, processId, snapshot => !snapshot.writerActive);
+  assert.equal(stopped.status, "exited");
+  assert.equal(stopped.mode, "pty");
+  assert.equal(stopped.pid, null);
+  assert.equal(stopped.exitCode, null);
+  assert.equal(stopped.signal, null);
+  assert.match(stopped.reason ?? "", /native Job exited; target exit status unavailable/);
+  // Only the retained Job's empty membership confirms cleanup. No guardian
+  // spawned=false/treeConfirmed=true receipt may claim the PTY never existed.
+  await assert.rejects(fs.access(outputFiles(f, processId).receipt), { code: "ENOENT" });
+  assert.equal(f.host.isReady, true);
+  await f.client.processRelease({ workspaceId: "ws", processId });
+  await f.client.fileRemove({ ...f.address, operationId: "failed-pty-remove", path: "child", recursive: true, force: true });
+}, 30_000);
+
 it("kernel death invalidates the Host handle without manufacturing an exit event", async () => {
   const f = await fixture();
   const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace }) });
@@ -447,6 +473,82 @@ it("natural command exit drains descendants before releasing its directory write
   assert.equal(await fs.stat(marker).then(()=>true,()=>false), false);
   await f.client.fileRemove({ ...f.address, operationId: "remove-drained", path: "child", recursive: true, force: true });
 }, 30_000);
+
+for (const exitMode of ["natural", "stopped"] as const) {
+  vitestIt.skipIf(!available || process.platform !== "win32")(`Windows PTY ${exitMode} exit drains inherited-terminal descendants and retains final output`, async () => {
+    const f = await fixture();
+    const processId = `pty-descendants-${exitMode}`;
+    const directory = path.join(f.workspace, "child");
+    const ready = path.join(directory, "descendant-ready.json");
+    const gate = path.join(directory, "finish-primary");
+    const tailReady = path.join(directory, "tail-ready");
+    const tail = `VARIN_PTY_PARENT_TAIL_${exitMode}_COMPLETE`;
+    // Execute files so ConPTY's window title cannot contain our output markers
+    // from an inline command and accidentally satisfy the retained-output checks.
+    await fs.writeFile(path.join(directory, "descendant.cjs"), [
+      "const fs=require('node:fs');",
+      "setInterval(()=>{},1000);",
+      "fs.writeSync(1,'VARIN_PTY_DESCENDANT_READY\\n');",
+      `fs.writeFileSync(${JSON.stringify(ready + ".tmp")},JSON.stringify({pid:process.pid,parentPid:process.ppid,stdinTTY:process.stdin.isTTY,stdoutTTY:process.stdout.isTTY}));`,
+      `fs.renameSync(${JSON.stringify(ready + ".tmp")},${JSON.stringify(ready)});`,
+    ].join("\n"));
+    await fs.writeFile(path.join(directory, "primary.cjs"), [
+      "const fs=require('node:fs');",
+      // This child shares the real console, rather than ignored/pipe handles or
+      // a detached console. It has no self-exit timer and outlives its parent.
+      "const child=require('node:child_process').spawn(process.execPath,['descendant.cjs'],{stdio:'inherit',detached:false});child.unref();",
+      "let finishing=false;const timer=setInterval(()=>{",
+      `if(finishing||!fs.existsSync(${JSON.stringify(gate)}))return;finishing=true;`,
+      `fs.writeSync(1,${JSON.stringify("\n" + tail + "\n")});`,
+      `fs.writeFileSync(${JSON.stringify(tailReady)},'ready');`,
+      // Clearing the last referenced handle exercises natural Node exit, not
+      // process.exit() or an explicit kernel stop disguised as normal completion.
+      exitMode === "natural" ? "clearInterval(timer);" : "",
+      "},10);",
+    ].join("\n"));
+    const waitForMarker = (filename: string) => expect.poll(() => fs.stat(filename).then(() => true, error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }), { timeout: 15_000 }).toBe(true);
+    const params = { ...f.spawn(processId, "", "pty"), args: ["primary.cjs"] };
+    await f.client.processSpawn(params);
+    await waitForMarker(ready);
+    const descendant = JSON.parse(await fs.readFile(ready, "utf8")) as {
+      pid: number; parentPid: number; stdinTTY: boolean; stdoutTTY: boolean;
+    };
+    const running = await waitFor(f.client, processId, snapshot => snapshot.pid !== null);
+    assert.ok(Number.isSafeInteger(descendant.pid) && descendant.pid > 0);
+    assert.equal(descendant.parentPid, running.pid);
+    assert.notEqual(descendant.pid, running.pid);
+    assert.equal(descendant.stdinTTY, true);
+    assert.equal(descendant.stdoutTTY, true);
+    assert.equal(process.kill(descendant.pid, 0), true, "The inherited-terminal descendant must be alive before teardown");
+    assert.equal(running.writerActive, true);
+
+    await fs.writeFile(gate, "go");
+    await waitForMarker(tailReady);
+    if (exitMode === "stopped") {
+      await f.client.processKill({ workspaceId: "ws", processId, force: true });
+    }
+    const result = await drain(f.client, processId);
+    const output = stripVTControlCharacters(result.stdout.toString("utf8"));
+    assert.ok(output.includes("VARIN_PTY_DESCENDANT_READY"), output);
+    assert.ok(output.includes(tail), output);
+    assert.equal(result.process.status, "exited");
+    assert.equal(result.process.writerActive, false);
+    if (exitMode === "natural") assert.equal(result.process.exitCode, 0, JSON.stringify(result.process));
+    assert.throws(() => process.kill(descendant.pid, 0), { code: "ESRCH" });
+    const completed = await f.client.processRead({ workspaceId: "ws", processId, cursor: result.cursor });
+    assert.equal(completed.outputComplete, true);
+    assert.equal(completed.outputError, null);
+    assert.equal(completed.nextCursor, completed.endCursor);
+    assert.deepEqual(completed.chunks, []);
+    const receipt = JSON.parse(await fs.readFile(outputFiles(f, processId).receipt, "utf8")) as { treeConfirmed: boolean };
+    assert.equal(receipt.treeConfirmed, true);
+    await f.client.processRelease({ workspaceId: "ws", processId });
+    await f.client.fileRemove({ ...f.address, operationId: `${processId}-remove`, path: "child", recursive: true, force: true });
+  }, 30_000);
+}
 
 it("kernel restart reconciles an interrupted native tree without replaying its command", async () => {
   const f = await fixture();
