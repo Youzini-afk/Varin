@@ -8,6 +8,11 @@ port the patch and remove the obsolete version's entry and file.
   `data-legend-immediate-shrink` so animated collapse does not leave the following rows behind.
 - `app-builder-lib`: preserve Varin's NSIS extraction, old-version uninstall, assisted
   pages and app-data removal hooks.
+- `@electron/osx-sign` 1.3.3: walk signing inputs sequentially instead of recursively
+  opening every dependency file at once. Preserve binary discovery, bundle order,
+  temporary-file cleanup and error propagation. The actual installed signer is
+  exercised under a small subprocess-only descriptor limit in
+  `packages/tauri/scripts/macos-sign.test.mjs`; no signing or system limits change.
 - `minimatch` 9.0.9 and 10.2.4–10.2.6: backport the preprocessing changes from
   [11.0.1](https://github.com/isaacs/minimatch/compare/v11.0.0...v11.0.1)
   for [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249).

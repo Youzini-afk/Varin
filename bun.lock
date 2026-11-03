@@ -429,6 +429,7 @@
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
     "minimatch@10.2.4": "bun-patches/minimatch@10.2.4.patch",
     "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
+    "@electron/osx-sign@1.3.3": "bun-patches/@electron%2Fosx-sign@1.3.3.patch",
     "minimatch@10.2.5": "bun-patches/minimatch@10.2.5.patch",
     "deepmerge@4.3.1": "bun-patches/deepmerge@4.3.1.patch",
   },
