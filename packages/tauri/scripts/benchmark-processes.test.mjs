@@ -215,6 +215,31 @@ test('collector pins expected root identity and refuses invalid lifecycle calls'
   await collector.close();
 });
 
+test('Windows counters retain the original launch handle FILETIME without rounding', { skip: process.platform !== 'win32', timeout: 120000 }, async t => {
+  const { launchOwned } = await import('./native-process-owner.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'varin-counter-identity-'));
+  const stop = join(root, 'stop-original');
+  const program = `const fs=require('node:fs');const timer=setInterval(()=>{if(fs.existsSync(process.argv[1]))clearInterval(timer)},25);setTimeout(()=>clearInterval(timer),90000).unref();`;
+  let owner, collector, other, drained = false;
+  try {
+    owner = await launchOwned({ executable: process.execPath, args: ['-e', program, stop], cwd: root, env: process.env });
+    assert.match(owner.rootStartIdentity, /^win32:[0-9]+$/u);
+    collector = await createProcessCollector();
+    assert.equal(await collector.setRoot(owner.rootPid, owner.rootStartIdentity), owner.rootStartIdentity);
+    const sample = await collector.sample();
+    assert.equal(sample.processes.find(row => row.pid === owner.rootPid)?.startIdentity, owner.rootStartIdentity);
+    other = await createProcessCollector();
+    const changed = `win32:${BigInt(owner.rootStartIdentity.slice(6)) + 1n}`;
+    await assert.rejects(other.setRoot(owner.rootPid, changed), /does not match/u);
+  } finally {
+    await collector?.close(); await other?.close();
+    await writeFile(stop, 'stop');
+    if (owner) drained = (await owner.settle({ timeoutMs: 15000 })).ownershipDrainConfirmed;
+    if (drained) await rm(root, { recursive: true, force: true });
+    else t.diagnostic('Original counter identity fixture retained because its scope is unconfirmed.');
+  }
+});
+
 const treeProgram = String.raw`
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';

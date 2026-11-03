@@ -29,6 +29,8 @@ test('the pinned Tauri CLI prepares release builds without rewriting committed m
   await fs.cp(path.join(source, 'vendor'), path.join(native, 'vendor'), { recursive: true });
   await fs.writeFile(path.join(native, 'src/main.rs'), 'fn main() {}\n');
   await fs.writeFile(path.join(native, 'src/lib.rs'), '');
+  await fs.mkdir(path.join(native, 'src/bin'), { recursive: true });
+  await fs.writeFile(path.join(native, 'src/bin/varin-process-owner.rs'), 'fn main() {}\n');
   // The actual CLI owns preparation and feature normalization. Node replaces
   // only the compiler, and a receipt proves preparation reached that boundary.
   await fs.writeFile(path.join(native, 'build'), `require('node:fs').writeFileSync('runner.json', JSON.stringify({args:process.argv.slice(2),config:JSON.parse(process.env.TAURI_CONFIG||'{}')})); process.exit(86);\n`);
@@ -110,8 +112,11 @@ test('the pinned CLI bundles only the prepared runtime after merging the checked
   // Do not run application hooks even if one is added to the base configuration.
   config.build.beforeBundleCommand = null;
   await fs.writeFile(path.join(native, 'tauri.conf.json'), JSON.stringify(config));
-  await fs.writeFile(path.join(native, 'Cargo.toml'), `[package]\nname = "varin"\nversion = ${JSON.stringify(config.version)}\nedition = "2021"\ndescription = "Resource merge probe"\nlicense = "AGPL-3.0-only"\nauthors = ["Varin"]\n[features]\ndesktop = []\n`);
+  await fs.writeFile(path.join(native, 'Cargo.toml'), `[package]\nname = "varin"\nversion = ${JSON.stringify(config.version)}\nedition = "2021"\ndescription = "Resource merge probe"\nlicense = "AGPL-3.0-only"\nauthors = ["Varin"]\n[[bin]]\nname = "varin"\npath = "src/main.rs"\n[[bin]]\nname = "varin-process-owner"\npath = "src/bin/varin-process-owner.rs"\nrequired-features = ["process-owner"]\n[features]\ndesktop = []\nprocess-owner = []\n`);
   await fs.writeFile(path.join(native, 'src/main.rs'), 'fn main() {}\n');
+  await fs.mkdir(path.join(native, 'src/bin'), { recursive: true });
+  await fs.writeFile(path.join(native, 'src/bin/varin-process-owner.rs'), 'fn main() {}\n');
+  // The opt-in tooling helper is deliberately absent from the product build.
   await fs.copyFile('/bin/true', path.join(target, 'release/varin'));
   const env = { ...process.env, CARGO_NET_OFFLINE: 'true', CARGO_HOME: path.join(root, 'cargo-home'), CARGO_TARGET_DIR: target };
   delete env.CARGO_BUILD_TARGET;

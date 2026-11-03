@@ -18,6 +18,8 @@ mod desktop;
 #[cfg(feature = "desktop")]
 pub mod engine;
 pub mod files;
+#[cfg(feature = "process-owner")]
+pub mod process_owner;
 pub mod host;
 pub mod host_codec;
 mod host_scope;

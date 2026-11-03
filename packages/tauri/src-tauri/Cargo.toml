@@ -17,8 +17,16 @@ name = "varin"
 path = "src/main.rs"
 required-features = ["desktop"]
 
+[[bin]]
+name = "varin-process-owner"
+path = "src/bin/varin-process-owner.rs"
+required-features = ["process-owner"]
+test = false
+bench = false
+
 [features]
 default = ["desktop"]
+process-owner = []
 desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-runtime-cef", "dep:tauri-plugin-dialog", "dep:tauri-plugin-single-instance", "dep:tauri-plugin-opener", "dep:tauri-plugin-notification", "dep:tauri-plugin-autostart", "dep:tauri-plugin-global-shortcut", "dep:tauri-plugin-updater", "dep:winit", "dep:wgpu", "dep:pollster", "dep:winit-common", "dep:objc2", "dep:objc2-app-kit", "dep:block2", "dep:zbus", "dep:gtk4", "dep:core-foundation-sys", "dep:objc2-foundation", "dep:notify-rust", "dep:windows", "dep:windows-core"]
 
 [dependencies]

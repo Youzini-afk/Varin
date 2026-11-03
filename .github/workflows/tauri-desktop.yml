@@ -86,6 +86,10 @@ jobs:
           const include = selectNativeTargets({ full: process.env.FULL === 'true', target: process.env.TARGET });
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify({ include })}\n`);
           JS
+      - name: Prepare the pinned process-owner test toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          echo 'RUSTUP_TOOLCHAIN=1.95.0' >> "$GITHUB_ENV"
       - run: bun run --cwd packages/tauri test:tooling
       - run: node scripts/build-products.mjs frontend --export artifacts/tauri-shared-frontend
       - uses: actions/upload-artifact@v7
@@ -172,6 +176,14 @@ jobs:
       - name: Verify native owner logic
         timeout-minutes: 15
         run: cargo test --manifest-path packages/tauri/src-tauri/Cargo.toml --no-default-features --locked
+      - name: Verify launch-bound native process ownership
+        if: matrix.platform != 'darwin'
+        timeout-minutes: 15
+        run: cargo test --manifest-path packages/tauri/src-tauri/Cargo.toml --no-default-features --features process-owner --locked process_owner
+      - name: Exercise native ownership and process counter identity
+        if: matrix.platform != 'darwin'
+        timeout-minutes: 15
+        run: node --test packages/tauri/scripts/native-process-owner.test.mjs packages/tauri/scripts/benchmark-processes.test.mjs
       - name: Build controlled old-engine reader
         run: node packages/tauri/scripts/prepare-exporter.mjs artifacts/tauri-input/exporter
       - name: Fetch fixed Node and prepare shared Host runtime

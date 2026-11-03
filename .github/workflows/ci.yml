@@ -152,6 +152,11 @@ jobs:
       - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: bun run lint
       - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        name: Prepare the pinned native tooling test compiler
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          echo 'RUSTUP_TOOLCHAIN=1.95.0' >> "$GITHUB_ENV"
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: bun run test:tooling
       # Package consumers do not require a native executable; collect their
       # results independently of the parallel native build and acceptance.

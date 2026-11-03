@@ -258,22 +258,27 @@ async function linuxDriver({ procRoot = '/proc', ticksPerSecond } = {}) {
 const windowsScript = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-function Identity($date) { if ($null -eq $date) { return $null }; return $date.ToUniversalTime().ToString('yyyyMMddHHmmssffffff', [System.Globalization.CultureInfo]::InvariantCulture) }
+function CimIdentity($date) { if ($null -eq $date) { return $null }; return $date.ToUniversalTime().ToString('yyyyMMddHHmmssffffff', [System.Globalization.CultureInfo]::InvariantCulture) }
+function NativeIdentity($date) { return $date.ToUniversalTime().ToFileTimeUtc().ToString([System.Globalization.CultureInfo]::InvariantCulture) }
 $table = @(Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate)
 $rows = @($table | ForEach-Object {
-  $id = Identity $_.CreationDate
-  $row = [ordered]@{pid=[int]$_.ProcessId;parentPid=[int]$_.ParentProcessId;startOrder=$id;startIdentity=$null;state='running';cpuTimeMs=$null;memoryBytes=$null;handles=$null;counterError=$null;identityVerified=$false}
-  if ($null -ne $id) { $row.startIdentity = 'win32:' + $id }
+  $cimId = CimIdentity $_.CreationDate
+  $row = [ordered]@{pid=[int]$_.ProcessId;parentPid=[int]$_.ParentProcessId;startOrder=$null;startIdentity=$null;state='running';cpuTimeMs=$null;memoryBytes=$null;handles=$null;counterError=$null;identityVerified=$false}
   $p = $null
   try {
     $p = Get-Process -Id $_.ProcessId -ErrorAction Stop
-    $actual = Identity $p.StartTime
-    if ($null -eq $id -or $actual -ne $id) { throw 'IDENTITY_UNAVAILABLE' }
+    $started = $p.StartTime
+    if ($null -eq $cimId -or (CimIdentity $started) -ne $cimId) { throw 'IDENTITY_UNAVAILABLE' }
+    # CIM dates lose sub-microsecond precision. Publish the native 100ns FILETIME
+    # from the retained Process object, matching the launch owner's original handle.
+    $id = NativeIdentity $started
+    $row.startOrder = $id
+    $row.startIdentity = 'win32:' + $id
     $p.Refresh()
     try { $row.cpuTimeMs = $p.TotalProcessorTime.TotalMilliseconds } catch { $row.counterError='CPU_UNAVAILABLE' }
     try { $row.memoryBytes = $p.PrivateMemorySize64 } catch { $row.counterError='MEMORY_UNAVAILABLE' }
     try { $row.handles = $p.HandleCount } catch { $row.counterError='HANDLES_UNAVAILABLE' }
-    if ((Identity $p.StartTime) -ne $id -or $p.HasExited) { throw 'IDENTITY_CHANGED' }
+    if ((NativeIdentity $p.StartTime) -ne $id -or $p.HasExited) { throw 'IDENTITY_CHANGED' }
     $row.identityVerified = $true
   } catch { $row.cpuTimeMs=$null; $row.memoryBytes=$null; $row.handles=$null; $row.counterError='COUNTERS_OR_IDENTITY_UNAVAILABLE' }
   finally { if ($null -ne $p) { $p.Dispose() } }
