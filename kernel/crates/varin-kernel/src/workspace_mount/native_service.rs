@@ -412,6 +412,8 @@ fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str, KernelError> {
         .ok_or_else(|| unsupported("Native request requires a string"))
 }
 
+#[cfg(any(target_os = "macos", all(test, unix)))]
+mod resource_owner;
 #[cfg(target_os = "macos")]
 mod transport;
 #[cfg(target_os = "macos")]

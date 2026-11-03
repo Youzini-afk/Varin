@@ -27,17 +27,9 @@ impl Server {
     ) -> Result<Self, KernelError> {
         // A short OS-owned path fits sockaddr_un even when Application Support
         // or the project's actual name is long. Never use the project as IPC.
-        let resource = resources::root()?.join(uuid::Uuid::new_v4().to_string());
-        std::fs::DirBuilder::new().mode(0o700).create(&resource)?;
+        let (resource, owner) = resource_owner::create(&resources::root()?)?;
         let prepared = (|| {
             use std::os::unix::fs::OpenOptionsExt;
-            let owner = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(resource.join("owner.lock"))?;
-            fs2::FileExt::try_lock_exclusive(&owner)?;
             let service = Arc::new(Service::new(session.clone())?);
             let socket = resource.join("executor.sock");
             let listener = UnixListener::bind(&socket)?;

@@ -445,7 +445,8 @@ jobs:
       - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
         name: Verify native executor bytes, cache boundaries and admitted-inode import
         working-directory: kernel
-        run: cargo test -p varin-kernel --lib workspace_mount::review --locked
+        run: |
+          cargo test -p varin-kernel --lib workspace_mount:: --locked
       # Compile callback contracts without installing a filesystem component or
       # changing the runner's system-extension policy. Actual mount tests remain
       # explicit qualification on a machine with an already-enabled component.
