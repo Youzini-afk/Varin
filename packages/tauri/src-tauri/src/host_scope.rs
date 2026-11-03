@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::process::{Child, Command};
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExit {
     pub clean: bool,
@@ -20,6 +20,8 @@ pub struct ProcessScope {
     original_process: std::os::windows::io::OwnedHandle,
     #[cfg(windows)]
     original_pid: u32,
+    #[cfg(windows)]
+    lease: crate::desktop_lock::ScopeLease,
     terminating: AtomicBool,
     ended: AtomicBool,
 }
@@ -48,19 +50,29 @@ impl ProcessScope {
         }
         #[cfg(windows)]
         {
-            let _ = data_dir;
-            command.stderr(stderr);
+            let lease = crate::desktop_lock::ScopeLease::prepare(data_dir)?;
+            command
+                .env("VARIN_DESKTOP_SCOPE_TOKEN", lease.token())
+                .stderr(stderr);
             // No Node instruction may run before it belongs to the kill-on-close Job.
             command.creation_flags(0x08000000 | 0x00000004);
-            let mut child = command
-                .spawn()
-                .map_err(|_| "Bundled desktop service could not start")?;
-            match windows::attach(&child) {
+            let mut child = match command.spawn() {
+                Ok(child) => child,
+                Err(_) => {
+                    lease.mark_ended()?;
+                    return Err("Bundled desktop service could not start".into());
+                }
+            };
+            match windows::attach(&child, lease.clone()) {
                 Ok(scope) => Ok((child, scope)),
                 Err(error) => {
                     let _ = child.start_kill();
                     tokio::spawn(async move {
-                        let _ = child.wait().await;
+                        // Admission failed before the initial thread resumed.
+                        // Only a successful wait releases that pending scope.
+                        if child.wait().await.is_ok() {
+                            let _ = lease.mark_ended();
+                        }
                     });
                     Err(error)
                 }
@@ -138,10 +150,18 @@ impl ProcessScope {
         #[cfg(windows)]
         {
             let clean = !self.terminating.load(Ordering::Acquire) && self.empty()?;
+            #[cfg(test)]
+            if !clean {
+                eprintln!(
+                    "Managed Job settlement requires cleanup: termination_requested={}, node_status={status:?}",
+                    self.terminating.load(Ordering::Acquire),
+                );
+            }
             if !clean {
                 self.terminate()?;
             }
             self.wait_empty().await?;
+            self.lease.mark_ended()?;
             let status = status
                 .as_ref()
                 .map_err(|_| "Desktop service termination could not be observed")?;
@@ -194,7 +214,10 @@ mod windows {
             },
         },
     };
-    pub fn attach(child: &Child) -> Result<ProcessScope, String> {
+    pub fn attach(
+        child: &Child,
+        lease: crate::desktop_lock::ScopeLease,
+    ) -> Result<ProcessScope, String> {
         let process = child
             .raw_handle()
             .ok_or("Managed service process handle is unavailable")?;
@@ -223,6 +246,10 @@ mod windows {
             {
                 return Err("Managed service could not enter its process Job".into());
             }
+            // Publish the exact active ancestry before any child instruction.
+            // An inherited lease consumer authenticates this chain on Windows
+            // just as it authenticates a Unix guardian's durable scope record.
+            lease.mark_active(std::process::id(), pid)?;
             let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             if snapshot == INVALID_HANDLE_VALUE {
                 return Err("Managed service initial thread could not be inspected".into());
@@ -250,6 +277,7 @@ mod windows {
                 job,
                 original_process,
                 original_pid: pid,
+                lease,
                 terminating: AtomicBool::new(false),
                 ended: AtomicBool::new(false),
             })
@@ -322,7 +350,11 @@ mod windows {
                     match unsafe { WaitForSingleObject(scope.original_process.as_raw_handle(), 0) }
                     {
                         WAIT_OBJECT_0 => continue,
-                        WAIT_TIMEOUT => return Ok(false),
+                        WAIT_TIMEOUT => {
+                            #[cfg(test)]
+                            trace_unsignaled(scope.original_process.as_raw_handle(), true);
+                            return Ok(false);
+                        }
                         _ => return Err("Original managed process termination is unknown".into()),
                     }
                 }
@@ -363,7 +395,11 @@ mod windows {
                 }
                 match unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) } {
                     WAIT_OBJECT_0 => handles.push(handle),
-                    WAIT_TIMEOUT => return Ok(false),
+                    WAIT_TIMEOUT => {
+                        #[cfg(test)]
+                        trace_unsignaled(handle.as_raw_handle(), false);
+                        return Ok(false);
+                    }
                     _ => return Err("Managed Job process termination is unknown".into()),
                 }
             }
@@ -372,6 +408,20 @@ mod windows {
             drop(handles);
             return Ok(true);
         }
+    }
+
+    #[cfg(test)]
+    fn trace_unsignaled(handle: std::os::windows::io::RawHandle, original: bool) {
+        let mut code = 0;
+        let readable = unsafe {
+            windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut code)
+        } != 0;
+        // Process role and OS exit status only. Never print command lines,
+        // environment, application data or inherited pipe contents.
+        eprintln!(
+            "Managed Job member is not signaled: original={original}, exit_code={:?}",
+            readable.then_some(code),
+        );
     }
 }
 
@@ -384,6 +434,7 @@ mod tests {
     #[tokio::test]
     async fn clean_job_settlement_uses_original_object_after_tokio_child_is_dropped() {
         let data = tempfile::tempdir().unwrap();
+        let _lease = crate::desktop_lock::Lease::acquire(data.path()).unwrap();
         for _ in 0..24 {
             let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
             let mut command = Command::new(node);
@@ -403,7 +454,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-            assert!(ended.clean && ended.success);
+            assert!(ended.clean && ended.success, "Original Job receipt: {ended:?}");
             assert!(scope.empty().unwrap());
             drop(retained);
         }
@@ -411,6 +462,7 @@ mod tests {
     #[tokio::test]
     async fn exited_original_process_does_not_certify_a_live_job_descendant() {
         let data = tempfile::tempdir().unwrap();
+        let _lease = crate::desktop_lock::Lease::acquire(data.path()).unwrap();
         let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
         let mut command = Command::new(node);
         command.args(["-e", "const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});process.stdout.write(c.pid+'\\n');c.unref();"])
