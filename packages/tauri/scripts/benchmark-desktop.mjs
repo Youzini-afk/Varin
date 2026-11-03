@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { performance } from 'node:perf_hooks';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { hashDirectory, hashFile, hashJson, isHash, validateWorkload, summarizeRun, isResourceSample, scenarioRequirements, collectorVersion } from './benchmark-contract.mjs';
 import { performanceScenarios } from './performance-evidence.mjs';
@@ -17,11 +17,101 @@ import { launchOwned, prepareNativeProcessOwner } from './native-process-owner.m
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const readJson = async file => JSON.parse(await fs.readFile(file, 'utf8'));
-const readOptional = async file => fs.readFile(file, 'utf8').then(JSON.parse, error => { if (error.code === 'ENOENT') return null; throw error; });
+const readOptional = async file => {
+  let content;
+  try { content = await fs.readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  try { return JSON.parse(content); } catch (error) { throw Object.assign(error, { cleanupUncertain: true }); }
+};
 // Exceptions can contain private paths, argv or parser excerpts. Persist only
 // fixed categories, never arbitrary error messages or application output.
-const failureReason = error => error instanceof SyntaxError ? 'invalid-json'
+export const failureReason = error => error instanceof SyntaxError ? 'invalid-json'
   : ['ENOENT', 'EACCES', 'EPERM', 'ENOTDIR', 'EEXIST', 'EIO', 'ENOSPC', 'ETIMEDOUT', 'ECONNRESET'].includes(error?.code) ? error.code : 'operation-failed';
+// Private observations may contain exception text or future fields. Public
+// evidence is a typed projection, never a copy of application JSON.
+const invalidObservation = () => Object.assign(new Error('Invalid private benchmark observation'), { cleanupUncertain: true });
+const scalar = predicate => value => { if (!predicate(value)) throw invalidObservation(); return value; };
+const number = scalar(Number.isFinite), boolean = scalar(value => typeof value === 'boolean');
+const identity = scalar(value => typeof value === 'string' && /^[a-zA-Z0-9_.:-]+$/u.test(value));
+const choice = (...values) => scalar(value => values.includes(value));
+const hash = scalar(isHash);
+const reason = value => value == null ? null : 'operation-failed';
+function project(value, schema) {
+  if (value === null) return null;
+  if (typeof schema === 'function') return schema(value);
+  if (Array.isArray(schema)) {
+    if (!Array.isArray(value)) throw invalidObservation();
+    return Array.from(value, item => project(item, schema[0]));
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidObservation();
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => Object.hasOwn(value, key))
+    .map(([key, shape]) => [key, project(value[key], shape)]));
+}
+const geometry = { x: number, y: number, width: number, height: number };
+const windowGeometry = { X: number, Y: number, WIDTH: number, HEIGHT: number, SCREEN: number, WINDOW: number };
+const dragShape = { complete: boolean, input: choice('X11-system-pointer'), windowId: identity,
+  before: windowGeometry, after: windowGeometry, settled: windowGeometry, released: boolean,
+  physicalDisplayQualified: boolean, attemptedInputs: [choice('hover', 'tap', 'repeat-tap', 'drag-release')] };
+const asset = { file: identity, width: number, height: number };
+const assetPackage = { id: identity, frames: number, expectedFrames: number, paintedFrames: number };
+const companionShape = {
+  status: choice('waiting-ready', 'waiting-system-drag', 'asset-diagnostic', 'failed', 'completed'), surfaceRole: choice('companion'),
+  systemDrag: { point: { x: number, y: number }, bounds: geometry }, drag: dragShape,
+  normalObservationMs: number, idleMinimumMs: number,
+  notQualified: [choice('physical-cross-display', 'physical-GPU-composition', 'OS-click-through', 'all-normal-action-paths')],
+  normal: { enabled: boolean, startedAt: number, startupHistory: choice('not-observed-before-enable'),
+    preObservationLiveBitmaps: choice('unknown'), epoch: hash, paints: number, closed: boolean, releases: number,
+    lastSuccessfulPaint: { epoch: hash, packageId: identity, frame: number, at: number, source: choice('original-painter-successful-commit') },
+    observedLiveBitmaps: number, decoded: [asset], packages: [assetPackage], notCovered: [identity] },
+  diagnostic: { epoch: hash, mode: choice('independent-offscreen-asset-decode-draw-not-production-action-playback', 'independent-asset-diagnostic'),
+    packages: [assetPackage], failed: value => value === true ? true : project(value, [assetPackage]), decoded: [asset], closedBitmaps: number, released: boolean },
+};
+const ownerObservationShape = {
+  error: reason, pageId: identity,
+  download: { downloadId: identity, state: choice('completed'), bytes: number, sha256: hash, source: choice('original-native-download-owner-completed-file-read') },
+  run: { id: identity, state: choice('accepted', 'preparing', 'runnable', 'generating', 'executing', 'waiting', 'completed', 'failed', 'cancelled') },
+  processes: [{ processId: identity, kernelEpoch: value => typeof value === 'number' ? number(value) : identity(value), pid: number,
+    status: choice('running', 'exited', 'released', 'failed', 'starting'), writerActive: boolean, exitCode: number,
+    signal: value => typeof value === 'number' ? number(value) : choice('SIGTERM', 'SIGKILL', 'SIGINT', 'SIGABRT', 'SIGSEGV')(value), outputComplete: boolean, wasRunning: boolean }],
+  operations: [{ id: identity, phase: choice('accepted', 'preparing', 'queued', 'running', 'waiting', 'settling', 'terminal'),
+    outcome: choice('succeeded', 'failed', 'cancelled', 'indeterminate'), cancelRequested: boolean }],
+};
+const stepsFor = workload => [...(workload.steps ?? []), ...(workload.remote?.steps ?? []), ...(workload.browser?.steps ?? [])];
+function stepShape(workload) {
+  const steps = stepsFor(workload);
+  return { id: choice(...steps.map(step => step.id)), action: choice('wait', 'click', 'key', 'text', 'scroll', 'checkpoint', 'manual', 'file'),
+    cycle: number, milestone: choice(...steps.map(step => step.milestone).filter(value => value != null)),
+    startedMs: number, committedMs: number, settledMs: number, trustedInputs: number, externalTrustedInputs: number,
+    nativeCoverage: choice('operator-observation-still-required') };
+}
+const label = scalar(value => typeof value === 'string' && /^(main|application:main|(?:application|browser|companion):[a-zA-Z0-9_.:-]+)$/u.test(value));
+export function publicRendererRecord(value, { nonce, workload }, sequence) {
+  if (!value || value.schema !== 1 || value.nonce !== nonce || !Number.isSafeInteger(value.sequence) || value.sequence < 0
+    || sequence !== undefined && value.sequence !== sequence || !Number.isFinite(value.elapsedMs) || !Array.isArray(value.targets)) throw invalidObservation();
+  const targets = value.targets.map(target => {
+    if (!target || typeof target.status !== 'string' || typeof target.label !== 'string') throw invalidObservation();
+    return project(target, { label, surfaceRole: choice('main-workbench', 'remote-workbench', 'native-browser', 'companion', 'browser', 'application:mini', 'passive'),
+      status: choice('waiting-ready', 'running', 'observing', 'failed', 'completed', 'document-ended-or-unavailable'), error: reason,
+      readyAt: number, monotonicMs: number, visibility: choice('visible', 'hidden', 'prerender'), motion: choice('full', 'reduced'),
+      ownerObservation: ownerObservationShape, viewport: { width: number, height: number, scale: number }, trustedInputs: number,
+      frameTimesMs: [number], inputLatenciesMs: [number], inputEvents: [{ entryType: choice('event', 'first-input'), startTime: number, duration: number,
+        inputDelayMs: number, processingMs: number, interactionId: number }], receipts: [stepShape(workload)], stepIndex: number,
+      framesObserved: number, eventTimingAvailable: boolean, companion: companionShape });
+  });
+  return { schema: 1, nonce, sequence: value.sequence, elapsedMs: value.elapsedMs, targets };
+}
+export function publicProductReceipt(value, request, shell) {
+  if (!value || value.schema !== 1 || value.product !== 'varin-desktop-benchmark-receipt' || value.shell !== shell
+    || value.nonce !== request.nonce || value.sourceSha !== request.sourceSha || value.version !== request.version
+    || value.scenarioSha256 !== request.scenarioSha256 || !value.inputs || typeof value.inputs !== 'object' || Array.isArray(value.inputs) || hashJson(value.inputs) !== hashJson(request.inputs)
+    || typeof value.complete !== 'boolean' || shell === 'tauri' && typeof value.nativeDrain !== 'boolean') throw invalidObservation();
+  const result = project(value, { complete: boolean, reason, steps: [stepShape(request.workload)], rendererTargets: [label], sequence: number,
+    inputDriver: choice('chromium-devtools-input'), nativeInputVerified: boolean, companionComplete: boolean, fixtureComplete: boolean,
+    remoteComplete: boolean, fileSelectionDriver: choice('chromium-DOM-setFileInputFiles-not-OS-chooser'),
+    nativeDrain: choice(true, false, 'verify-external-process-exit'),
+    coverage: [choice('requestAnimationFrame-is-not-display-presentation', 'event-timing-is-16ms-thresholded', 'physical-input-and-cross-screen-require-platform-evidence')] });
+  return { schema: 1, product: 'varin-desktop-benchmark-receipt', shell, nonce: request.nonce, sourceSha: request.sourceSha,
+    version: request.version, scenarioSha256: request.scenarioSha256, inputs: request.inputs, ...result };
+}
 async function save(file, value) { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); }
 function executable(candidate) { return path.join(candidate.payload, process.platform === 'darwin' ? 'Contents/MacOS/varin' : process.platform === 'win32' ? 'varin.exe' : 'varin'); }
 function requireControlledLaunchEnvironment() {
@@ -143,7 +233,7 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
   const nonce = randomUUID(), request = { schema: 1, product: 'varin-desktop-benchmark-request', nonce, sourceSha: plan.sourceSha, frontendDirectory: shell === 'electron' ? plan.electron.frontendDirectory : path.join(preflightResult.candidate.runtime, 'frontend'),
     version: plan.version, inputs: bound.inputs, scenarioSha256: bound.scenarioSha256, sampleIntervalMs: plan.intervalMs, workload: scenario.workload };
   const samples = [], issues = [], lifecycle = []; let owner, ownerResult = null, ownerError = false, launchAttempted = false, exit = null, timedOut = false, observedCounterScopeEmpty = false, startupMs = null, receipt = null, productComplete = false;
-  let rendererSequence = -1, companionTask = null, companionAcknowledged = false, lastCompanion = null;
+  let receiptHash = null, rendererSequence = -1, companionTask = null, companionAcknowledged = false, lastCompanion = null;
   let services;
   const execution = { shell, scenario: scenario.name, sourceSha: plan.sourceSha, version: plan.version, inputs: bound.inputs, scenarioSha256: bound.scenarioSha256,
     artifactSha256: shell === 'electron' ? preflightResult.electronArtifact.sha256 : preflightResult.tauriArtifact.sha256,
@@ -178,7 +268,8 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
       if (ownerError || ownerResult?.ownershipDrainConfirmed === false) throw new Error('Original process ownership became unavailable');
       if (exit && companionTask && !companionTask.state.settled) { companionTask.cancel(); throw new Error('Product exited during owned companion input'); }
       const sampledAt = performance.now(), observed = await collector.sample();
-      const live = await readOptional(path.join(data, 'benchmark-live.json'));
+      const privateLive = await readOptional(path.join(data, 'benchmark-live.json'));
+      const live = privateLive === undefined ? null : publicRendererRecord(privateLive, request);
       let targets = [];
       if (live && live.nonce === nonce && Number.isSafeInteger(live.sequence) && live.sequence > rendererSequence) {
         rendererSequence = live.sequence; targets = live.targets;
@@ -208,7 +299,9 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
         await fs.writeFile(temporary, JSON.stringify({ nonce, result: execution.companionDrag }), { flag: 'wx', mode: 0o600 });
         await fs.rename(temporary, path.join(data, 'benchmark-companion-drag.json')); companionAcknowledged = true;
       }
-      receipt = await readOptional(path.join(data, 'benchmark-receipt.json'));
+      const privateReceipt = await readOptional(path.join(data, 'benchmark-receipt.json'));
+      receipt = privateReceipt === undefined ? null : publicProductReceipt(privateReceipt, request, shell);
+      receiptHash = privateReceipt === undefined ? null : hashJson(privateReceipt);
       if (exit && !observed.processes.length && observed.coverage?.rootState === 'exited' && observed.coverage?.processCountersComplete) observedCounterScopeEmpty = true;
       // Sampling is diagnostic only. A fork/reparent between polls stays owned
       // by the original kernel scope even when the observed counter set is empty.
@@ -235,19 +328,24 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
     for (const name of ['benchmark-renderer.jsonl', 'benchmark-receipt.json']) {
       try {
         const destination = path.join(directory, `${shell}-${iteration}-${name}`);
-        // Validate the same bytes that will be published. Copying first could
-        // publish arbitrary malformed content even when JSON parsing rejects it.
+        // Validate private bytes, then publish only the typed projection. Keep
+        // both hashes so the public artifact remains bound to the private source.
         const content = await fs.readFile(path.join(data, name), 'utf8');
+        let published;
         if (name.endsWith('.jsonl')) {
-          const records = content.trim().split('\n').filter(Boolean).map(JSON.parse);
-          if (records.some((sample, index) => sample.nonce !== nonce || sample.sequence !== index)) throw new Error('Renderer stream identity or sequence is incomplete');
+          const records = content.trim().split('\n').filter(Boolean).map((line, index) => publicRendererRecord(JSON.parse(line), request, index));
           execution.rendererSamples = records;
-        } else if (hashJson(JSON.parse(content)) !== hashJson(receipt)) throw new Error('Product receipt changed after observation');
+          published = records.map(record => JSON.stringify(record)).join('\n') + '\n';
+        } else {
+          const value = JSON.parse(content);
+          if (hashJson(value) !== receiptHash) throw invalidObservation();
+          published = JSON.stringify(publicProductReceipt(value, request, shell)) + '\n';
+        }
         try {
-          await fs.writeFile(destination, content, { mode: 0o600 });
-          execution.recordings[name] = { name: path.basename(destination), sha256: await hashFile(destination) };
+          await fs.writeFile(destination, published, { mode: 0o600 });
+          execution.recordings[name] = { name: path.basename(destination), sha256: await hashFile(destination), sourceSha256: createHash('sha256').update(content).digest('hex') };
         } catch (error) { throw Object.assign(error, { reportWriteFailed: true }); }
-      } catch (error) { if (error.code !== 'ENOENT' || error.reportWriteFailed) throw error; }
+      } catch (error) { if (error.code !== 'ENOENT' || error.reportWriteFailed) { if (error instanceof SyntaxError) error.cleanupUncertain = true; throw error; } }
     }
     if (scenario.workload.companion) execution.companionEvidence = execution.rendererSamples?.flatMap(record => record.targets ?? []).map(target => target.companion).filter(value => value?.diagnostic).at(-1) ?? execution.companionEvidence;
     if (scenario.workload.companion && (!execution.companionInstallation?.verified || !execution.companionDrag?.complete || execution.companionEvidence?.status !== 'completed')) issues.push('companion-install-drag-or-diagnostic-incomplete');
@@ -321,7 +419,19 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
       throw error;
     } finally {
       // These are only newly created private benchmark copies, never source data.
-      if (!execution.cleanupUncertain) await fs.rm(root, { recursive: true, force: true });
+      if (!execution.cleanupUncertain) {
+        try { await fs.rm(root, { recursive: true, force: true }); }
+        catch (error) {
+          execution.status = 'failed'; execution.cleanupUncertain = true; execution.retainedPrivateDirectory = root;
+          issues.push(`private-copy-release-failed:${failureReason(error)}`);
+          let category = failureReason(error);
+          try { await save(path.join(directory, `${shell}-${iteration}.json`), execution); }
+          catch (writeError) { category = failureReason(writeError); }
+          throw Object.assign(new Error(`benchmark-copy-release-failed:${category}`), { cleanupUncertain: true,
+            ownershipDrainConfirmed: execution.ownershipDrainConfirmed, retainedPrivateDirectory: root,
+            retainedPrivateDirectories: [{ scenario: scenario.name, shell, iteration, path: root }] });
+        }
+      }
     }
   }
 }

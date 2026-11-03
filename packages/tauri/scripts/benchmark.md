@@ -42,16 +42,16 @@ node packages/tauri/scripts/benchmark-build.mjs --candidate /absolute/native-can
 
 ## 失败与清理
 
-源 SHA、runtime inventory、完整 Electron 包 inventory、前端树、fixture 和 workload hash 都必须一致。旧 stage 或 dirty build 不接受。端口/token 在每次恢复 remote snapshot 时必须保持一致。先等 seed Host 的原 `stop()` 完成并观察直接子进程退出，再复制 durable 数据；这个 fixture owner 合同不代证完整 GUI/CEF 作用域。
+源 SHA、runtime inventory、完整 Electron 包 inventory、前端树、fixture 和 workload hash 都必须一致。旧 stage 或 dirty build 不接受。端口/token 在每次恢复 remote snapshot 时必须保持一致。先等 seed Host 的原 `stop()` 完成，以及启动时绑定的独立 OS owner 确认完整后代作用域正常结束，再复制 durable 数据；fixture 的完整作用域仍不代证另一次 GUI/CEF 启动。Linux 与 Windows 使用同一原生 guardian；macOS 缺少对应证明时在准备 fixture 前明确停止。
 
 `observedCounterScopeEmpty` 只表示一次采样未找到仍活动的已观察进程，不能证明 `ownershipDrainConfirmed`：子进程可能在两次采样间创建并脱离原父进程。Electron 的 benchmark receipt 写在正常退出前；Tauri 的 `nativeDrain` 覆盖受管 Host 与原生窗口 owner，但写在最终 CEF shutdown 前。两者都不是完整 Chromium 外部进程的终止回执。独立 owner 在启动门打开之前绑定根进程的 OS birth identity，collector 只接受相同身份，不能把立即退出后的复用 PID 当成本轮根进程。Linux 使用本轮 sole-reaper/subreaper 的 kernel ECHILD，Windows 使用从挂起启动时即加入并保留的原 Job Object；只有原私有协议流的完整终态和 guardian 正常结束才能设置 `ownershipDrainConfirmed=true`。作用域证明、根进程退出、产品 receipt、renderer 与资源覆盖分别记录；即使作用域已干净退出，缺失的产品测量仍是 incomplete。
 
 观察失败或 deadline 到期时，仅通过原 owner 的私有控制通道请求停止，不按数值 PID/PGID 调用 kill 或 taskkill。Linux 的信号目标是经过 kernel child 关系确认的原 pidfd；Windows 是保留的原 Job。强制停止后确实耗尽的作用域允许释放该轮副本，但始终把工作负载记为 failed，绝不转成成功样本。admission 未确认、guardian 丢失、控制失败或作用域证明缺失都报告 `cleanupUncertain`，保留私有目录及共享 seed workspace 并停止后续 A/B。产品 stdout/stderr 不进入 owner 协议或报告；未解决的 guardian 不以 stdio 引用阻止控制器报告失败。
 
-raw run、comparison 和 suite 保留可用的根进程退出事实、采样观察与独立 OS 归属证明。报告写入失败也保留私有副本，并向外传播停止/保留义务，即使 OS 已确认耗尽。源 fixture 永远不由每轮清理删除；fixture 服务仍由自己的原 stop owner 负责，桌面 scope 不能代替服务终止回执。
+raw run、comparison 和 suite 保留可用的根进程退出事实、采样观察与独立 OS 归属证明。报告写入失败也保留私有副本，并向外传播停止/保留义务，即使 OS 已确认耗尽。源 fixture 永远不由每轮清理删除；fixture 服务仍由自己的原 stop owner 和启动绑定的 OS scope 负责，桌面 scope 不能代替服务终止回执。启动或停止失败后的原生强制清理只说明资源是否已耗尽，不能把失败 workload 改成通过。
 
 `preflight.json`、每次 raw JSON/JSONL、`comparison.json` 和 `suite.json` 保留缺失/失败/未执行状态。空数据不转换为零成本；CPU/内存缺失、GPU不可用、输入阈值以下无样本、renderer观测缺口均保留 unknown/incomplete。采样与只读owner观测的开销包含在两边测量中；尚未单独校准其成本。原始target identity保留，汇总按main-workbench、remote-workbench、native-browser区分角色。RAF 不是屏幕呈现时间，Event Timing 不是无阈值端到端输入延迟。
 
-损坏的私有 JSON 只报告 `invalid-json`，其他异常仅输出固定类别或允许的系统错误码，不保存任意异常文本、解析器原文、env、argv 或 token。owner receipt 另有严格字段、顺序与本轮 nonce 校验，公开摘要不复制其原始 reason。renderer JSONL 与 receipt 在校验原字节后才写入报告，不能先复制未经校验的内容再报错。
+损坏的私有 JSON 只报告 `invalid-json`，其他异常仅输出固定类别或允许的系统错误码，不保存任意异常文本、解析器原文、env、argv 或 token。owner receipt 另有严格字段、顺序与本轮 nonce 校验，公开摘要不复制其原始 reason。renderer JSONL 与 receipt 先校验本轮身份和类型，再仅发布已定义的观测字段，任意附加字段与私有错误文本不进入报告；分别保留私有原字节和公开投影的摘要，不把投影误称原始字节副本。
 
 报告始终 `qualification: not-accepted`。只有执行与清理均无未解决失败的 suite 才能返回 0；任何强制停止或未确认的归属都不能成为通过的工作负载。启动、seed、原owner执行或退出失败也返回非零。任何节省百分比与完整七场景通过结论都需要实际产品运行和额外 native evidence，不能从本文件或 Node harness tests 推断。

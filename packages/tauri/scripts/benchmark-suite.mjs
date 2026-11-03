@@ -10,19 +10,40 @@ import { verifyElectronBaseline } from './benchmark-build.mjs';
 import { startFixtureWorker, isolatedEnvironment } from './benchmark-services.mjs';
 import { fixtureApi, seedProduct } from './benchmark-seed.mjs';
 import { productWorkloads, operatorInstructions, manualScenarios } from './benchmark-workloads.mjs';
-import { planTemplate, environmentProbe, runBenchmark } from './benchmark-desktop.mjs';
+import { planTemplate, environmentProbe, runBenchmark, failureReason } from './benchmark-desktop.mjs';
 import { hashDirectory, hashJson, scenarioRequirements } from './benchmark-contract.mjs';
 import { startBenchmarkWindowManager } from './benchmark-companion.mjs';
 import { providerDisclosure } from './benchmark-fixture-service.mjs';
 const read = async file => JSON.parse(await fs.readFile(file, 'utf8'));
 const save = (file, value) => fs.writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 async function makeRoot(root) { await fs.mkdir(path.join(root, 'data'), { recursive: true }); await fs.mkdir(path.join(root, 'home'), { recursive: true }); return root; }
+/** Commit the final public evidence before releasing the private seed. A
+ * publication failure retains data even when every process already stopped. */
+export async function publishSuiteReport({ output, root, report, cleanupUncertain }) {
+  report.cleanupUncertain = cleanupUncertain;
+  if (root && cleanupUncertain) report.retainedPrivateDirectory = root;
+  const failure = error => Object.assign(new Error(`benchmark-suite-publication-failed:${failureReason(error)}`), {
+    cleanupUncertain: true, retainedPrivateDirectory: root,
+    retainedPrivateDirectories: report.retainedRunDirectories ?? [],
+  });
+  try { await save(path.join(output, 'suite.json'), report); }
+  catch (error) { throw failure(error); }
+  if (root && !cleanupUncertain) {
+    try { await fs.rm(root, { recursive: true, force: true }); }
+    catch (error) {
+      report.status = 'failed-cleanup'; report.cleanupUncertain = true; report.retainedPrivateDirectory = root;
+      report.cleanup.push({ owner: 'private-seed', reason: failureReason(error) });
+      try { await save(path.join(output, 'suite.json'), report); } catch (writeError) { throw failure(writeError); }
+    }
+  }
+}
 export async function runSuite({ pairFile, output, repetitions = 4, manual = false, turns = 40 } = {}) {
   output = path.resolve(output); await fs.mkdir(output, { recursive: false });
   const report = { schema: 1, product: 'varin-desktop-benchmark-suite', status: 'running', qualification: 'not-accepted', sourceSha: null,
     providerDisclosure, scenarios: [], setup: [], limitations: [], cleanup: [] };
   let root, provider, windowManager, cleanupUncertain = false;
   try {
+    if (!['linux', 'win32'].includes(process.platform)) throw new Error('Launch-bound benchmark ownership is unsupported on this platform');
     const pair = await read(path.resolve(pairFile)); report.sourceSha = pair.sourceSha;
     if (pair.schema !== 1 || pair.product !== 'varin-desktop-benchmark-pair' || pair.target !== `${process.platform}-${process.arch}`) throw new Error('Expected native same-source benchmark pair');
     const manifest = await verifyRuntimeManifest(pair.runtime, { platform: process.platform, architecture: process.arch });
@@ -33,7 +54,7 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
     if (process.env.VARIN_BENCHMARK_DISPOSABLE_OS_USER !== '1') throw new Error('A disposable OS account/session is required before full products register OS handlers');
     if (!Number.isSafeInteger(repetitions) || repetitions < 1 || !Number.isSafeInteger(turns) || turns < 20) throw new Error('Expected positive repetitions and at least 20 real history turns');
     try { windowManager = await startBenchmarkWindowManager(); report.setup.push(windowManager.receipt); }
-    catch (error) { report.limitations.push(`Companion system-input scenario blocked: ${error.message}`); }
+    catch (error) { report.limitations.push(`Companion system-input scenario blocked: ${failureReason(error)}`); }
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-benchmark-suite-'));
     const node = path.join(pair.runtime, manifest.node.executable), worker = (directory, configuration) => startFixtureWorker({ node,
       env: isolatedEnvironment(directory, pair.runtime, manifest), configuration: { runtime: pair.runtime, ...configuration } });
@@ -122,20 +143,12 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
     if (error.retainedPrivateDirectories?.length) report.retainedRunDirectories = error.retainedPrivateDirectories;
     else if (error.retainedPrivateDirectory) report.retainedRunDirectories = [{ path: error.retainedPrivateDirectory }];
     report.status = cleanupUncertain ? 'failed-cleanup' : 'blocked';
-    report.failure = { code: error.code ?? 'suite-owner-operation-failed', reason: error instanceof SyntaxError ? 'invalid-json' : error.message };
+    report.failure = { code: 'suite-owner-operation-failed', reason: failureReason(error) };
   }
   finally {
-    if (windowManager) { try { report.cleanup.push({ owner: 'window-manager', ...(await windowManager.stop()) }); } catch(error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'failed-cleanup'; report.cleanup.push({ owner: 'window-manager', reason: error.message }); } }
-    if (provider) { try { report.cleanup.push({ owner: 'provider', ...(await provider.stop()) }); } catch (error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'failed-cleanup'; report.cleanup.push({ owner: 'provider', error: error.message, ...error.fixtureCleanup }); } }
-    if (root && !cleanupUncertain) await fs.rm(root, { recursive: true, force: true });
-    else if (root) report.retainedPrivateDirectory = root;
-    report.cleanupUncertain = cleanupUncertain;
-    try { await save(path.join(output, 'suite.json'), report); }
-    catch (error) {
-      if (cleanupUncertain) Object.assign(error, { cleanupUncertain: true, retainedPrivateDirectory: root,
-        retainedPrivateDirectories: report.retainedRunDirectories ?? [] });
-      throw error;
-    }
+    if (windowManager) { try { report.cleanup.push({ owner: 'window-manager', ...(await windowManager.stop()) }); } catch(error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'failed-cleanup'; report.cleanup.push({ owner: 'window-manager', reason: failureReason(error) }); } }
+    if (provider) { try { report.cleanup.push({ owner: 'provider', ...(await provider.stop()) }); } catch (error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'failed-cleanup'; report.cleanup.push({ owner: 'provider', reason: failureReason(error), drained: false, ownerStopAcknowledged: error.fixtureCleanup?.ownerStopAcknowledged === true }); } }
+    await publishSuiteReport({ output, root, report, cleanupUncertain });
   }
   return report;
 }

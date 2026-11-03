@@ -1,11 +1,14 @@
-/** Own only new disposable benchmark workers. Await the original owner's stop
- * and direct process exit; retain private data when either remains uncertain. */
-import { fork } from 'node:child_process';
-import { once } from 'node:events';
+/** Own disposable benchmark workers through their original native scope. The
+ * private application stop receipt and root exit are separate from scope drain. */
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createProcessCollector } from './benchmark-processes.mjs';
+import { launchOwned, prepareNativeProcessOwner } from './native-process-owner.mjs';
 const worker = fileURLToPath(new URL('./benchmark-fixture-service.mjs', import.meta.url));
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 export function isolatedEnvironment(root, runtime, manifest) {
   const home = path.join(root, 'home');
   const env = { ...process.env, HOME: home, USERPROFILE: home, VARIN_DATA_DIR: path.join(root, 'data'),
@@ -15,70 +18,81 @@ export function isolatedEnvironment(root, runtime, manifest) {
   return env;
 }
 export async function startFixtureWorker({ node, env, configuration, timeoutMs = 60000 }) {
-  const child = fork(worker, ['--fixture-worker'], { execPath: node, env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], detached: process.platform !== 'win32' });
-  const pending = new Map(); let serial = 0, exited = false, exitResult;
-  const exit = new Promise(resolve => child.once('exit', (code, signal) => {
-    exited = true; exitResult = { code, signal }; resolve(exitResult);
-    for (const entry of pending.values()) entry.reject(new Error('Fixture worker exited before its owner acknowledged the operation'));
-    pending.clear();
-  }));
-  child.on('message', message => { const entry = pending.get(message?.id); if (!entry) return; pending.delete(message.id); message.ok ? entry.resolve(message) : entry.reject(new Error(message.error?.message ?? 'Fixture worker operation failed')); });
-  child.on('error', error => { for (const entry of pending.values()) entry.reject(error); pending.clear(); });
-  const request = (command, fields = {}) => new Promise((resolve, reject) => {
-    if (exited || !child.connected) return reject(new Error('Fixture worker is not connected'));
-    const id = serial++, timer = setTimeout(() => { pending.delete(id); reject(new Error(`Fixture ${command} did not finish within its observation budget`)); }, timeoutMs);
-    pending.set(id, { resolve(value) { clearTimeout(timer); resolve(value); }, reject(error) { clearTimeout(timer); reject(error); } });
-    child.send({ id, command, ...fields }, error => { if (error) { const entry = pending.get(id); pending.delete(id); entry?.reject(error); } });
-  });
-  let collector;
-  const retainUnresolved = (error, { receipt, ownerStopAcknowledged = false, final } = {}) => {
-    // A sampled empty table cannot prove that a descendant did not fork/detach
-    // between observations. Never signal a reusable numeric PID or process
-    // group to manufacture a cleanup receipt after the original owner failed.
-    if (child.pid) {
-      error.cleanupUncertain = true;
-      error.fixtureCleanup = { receipt, pid: child.pid, exit: exitResult ?? null,
-        drained: false, forced: false, ownerStopAcknowledged,
-        observedCounterScopeEmpty: !!final && !final.processes.length && final.coverage?.rootState === 'exited',
-        termination: 'not-attempted-without-launch-bound-process-scope' };
-      // Keep the actual worker and its private data intact. Do not keep this
-      // reporting controller alive solely through an unresolved child's IPC.
-      child.unref(); child.channel?.unref();
+  const helperExecutable = await prepareNativeProcessOwner(); // Reject unsupported platforms before a launch or private copy.
+  const control = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-benchmark-control-'));
+  const nonce = randomUUID();
+  let owner, collector, serial = 0, exited = false, exitResult = null, ownerError = false, stopPromise;
+  const request = async (command, fields = {}) => {
+    if (!['start', 'inspect', 'stop'].includes(command) || exited || ownerError) throw new Error('Fixture control is unavailable');
+    const id = serial++, file = path.join(control, `request-${id}.json`), temporary = `${file}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify({ schema: 1, nonce, id, command, ...fields }), { flag: 'wx', mode: 0o600 });
+    await fs.rename(temporary, file);
+    const response = path.join(control, `response-${id}.json`), deadline = performance.now() + timeoutMs;
+    while (performance.now() < deadline) {
+      let value;
+      try {
+        const stat = await fs.lstat(response);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) throw new Error('Invalid fixture control receipt');
+        value = JSON.parse(await fs.readFile(response, 'utf8'));
+      } catch (error) { if (error.code !== 'ENOENT') throw new Error('Invalid fixture control receipt'); }
+      if (value !== undefined) {
+        if (!value || value.schema !== 1 || value.nonce !== nonce || value.id !== id || value.command !== command || typeof value.ok !== 'boolean') throw new Error('Invalid fixture control receipt');
+        if (!value.ok) throw new Error('The real isolated fixture owner failed its operation');
+        return value;
+      }
+      if (exited || ownerError) throw new Error('Fixture worker exited before its original operation receipt');
+      await sleep(10);
     }
-    return error;
+    throw new Error('Fixture operation remained unconfirmed at its observation deadline');
   };
-
+  const finish = async ({ receipt, ownerStopAcknowledged = false, failure } = {}) => {
+    let scope, final, controlConfirmed = true;
+    if (owner) {
+      try { scope = await owner.settle({ timeoutMs: failure ? 100 : 10000 }); } catch { ownerError = true; }
+      if (!scope?.ownershipDrainConfirmed) {
+        try { controlConfirmed = (await owner.requestStop({ forceAfterMs: 1000 })).requested; } catch { controlConfirmed = false; }
+        try { scope = await owner.settle({ timeoutMs: 10000 }); } catch { ownerError = true; }
+      }
+    }
+    try { final = await collector?.sample(); } catch { /* Counter gaps are diagnostic, never a release proof. */ }
+    let cleanupUncertain = !scope?.ownershipDrainConfirmed || ownerError || !controlConfirmed;
+    try { await collector?.close(); } catch { cleanupUncertain = true; }
+    const result = { receipt, pid: owner?.rootPid ?? null, exit: exitResult, ownerStopAcknowledged,
+      ownershipDrainConfirmed: scope?.ownershipDrainConfirmed === true,
+      drained: scope?.ownershipDrainConfirmed === true, forced: scope?.forced === true,
+      clean: !failure && ownerStopAcknowledged && scope?.clean === true && exitResult?.success === true && !cleanupUncertain,
+      observedCounterScopeEmpty: !!final && !final.processes.length && final.coverage?.rootState === 'exited', final };
+    if (!cleanupUncertain) {
+      try { await fs.rm(control, { recursive: true, force: true }); } catch { cleanupUncertain = true; }
+    }
+    if (failure || !result.clean || cleanupUncertain) {
+      throw Object.assign(new Error('Fixture owner did not complete a clean original-scope shutdown'), {
+        cleanupUncertain, fixtureCleanup: result,
+        ...(cleanupUncertain ? { retainedControlDirectory: control } : {}),
+      });
+    }
+    return result;
+  };
   try {
-    await once(child, 'spawn');
-    collector = await createProcessCollector({ rootPid: child.pid });
+    try {
+      owner = await launchOwned({ executable: node, args: [worker, '--fixture-worker', control, nonce], env }, { helperExecutable });
+    } catch (error) { owner = error.owner; ownerError = true; throw new Error('Fixture launch admission was not confirmed'); }
+    owner.rootExit.then(value => { exited = true; exitResult = value; }, () => { exited = true; ownerError = true; });
+    collector = await createProcessCollector();
+    await collector.setRoot(owner.rootPid, owner.rootStartIdentity);
     const started = await request('start', { configuration });
     const startup = await collector.sample();
-    return { pid: child.pid, startup, origin: started.origin, credentials: started.credentials, request,
+    return { pid: owner.rootPid, startup, origin: started.origin, credentials: started.credentials, request,
       sample: () => collector.sample(),
-      async stop() {
-        let receipt, final, ownerStopAcknowledged = false;
-        try {
-          receipt = (await request('inspect')).receipt;
-          await collector.sample();
-          await request('stop'); ownerStopAcknowledged = true;
-          await Promise.race([exit, new Promise((_, reject) => setTimeout(() => reject(new Error('Fixture owner acknowledged stop but process did not exit')), 10000).unref())]);
-          final = await collector.sample();
-          if (exitResult.code !== 0 || final.processes.length || final.coverage.rootState !== 'exited' || !final.coverage.processCountersComplete) throw new Error('Fixture owner process tree did not drain');
-          // The fixture's original stop protocol awaits its actual owner (the
-          // Host rejects incomplete native shutdown), then its direct process
-          // exits. The counter table is supporting observation, not that proof.
-          await collector.close();
-          return { receipt, exit: exitResult, drained: true, forced: false, ownerStopAcknowledged, final };
-        } catch (error) {
-          retainUnresolved(error, { receipt, ownerStopAcknowledged, final });
-          try { await collector.close(); } catch { /* Preserve the original failure and unresolved owner. */ }
-          throw error;
-        }
+      stop() {
+        stopPromise ??= (async () => {
+          let receipt, ownerStopAcknowledged = false, failure;
+          try { receipt = (await request('inspect')).receipt; await request('stop'); ownerStopAcknowledged = true; }
+          catch (error) { failure = error; }
+          return finish({ receipt, ownerStopAcknowledged, failure });
+        })();
+        return stopPromise;
       },
     };
-  } catch (error) {
-    retainUnresolved(error);
-    try { await collector?.close(); } catch { /* Preserve cleanup uncertainty on the original setup error. */ }
-    throw error;
-  }
+  } catch (failure) { return finish({ failure }); }
 }

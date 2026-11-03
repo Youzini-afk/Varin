@@ -106,36 +106,57 @@ export async function startControlledService({ port = 0, nodePath = process.exec
 }
 
 async function runWorker() {
+  const index = process.argv.indexOf('--fixture-worker'), directory = process.argv[index + 1], nonce = process.argv[index + 2];
+  if (!directory || !path.isAbsolute(directory) || !/^[a-f0-9-]{36}$/u.test(nonce ?? '')) throw new Error('Invalid fixture control admission');
+  const stat = await fs.lstat(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid fixture control directory');
   let owner, initial = true;
-  process.on('message', message => { void (async () => {
-    if (message.command === 'start' && initial) {
-      initial = false; const { configuration: config } = message;
-      if (config.mode === 'provider') owner = await startControlledService(config);
-      else if (config.mode === 'settings') {
-        const entry = path.join(config.runtime, 'host/node_modules/@varin/web/server/desktop-settings.js');
-        const { createDesktopSettingsOwner } = await import(pathToFileURL(entry).href);
-        const settings = createDesktopSettingsOwner();
-        for (const operation of config.operations) await settings(operation.method, operation.args);
-        owner = { stop: async () => {}, inspect: () => ({ operations: config.operations.length }) };
-      } else if (config.mode === 'host') {
-        const entry = path.join(config.runtime, 'host/node_modules/@varin/web/server/index.js');
-        const { startWebUiServer } = await import(pathToFileURL(entry).href);
-        const allowed = new URL(config.providerOrigin).origin;
-        // Use the original desktop transport contract, bounded to the synthetic
-        // provider. No real remote API is contacted by this isolated service.
-        const desktopNetworkFetch = (url, init) => {
-          if (new URL(url).origin !== allowed) throw new Error('Benchmark Host network is limited to the controlled fixture provider');
-          return fetch(url, init);
-        };
-        const host = await startWebUiServer({ port: config.port ?? 0, host: '127.0.0.1', apiOnly: true, attachSignals: false, exitOnShutdown: false, desktopNetworkFetch });
-        const credentials = await host.getDesktopLocalCredentials();
-        owner = { origin: `http://127.0.0.1:${host.getPort()}`, credentials, stop: () => host.stop({ exitProcess: false }), inspect: () => ({ ready: host.isReady() }) };
-      } else throw new Error('Unknown fixture worker mode');
-      process.send({ id: message.id, ok: true, origin: owner.origin, credentials: owner.credentials });
-    } else if (message.command === 'inspect' && owner) process.send({ id: message.id, ok: true, receipt: owner.inspect() });
-    else if (message.command === 'stop' && owner) { await owner.stop(); owner = null; process.send({ id: message.id, ok: true }, () => process.disconnect()); }
-    else throw new Error('Fixture worker state mismatch');
-  })().catch(error => { process.send?.({ id: message.id, ok: false, error: { code: error.code ?? 'fixture-worker-failed', message: 'The real isolated fixture service could not start or complete its owner operation' } }); }); });
-  process.on('disconnect', () => { if (owner) void owner.stop().finally(() => { process.exitCode = 0; }); });
+  // A dedicated sequential file channel keeps credentials and service commands
+  // out of the native receipt stream and application stdout/stderr. Only files
+  // in this newly created private directory are admitted, never product APIs.
+  for (let id = 0; ; id++) {
+    const file = path.join(directory, `request-${id}.json`);
+    let message;
+    while (message === undefined) {
+      try {
+        const stat = await fs.lstat(file);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) throw new Error('Invalid fixture command');
+        message = JSON.parse(await fs.readFile(file, 'utf8'));
+      } catch (error) { if (error.code !== 'ENOENT') throw new Error('Invalid fixture command'); await delay(10); }
+    }
+    if (!message || message.schema !== 1 || message.nonce !== nonce || message.id !== id || !['start', 'inspect', 'stop'].includes(message.command)) throw new Error('Invalid fixture command identity');
+    let value, stopped = false;
+    try {
+      if (message.command === 'start' && initial) {
+        initial = false; const { configuration: config } = message;
+        if (config.mode === 'provider') owner = await startControlledService(config);
+        else if (config.mode === 'settings') {
+          const entry = path.join(config.runtime, 'host/node_modules/@varin/web/server/desktop-settings.js');
+          const { createDesktopSettingsOwner } = await import(pathToFileURL(entry).href);
+          const settings = createDesktopSettingsOwner();
+          for (const operation of config.operations) await settings(operation.method, operation.args);
+          owner = { stop: async () => {}, inspect: () => ({ operations: config.operations.length }) };
+        } else if (config.mode === 'host') {
+          const entry = path.join(config.runtime, 'host/node_modules/@varin/web/server/index.js');
+          const { startWebUiServer } = await import(pathToFileURL(entry).href);
+          const allowed = new URL(config.providerOrigin).origin;
+          const desktopNetworkFetch = (url, init) => {
+            if (new URL(url).origin !== allowed) throw new Error('Benchmark Host network is limited to the controlled fixture provider');
+            return fetch(url, init);
+          };
+          const host = await startWebUiServer({ port: config.port ?? 0, host: '127.0.0.1', apiOnly: true, attachSignals: false, exitOnShutdown: false, desktopNetworkFetch });
+          const credentials = await host.getDesktopLocalCredentials();
+          owner = { origin: `http://127.0.0.1:${host.getPort()}`, credentials, stop: () => host.stop({ exitProcess: false }), inspect: () => ({ ready: host.isReady() }) };
+        } else throw new Error('Unknown fixture worker mode');
+        value = { ok: true, origin: owner.origin, credentials: owner.credentials };
+      } else if (message.command === 'inspect' && owner) value = { ok: true, receipt: owner.inspect() };
+      else if (message.command === 'stop' && owner) { await owner.stop(); owner = null; stopped = true; value = { ok: true }; }
+      else throw new Error('Fixture worker state mismatch');
+    } catch { value = { ok: false }; }
+    const response = path.join(directory, `response-${id}.json`), temporary = `${response}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify({ schema: 1, nonce, id, command: message.command, ...value }), { flag: 'wx', mode: 0o600 });
+    await fs.rename(temporary, response);
+    if (stopped) return; // Native scope, not this return, certifies all descendants.
+  }
 }
 if (process.argv.includes('--fixture-worker')) await runWorker();

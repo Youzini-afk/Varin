@@ -8,7 +8,7 @@ import { startControlledService, responseRecipe, seedAnswer } from './benchmark-
 import { productWorkloads, manualScenarios } from './benchmark-workloads.mjs';
 import { validateWorkload } from './benchmark-contract.mjs';
 import { fixtureApi, awaitRun } from './benchmark-seed.mjs';
-import { runSuite } from './benchmark-suite.mjs';
+import { runSuite, publishSuiteReport } from './benchmark-suite.mjs';
 
 test('all seven actual product workloads are nonempty and physical operations are explicit', () => {
   const workloads = productWorkloads({ runtime: 'agent', threadId: 'thread-fixture', branchId: 'branch-fixture' }, { workspace: os.tmpdir() });
@@ -43,7 +43,7 @@ test('controlled fixture is a real HTTP SSE endpoint and login/upload/download o
   await assert.rejects(fetch(service.origin));
 });
 
-test('fixture process waits for original owner stop and observed process-tree exit', async () => {
+test('fixture process waits for original owner stop and observed process-tree exit', { skip: !['linux', 'win32'].includes(process.platform) }, async () => {
   const worker = await startFixtureWorker({ node: process.execPath, env: process.env, configuration: { mode: 'provider' }, timeoutMs: 10000 });
   const response = await fetch(worker.origin + '/v1/models'); assert.equal(response.status, 200); await response.text();
   const observed = await worker.sample(); assert.ok(observed.processes.some(p => p.pid === worker.pid));
@@ -53,7 +53,7 @@ test('fixture process waits for original owner stop and observed process-tree ex
   await assert.rejects(fetch(worker.origin));
 });
 
-test('fixture setup and stop failures retain unresolved writers without unbound process-tree kills', { timeout: 20000 }, async t => {
+test('fixture setup and stop failures remain failed after original-scope cleanup stops detached writers', { skip: !['linux', 'win32'].includes(process.platform), timeout: 20000 }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-fixture-lifetime-test-'));
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   const exists = file => fs.access(file).then(() => true, () => false);
@@ -62,15 +62,15 @@ test('fixture setup and stop failures retain unresolved writers without unbound 
     while (!await check() && performance.now() < deadline) await pause(25);
     assert.ok(await check(), description);
   };
+  const drained = new Set();
   t.after(async () => {
     for (const phase of ['setup', 'stop']) {
       const directory = path.join(root, phase);
-      if (!await exists(path.join(directory, 'writer-ready'))) continue;
-      await fs.writeFile(path.join(directory, 'stop-writer'), 'stop');
-      await until(() => exists(path.join(directory, 'writer-closed')), 'Original test writer closed its file before cleanup');
-      await until(() => exists(path.join(directory, 'root-closed')), 'Original test worker reached its explicit exit');
+      if (drained.has(phase)) continue;
+      if (await exists(path.join(directory, 'writer-ready'))) await fs.writeFile(path.join(directory, 'stop-writer'), 'stop');
     }
-    await fs.rm(root, { recursive: true, force: true });
+    // A test assertion cannot stand in for the original guardian's receipt.
+    if (drained.size === 2) await fs.rm(root, { recursive: true, force: true });
   });
   for (const phase of ['setup', 'stop']) {
     const directory = path.join(root, phase), runtime = path.join(directory, 'runtime');
@@ -79,16 +79,17 @@ test('fixture setup and stop failures retain unresolved writers without unbound 
     await fs.writeFile(path.join(server, 'package.json'), '{"type":"module"}');
     await fs.writeFile(path.join(directory, 'original-state'), 'original worker owns this data');
     // A real process fixture, not a substitute Host or product acceptance.
-    // The writer is born only after initial process registration and must keep
-    // its existing file after setup/stop reports an unconfirmed outcome.
+    // The writer detaches after original admission. Cleanup still uses only
+    // its original guardian, never a sampled PID or process-table match.
     const writer = `const fs=require('node:fs'),path=require('node:path'),root=process.env.VARIN_DATA_DIR;
       const file=fs.openSync(path.join(root,'writer-progress'),'a');let ticks=0;
+      process.on('SIGTERM',()=>{});
       fs.writeFileSync(path.join(root,'writer-ready'),'ready');
       const timer=setInterval(()=>{fs.writeSync(file,String(++ticks)+'\\n');
         if(fs.existsSync(path.join(root,'stop-writer'))||ticks>400){clearInterval(timer);fs.closeSync(file);fs.writeFileSync(path.join(root,'writer-closed'),'closed');}},25);`;
     await fs.writeFile(path.join(server, 'index.js'), `import fs from 'node:fs/promises';import path from 'node:path';import {spawn} from 'node:child_process';
       const root=process.env.VARIN_DATA_DIR;
-      async function fail(){const child=spawn(process.execPath,['-e',${JSON.stringify(writer)}],{stdio:'ignore'});child.unref();
+      async function fail(){const child=spawn(process.execPath,['-e',${JSON.stringify(writer)}],{detached:true,stdio:'ignore'});child.unref();
         while(!await fs.access(path.join(root,'writer-ready')).then(()=>true,()=>false))await new Promise(r=>setTimeout(r,10));
         setTimeout(async()=>{await fs.writeFile(path.join(root,'root-closed'),'closed');process.exit(0)},500);
         throw new Error('Controlled original owner failure');}
@@ -102,14 +103,17 @@ test('fixture setup and stop failures retain unresolved writers without unbound 
       await worker.stop();
     } catch (error) { failure = error; }
     assert.ok(failure, 'The controlled owner must fail');
-    assert.equal(failure.cleanupUncertain, true);
-    assert.equal(failure.fixtureCleanup.drained, false);
-    assert.equal(failure.fixtureCleanup.forced, false);
+    if (failure.fixtureCleanup?.ownershipDrainConfirmed) drained.add(phase);
+    assert.equal(failure.cleanupUncertain, false);
+    assert.equal(failure.fixtureCleanup.ownershipDrainConfirmed, true);
+    assert.equal(failure.fixtureCleanup.drained, true);
+    assert.equal(failure.fixtureCleanup.forced, true);
+    assert.equal(failure.fixtureCleanup.clean, false);
     assert.equal(failure.fixtureCleanup.ownerStopAcknowledged, false);
     await until(() => exists(path.join(directory, 'writer-progress')), 'Original writer started');
     const first = (await fs.stat(path.join(directory, 'writer-progress'))).size;
     await pause(100);
-    assert.ok((await fs.stat(path.join(directory, 'writer-progress'))).size > first, 'No numeric PID/group kill may terminate the unresolved writer');
+    assert.equal((await fs.stat(path.join(directory, 'writer-progress'))).size, first, 'Original-scope cleanup must stop real descendant writes');
     assert.equal(await fs.readFile(path.join(directory, 'original-state'), 'utf8'), 'original worker owns this data');
   }
 });
@@ -141,4 +145,38 @@ test('same-source candidate reuse rejects a different immutable source before to
     await fs.writeFile(candidate, JSON.stringify({ schema: 1, sourceSha: 'a'.repeat(40), version: '1', target: `${process.platform}-${process.arch}`, runtime: path.join(root, 'never-read') }));
     await assert.rejects(verifyTauriBenchmarkCandidate(candidate, { sourceSha: 'b'.repeat(40), version: '1', target: `${process.platform}-${process.arch}` }), /source\/version\/target mismatch/u);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+
+test('suite publication failure retains the seed and redacts raw filesystem errors', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-suite-publication-test-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const root = path.join(directory, 'seed'), output = path.join(directory, 'output');
+  await fs.mkdir(root); await fs.mkdir(output); await fs.writeFile(path.join(root, 'source'), 'original private seed');
+  await fs.mkdir(path.join(output, 'suite.json'));
+  const report = { status: 'observed-not-qualified', cleanup: [], retainedRunDirectories: [] };
+  await assert.rejects(publishSuiteReport({ root, output, report, cleanupUncertain: false }), error => {
+    assert.equal(error.cleanupUncertain, true); assert.equal(error.retainedPrivateDirectory, root);
+    assert.equal(error.message.includes(directory), false); return true;
+  });
+  assert.equal(await fs.readFile(path.join(root, 'source'), 'utf8'), 'original private seed');
+  await fs.rm(path.join(output, 'suite.json'), { recursive: true });
+  await publishSuiteReport({ root, output, report, cleanupUncertain: false });
+  assert.equal(JSON.parse(await fs.readFile(path.join(output, 'suite.json'), 'utf8')).cleanupUncertain, false);
+  await assert.rejects(fs.access(root), { code: 'ENOENT' });
+});
+
+test('suite errors are fixed categories and unsupported macOS stops before fixture preparation', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-suite-private-error-test-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const canary = 'PRIVATE_SUITE_ERROR_CANARY';
+  const result = await runSuite({ pairFile: path.join(directory, canary), output: path.join(directory, 'missing') });
+  assert.equal(JSON.stringify(result).includes(canary), false);
+  assert.equal(result.failure.reason, ['linux', 'win32'].includes(process.platform) ? 'ENOENT' : 'operation-failed');
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...original, value: 'darwin' });
+  try {
+    const result = await runSuite({ pairFile: path.join(directory, canary), output: path.join(directory, 'macos') });
+    assert.equal(result.status, 'blocked'); assert.equal(result.failure.reason, 'operation-failed'); assert.deepEqual(result.setup, []);
+  } finally { Object.defineProperty(process, 'platform', original); }
 });

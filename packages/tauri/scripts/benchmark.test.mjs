@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { hashJson, hashDirectory, validateBenchmarkRequest, validateWorkload, readIsolatedRequest, summarizeRun } from './benchmark-contract.mjs';
 import { dispatchBenchmarkInput, publicRendererSample, remoteTargetExpression } from './benchmark-driver.mjs';
-import { planTemplate, preflight, compareRuns, runBenchmark, measureRun } from './benchmark-desktop.mjs';
+import { planTemplate, preflight, compareRuns, runBenchmark, measureRun, publicRendererRecord, publicProductReceipt } from './benchmark-desktop.mjs';
 
 const pageSource = await fs.readFile(new URL('./benchmark-page.js', import.meta.url), 'utf8');
 const workload = steps => ({ name: 'workspace-transitions', motion: 'full', timeoutMs: 10000, readyTimeoutMs: 500,
@@ -369,10 +369,11 @@ test('observation failure stops actual original writers and forced cleanup never
   });
   assert.ok(writes.length > 0); assert.equal(result.status, 'failed');
   assert.equal(result.ownershipDrainConfirmed, true); assert.equal(result.processOwner.forced, true);
-  assert.equal(result.cleanupUncertain, false); assert.ok(result.coverage.includes('measurement-failed:invalid-json'));
+  assert.equal(result.cleanupUncertain, true); assert.ok(result.coverage.includes('measurement-failed:invalid-json'));
+  t.after(() => fs.rm(copy, { recursive: true, force: true }));
   assert.ok(result.coverage.includes('measurement-failed:native-owner-workload-not-clean'));
   assert.equal(JSON.stringify(result).includes('PRIVATE_OBSERVATION_CANARY'), false);
-  await assert.rejects(fs.access(copy), { code: 'ENOENT' });
+  await fs.access(copy);
   assert.equal(await hashDirectory(fixture.fixtureDirectory), fixture.checked.scenarios[0].inputs.dataSha256);
 });
 
@@ -579,12 +580,63 @@ test('malformed private observations never leak parser excerpts or unvalidated r
   for (const name of ['benchmark-live.json', 'benchmark-receipt.json', 'benchmark-renderer.jsonl']) {
     const fixture = await ownedBenchmarkFixture(t, `fs.writeFileSync(path.join(data,${JSON.stringify(name)}),${JSON.stringify(canary)});setTimeout(()=>process.exit(0),250);`);
     const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, fixture.dir);
-    assert.equal(result.ownershipDrainConfirmed, true); assert.equal(result.cleanupUncertain, false);
+    assert.equal(result.ownershipDrainConfirmed, true); assert.equal(result.cleanupUncertain, true);
+    t.after(() => fs.rm(result.retainedPrivateDirectory, { recursive: true, force: true }));
     assert.ok(result.coverage.includes('measurement-failed:invalid-json')); assert.equal(JSON.stringify(result).includes(canary), false);
     for (const file of (await fs.readdir(fixture.dir)).filter(value => /\.jsonl?$/u.test(value))) {
       assert.equal((await fs.readFile(path.join(fixture.dir, file), 'utf8')).includes(canary), false);
     }
     await assert.rejects(fs.access(path.join(fixture.dir, 'electron-0-benchmark-renderer.jsonl')), { code: 'ENOENT' });
+  }
+});
+
+test('public projections preserve typed evidence and exclude private reason and unknown fields at every level', () => {
+  const canary = 'PRIVATE_STRUCTURED_ERROR_CANARY', bound = request([{ id: 'observe', action: 'wait', durationMs: 50 }]);
+  const receipt = { ...bound, product: 'varin-desktop-benchmark-receipt', shell: 'tauri', complete: false, nativeDrain: false,
+    reason: canary, token: canary, steps: [{ id: 'observe', action: 'wait', startedMs: 1, settledMs: 3, text: canary }], rendererTargets: ['application:main'] };
+  const published = publicProductReceipt(receipt, bound, 'tauri');
+  assert.equal(published.complete, false); assert.equal(published.nativeDrain, false); assert.equal(published.reason, 'operation-failed');
+  assert.equal(published.steps[0].settledMs, 3); assert.equal(JSON.stringify(published).includes(canary), false);
+  const record = { schema: 1, nonce: bound.nonce, sequence: 0, elapsedMs: 4, token: canary, targets: [{ label: 'application:main', status: 'failed',
+    error: canary, pendingAction: { text: canary }, frameTimesMs: [16], ownerObservation: { error: canary, token: canary },
+    receipts: [{ id: 'observe', action: 'wait', settledMs: 3, text: canary }], companion: { status: 'failed', diagnostic: { failed: true, released: true, error: canary } } }] };
+  const observed = publicRendererRecord(record, bound, 0);
+  assert.deepEqual(observed.targets[0].frameTimesMs, [16]); assert.equal(observed.targets[0].error, 'operation-failed');
+  assert.equal(JSON.stringify(observed).includes(canary), false);
+  for (const value of [null, [], { ...receipt, nonce: 'different' }, { ...receipt, complete: 'true' }, { ...receipt, inputs: null },
+    { ...receipt, steps: [{ id: 'unbound', action: 'wait' }] }]) assert.throws(() => publicProductReceipt(value, bound, 'tauri'), { cleanupUncertain: true });
+  for (const value of [null, { ...record, nonce: 'different' }, { ...record, targets: null }, { ...record, targets: [{ label: 'application:main', status: canary }] },
+    { ...record, targets: [{ label: 'application:main', status: 'running', frameTimesMs: [canary] }] }]) assert.throws(() => publicRendererRecord(value, bound, 0), { cleanupUncertain: true });
+});
+
+test('actual page observer output survives the public projection with nullable fields and Event Timing', () => {
+  const bound = request([{ id: 'observe', action: 'wait', durationMs: 50 }]);
+  const h = browserHarness({ ready: false }); h.api.start(bound.workload);
+  const project = (sample, sequence) => publicRendererRecord({ schema: 1, nonce: bound.nonce, sequence, elapsedMs: sequence + 1,
+    targets: [{ label: 'application:main', surfaceRole: 'main-workbench', ...sample }] }, bound, sequence).targets[0];
+  const waiting = project(h.api.poll(), 0); assert.equal(waiting.readyAt, null); assert.equal(waiting.error, null);
+  h.elements.set('[data-varin-workbench-switcher]', h.element()); project(h.api.poll(), 1);
+  h.frame(16); h.frame(20); h.timing([{ entryType: 'event', startTime: 10, duration: 32, processingStart: 18, processingEnd: 22, interactionId: 1 }]);
+  const active = project(h.api.poll(), 2); assert.deepEqual(active.frameTimesMs, [20]); assert.deepEqual(active.inputLatenciesMs, [32]);
+  assert.equal(active.inputEvents[0].inputDelayMs, 8); h.advance(50);
+  const complete = project(h.api.poll(), 3); assert.equal(complete.status, 'completed');
+  assert.equal(complete.receipts[0].cycle, null); assert.equal(complete.receipts[0].milestone, null); assert.equal('pendingAction' in complete, false);
+});
+
+test('valid JSON product errors never publish raw private data and invalid identities retain the copy', nativeLinux, async t => {
+  const canary = 'PRIVATE_STRUCTURED_ERROR_CANARY';
+  for (const fault of ['product-failure', 'wrong-nonce', 'wrong-shape', 'null']) {
+    const fixture = await ownedBenchmarkFixture(t, `
+      const request=JSON.parse(fs.readFileSync(path.join(data,'benchmark-request.json'),'utf8'));
+      const receipt={schema:1,product:'varin-desktop-benchmark-receipt',shell:'electron',nonce:request.nonce,sourceSha:request.sourceSha,version:request.version,scenarioSha256:request.scenarioSha256,inputs:request.inputs,complete:false,reason:${JSON.stringify(canary)},token:${JSON.stringify(canary)}};
+      if(${JSON.stringify(fault)}==='wrong-nonce')receipt.nonce='wrong';if(${JSON.stringify(fault)}==='wrong-shape')receipt.complete='true';
+      fs.writeFileSync(path.join(data,'benchmark-receipt.json'),JSON.stringify(${JSON.stringify(fault)}==='null'?null:receipt));setTimeout(()=>process.exit(0),250);`);
+    const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, fixture.dir);
+    assert.equal(result.ownershipDrainConfirmed, true); assert.notEqual(result.status, 'measured-awaiting-review');
+    assert.equal(JSON.stringify(result).includes(canary), false);
+    for (const file of (await fs.readdir(fixture.dir)).filter(value => /\.jsonl?$/u.test(value))) assert.equal((await fs.readFile(path.join(fixture.dir, file), 'utf8')).includes(canary), false);
+    if (fault === 'product-failure') { assert.equal(result.cleanupUncertain, false); assert.equal(result.rendererReceipt.reason, 'operation-failed'); }
+    else { assert.equal(result.cleanupUncertain, true); await fs.access(result.retainedPrivateDirectory); t.after(() => fs.rm(result.retainedPrivateDirectory, { recursive: true, force: true })); }
   }
 });
 
@@ -772,5 +824,8 @@ test('companion stop joins an in-flight decode and closes its bitmap without pai
   await Promise.resolve(); assert.equal(settled, false);
   finishDecode({ width: 8, height: 8, close() { closed++; } });
   assert.equal((await stop).released, true); assert.equal(closed, 1); assert.equal(draws, 0); assert.equal(api.poll().status, 'failed');
+  const bound = request([{ id: 'observe', action: 'wait', durationMs: 50 }]);
+  const recorded = publicRendererRecord({ schema: 1, nonce: bound.nonce, sequence: 0, elapsedMs: 1, targets: [{ label: 'companion:original', status: 'observing', companion: api.poll() }] }, bound, 0);
+  assert.equal(recorded.targets[0].companion.diagnostic.released, true); assert.equal(recorded.targets[0].companion.diagnostic.failed, true);
   assert.throws(() => api.start({}), /interrupted/u);
 });
