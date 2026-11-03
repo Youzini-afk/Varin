@@ -152,7 +152,9 @@ jobs:
         run: node packages/electron/scripts/ensure-electron.mjs
       - name: Verify isolated Linux fixture startup before the native build
         if: matrix.platform == 'linux'
-        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs --preflight --output artifacts/tauri-fixture-preflight --disposable-runner
+        run: |
+          mkdir -p artifacts
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs --preflight --output artifacts/tauri-fixture-preflight --disposable-runner
       - uses: actions/download-artifact@v8
         with:
           name: tauri-shared-frontend
