@@ -14,9 +14,11 @@ export function useToolOperation(operationId: string | undefined, projected?: Op
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [state, setState] = React.useState<{ key: string; operation?: Operation; busy?: boolean; cancelRequested?: boolean; error?: string }>({ key });
   const live = operationId ? Object.values(conversation?.toolExecutions ?? {}).find(value => value.operationId === operationId)?.operation ?? projected : undefined;
-  const belongs = (value?: Operation) => value?.id === operationId;
+  // Streaming and historical cards may not have an Operation yet. Two absent
+  // IDs do not establish ownership, and missing values have no revision.
+  const belongs = (value?: Operation): value is Operation => value !== undefined && value.id === operationId;
   const loaded = state.key === key ? state.operation : undefined;
-  const operation = belongs(live) && (!belongs(loaded) || live!.revision >= loaded!.revision) ? live : belongs(loaded) ? loaded : undefined;
+  const operation = belongs(live) && (!belongs(loaded) || live.revision >= loaded.revision) ? live : belongs(loaded) ? loaded : undefined;
   const lock = React.useRef<string | undefined>(undefined);
   const update = async (cancel = false) => {
     if (!api || !identity || !operationId || lock.current === key || (cancel && conversation.readOnly)) return;
