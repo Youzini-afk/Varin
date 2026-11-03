@@ -120,6 +120,10 @@ jobs:
         with:
           name: tauri-shared-frontend
           path: artifacts/tauri-input/frontend
+      # The native scope test starts the production extension broker, which
+      # imports the real workspace contracts rather than a stand-in fixture.
+      - name: Prepare shared runtime contracts for native integration tests
+        run: bun run build:runtime-dependencies
       - name: Verify native owner logic
         run: cargo test --manifest-path packages/tauri/src-tauri/Cargo.toml --no-default-features --locked
       - name: Build controlled old-engine reader

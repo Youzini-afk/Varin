@@ -987,9 +987,11 @@ const {{fileURLToPath}}=await import('node:url');
 const extension=new URL('./extension.cjs',import.meta.url);
 fs.writeFileSync(extension, 'module.exports.activate=context=>{{setInterval(()=>{{}},1000);context.effect(()=>new Promise(()=>{{}}));}};');
 const broker=fork({},[],{{execArgv:[],stdio:['ignore','ignore','ignore','ipc']}});
+let activated=false;
+broker.once('exit',(code,signal)=>{{if(!activated)void send({{kind:'event',event:'brokerExitedBeforeReady',payload:{{code,signal}}}})}});
 broker.on('message',async message=>{{
  if(message.kind==='event'&&message.event==='ready')broker.send({{kind:'request',id:'activate',method:'activate',params:{{modulePath:fileURLToPath(extension),packageRoot:fileURLToPath(new URL('.',import.meta.url)),storage:{{data:{{}},revision:'0'}},dependencies:[]}}}});
- if(message.kind==='response'&&message.id==='activate'){{if(!message.success)process.exit(21);await send({{kind:'event',event:'brokerReady',payload:{{pid:broker.pid}}}})}}
+ if(message.kind==='response'&&message.id==='activate'){{if(!message.success)process.exit(21);activated=true;await send({{kind:'event',event:'brokerReady',payload:{{pid:broker.pid}}}})}}
 }});
 onFrame=async frame=>{{if(frame.method==='crash')process.exit(13)}};
 "#,

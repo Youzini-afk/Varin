@@ -20,7 +20,7 @@
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",
     "test:tooling": "node --test scripts/*.test.mjs",
-    "test:native": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked",
+    "test:native": "bun run --cwd ../.. build:runtime-dependencies && cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked",
     "type-check": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src test --config ../../eslint.config.js",
     "dev": "node ./scripts/desktop.mjs dev",
