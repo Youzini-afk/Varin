@@ -373,13 +373,15 @@ jobs:
           $installation = Start-Process msiexec.exe -ArgumentList @('/i', "`"$installer`"", '/qn', '/norestart') -Wait -PassThru -WindowStyle Hidden
           if ($installation.ExitCode -ne 0) { throw "WinFsp installation did not finish without a restart: $($installation.ExitCode)" }
       - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && needs.changes.outputs.rust == 'true' }}
-        name: Verify native workspace storage and runtime on Windows
+        name: Verify native workspace and original process recovery on Windows
         shell: cmd
         working-directory: kernel
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
           set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
           cargo test -p varin-kernel --lib workspace --features workspace-mount --locked
+          if errorlevel 1 exit /b %errorlevel%
+          cargo test -p varin-kernel --lib storage::process_recovery_tests --features workspace-mount --locked
       - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         name: Test Windows input targeting without desktop access
         shell: pwsh

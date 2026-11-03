@@ -143,13 +143,9 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let _ = self
-            .storage
-            .lock()
-            .unwrap()
-            .as_mut()
-            .unwrap()
-            .shutdown_processes();
+        if let Some(storage) = self.storage.lock().unwrap().as_mut() {
+            let _ = storage.shutdown_processes();
+        }
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
@@ -701,4 +697,76 @@ fn native_subscription_tracks_both_grants_and_alias_detach_keeps_original_proces
         .client
         .inspect(f.context("alias2"), f.address("subscriptions", "missing"))
         .is_err());
+}
+
+#[test]
+#[ignore = "requires a freshly built kernel executable"]
+fn original_tree_receipt_restores_unknown_and_legacy_name_only_writer_without_replay() {
+    let f = Fixture::new();
+    let id = "tree-recovery";
+    f.spawn(id, "printf once >> executions; IFS= read -r line; printf '%s' \"$line\"", "pipe").unwrap();
+    let database = f.root.join("storage/catalog.sqlite");
+    let read_record = || {
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        let raw: String = conn.query_row("SELECT status_json FROM process_records WHERE process_id=?1",
+            [id], |row| row.get(0)).unwrap();
+        serde_json::from_str::<Value>(&raw).unwrap()
+    };
+    let original = read_record();
+    assert_eq!(original["writerActive"], true);
+    f.write(id, "finish-tree", b"done\n".to_vec(), true);
+    f.wait(id);
+    drop(f.storage.lock().unwrap().take().unwrap());
+    let receipt_path = crate::process::receipt_path(&f.root.join("storage"), id);
+    let receipt = std::fs::read(&receipt_path).unwrap();
+    std::fs::remove_file(&receipt_path).unwrap();
+    for legacy_name_only in [false, true] {
+        let mut interrupted = original.clone();
+        if legacy_name_only {
+            interrupted["status"] = json!("exited");
+            interrupted["writerActive"] = json!(false);
+            interrupted["treeConfirmed"] = json!(true);
+            interrupted["reason"] = json!("prior native Job is gone; command is not replayed and exit code is unknown");
+        }
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        conn.execute("UPDATE process_records SET status_json=?2 WHERE process_id=?1",
+            rusqlite::params![id, interrupted.to_string()]).unwrap();
+        drop(conn);
+        *f.storage.lock().unwrap() = Some(Storage::open(&f.root.join("storage"), HOST).unwrap());
+        let unknown = read_record();
+        assert_eq!(unknown["status"], "unknown");
+        assert_eq!(unknown["writerActive"], true);
+        assert_eq!(unknown["treeConfirmed"], false);
+        drop(f.storage.lock().unwrap().take().unwrap());
+    }
+    // A real receipt from a different process/epoch must not settle this row.
+    for field in ["processId", "kernelEpoch"] {
+        let mut foreign: Value = serde_json::from_slice(&receipt).unwrap();
+        foreign[field] = json!("another-original-scope");
+        std::fs::write(&receipt_path, foreign.to_string()).unwrap();
+        assert!(crate::process::read_receipt(&f.root.join("storage"), id, EPOCH).is_err());
+        assert_eq!(read_record()["writerActive"], true);
+    }
+    // Restore only the original guardian's bytes. No test-produced exit receipt
+    // or Job/PID inference can settle the interrupted writer.
+    std::fs::write(&receipt_path, receipt).unwrap();
+    *f.storage.lock().unwrap() = Some(Storage::open(&f.root.join("storage"), HOST).unwrap());
+    let recovered = read_record();
+    assert_eq!(recovered["status"], "exited");
+    assert_eq!(recovered["writerActive"], false);
+    assert_eq!(recovered["treeConfirmed"], true);
+    assert_eq!(std::fs::read(f.root.join("work/executions")).unwrap(), b"once");
+    let registered = f.dispatch("file.root.register", json!({"workspaceId":"workspace",
+        "executionWorkspaceId":"workspace","canonicalRoot":f.root.join("work")})).unwrap();
+    f.dispatch("process.release", json!({"workspaceId":"workspace","rootId":registered["rootId"],"processId":id})).unwrap();
+    let mut released = read_record();
+    assert_eq!(released["status"], "released");
+    drop(f.storage.lock().unwrap().take().unwrap());
+    released["reason"] = json!("prior native Job is gone; command is not replayed and exit code is unknown");
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    conn.execute("UPDATE process_records SET status_json=?2 WHERE process_id=?1",
+        rusqlite::params![id, released.to_string()]).unwrap();
+    drop(conn);
+    *f.storage.lock().unwrap() = Some(Storage::open(&f.root.join("storage"), HOST).unwrap());
+    assert_eq!(read_record(), released, "repair must preserve released tombstones");
 }

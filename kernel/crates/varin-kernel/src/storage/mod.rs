@@ -73,6 +73,8 @@ mod native_authority_tests;
 mod versioned_workspaces_review;
 pub(crate) mod process_interactions;
 mod process_resources;
+#[cfg(all(test, windows))]
+mod process_recovery_tests;
 pub(crate) mod process_tasks;
 mod records;
 mod recovery;

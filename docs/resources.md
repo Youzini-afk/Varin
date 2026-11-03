@@ -263,7 +263,13 @@ Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 
 Windows 启动时将规范化路径转换为子进程可用的目录表示，内部资源身份仍保留规范化路径。
 进程已退出时，输入和 resize 明确返回 `process_exited`；正在停止时返回 `process_stopping`。
 
-Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。
+Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 恢复只接受原 processId/epoch 的耐久退出回执，
+不要求已完成 workspace writer 的 guardian 同时完成日志收尾。Windows 控制管道 EOF 请求原 guardian 排空进程树并保存回执，
+不立即连同回执 writer 一起终止 Job。控制线程实际读到 EOF 后，主线程清理若超过既有停止预算，则终止原 Job，
+超时不生成成功回执；这不保证已阻塞于更早 native 操作的控制线程在同一时间内退出。Job 名字会在最后一个 handle 关闭时移除，也可能被另一个新 Job 使用，
+因此名字不存在、按名字重开的空 Job 都不能证明原进程树停止。打开 Storage 时纠正旧版未释放的 name-only 停止投影，
+再按原回执恢复；真实已保存的退出证据及 released tombstone 保留。无原回执、无原对象的退出保持 unknown 并继续保护目录，
+包括重启机器之后；当前未保存可核验的 boot 身份，不凭重启推断退出，也不自动重放效果。
 Windows PTY 在创建控制台后、执行用户命令前保留原 Job 基础进程的对象句柄。主进程退出后，先终止并重新核验
 后来加入同一 Job 的用户子进程，再关闭 ConPTY 并读取到真实 EOF；原控制台进程保留到最后输出排空之后才清理。
 保护对象按原句柄比较，不按进程名或初始数量推断。启动期间无法确认这些对象时，不发布已完成进程树清理的回执。

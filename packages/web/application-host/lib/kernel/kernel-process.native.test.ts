@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { TransportFixture } from "./tests/transport-fixture.js";
+import { holdWindowsJob } from "./tests/windows-job.test-helper.js";
 import { createKernelProcessService } from "./process-service.js";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -674,8 +675,8 @@ it("native termination confirms the real tree while its output remains unread", 
   await f.client.fileRemove({ ...f.address, operationId: "unread-kill-reclaim", path: "child", recursive: true, force: true });
 }, 30_000);
 
-vitestIt.skipIf(!available || process.platform !== "linux")("a truncated guardian control frame terminates its own real child and persists the exit receipt", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-guardian-truncation-"));
+vitestIt.skipIf(!available || process.platform !== "linux").each(["truncated-control", "lost-started-output"] as const)("guardian %s drains its original tree and preserves the durable receipt", async fault => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-guardian-control-loss-"));
   const receiptPath = path.join(root, "receipt.json");
   const guardian = nodeSpawn(kernelPath, ["--process-worker"], { stdio: ["pipe", "pipe", "pipe"] });
   const frames: Array<Record<string, unknown>> = [];
@@ -690,27 +691,44 @@ vitestIt.skipIf(!available || process.platform !== "linux")("a truncated guardia
   });
   guardian.stderr.resume();
   const exited = new Promise<void>((resolve, reject) => { guardian.once("error", reject); guardian.once("close", () => resolve()); });
-  const config = Buffer.from(JSON.stringify({ processId: "truncated-control", kernelEpoch: "test-epoch", receiptPath, jobName: "", cwd: root, command: process.execPath, args: ["-e", "setInterval(()=>{},1000)"], env: [], mode: "pipe", cols: 80, rows: 24 }));
+  const config = Buffer.from(JSON.stringify({ processId: fault, kernelEpoch: "test-epoch", receiptPath, jobName: "", cwd: root, command: process.execPath, args: ["-e", "setInterval(()=>{},1000)"], env: [], mode: "pipe", cols: 80, rows: 24 }));
   const header = Buffer.alloc(4); header.writeUInt32BE(config.length);
   try {
-    guardian.stdin.write(Buffer.concat([header, config]));
     const deadline = Date.now() + 10_000;
-    while (!frames.some(value => value.type === "started")) {
-      if (Date.now() > deadline || guardian.exitCode !== null) throw new Error("Guardian did not start its child");
+    while (!frames.some(value => value.type === "ready")) {
+      if (Date.now() > deadline || guardian.exitCode !== null) throw new Error("Guardian did not become ready");
       await pause();
     }
-    guardian.stdin.end(Buffer.from([0, 0, 0, 20, 123]));
+    if (fault === "lost-started-output") {
+      // Close the original control reader before dispatch. The guardian's
+      // started frame must fail after spawning, without abandoning its tree.
+      const closed = new Promise<void>(resolve => guardian.stdout.once("close", resolve));
+      guardian.stdout.destroy();
+      await closed;
+    }
+    guardian.stdin.write(Buffer.concat([header, config]));
+    if (fault === "truncated-control") {
+      while (!frames.some(value => value.type === "started")) {
+        if (Date.now() > deadline || guardian.exitCode !== null) throw new Error("Guardian did not start its child");
+        await pause();
+      }
+      guardian.stdin.end(Buffer.from([0, 0, 0, 20, 123]));
+    } else {
+      guardian.stdin.end();
+    }
     while (guardian.exitCode === null && guardian.signalCode === null) {
-      if (Date.now() > deadline) throw new Error("Truncated control frame left its child running");
+      if (Date.now() > deadline) throw new Error(`${fault} left the original guardian running`);
       await pause();
     }
     await exited;
     const receipt = JSON.parse(await fs.readFile(receiptPath, "utf8")) as Record<string, unknown>;
-    assert.equal(receipt.processId, "truncated-control");
+    assert.equal(receipt.processId, fault);
     assert.equal(receipt.kernelEpoch, "test-epoch");
     assert.equal(receipt.treeConfirmed, true);
     assert.equal(receipt.status, "exited");
-    assert.ok(frames.some(frame => frame.type === "receipt"));
+    assert.equal(receipt.spawned, true);
+    assert.equal(receipt.stopApplied, true);
+    assert.equal(frames.some(frame => frame.type === "receipt"), fault === "truncated-control");
   } finally {
     if (guardian.exitCode === null && guardian.signalCode === null) {
       guardian.kill("SIGUSR2");
@@ -979,7 +997,7 @@ it("a missing retained spool is explicit unavailability without erasing the prov
   } finally { await fs.writeFile(files.spool, spool); }
 }, 30_000);
 
-vitestIt.skipIf(!available || process.platform !== "linux")("a complete retained log cannot substitute for missing native tree-exit evidence", async () => {
+it("a complete retained log cannot substitute for missing native tree-exit evidence", async () => {
   const f = await fixture();
   const processId = "complete-log-unknown-writer";
   const initial = await f.client.processSpawn(f.spawn(processId, "process.stdin.once('data',()=>{process.stdout.write('complete-log');process.stdin.destroy()});process.stdin.resume()"));
@@ -1025,7 +1043,55 @@ vitestIt.skipIf(!available || process.platform !== "linux")("a complete retained
     const registered = await reopened.client.fileRootRegister({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace });
     await assert.rejects(reopened.client.fileRemove({ workspaceId: "ws", rootId: String(registered.rootId), operationId: "unknown-log-reclaim", path: "child", recursive: true, force: true }), /writer|exit/);
     await reopened.host.close();
+    // Older Windows builds persisted the unsafe name-only inference. Opening
+    // the same current schema must correct that projection before cleanup runs.
+    const nameOnly = { ...JSON.parse(originalStatus), status: "exited", writerActive: false, treeConfirmed: true,
+      reason: "prior native Job is gone; command is not replayed and exit code is unknown" };
+    const legacy = new DatabaseSync(databasePath);
+    try {
+      legacy.prepare("UPDATE process_records SET status_json=? WHERE process_id=?").run(JSON.stringify(nameOnly), processId);
+    } finally { legacy.close(); }
+    const corrected = await reopenProcessFixture(f);
+    const unknown = await corrected.client.processInspect({ workspaceId: "ws", processId });
+    assert.equal(unknown.status, "unknown");
+    assert.equal(unknown.writerActive, true);
+    await assert.rejects(corrected.client.processRelease({ workspaceId: "ws", processId }), /unconfirmed|in use/);
+    await corrected.host.close();
   } finally { await fs.writeFile(files.receipt, receipt); }
+}, 30_000);
+
+vitestIt.skipIf(!available || process.platform !== "win32")("a real original receipt recovers despite a live replacement with the same Job name", async () => {
+  const f = await fixture();
+  const processId = "receipt-with-reused-job-name";
+  await f.client.processSpawn(f.spawn(processId, "process.stdin.once('data',()=>process.exit(7));process.stdin.resume()"));
+  await waitFor(f.client, processId, snapshot => snapshot.pid !== null);
+  const databasePath = path.join(f.storageRoot, "catalog.sqlite");
+  const before = new DatabaseSync(databasePath, { readOnly: true });
+  let originalStatus: string, jobName: string;
+  try {
+    const row = before.prepare("SELECT status_json,job_name FROM process_records WHERE process_id=?").get(processId);
+    assert.ok(row && typeof row.status_json === "string" && typeof row.job_name === "string");
+    originalStatus = row.status_json;
+    jobName = row.job_name;
+    assert.equal(JSON.parse(originalStatus).writerActive, true);
+  } finally { before.close(); }
+  await f.client.processWrite({ workspaceId: "ws", processId, operationId: `finish:${processId}`, bytesBase64: Buffer.from("go").toString("base64") });
+  assert.equal((await drain(f.client, processId)).process.exitCode, 7);
+  await f.host.close();
+  const interrupted = new DatabaseSync(databasePath);
+  try {
+    // Restore the exact original pre-receipt snapshot, not a constructed result.
+    interrupted.prepare("UPDATE process_records SET status_json=? WHERE process_id=?").run(originalStatus, processId);
+  } finally { interrupted.close(); }
+  const replacement = await holdWindowsJob(jobName);
+  try {
+    const reopened = await reopenProcessFixture(f);
+    const recovered = await waitFor(reopened.client, processId, snapshot => !snapshot.writerActive);
+    assert.equal(recovered.status, "exited");
+    assert.equal(recovered.exitCode, 7);
+    await reopened.client.processRelease({ workspaceId: "ws", processId });
+    await reopened.host.close();
+  } finally { await replacement.stop(); }
 }, 30_000);
 
 it("saved tree-exit evidence survives a missing guardian receipt file after restart", async () => {

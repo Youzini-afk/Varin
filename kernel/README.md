@@ -256,6 +256,16 @@ Active or unknown processes continue protecting their physical execution directo
 Grant retirement closes the old caller while retaining valid stopped-process provenance. Explicit
 revocation remains denied; operation-owned grants can outlive their creating Run until actual resource
 and receipt drain. Unproven old-epoch exits remain unknown, including after a Host transport failure.
+Recovery consumes the original process/epoch-bound guardian receipt even while its log drain is
+still running. Windows control EOF requests that same guardian's drain rather than killing the
+receipt writer immediately. Once the control reader observes EOF, the existing stop budget bounds
+stalled main-thread cleanup with an original-Job abort; it does not publish success. This is not a
+bound on a control reader already blocked in an earlier native operation. A missing Job name or an empty Job reopened by name is not original-tree evidence:
+[temporary object names disappear at the last handle](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/life-cycle-of-an-object),
+independently of pending process termination, and names can be reused. Opening Storage repairs
+unreleased name-only stop projections from older builds; true saved receipts and released tombstones
+remain intact. A lost guardian without a durable receipt remains unknown, including across reboot;
+there is no persisted boot identity that would authorize inferring a stop or replaying effects.
 This is lifecycle management, not a hostile-code sandbox or a physical power-loss guarantee.
 
 ## Compute and runtime

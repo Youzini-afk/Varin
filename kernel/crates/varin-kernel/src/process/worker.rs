@@ -1,7 +1,7 @@
 //! Private native process guardian. It is not a second protocol endpoint: only
 //! the owning kernel supplies its framed stdin, after OS containment admission.
 use super::interaction::{self, Receipt as InteractionReceipt, State as InteractionState};
-use super::platform;
+use super::{platform, STOP_TIMEOUT};
 use crate::protocol::{read_frame, write_frame};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
@@ -380,7 +380,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pid = child
         .process_id()
         .ok_or_else(|| io::Error::other("process has no OS identity"))?;
-    send(&output, json!({"type":"started", "pid":pid}))?;
+    if send(&output, json!({"type":"started", "pid":pid})).is_err() {
+        // Dispatch already happened. Losing the owner must still drain this
+        // original tree and install its durable receipt, even before control starts.
+        STOP.store(2, Ordering::Release);
+    }
     let master = Arc::new(Mutex::new(master));
     let mut readers = readers.into_iter().map(|(channel, mut reader)| {
         let output = output.clone();
@@ -669,9 +673,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // abruptly. Do not bind guardian lifetime to PR_SET_PDEATHSIG: on Linux
         // it fires when the short-lived launcher thread exits, even while the
         // owning kernel and this control pipe remain alive.
+        // Keep the Windows guardian and its original Job handle alive while
+        // the existing stop path waits for target/descendant exit and persists
+        // the receipt. Aborting the whole Job here would kill the receipt writer.
+        // Kill-on-close still bounds a guardian crash; that alone is not a receipt.
         STOP.store(2, Ordering::Release);
         #[cfg(windows)]
-        let _ = control_job.abort();
+        {
+            // Main normally exits after durable receipt publication. If it is
+            // stuck in native I/O/ConPTY, retain the original independent abort
+            // path after the same stop budget; timeout is never exit evidence.
+            thread::sleep(STOP_TIMEOUT);
+            let _ = control_job.abort();
+        }
     });
     let mut stop_started: Option<Instant> = None;
     let mut stop_applied = false;
@@ -719,7 +733,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             .drain_pty_clients(infrastructure)
             .map_err(|error| io::Error::other(format!("native PTY client drain: {error}")))?
         {
-            if drain_started.elapsed() >= Duration::from_secs(5) {
+            if drain_started.elapsed() >= STOP_TIMEOUT {
                 return Err(io::Error::other("native PTY clients did not confirm exit").into());
             }
             thread::sleep(Duration::from_millis(10));
@@ -749,7 +763,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     trace(&diagnostic, "descendant-drain-started");
     let drain_started = Instant::now();
     loop {
-        if drain_started.elapsed() >= Duration::from_secs(5) {
+        if drain_started.elapsed() >= STOP_TIMEOUT {
             return Err(io::Error::other("native process descendants did not confirm exit").into());
         }
         #[cfg(unix)]

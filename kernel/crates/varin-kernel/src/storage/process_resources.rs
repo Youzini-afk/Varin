@@ -165,28 +165,22 @@ impl Storage {
         }
         let epoch = string(&record, "kernelEpoch")?;
         let receipt = process::read_receipt(&self.root, id, epoch)?;
-        #[cfg(windows)]
-        let gone = process::platform::prior_tree_gone(&process::job_name(&self.root, id))?;
-        #[cfg(unix)]
-        let gone = receipt.is_some();
-        if gone {
-            if let Some(receipt) = receipt {
-                self.processes.replay_terminal(id, epoch, receipt.clone());
-                for key in [
-                    "status",
-                    "pid",
-                    "exitCode",
-                    "signal",
-                    "reason",
-                    "stopApplied",
-                ] {
-                    record[key] = receipt[key].clone();
-                }
-            } else {
-                record["status"] = json!("exited");
-                record["reason"] = json!(
-                    "prior native Job is gone; command is not replayed and exit code is unknown"
-                );
+        // A recovered name does not identify the original Windows Job object.
+        // Its name disappears when the last handle closes, before asynchronous
+        // kill-on-close has necessarily completed, and can name a new empty Job.
+        // Only the original guardian's durable, identity-checked receipt proves
+        // this old scope stopped. It remains valid while that guardian drains logs.
+        if let Some(receipt) = receipt {
+            self.processes.replay_terminal(id, epoch, receipt.clone());
+            for key in [
+                "status",
+                "pid",
+                "exitCode",
+                "signal",
+                "reason",
+                "stopApplied",
+            ] {
+                record[key] = receipt[key].clone();
             }
             record["writerActive"] = json!(false);
             record["treeConfirmed"] = json!(true);
@@ -319,6 +313,17 @@ impl Storage {
             self.process_receipt_wake.take();
             self.process_receipt_wake_failure = None;
         }
+    }
+    /// Correct only the old name-based stop projection, never a real guardian
+    /// receipt, retained-original-Job observation, or released tombstone. This is
+    /// an evidence correction within the current schema, not effect replay.
+    pub(super) fn repair_name_only_process_stops(&self) -> Result<(), KernelError> {
+        self.conn.execute(
+            "UPDATE process_records SET status_json=json_set(status_json, '$.status', 'unknown', '$.writerActive', json('true'), '$.treeConfirmed', json('false'))
+             WHERE json_extract(status_json, '$.reason') = ?1 AND json_extract(status_json, '$.status') <> 'released'",
+            params!["prior native Job is gone; command is not replayed and exit code is unknown"],
+        )?;
+        Ok(())
     }
     pub(crate) fn refresh_process_records(&mut self) -> Result<(), KernelError> {
         let ids = self

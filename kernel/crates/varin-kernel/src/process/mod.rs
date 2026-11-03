@@ -32,6 +32,8 @@ use std::{
 };
 
 pub(crate) const CHUNK_BYTES: usize = 64 * 1024;
+// Existing shutdown/drain budget also bounds a lost owner's guardian cleanup.
+pub(super) const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 /// Produced only by the owning guardian control reader, never by a frontend/model message.
 #[derive(Debug, Clone)]
 pub(crate) struct ProcessTerminal {
@@ -662,12 +664,12 @@ impl ProcessManager {
         for live in self.live.values_mut() {
             live.shared.lock().discard = true;
             // Keep control alive until the guardian can durably report the actual tree stop.
-            // Windows EOF aborts the whole Job, including the guardian that writes that receipt.
+            // EOF also requests a stop, but keep the live receipt channel available.
             if !live.guardian_exited {
                 let _ = live.control.stop(true);
             }
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + STOP_TIMEOUT;
         let result = (|| -> Result<(), KernelError> {
             loop {
                 let mut pending = false;

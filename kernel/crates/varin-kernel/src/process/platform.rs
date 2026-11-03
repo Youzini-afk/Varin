@@ -8,8 +8,8 @@ mod windows {
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use windows_sys::Win32::{
         Foundation::{
-            CompareObjectHandles, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA,
-            HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+            CompareObjectHandles, ERROR_ACCESS_DENIED, ERROR_MORE_DATA, HANDLE, WAIT_FAILED,
+            WAIT_OBJECT_0, WAIT_TIMEOUT,
         },
         System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob,
@@ -85,9 +85,27 @@ mod windows {
             if handle.is_null() {
                 return Err(io::Error::last_os_error());
             }
-            Ok(Self {
+            let job = Self {
                 handle: unsafe { OwnedHandle::from_raw_handle(handle as _) },
-            })
+            };
+            // The parent can die between config delivery and this open. Its
+            // last handle/name may disappear while termination is pending;
+            // a same-name replacement must never authorize dispatch or drain.
+            let mut belongs = 0;
+            if unsafe {
+                IsProcessInJob(
+                    windows_sys::Win32::System::Threading::GetCurrentProcess(),
+                    job.handle.as_raw_handle() as _,
+                    &mut belongs,
+                )
+            } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            if belongs == 0 {
+                return Err(io::Error::other("guardian does not belong to its admitted Job"));
+            }
+            Ok(job)
         }
         pub fn abort(&self) -> io::Result<()> {
             // A lost owner or failed native setup invalidates this entire tree.
@@ -324,22 +342,9 @@ mod windows {
         }
         Ok(info.ActiveProcesses)
     }
-    pub fn prior_tree_gone(name: &str) -> io::Result<bool> {
-        let name = wide(name);
-        let handle = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, name.as_ptr()) };
-        if handle.is_null() {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(ERROR_FILE_NOT_FOUND as i32) {
-                return Ok(true);
-            }
-            return Err(error);
-        }
-        let handle = unsafe { OwnedHandle::from_raw_handle(handle as _) };
-        active(handle.as_raw_handle() as _).map(|n| n == 0)
-    }
 }
 #[cfg(windows)]
-pub use windows::{prior_tree_gone, Containment, PtyInfrastructure, WorkerJob};
+pub use windows::{Containment, PtyInfrastructure, WorkerJob};
 
 #[cfg(unix)]
 pub struct Containment;
@@ -365,13 +370,6 @@ impl Containment {
         Ok(true)
     }
 }
-#[cfg(unix)]
-pub fn prior_tree_gone(_name: &str) -> io::Result<bool> {
-    // Unix has no named kill-on-close Job. Only the guardian's durable receipt
-    // proves an old session has drained. A vanished PID alone proves nothing.
-    Ok(false)
-}
-
 #[cfg(unix)]
 pub fn session_members(session: u32) -> io::Result<Vec<i32>> {
     #[cfg(target_os = "linux")]
