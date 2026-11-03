@@ -15,20 +15,20 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/lib/extensions/catalog-store', async () => {
   const { defaultVarinWorkbenchProfileDocument } = await import('@varin/extension-contract');
-  return {
-    useVarinExtensionCatalog: () => ({
-      snapshot: {
-        workbench: {
-          authoritative: true,
-          hostId: state.hostId,
-          document: {
-            ...defaultVarinWorkbenchProfileDocument(),
-            profileSelections: { users: { default: state.activeProfileId } },
-          },
+  const catalogState = () => ({
+    snapshot: {
+      catalog: { authoritative: true, hostId: state.hostId, extensions: [] },
+      workbench: {
+        authoritative: true,
+        hostId: state.hostId,
+        document: {
+          ...defaultVarinWorkbenchProfileDocument(),
+          profileSelections: { users: { default: state.activeProfileId } },
         },
       },
-    }),
-  };
+    },
+  });
+  return { useVarinExtensionCatalog: catalogState, getVarinExtensionCatalogState: catalogState };
 });
 vi.mock('@/lib/extensions/workbench-shell-transition', () => ({ selectActiveWorkbenchProfile: state.selectProfile, WorkbenchShellTransitionAbortedError: state.AbortedError }));
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'desktop' } }));
