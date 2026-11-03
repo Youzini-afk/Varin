@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import lockfile from "proper-lockfile";
 import { HostError } from "../configuration-errors.js";
+import { withConfigurationFileAccess } from "../configuration-file-access.js";
 
 export interface RevisionedTextFileSnapshot {
   content: string;
@@ -43,6 +44,10 @@ export class RevisionedTextFileEditor {
   }
 
   async read(): Promise<RevisionedTextFileSnapshot> {
+    return withConfigurationFileAccess(this.#path, () => this.#read());
+  }
+
+  async #read(): Promise<RevisionedTextFileSnapshot> {
     try {
       const content = await readFile(this.#path, "utf8");
       return { content, exists: true, revision: revisionFor(content, true) };
@@ -56,7 +61,7 @@ export class RevisionedTextFileEditor {
   async update(content: string, expectedRevision: string): Promise<RevisionedTextFileSnapshot> {
     this.#options.validate?.(content);
     return this.#withParentLock(async (compromised) => {
-      const current = await this.read();
+      const current = await this.#read();
       this.#assertRevision(current.revision, expectedRevision);
       const lockError = compromised();
       if (lockError) throw lockError;
@@ -75,7 +80,7 @@ export class RevisionedTextFileEditor {
 
   async delete(expectedRevision: string): Promise<boolean> {
     return this.#withParentLock(async (compromised) => {
-      const current = await this.read();
+      const current = await this.#read();
       this.#assertRevision(current.revision, expectedRevision);
       if (!current.exists) return false;
       const lockError = compromised();
@@ -114,7 +119,7 @@ export class RevisionedTextFileEditor {
       },
     });
     try {
-      return await operation(() => lockError);
+      return await withConfigurationFileAccess(this.#path, () => operation(() => lockError));
     } finally {
       await release();
     }
