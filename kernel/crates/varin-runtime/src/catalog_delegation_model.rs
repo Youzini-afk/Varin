@@ -310,8 +310,11 @@ impl Preparation {
                 "Fresh delegated model catalog is required for preparation admission".into(),
             )
         })?;
-        let input: DispatchInput =
+        let mut input: DispatchInput =
             serde_json::from_value(self.content.load(&self.execution.input_ref)?)?;
+        let db=Connection::open_with_flags(&self.database,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        if super::attachments::descriptors(&db,"dispatch",&self.relation.operation_id)?.iter().any(|file|file.is_direct_image())
+            && !input.input_types.iter().any(|kind|kind=="image") { input.input_types.push("image".into()); }
         let inherited_binding =
             (catalog.selector.is_none() && input.model.is_none() && input.thinking.is_none())
                 .then_some(frozen.parent_model.clone());

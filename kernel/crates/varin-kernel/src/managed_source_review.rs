@@ -229,14 +229,11 @@ fn managed_source_original_effects_survive_epoch_fence_and_reject_foreign_author
         .unwrap();
     let version = read["result"]["completion"]["content"]["data"]["readVersion"].clone();
     assert!(version.is_string(), "{read}");
-    let applied = owner
-        .tool(
-            &address,
-            "file_write",
-            "write",
-            json!({"path":"note.txt","readVersion":version,"content":"after"}),
-        )
-        .unwrap();
+    let mut write = address.clone();
+    write["call"] = json!({"runId":"run","operationId":"request:tool:write","origin":{"kind":"model_step","request_id":"request"},
+        "callId":"write","name":"file_write","schemaVersion":"1","arguments":{"path":"note.txt","readVersion":version,"content":"after"}});
+    write["journal"] = json!({"executionId":"source-review-turn","threadId":"thread","branchId":"branch","runId":"run","entryId":"source-review-input","epoch":1});
+    let applied = owner.rpc("source.resource.execute", write, None).unwrap();
     assert_eq!(
         applied["result"]["completion"]["effect"], "confirmed",
         "{applied}"
@@ -245,6 +242,27 @@ fn managed_source_original_effects_survive_epoch_fence_and_reject_foreign_author
         std::fs::read_to_string(work.join("note.txt")).unwrap(),
         "after"
     );
+    let artifact = &applied["result"]["completion"]["content"]["data"]["attachment"];
+    assert!(artifact["ref"].is_string(), "{applied}");
+    let original_file = json!({"principalId":"client","coordinatorHostId":"coordinator","threadId":"thread","runId":"run","source":source,"operationId":"request:tool:write"});
+    let fixed = owner.rpc("source.file.receipt", original_file.clone(), None).unwrap();
+    assert_eq!(fixed["state"], "committed");
+    assert_eq!(fixed["grantId"], "first");
+    assert_eq!(fixed["receipt"]["attachment"], *artifact);
+    let retained = owner.rpc("storage.record.get", json!({"workspaceId":"workspace","recordId":artifact["ref"]}), Some("first")).unwrap();
+    let retained_payload: Value = serde_json::from_str(retained["payloadJson"].as_str().unwrap()).unwrap();
+    assert_eq!(retained_payload["managedSource"], true);
+    assert_eq!(retained_payload["sourceGrantId"], "first");
+    assert_eq!(retained["runId"], "run");
+    // A valid authority with the same user-supplied Thread/Run names still
+    // cannot read another principal's or coordinator's exact write receipt.
+    for (grant, principal, coordinator) in [("foreign-principal", "other-client", "coordinator"), ("foreign-coordinator", "client", "other-coordinator")] {
+        owner.bind_live_identity(&work, grant, 1, principal, coordinator);
+        let mut foreign_file = original_file.clone();
+        foreign_file["principalId"] = json!(principal);
+        foreign_file["coordinatorHostId"] = json!(coordinator);
+        assert!(owner.rpc("source.file.receipt", foreign_file, None).is_err());
+    }
     let (_next, _) = owner.bind_live(&work, "second", 2);
     assert!(owner
         .tool(
@@ -3394,4 +3412,76 @@ fn original_mcp_child_definition_references_fence_release_and_retain_storage_bod
     gc(&reopened, "child-body-released-gc"); assert!(!body.exists());
     assert_eq!(reopened.rpc("source.mcp.child", params("dispatch", "read"), None).unwrap()["selection"], Value::Null);
     drop(reopened); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn managed_attachment_import_preserves_original_bytes_and_process_lifetime() {
+    let executable = std::env::var_os("VARIN_TEST_KERNEL_EXECUTABLE")
+        .map(PathBuf::from)
+        .expect("VARIN_TEST_KERNEL_EXECUTABLE must identify the freshly built kernel guardian");
+    assert!(executable.is_file(), "fresh kernel guardian is missing");
+    let root = std::env::temp_dir().join(format!("varin-managed-attachment-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let owner = Owner::new(root.join("storage"), "target", "target-generation", "target-epoch");
+    let mut host = Host::with_script("packages/web/application-host/lib/harness/managed-attachment-host.test-helper.ts");
+    host.send(json!({"kind":"fixture-init","root":root,"storageRoot":owner.root,"epoch":owner.epoch}));
+    let (send, completed) = mpsc::channel();
+    let deadline = Instant::now() + Duration::from_secs(90);
+    loop {
+        assert!(Instant::now() < deadline, "managed attachment fixture timed out");
+        while let Ok(response) = completed.try_recv() { host.send(response); }
+        let Some(frame) = host.next_frame(Duration::from_millis(5)) else { continue; };
+        match frame["kind"].as_str().unwrap_or("") {
+            "fixture-request" => {
+                let owner = owner.clone();
+                let send = send.clone();
+                std::thread::spawn(move || {
+                    let result = owner.rpc(frame["method"].as_str().unwrap(), frame["params"].clone(), frame["grantId"].as_str());
+                    let response = match result {
+                        Ok(value) => json!({"kind":"fixture-response","id":frame["id"],"ok":true,"result":value}),
+                        Err(error) => json!({"kind":"fixture-response","id":frame["id"],"ok":false,"error":error.to_string()}),
+                    };
+                    let _ = send.send(response);
+                });
+            }
+            "fixture-result" => { assert_eq!(frame["ok"], true, "{frame}"); break; }
+            _ => panic!("Unexpected attachment fixture frame: {frame}"),
+        }
+    }
+    drop(host); drop(owner);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn attachment_upload_retry_renews_retired_owner_without_changing_original_bytes() {
+    let root = std::env::temp_dir().join(format!("varin-attachment-upload-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let owner = Owner::new(root.join("storage"), "web-domain-host", "web-domain-generation", "upload-epoch");
+    let mut host = Host::with_script("packages/web/application-host/lib/kernel/attachment-upload-host.test-helper.ts");
+    host.send(json!({"kind":"fixture-init","root":root,"storageRoot":owner.root,"epoch":owner.epoch}));
+    let (send, completed) = mpsc::channel();
+    let deadline = Instant::now() + Duration::from_secs(90);
+    loop {
+        assert!(Instant::now() < deadline, "managed attachment fixture timed out");
+        while let Ok(response) = completed.try_recv() { host.send(response); }
+        let Some(frame) = host.next_frame(Duration::from_millis(5)) else { continue; };
+        match frame["kind"].as_str().unwrap_or("") {
+            "fixture-request" => {
+                let owner = owner.clone();
+                let send = send.clone();
+                std::thread::spawn(move || {
+                    let result = owner.rpc(frame["method"].as_str().unwrap(), frame["params"].clone(), frame["grantId"].as_str());
+                    let response = match result {
+                        Ok(value) => json!({"kind":"fixture-response","id":frame["id"],"ok":true,"result":value}),
+                        Err(error) => json!({"kind":"fixture-response","id":frame["id"],"ok":false,"error":error.to_string()}),
+                    };
+                    let _ = send.send(response);
+                });
+            }
+            "fixture-result" => { assert_eq!(frame["ok"], true, "{frame}"); break; }
+            _ => panic!("Unexpected attachment fixture frame: {frame}"),
+        }
+    }
+    drop(host); drop(owner);
+    std::fs::remove_dir_all(root).unwrap();
 }

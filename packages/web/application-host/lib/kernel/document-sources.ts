@@ -1,5 +1,6 @@
 /** Adapters into the original Run source and Experiment owners for PDF ingestion. */
 import path from 'node:path';
+import type { ThreadAttachmentOwner } from './thread-attachments.js';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -26,6 +27,8 @@ const contentType = (filename: string): string => ({
 }[path.extname(filename).toLowerCase()] ?? 'application/octet-stream');
 
 export interface DocumentSources {
+  bindAttachments(owner: ThreadAttachmentOwner): void;
+  attachment(authority: ToolInvocationAuthority, snapshotId: string, signal?: AbortSignal): Promise<import('@varin/protocol').Attachment | undefined>;
   tool(authority: ToolInvocationAuthority): DocumentMaterialSources;
   path(selection: ThreadResearchSelection, path: string, signal?: AbortSignal): Promise<DocumentIngestInput>;
   artifact(selection: ThreadResearchSelection, artifact: NonNullable<DocumentReadRequest['artifact']>, signal?: AbortSignal): Promise<DocumentArtifactSource>;
@@ -98,6 +101,7 @@ export function createDocumentSources(options: {
   resolveLiveSource: LiveSourceResolver;
   experiments: Pick<ExperimentService, 'readArtifact'>;
 }): DocumentSources {
+  let attachments: ThreadAttachmentOwner | undefined;
   const research = createResearchAccess(options.kernel, options.runtime);
   const readPath = async (authority: Pick<ToolInvocationAuthority, 'source' | 'runId' | 'operationId'>, inputPath: string, signal?: AbortSignal): Promise<DocumentIngestInput> => {
     if (!authority.source) throw new HarnessServiceError('unavailable', 'Select a file source before reading a local document');
@@ -128,8 +132,24 @@ export function createDocumentSources(options: {
 
   };
   return {
+    bindAttachments(owner) { attachments = owner; },
+    async attachment(authority, snapshotId, signal) {
+      if (!attachments) return undefined;
+      const run = await options.runtime.run(authority.runId, signal);
+      const identity = { runtime: 'agent' as const, threadId: run.thread_id, branchId: run.branch_id };
+      if (run.thread_id !== authority.threadId) throw new HarnessServiceError('forbidden', 'The original document owner changed');
+      return (await attachments.prepare(identity, [{ ref: snapshotId }], `document-result:${authority.operationId}:${snapshotId}`, identity.threadId, signal))[0];
+    },
     tool(authority) {
-      return { readPath: (path, signal) => readPath(authority, path, signal),
+      return { readRef: async (ref, signal) => {
+        if (!attachments) throw new HarnessServiceError('unavailable', 'The original attachment owner is unavailable');
+        const run = await options.runtime.run(authority.runId, signal);
+        if (run.thread_id !== authority.threadId) throw new HarnessServiceError('forbidden', 'The attachment invocation belongs to another Thread');
+        const original = await attachments.read({ runtime: 'agent', threadId: run.thread_id, branchId: run.branch_id }, ref, signal);
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of original.stream) chunks.push(chunk);
+        return { source: Buffer.concat(chunks), sourceUrl: original.attachment.ref, contentType: original.attachment.mimeType, title: original.attachment.filename };
+      }, readPath: (path, signal) => readPath(authority, path, signal),
         readArtifact: async (artifact, signal) => {
           const { scope, owner } = await research.toolScope(authority, signal);
           return options.experiments.readArtifact(researchCaller(scope, owner), artifact.attemptId, artifact.artifactId, signal);

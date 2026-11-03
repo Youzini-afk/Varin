@@ -5,6 +5,7 @@ import { acknowledgeEditorContextAttachments } from '@/lib/agent-editor/attachme
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { deliverThreadInput } from './threadInputDelivery';
+import { prepareThreadFiles } from './fileAttachments';
 
 const sending = new Map<string, Promise<string | undefined>>();
 type Preparation = { input: ThreadPrepareSource; release?: () => Promise<void>; unsubscribe?: () => void };
@@ -63,21 +64,13 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
       if (!read().pendingInput) {
         const preparedSource = read().preparedSource ?? await prepare(identity);
         assertHost();
-        for (const pdf of request.pdfs) {
-          if (!read().pdfs?.some(item => item.id === pdf.id)) continue;
-          const result = await api.materials.upload(identity, { filename: pdf.filename, mimeType: pdf.mimeType ?? 'application/pdf', data: pdf.data });
-          assertHost();
-          const retained = result.status === 'ok' ? result.sourceSnapshot ?? result.snapshot : undefined;
-          if (!retained?.snapshotId || !retained.document?.source) throw new Error('Document attachment could not be retained');
-          const material = { snapshotId: retained.snapshotId, filename: pdf.filename, sourceHash: retained.document.source.contentHash, format: retained.document.kind };
-          patch(current => ({ pdfs: current.pdfs?.filter(item => item.id !== pdf.id), materials: [...current.materials,
-            material] }));
-        }
+        const attachments = await prepareThreadFiles(api, identity, draftKey, request.files);
+        assertHost();
         const materials = read().materials.map(({ snapshotId }) => ({ snapshotId }));
         const input: ThreadPendingInput = { kind: 'submit', status: 'sending', fingerprint: request.key,
-          editorText: request.editorText, editorContext: request.editorContext, inlineContext: request.inlineContext,
+          editorText: request.editorText, fileIds: request.files.map(file => file.id), editorContext: request.editorContext, inlineContext: request.inlineContext,
           preparedSource, goalObjective: request.goalObjective, goalBudget: request.goalBudget,
-          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, materials, skills: request.skills, references: request.references,
+          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, materials, skills: request.skills, references: request.references, attachments: attachments.map(({ ref }) => ({ ref })),
             model: request.model, ...(request.agent ? { agent: request.agent } : {}), ...(preparedSource ? { source: preparedSource.source } : {}) } };
         patch({ pendingInput: input });
       }
@@ -87,11 +80,12 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
       acknowledgeEditorContextAttachments(original.editorContext ?? [], draftKey);
       for (const bucket of original.inlineContext ?? []) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, bucket.drafts);
       patch(current => ({ firstSend: undefined, pendingInput: undefined, preparedSource: null,
-        firstMessageReceipt: acceptedInputId ? { key: request.key, text: original.input.text, images: request.images, inputId: acceptedInputId } : undefined,
+        firstMessageReceipt: acceptedInputId ? { key: request.key, text: original.input.text, images: request.images, files: read().files?.filter(file => request.files.some(selected => selected.id === file.id)) ?? request.files, inputId: acceptedInputId } : undefined,
         ...(original.goalObjective ? { goalArmed: false } : {}),
         text: current.text === original.editorText ? '' : current.text,
         ...(current.text === original.editorText ? { imageReferenceSequence: 0, references: [] } : {}),
         images: current.images.filter(image => !request.images.includes(image)),
+        files: current.files?.filter(file => !original.fileIds?.includes(file.id)),
         materials: current.materials.filter(material => !original.input.materials?.some(item => item.snapshotId === material.snapshotId)),
       }));
       return acceptedInputId;

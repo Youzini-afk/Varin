@@ -84,7 +84,7 @@ fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     }
 }
 fn input() -> DispatchInput {
-    DispatchInput { model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), source_path: None,
+    DispatchInput { attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), source_path: None,
         inherit_context: false,
         source_agent: None,
         name: None,

@@ -1,10 +1,12 @@
-import { parseThreadOutput } from '@/lib/agent-runtime/thread-content';
+import type { Attachment } from '@varin/protocol';
+import { isAttachment, parseThreadOutput } from '@/lib/agent-runtime/thread-content';
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
 export interface ReceivedAgentMessage {
   kind: 'message' | 'report' | 'task';
+  attachments?: Attachment[];
   text: string;
   senderThreadId?: string;
   targetThreadId?: string;
@@ -55,6 +57,7 @@ export function receivedAgentMessage(input: {
           partial: preview.next_offset !== null || !body.trim() || itemIds.length > 1 };
       } else if (itemIds.length) return base;
       return { ...base, kind: 'report', text: [body, detail].filter(Boolean).join('\n\n'),
+        attachments: Array.isArray(report.attachments) ? report.attachments.filter(isAttachment) : [],
         ...(reference ? { targetBranchId: entryId.slice('child-report:'.length, -(reference.operationId.length + 1)) } : {}),
         outcome: typeof report.outcome === 'string' ? report.outcome : undefined, detail, report: reference };
     } catch { return base; }

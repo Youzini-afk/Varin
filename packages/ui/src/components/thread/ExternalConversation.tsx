@@ -24,8 +24,6 @@ import { ChatThinkingBlock } from '@/components/conversation/ChatThinkingBlock';
 import { ToolDisclosure, ToolDisclosureScope, ToolStatus } from '@/components/conversation/ToolDisclosure';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import {
-  beginImageInsertion,
-  fileToImageAttachment,
   removeDraftImage,
 } from '@/components/chat/composer/imageAttachments';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
@@ -41,6 +39,8 @@ import { ChatAgentMessageBubble } from '@/components/conversation/ChatAgentMessa
 import { ExternalInteractionForm } from './ExternalInteractionForm';
 import { ExternalSessionControls } from './ExternalSessionControls';
 import { externalSessionInput } from './externalSessionChoice';
+import { selectThreadFiles, prepareDraftFiles } from '@/lib/agent-runtime/fileAttachments';
+import { ThreadAttachments, ThreadFileDrafts } from './ThreadAttachments';
 import { ExternalAuthentication } from './ExternalAuthentication';
 
 const describe = (value: unknown): string =>
@@ -63,7 +63,9 @@ const Item = React.memo(function Item({
   active,
   expanded = false,
   cwd,
+  readAttachment,
 }: {
+  readAttachment(ref: string, signal: AbortSignal): Promise<Blob>;
   item: ExternalItem;
   active: boolean;
   expanded?: boolean;
@@ -118,6 +120,7 @@ const Item = React.memo(function Item({
         kind={item.kind === 'notice' ? 'message' : 'task'}
         senderThreadId={item.senderThreadId}
         text={item.text}
+        attachments={<ThreadAttachments attachments={item.attachments} read={readAttachment} />}
       >
         <MarkdownRenderer content={item.text} messageId={item.id} variant="assistant" />
       </ChatAgentMessageBubble>
@@ -203,6 +206,7 @@ const Item = React.memo(function Item({
         isStreaming={active && !item.complete && item.kind === 'assistant'}
         variant={item.kind === 'notice' ? 'tool' : 'assistant'}
       />
+      <ThreadAttachments attachments={item.attachments} read={readAttachment} />
       <Dialog
         open={Boolean(image)}
         onOpenChange={(open) => {
@@ -279,7 +283,9 @@ function Messages({
   activeTurn,
   cwd,
   receipts,
+  readAttachment,
 }: {
+  readAttachment(ref: string, signal: AbortSignal): Promise<Blob>;
   items: ExternalItem[];
   activeTurn?: string;
   cwd: string;
@@ -324,7 +330,7 @@ function Messages({
         return (
           <React.Fragment key={group[0]!.id}>
             {group.length === 1 ? (
-              <Item
+              <Item readAttachment={readAttachment}
                 item={group[0]!}
                 cwd={cwd}
                 active={group[0]!.turnId === activeTurn}
@@ -339,7 +345,7 @@ function Messages({
                 </summary>
                 <div className="border-l border-border/50 pl-4">
                   {group.map((item) => (
-                    <Item key={item.id} item={item} cwd={cwd} active={item.turnId === activeTurn} />
+                    <Item readAttachment={readAttachment} key={item.id} item={item} cwd={cwd} active={item.turnId === activeTurn} />
                   ))}
                 </div>
               </ToolDisclosure>
@@ -509,7 +515,10 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
   React.useEffect(() => {
     if (!draft.externalInput || !snapshot?.turns.some((turn) => turn.key === draft.externalInput!.key))
       return;
-    useThreadDraftStore.getState().patch(key, { externalInput: undefined });
+    useThreadDraftStore.getState().patch(key, current => ({ externalInput: undefined,
+      text: current.text === draft.externalInput!.text ? '' : current.text,
+      files: current.files?.filter(file => !draft.externalInput!.attachments?.some(selected => 'ref' in selected && selected.ref === file.attachment?.ref)),
+    }));
   }, [snapshot?.turns, draft.externalInput, key]);
   const act = async (operation: () => Promise<unknown>, refresh = false) => {
     if (acting.current || !isCurrent()) return;
@@ -525,22 +534,9 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
       if (isCurrent()) setPending(false);
     }
   };
-  const addFiles = async (files: File[]) => {
-    const insertion = beginImageInsertion(key, editor.current, (number) =>
-      t('chat.imageReference.token', { number }),
-    );
-    try {
-      for (const file of files) {
-        if (!file.type.startsWith('image/')) throw new Error(t('external.attachments'));
-        const image = await fileToImageAttachment(file);
-        if (!isCurrent()) return;
-        insertion.append(image);
-      }
-    } catch (error) {
-      if (isCurrent()) setError(String(error));
-    } finally {
-      insertion.dispose();
-    }
+  const addFiles = (files: File[]) => {
+    if (!isCurrent() || acting.current || draft.externalInput) return;
+    selectThreadFiles(key, files);
   };
   if (!snapshot)
     return (
@@ -598,7 +594,7 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                     {t('external.history')}
                   </Button>
                 )}
-                <Messages items={messages} activeTurn={activeTurn} cwd={c.cwd} receipts={snapshot.turns} />
+                <Messages readAttachment={(ref, signal) => api.readAttachment(id, ref, signal)} items={messages} activeTurn={activeTurn} cwd={c.cwd} receipts={snapshot.turns} />
               </ToolDisclosureScope>
             </div>
           </div>
@@ -639,7 +635,7 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                           const request = draft.externalInput!;
                           await api.send(id, request.key, request);
                           if (!isCurrent()) return;
-                          patch({ externalInput: undefined });
+                          patch({ externalInput: undefined, text: draft.text === request.text ? '' : draft.text, files: draft.files?.filter(file => !request.attachments?.some(selected => 'ref' in selected && selected.ref === file.attachment?.ref)) });
                         })
                       }
                     >
@@ -681,17 +677,16 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (acting.current || pending || unresolvedInput || !snapshot.connected || c.needsReview || snapshot.capabilities?.images === false && draft.images.length || (!draft.text.trim() && !draft.images.length)) return;
-                  const request = draft.externalInput ?? {
-                    key: crypto.randomUUID(),
-                    text: draft.text,
-                    images: draft.images.map((v) => ({ data: v.data, mimeType: v.mimeType })),
-                    ...externalSessionInput(choice, snapshot.capabilities),
-                  };
-                  patch({ externalInput: request });
-                  const originalText = draft.text,
-                    originalImages = draft.images;
+                  if (acting.current || pending || unresolvedInput || !snapshot.connected || c.needsReview || snapshot.capabilities?.images === false && draft.images.length || (!draft.text.trim() && !draft.images.length && !draft.files?.length)) return;
+                  const originalText = draft.text, originalImages = draft.images, originalFiles = draft.files;
                   void act(async () => {
+                    const attachments = draft.externalInput ? [] : await prepareDraftFiles(key, draft.files ?? [], `external:${id}`,
+                      (file, signal) => api.uploadAttachment(id, { key: file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
+                    if (!isCurrent()) return;
+                    const request = draft.externalInput ?? { key: crypto.randomUUID(), text: draft.text,
+                      images: draft.images.map(v => ({ data: v.data, mimeType: v.mimeType })), attachments: attachments.map(({ ref }) => ({ ref })),
+                      ...externalSessionInput(choice, snapshot.capabilities) };
+                    patch({ externalInput: request });
                     try {
                       await api.send(id, request.key, request);
                     } catch (error) {
@@ -710,6 +705,7 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                     patch({
                       ...(current?.text === originalText ? { text: '' } : {}),
                       ...(current?.images === originalImages ? { images: [] } : {}),
+                      files: current?.files?.filter(file => !originalFiles?.some(original => original.id === file.id)),
                       externalInput: undefined,
                     });
                     follow.current = true;
@@ -719,7 +715,6 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
               >
                 <input
                   type="file"
-                  accept="image/*"
                   multiple
                   hidden
                   ref={fileInput}
@@ -750,24 +745,25 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                     terminal: { run: () => useUIStore.getState().openContextSurface(c.cwd, 'terminal') },
                   }}
                   modelDisabled={pending}
-                  attachmentDisabled={pending}
-                  imageDisabled={snapshot.capabilities?.images === false}
-                  sendDisabled={pending || unresolvedInput || !snapshot.connected || Boolean(c.needsReview) || snapshot.capabilities?.images === false && Boolean(draft.images.length) || (!draft.text.trim() && !draft.images.length)}
+                  attachmentDisabled={pending || unresolvedInput}
+                  imageDisabled={false}
+                  sendDisabled={pending || unresolvedInput || !snapshot.connected || Boolean(c.needsReview) || snapshot.capabilities?.images === false && Boolean(draft.images.length) || (!draft.text.trim() && !draft.images.length && !draft.files?.length)}
                   pending={pending}
                   active={Boolean(active)}
                   retrying={false}
                   onFiles={(files) => void addFiles(files)}
                   onAttachImages={() => fileInput.current?.click()}
-                  onAttachPdfs={() => setError(t('external.attachments'))}
+                  onAttachPdfs={() => fileInput.current?.click()}
                   onStop={active ? () => void act(() => api.stop(id, active.id)) : undefined}
                   onGoal={() => {}}
-                  hasInput={Boolean(draft.text.trim() || draft.images.length)}
+                  hasInput={Boolean(draft.text.trim() || draft.images.length || draft.files?.length)}
                   onWorkspace={() => setDetails(true)}
                   workspaceLabel={c.cwd.split(/[\\/]/).at(-1) ?? c.cwd}
                   workspacePath={c.cwd}
-                  attachmentNames={[]}
+                  attachmentNames={draft.files?.map(file => file.filename) ?? []}
                   skills={[]}
                 >
+                  <ThreadFileDrafts files={draft.files} locked={pending || unresolvedInput} onRemove={id => patch({ files: draft.files?.filter(file => file.id !== id) })} />
                   <ImageAttachmentStrip
                     images={draft.images}
                     onRemove={(index) => removeDraftImage(key, index)}

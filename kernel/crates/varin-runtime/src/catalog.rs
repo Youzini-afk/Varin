@@ -51,7 +51,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 84;
+pub(crate) const FORMAT: i64 = 85;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -156,6 +156,7 @@ fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     upgrades::check_context_schema(db, version)?;
     upgrades::check_history_indexes(db, version)?;
     if version >= 84 { driver::check_format(db)?; }
+    if version >= 85 { attachments::check_format(db)?; }
     goals::check_format(db)?;
     mcp_interactions::check_format(db)?;
     bot::check_format(db)?;
@@ -223,6 +224,7 @@ fn initialize_metadata(
         usage_ledger::initialize(&tx)?;
         context_observations::initialize(&tx)?;
         driver::initialize(&tx)?;
+        attachments::initialize(&tx)?;
     }
     titles::initialize(&tx)?;
     let epoch = tx.query_row(
@@ -636,6 +638,9 @@ impl Catalog {
             input_id,
             cursor,
         };
+        attachments::publish(tx, &attachments::AttachmentDelivery {
+            source_thread_id:None, source_branch_id:None, holder_kind:"input".into(), holder_id:prepared.input_id.clone(), thread_id:command.thread_id.clone(), branch_id:command.branch_id.clone(), attachments:prepared.attachments.clone(), input_ref:None,
+        })?;
         tx.execute(
             "INSERT INTO commands(id,intent,receipt) VALUES(?1,?2,?3)",
             params![command.key, encode(&input)?, encode(&receipt)?],
@@ -2073,3 +2078,6 @@ mod attention_facts;
 mod generation;
 #[path = "catalog_attention.rs"]
 pub mod attention;
+
+#[path = "catalog_attachments.rs"]
+pub mod attachments;

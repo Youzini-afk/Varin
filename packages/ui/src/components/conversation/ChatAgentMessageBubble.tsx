@@ -10,12 +10,13 @@ import { toast } from '@/components/ui';
 
 /** The same folded message surface for received messages, reports and native send calls. */
 export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, targetThreadId, targetBranchId,
-  text, kind = 'message', outgoing = false, status, live = false, children }: {
+  text, kind = 'message', outgoing = false, status, live = false, children, attachments }: {
   id: string; senderThreadId?: string; senderBranchId?: string; targetThreadId?: string; targetBranchId?: string;
   text: string; kind?: 'message' | 'report' | 'task'; outgoing?: boolean; status?: React.ReactNode;
   /** Being sent now: the bubble settles in once instead of appearing. */
   live?: boolean;
   children: React.ReactNode;
+  attachments?: React.ReactNode;
 }) {
   const { t } = useI18n();
   const [arrives] = React.useState(live);
@@ -69,6 +70,7 @@ export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, tar
             {visited && children}
           </div></div>
         </div>
+        {attachments && <div className="px-3.5 pb-2 empty:hidden">{attachments}</div>}
       </div>
     </div>
   </article>;

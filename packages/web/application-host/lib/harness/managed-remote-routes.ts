@@ -113,7 +113,7 @@ export function registerManagedRemoteRoutes(
     response.json(await service.identity());
   }));
 
-  const sourceMethods = ['recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'fileReceipt', 'codeExchange', 'resolve', 'skills', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const sourceMethods = ['attachmentBegin', 'attachmentPath', 'recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'fileReceipt', 'codeExchange', 'resolve', 'skills', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
   const receiptMethods: ReadonlySet<string> = new Set(['scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'fileReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
   for (const method of sourceMethods) {
     const methodAuth: RequestHandler = (request, response, next) => {
@@ -174,6 +174,26 @@ export function registerManagedRemoteRoutes(
       response.off('close', close);
       await subscription?.close().catch(() => undefined);
     }
+  }));
+
+  app.put(`${base}/sources/attachments/objects/:objectHash`, requireAuth, requireSourceAuth, route(async (request, response) => {
+    const coordinatorHostId = asString(request.header('x-varin-coordinator-host'), 'Coordinator identity');
+    authorize(request, coordinatorHostId);
+    const input = { coordinatorHostId,
+      authorityId: asString(request.header('x-varin-source-authority'), 'Source authority'),
+      resourceEpoch: asString(request.header('x-varin-source-epoch'), 'Source epoch'),
+      operationId: asString(request.header('x-varin-attachment-operation'), 'Attachment operation'),
+      ref: asString(request.header('x-varin-attachment-ref'), 'Attachment reference'),
+      contentHash: asString(request.header('x-varin-attachment-content'), 'Attachment content identity'),
+      objectHash: asString(request.params.objectHash, 'Object identity'),
+      byteLength: asNonNegativeInteger(request.header('x-varin-object-length'), 'Object byte length') };
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    request.once('aborted', abort);
+    try {
+      const receipt = await service.sources().attachmentPut(principals.get(request)!, input, requestBodyChunks(request), controller.signal);
+      if (!response.destroyed) response.json(receipt);
+    } finally { request.off('aborted', abort); }
   }));
 
   app.get(`${base}/lifecycle`, requireAuth, requireManagedAuth, route(async (_request, response) => {

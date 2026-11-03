@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ExternalAgentCapabilities } from '@varin/application-client';
 import type { HarnessConnection, HarnessSink } from './adapter.js';
+import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
 import { PiContent } from './pi-content.js';
 import { requirePiRpcVersion } from './pi-version.js';
@@ -43,6 +44,7 @@ export async function connectPi(
   const capabilities: ExternalAgentCapabilities = {
     resume: true,
     images: true,
+    files: 'paths',
     steering: false,
     modelsError,
     modelsRefresh: true,
@@ -344,7 +346,7 @@ export async function connectPi(
         let accepted: RecordValue;
         try {
           accepted = await peer.request('prompt', {
-            message: input.text,
+            message: fileInputText(input),
             ...(input.images?.length
               ? {
                   images: input.images.map((image) => ({

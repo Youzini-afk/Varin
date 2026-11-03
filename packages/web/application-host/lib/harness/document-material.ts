@@ -7,6 +7,7 @@ export interface DocumentArtifactSource {
   chunks: AsyncIterable<Uint8Array>;
 }
 export interface DocumentMaterialSources {
+  readRef?(ref: string, signal?: AbortSignal): Promise<DocumentIngestInput>;
   readPath?(path: string, signal?: AbortSignal): Promise<DocumentIngestInput>;
   readArtifact?(artifact: NonNullable<DocumentReadRequest["artifact"]>, signal?: AbortSignal): Promise<DocumentArtifactSource>;
 }
@@ -20,11 +21,12 @@ export async function readDocumentMaterial(reader: DocumentReader, request: Docu
   if (!request || typeof request !== "object" || Array.isArray(request)) {
     return { status: "failed", url: "", reason: "A document read request is required" };
   }
+  const ref = typeof request.ref === 'string' ? request.ref.trim() : '';
   const localPath = typeof request.path === "string" ? request.path.trim() : "";
   const snapshotId = typeof request.snapshotId === "string" ? request.snapshotId.trim() : "";
   const artifact = request.artifact;
-  if ([Boolean(localPath), Boolean(snapshotId), artifact !== undefined].filter(Boolean).length !== 1) {
-    return { status: "failed", url: "", reason: "Provide exactly one path, snapshotId or experiment artifact" };
+  if ([Boolean(ref), Boolean(localPath), Boolean(snapshotId), artifact !== undefined].filter(Boolean).length !== 1) {
+    return { status: "failed", url: "", reason: "Provide exactly one ref, path, snapshotId or experiment artifact" };
   }
   if (artifact !== undefined && (!artifact || typeof artifact !== "object" || typeof artifact.attemptId !== "string"
     || !artifact.attemptId.trim() || typeof artifact.artifactId !== "string" || !artifact.artifactId.trim())) {
@@ -34,7 +36,10 @@ export async function readDocumentMaterial(reader: DocumentReader, request: Docu
   request = { ...request, view: request.view ?? (request.office?.view === 'overview' ? 'overview' : 'text') };
   if (snapshotId) return await alternate?.(request, context) ?? reader.read(request, context);
   let input: DocumentIngestInput;
-  if (artifact) {
+  if (ref) {
+    if (!sources.readRef) return { status: 'failed', url: '', reason: 'Original attachment reads are unavailable' };
+    input = await sources.readRef(ref, context.signal);
+  } else if (artifact) {
     if (!sources.readArtifact) return { status: "failed", url: "", reason: "Experiment artifacts are unavailable" };
     const original = await sources.readArtifact(artifact, context.signal);
     const chunks: Buffer[] = [];
@@ -53,6 +58,6 @@ export async function readDocumentMaterial(reader: DocumentReader, request: Docu
     return await alternate?.(request, context, input)
       ?? { status: "failed", url: input.sourceUrl, reason: "This document format is unsupported by the available readers" };
   }
-  const { path: _path, artifact: _artifact, ...readRequest } = request;
+  const { ref: _ref, path: _path, artifact: _artifact, ...readRequest } = request;
   return reader.ingest(input, context, readRequest);
 }

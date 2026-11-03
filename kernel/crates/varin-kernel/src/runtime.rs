@@ -248,6 +248,8 @@ fn pending_file_worker(method: &str) -> bool {
             | "file.measure"
             | "working.result.publish"
             | "file.materialize"
+            | "file.objectView.prepare"
+            | "file.objectView.release"
             | "file.materializedView.prepare"
             | "file.materializedView.release"
             | "file.root.register"
@@ -709,6 +711,27 @@ impl Kernel {
             self.file_workers.push((cancellation,worker));
             return Ok(None);
         }
+        if method == "file.objectView.prepare" || method == "file.objectView.release" {
+            let tasks = if method == "file.objectView.prepare" {
+                vec![storage.prepare_object_view(&authorized_params, &authorized_grant, cancellation.clone())?]
+            } else { storage.prepare_object_view_release(&authorized_params, &authorized_grant)? };
+            let (port, completed, request) = (Self::workspace_port(completions), completions.clone(), request.clone());
+            let abandoned=tasks.clone();
+            let worker = thread::Builder::new().name("object-view".into()).spawn(move || {
+                let result = (|| {
+                    let mut result = json!({"released":true});
+                    for task in &tasks { result = task.run(port.clone())?; }
+                    Ok(result)
+                })();
+                // A failed generation must also relinquish unstarted sibling
+                // reservations; their durable records still own every byte.
+                let cleanup = port.call(move |storage| { for task in tasks { storage.abandon_object_view(&task); } Ok(()) });
+                let result = result.and_then(|value| cleanup.map(|_| value));
+                let _ = completed.send(WorkerRequest::ResourceRequestDone { request, result });
+            });
+            match worker {Ok(worker)=>self.file_workers.push((cancellation,worker)),Err(error)=>{for task in abandoned {storage.abandon_object_view(&task);}return Err(error.into());}}
+            return Ok(None);
+        }
         if method == "storage.getBlob" {
             let task =
                 storage.prepare_blob_read(&authorized_params, &authorized_grant, cancellation)?;
@@ -811,6 +834,9 @@ impl Kernel {
             return Ok(None);
         }
         if matches!(method, "file.capture" | "file.captureBatch") {
+            if method=="file.capture" {
+                if let Some(receipt)=storage.retained_capture(&authorized_params,&authorized_grant)? {return Ok(Some(response_ok(id,receipt)));}
+            }
             let prepared=storage.prepare_capture_resolution(method,&authorized_params,&authorized_grant,cancellation.clone())?;
             let (request,completed)=(request.clone(),completions.clone());
             let worker=thread::Builder::new().name("capture-admission".into()).spawn(move ||{
@@ -1310,6 +1336,22 @@ impl Kernel {
             match storage.prepare_materialized_view_release(&params,&grant) {
                 Ok(Some(task))=>tasks.push(task), Ok(None)=>{}, Err(error)=>eprintln!("derived view cleanup pending: {error}"),
             }
+        }
+        let obsolete_objects=storage.obsolete_object_views(&self.epoch)?;
+        let mut object_tasks=Vec::new();
+        for (params,grant) in obsolete_objects {
+            match storage.prepare_obsolete_object_view_release(&params,&grant) {
+                Ok(tasks)=>object_tasks.extend(tasks), Err(error)=>eprintln!("attachment path cleanup pending: {error}"),
+            }
+        }
+        for task in object_tasks {
+            let port=Self::workspace_port(completions);
+            let cancellation=Arc::new(AtomicBool::new(false));
+            let abandoned=task.clone();
+            let worker=thread::Builder::new().name("object-view-cleanup".into()).spawn(move || {
+                if let Err(error)=task.run(port) { eprintln!("attachment path cleanup pending: {error}"); }
+            });
+            match worker {Ok(worker)=>self.file_workers.push((cancellation,worker)),Err(error)=>{storage.abandon_object_view(&abandoned);eprintln!("Attachment cleanup worker did not start: {error}");}}
         }
         for task in tasks { self.spawn_materialized_view_cleanup(task,None,Arc::new(AtomicBool::new(false)),completions)?; }
         Ok(())

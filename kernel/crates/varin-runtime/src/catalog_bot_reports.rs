@@ -89,7 +89,7 @@ impl Catalog {
                 operation_id: operation.id,
                 origin,
             },
-            messages::MessageInput {
+            messages::MessageInput { attachments: report.attachments.iter().map(|file|super::attachments::AttachmentSelection::Ref{reference:file.reference.clone()}).collect(),
                 after_current: None,
                 source_agent: None,
                 name: None,
@@ -108,7 +108,7 @@ impl Catalog {
             None,
             None,
         )
-        .map(|message| message.with_delivery_data(data))
+        .map(|message| message.with_attachments(report.attachments.clone()).with_delivery_data(data))
     }
 }
 

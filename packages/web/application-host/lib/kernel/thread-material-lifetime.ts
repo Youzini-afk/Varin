@@ -3,7 +3,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
 import type { WebMaterialStore } from '../harness/web-materials.js';
 import { createWorkspaceOpSerializer, kernelContext } from '../harness/kernel-records.js';
-import { createMaterialLifecycle } from '../harness/material-lifecycle.js';
+import { createMaterialLifecycle, stopMaterialActivity } from '../harness/material-lifecycle.js';
 import { threadMaterialScope } from './material-storage.js';
 import type { MaterialRetention } from './protocol.generated.js';
 
@@ -15,6 +15,9 @@ export function createThreadMaterialLifetime(options: {
   materials: WebMaterialStore;
   releaseBrowser?(threadId: string): Promise<void>;
   releaseSource?(source:import('./protocol.generated.js').LaunchSource,cleanupId:string,signal?:AbortSignal):Promise<boolean>;
+  releaseAttachmentSources?(plan: MaterialRetention, signal?: AbortSignal): Promise<{ pending: boolean }>;
+  reconcileAttachments?(plan: MaterialRetention, signal?: AbortSignal): Promise<{ pending: boolean }>;
+  retainAttachments?(plan: MaterialRetention, signal?: AbortSignal): Promise<void>;
   releasePreparations?(threads:readonly string[]):Promise<void>;
 }) {
   const serial = createWorkspaceOpSerializer();
@@ -22,6 +25,7 @@ export function createThreadMaterialLifetime(options: {
     withBranchStore: (scope, purpose, consume, mode) => options.storage.withBranchStore(scope, purpose, consume, mode, { threadId }),
   });
   const retain = async (plan: MaterialRetention, signal?: AbortSignal) => {
+    await options.retainAttachments?.(plan, signal);
     for (const child of plan.inheritances) {
       const scope = threadMaterialScope(child.rootThreadId);
       for (const snapshotId of child.snapshotIds) {
@@ -56,19 +60,27 @@ export function createThreadMaterialLifetime(options: {
         plan=await options.runtime.materialRetention(undefined,signal);
       }
       await retain(plan, signal);
-      let pendingSources=0;
-      for(const item of plan.sources??[]){signal?.throwIfAborted();if(options.releaseSource&&!await options.releaseSource(item.source,item.cleanupId,signal))pendingSources++;}
+      const preparations = await options.reconcileAttachments?.(plan, signal);
       const scopes = new Map<string, string[]>();
       for (const thread of plan.threads) if (thread.release) {
         const owners = scopes.get(thread.rootThreadId) ?? [];
         owners.push(thread.threadId); scopes.set(thread.rootThreadId, owners);
       }
-      for (const [root, deleted] of scopes) {
-        signal?.throwIfAborted();
-        await createMaterialLifecycle(actorStorage(deleted[0]!)).releaseThreadMaterials(threadMaterialScope(root), deleted);
-        for (const threadId of deleted) await options.releaseBrowser?.(threadId);
-      }
-      return {pending:pendingSources>0};
+      const resumes: Array<() => void> = [];
+      try {
+        for (const [root, deleted] of scopes) resumes.push(await stopMaterialActivity(threadMaterialScope(root), deleted));
+        let pendingSources = 0;
+        for (const item of plan.sources ?? []) { signal?.throwIfAborted(); if (options.releaseSource && !await options.releaseSource(item.source, item.cleanupId, signal)) pendingSources++; }
+        if (pendingSources) return { pending: true };
+        const attachmentCleanup = await options.releaseAttachmentSources?.(plan, signal);
+        if (attachmentCleanup?.pending || preparations?.pending) pendingSources++;
+        for (const [root, deleted] of scopes) {
+          signal?.throwIfAborted();
+          await createMaterialLifecycle(actorStorage(deleted[0]!)).releaseThreadMaterials(threadMaterialScope(root), deleted);
+          for (const threadId of deleted) await options.releaseBrowser?.(threadId);
+        }
+        return { pending: pendingSources > 0 };
+      } finally { for (const resume of resumes.reverse()) resume(); }
     }),
   };
 }

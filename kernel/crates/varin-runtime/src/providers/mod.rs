@@ -695,6 +695,7 @@ impl<'a> From<&'a crate::output::OutputPart> for ProviderPart<'a> {
     fn from(part: &'a crate::output::OutputPart) -> Self {
         match part {
             crate::output::OutputPart::Text { text } => Self::Text { text: text.into() },
+            crate::output::OutputPart::Attachment { attachment } => Self::Text { text: attachment.description().into() },
             crate::output::OutputPart::Media { media } => Self::Media { media },
         }
     }

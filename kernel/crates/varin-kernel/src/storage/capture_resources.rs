@@ -623,6 +623,25 @@ fn capture_entry(
     verify_entry(entry, resolve, None, cancel, hooks)
 }
 impl Storage {
+    /// A retained capture is the selection receipt, not a request to observe the
+    /// pathname again. Host may also read this record after the original root exits.
+    pub(crate) fn retained_capture(&self, value: &Value, grant: &Grant) -> Result<Option<Value>,KernelError> {
+        let params: KernelFileCaptureParams=parse_file_params(value)?;
+        let Some(record_id)=params.retention_record_id.as_deref() else {return Ok(None)};
+        if record_id.is_empty() || !params.store || params.operation_id.is_empty() {
+            return Err(KernelError::Operation("Retained capture requires an identity and store:true".into()));
+        }
+        let Some(record)=self.domain_record_value(&params.workspace_id,record_id)? else {return Ok(None)};
+        self.domain_record_get(&json!({"workspaceId":params.workspace_id,"recordId":record_id}),&grant.grant_id)?;
+        if record["recordType"]!="attachment.capture" {return Err(KernelError::Authorization("Capture record identity belongs to another resource".into()));}
+        let payload:Value=serde_json::from_str(record["payloadJson"].as_str().ok_or_else(||KernelError::Storage("Capture receipt missing".into()))?)?;
+        let root=self.admitted_file_root(&params.root_id,grant)?;
+        if payload["operationId"]!=params.operation_id || payload["path"]!=params.path
+            || payload["canonicalRoot"]!=json!(root.canonical_root) || payload["executionWorkspaceId"]!=root.execution_workspace_id {
+            return Err(KernelError::Authorization("Capture identity was reused for another selection".into()));
+        }
+        Ok(Some(json!({"path":payload["path"],"stateJson":payload["stateJson"],"recordId":record_id,"ownerId":null})))
+    }
     pub(crate) fn prepare_capture_resolution(
         &self,
         method: &str,
@@ -636,6 +655,11 @@ impl Storage {
             "file.captureBatch" => CaptureRequest::Batch(parse_file_params(value)?),
             _ => return Err(KernelError::Protocol("unknown capture method".into())),
         };
+        if let CaptureRequest::Single(params)=&request {
+            if params.retention_record_id.as_deref().is_some_and(str::is_empty) || (params.retention_record_id.is_some() && (!params.store || params.operation_id.is_empty())) {
+                return Err(KernelError::Operation("Retained capture requires an identity and store:true".into()));
+            }
+        }
         let expected = match &request {
             CaptureRequest::Batch(params) if params.expected_states_json.is_some() => {
                 let states: BTreeMap<String, FileState> =
@@ -828,6 +852,9 @@ impl Storage {
         grant: &Grant,
     ) -> Result<Value, KernelError> {
         self.validate_capture(task, grant)?;
+        if let CaptureRequest::Single(params)=&task.request {
+            if let Some(response)=self.retained_capture(&json!({"workspaceId":params.workspace_id,"rootId":params.root_id,"operationId":params.operation_id,"path":params.path,"store":params.store,"retentionRecordId":params.retention_record_id}),grant)? {return Ok(response);}
+        }
         let workspace_id = match &task.request {
             CaptureRequest::Single(params) => &params.workspace_id,
             CaptureRequest::Batch(params) => &params.workspace_id,
@@ -837,7 +864,7 @@ impl Storage {
                 ))
             }
         };
-        let CapturePublication { response, rows } = batch
+        let CapturePublication { mut response, rows } = batch
             .publication
             .ok_or_else(|| KernelError::Storage("capture publication was not prepared".into()))?;
         // Hits stay installed under exact-hash retention until the new owner commits.
@@ -890,6 +917,22 @@ impl Storage {
                     Some(operation),
                     &grant.grant_id,
                 )?;
+            }
+            if let CaptureRequest::Single(params)=&task.request {
+                if let Some(record_id)=&params.retention_record_id {
+                    let payload=json!({"path":response["path"],"stateJson":response["stateJson"],"operationId":params.operation_id,
+                        "canonicalRoot":task.root.canonical_root,"executionWorkspaceId":task.root.execution_workspace_id,
+                        "managedSource":self.source_authority_for_grant(&grant.grant_id)?.is_some()});
+                    self.conn.execute("INSERT INTO domain_records(workspace_id,record_id,record_type,state,thread_id,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,'attachment.capture','temporary',?3,1,?4,?5,?5)",
+                        params![workspace_id,record_id,grant.thread_id,payload.to_string(),now_ms()])?;
+                    if let Some((_,hash,_,_))=rows.first() {
+                        self.conn.execute("INSERT INTO domain_record_refs(workspace_id,record_id,slot,object_hash) VALUES(?1,?2,'source',?3)",params![workspace_id,record_id,hash])?;
+                    }
+                    // Retained captures have one durable record owner. No extra
+                    // grant-scoped temporary owner needs to survive response loss.
+                    for (owner,_,_,_) in &rows {self.conn.execute("DELETE FROM object_owners WHERE owner_id=?1",[owner])?;}
+                    response["ownerId"]=Value::Null; response["recordId"]=json!(record_id);
+                }
             }
             check(&task.cancellation)?;
             self.conn.execute_batch("COMMIT")?;
@@ -946,5 +989,41 @@ impl CapturedBatch {
             ));
         }
         Ok(self.entries.remove(0).state)
+    }
+}
+
+#[cfg(test)]
+mod retained_capture_tests {
+    use super::*;
+    #[test]
+    fn capture_receipt_survives_response_loss_reopen_and_changed_source() {
+        let directory=std::env::temp_dir().join(format!("retained-capture-{}",Uuid::new_v4()));
+        let workspace=directory.join("workspace");fs::create_dir_all(&workspace).unwrap();
+        fs::write(workspace.join("selected.bin"),b"first selected bytes").unwrap();
+        let storage_root=directory.join("storage");
+        let mut storage=Storage::open(&storage_root,"host").unwrap();
+        storage.issue_grant(&json!({"grantId":"reader","hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":"workspace","threadId":"thread","capabilities":["storage.read","storage.write"],"pathScopes":[""]}),"host","generation",storage_root.to_str().unwrap(),"epoch").unwrap();
+        let grant=storage.load_grant("reader").unwrap();
+        let root=storage.file_root_register(&json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":workspace}),&grant).unwrap();
+        let mut params=json!({"workspaceId":"workspace","rootId":root["rootId"],"operationId":"select-once","path":"selected.bin","store":true,"retentionRecordId":"capture:original"});
+        let mut task=storage.prepare_capture("file.capture",&params,&grant,Arc::new(AtomicBool::new(false))).unwrap();
+        let hashed=task.hash_sources().unwrap();storage.retain_capture_objects(&mut task,&hashed,&grant).unwrap();
+        let batch=task.finish_sources(hashed).unwrap();let receipt=storage.publish_capture(&task,batch,&grant).unwrap();
+        storage.finish_retained_file_lease(task.lease_id());
+        assert!(receipt["ownerId"].is_null());assert_eq!(receipt["recordId"],"capture:original");
+        let owners:i64=storage.conn.query_row("SELECT COUNT(*) FROM object_owners",[],|row|row.get(0)).unwrap();assert_eq!(owners,0);
+        let record=storage.domain_record_get(&json!({"workspaceId":"workspace","recordId":"capture:original"}),"reader").unwrap();
+        assert_eq!(record["recordType"],"attachment.capture");assert_eq!(record["threadId"],"thread");
+        let hash=record["references"][0]["objectHash"].as_str().unwrap().to_owned();
+        fs::write(workspace.join("selected.bin"),b"later edited bytes").unwrap();
+        assert_eq!(storage.retained_capture(&params,&grant).unwrap(),Some(receipt.clone()));
+        drop(task);drop(storage);
+        let mut storage=Storage::open(&storage_root,"host").unwrap();
+        let root=storage.file_root_register(&json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":workspace}),&grant).unwrap();params["rootId"]=root["rootId"].clone();
+        fs::remove_file(workspace.join("selected.bin")).unwrap();
+        assert_eq!(storage.retained_capture(&params,&grant).unwrap(),Some(receipt));
+        assert_eq!(fs::read(object_path(&storage_root,&hash).unwrap()).unwrap(),b"first selected bytes");
+        params["operationId"]=json!("different");assert!(storage.retained_capture(&params,&grant).is_err());
+        drop(storage);fs::remove_dir_all(directory).unwrap();
     }
 }

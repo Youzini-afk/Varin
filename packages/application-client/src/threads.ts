@@ -172,6 +172,7 @@ export interface ThreadSubmit extends ThreadIdentity {
   materials?: ThreadMaterialAttachment[];
   skills?: ThreadSkillSelection[];
   references?: ThreadObjectReference[];
+  attachments?: import('@varin/protocol').AttachmentSelection[];
   model: ThreadModel;
   agent?: ThreadAgentChoice;
   source?: ThreadSource;
@@ -271,7 +272,7 @@ export interface ThreadFamilyAPI {
 export interface ThreadMessagesAPI {
   /** Original family messages, including peer exchanges; reading never activates a participant. */
   feed(identity: ThreadIdentity, request: Omit<MessageFeedParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessageFeedPage>;
-  send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal): Promise<MessageReceipt>;
+  send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId' | 'preparedAttachments' | 'preparedAttachmentMedia'>, signal?: AbortSignal): Promise<MessageReceipt>;
   list(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessagePage>;
   get(identity: ThreadIdentity, messageId: string, signal?: AbortSignal): Promise<MessageView>;
 }
@@ -287,6 +288,7 @@ export interface ThreadChildContinuation extends ThreadIdentity {
   materials?: ThreadMaterialAttachment[];
   skills?: ThreadSkillSelection[];
   references?: ThreadObjectReference[];
+  attachments?: import('@varin/protocol').AttachmentSelection[];
 }
 export interface ThreadCollaborationAPI {
   dispatchCatalog(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('./thread-dispatch.js').ThreadDispatchCatalog>;
@@ -508,8 +510,20 @@ export type ThreadUpdate = ThreadCatalogIdentity & import('@varin/protocol').Thr
 export type ThreadDelete = ThreadCatalogIdentity & import('@varin/protocol').ThreadDeleteParams;
 export type ThreadRead = ThreadCatalogIdentity & import('@varin/protocol').ThreadReadPositionParams;
 
+export interface ThreadAttachmentUpload {
+  /** Stable user intent. Retry an uncertain upload with the same key and bytes. */
+  key: string;
+  filename: string;
+  mimeType: string;
+  data: Blob;
+}
+export interface ThreadAttachmentsAPI {
+  upload(identity: ThreadIdentity, request: ThreadAttachmentUpload, signal?: AbortSignal): Promise<import('@varin/protocol').Attachment>;
+  read(identity: ThreadIdentity, request: { ref: string }, signal?: AbortSignal): Promise<Blob>;
+}
 export interface ThreadsAPI {
   workflows?: import('./thread-workflows.js').ThreadWorkflowsAPI;
+  attachments: ThreadAttachmentsAPI;
   nextStep?(identity: ThreadIdentity, cut: { runId: string; headId: string }, signal?: AbortSignal): Promise<ThreadNextStep>;
   materials: ThreadMaterialsAPI;
   computer: ThreadComputerAPI;
@@ -549,7 +563,7 @@ export interface ThreadsAPI {
   cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;
-  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
+  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: import('@varin/protocol').AttachmentSelection[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
   editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], skills?: ThreadSkillSelection[]): Promise<QueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
   sendInputNow(inputId: string, expectedRevision: number, expectedRunId: string): Promise<QueuedInput>;

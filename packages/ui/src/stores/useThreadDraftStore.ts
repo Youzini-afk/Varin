@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import type { InlineCommentDraft } from './useInlineCommentDraftStore';
-import type { ImageAttachment } from '@varin/protocol';
+import type { Attachment, ImageAttachment } from '@varin/protocol';
 import type { ThreadAgentChoice, ThreadIdentity, ThreadModel, ThreadPrepareSource, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
 
 export type ThreadPendingInput = {
   fingerprint: string;
   editorText: string;
+  fileIds?: readonly string[];
   goalObjective?: string;
   goalBudget?: number;
   editorContext?: readonly EditorContextAttachment[];
@@ -25,7 +26,18 @@ export interface ThreadMaterialAttachment {
   sourceHash?: string;
   format?: 'pdf' | import('@varin/protocol').OfficeFormat;
 }
-export interface DraftPdfAttachment { id: string; filename: string; data: string; mimeType?: import('@varin/protocol').DocumentMimeType }
+/** Original bytes stay in memory until the original upload owner confirms its fixed reference. */
+export interface DraftFileAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  data: Blob;
+  status: 'selected' | 'preparing' | 'ready' | 'failed';
+  attachment?: Attachment;
+  preparedScope?: string;
+  preparationHost?: number;
+  error?: string;
+}
 export interface DraftSourceSelection {
   path: string;
   resourceOwner: ThreadPrepareSource['resourceOwner'];
@@ -40,7 +52,7 @@ export interface ThreadFirstSend {
   text: string;
   editorText: string;
   images: ImageAttachment[];
-  pdfs: DraftPdfAttachment[];
+  files: DraftFileAttachment[];
   model: ThreadModel;
   agent?: ThreadAgentChoice;
   workspacePath?: string;
@@ -75,10 +87,10 @@ export interface ThreadDraft {
   goalArmed?: boolean;
   pendingInput?: ThreadPendingInput;
   identity?: ThreadIdentity;
-  pdfs?: DraftPdfAttachment[];
+  files?: DraftFileAttachment[];
   firstSend?: ThreadFirstSend;
   /** Paint the accepted first input until its native history snapshot arrives. */
-  firstMessageReceipt?: Pick<ThreadFirstSend, 'key' | 'text' | 'images'> & { inputId: string };
+  firstMessageReceipt?: Pick<ThreadFirstSend, 'key' | 'text' | 'images' | 'files'> & { inputId: string };
   sendError?: string;
   sourceSelection?: DraftSourceSelection;
   /** Unsent collaboration input and exact per-recipient attempts, retained in memory only. */

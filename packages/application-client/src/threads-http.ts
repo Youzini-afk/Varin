@@ -37,6 +37,21 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
     return result;
   };
+  const attachmentRequest = async <T>(path: string, init: RequestInit, decode: (response: Response) => Promise<T>, signal?: AbortSignal): Promise<T> => {
+    signal?.throwIfAborted();
+    const generation = getRuntimeEndpointGeneration();
+    const response = await runtimeFetch(`/api/threads/attachments/${path}`, { ...init, ...(signal ? { signal } : {}) });
+    signal?.throwIfAborted();
+    if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during attachment request');
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({})) as { code?: string; error?: string };
+      throw new ThreadRequestError(response.status, error.code ?? 'attachment-request-failed', undefined, error.error);
+    }
+    const value = await decode(response);
+    signal?.throwIfAborted();
+    if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during attachment request');
+    return value;
+  };
   return {
     workflows: {
       memoryScopes: (identity, signal) => post('memory/scopes', identity, signal),
@@ -60,6 +75,16 @@ export function createThreadsHttpAPI(): ThreadsAPI {
           if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during export');
         } catch (error) { await destination.abort(error).catch(() => {}); throw error; }
         finally { changed(); signal?.removeEventListener('abort', abort); }
+      },
+    },
+    attachments: {
+      upload: (identity, request, signal) => {
+        const query = new URLSearchParams({ ...identity, key: request.key, filename: request.filename, mimeType: request.mimeType, byteLength: String(request.data.size) });
+        return attachmentRequest(`upload?${query}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Accept: 'application/json' }, body: request.data }, response => response.json(), signal);
+      },
+      read: (identity, request, signal) => {
+        const query = new URLSearchParams({ ...identity, ref: request.ref });
+        return attachmentRequest(`read?${query}`, { method: 'GET' }, response => response.blob(), signal);
       },
     },
     nextStep: (identity, cut, signal) => post('next-step', { ...identity, ...cut }, signal),

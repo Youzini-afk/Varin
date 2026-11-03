@@ -14,6 +14,7 @@ export function documentMimeType(filename: string, mime = ''): DocumentMimeType 
 }
 export type OfficeCellValue = string | number | boolean | null | { formula: string };
 export interface OfficeReadRequest {
+  ref?: string;
   path?: string;
   snapshotId?: string;
   view?: 'overview' | 'content' | 'find';

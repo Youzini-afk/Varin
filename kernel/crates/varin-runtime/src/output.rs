@@ -13,6 +13,7 @@ pub struct OutputBody<M = ResolvedMedia> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OutputPart<M = ResolvedMedia> {
+    Attachment { attachment: crate::catalog::attachments::Attachment },
     Text { text: String },
     Media { media: M },
 }
@@ -43,6 +44,7 @@ impl<M> OutputBody<M> {
                 .map(|part| {
                     Ok(match part {
                         OutputPart::Text { text } => OutputPart::Text { text },
+                        OutputPart::Attachment { attachment } => OutputPart::Attachment { attachment },
                         OutputPart::Media { media } => OutputPart::Media { media: map(media)? },
                     })
                 })

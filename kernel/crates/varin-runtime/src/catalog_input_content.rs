@@ -19,6 +19,7 @@ pub(super) struct QueueIdentity {
     pub configuration: Option<Value>,
 }
 pub struct PreparedQueueInput {
+    pub(super) attachments: Vec<super::super::attachments::Attachment>,
     pub(super) title: Option<String>,
     pub(super) checkpoint: Option<Option<String>>,
     pub(super) identity: QueueIdentity,
@@ -112,6 +113,7 @@ impl QueuePreparation {
             )
         };
         Ok(PreparedQueueInput {
+            attachments: super::super::attachments::input_attachments(&command.input)?,
             title: threads::input_title(&command.input),
             identity: QueueIdentity {
                 input_id,
@@ -161,6 +163,7 @@ pub struct InputEditPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedInputEdit {
+    attachments: Vec<super::super::attachments::Attachment>,
     pub(super) checkpoint: Option<Option<String>>,
     pub(super) id: String,
     pub(super) revision: u64,
@@ -244,8 +247,16 @@ impl InputEditPreparation {
                 }
             }
         }
+        if self.value.get("fileAttachments").is_none() {
+            if let Some(files) = previous.content.get("fileAttachments") {
+                if stored.is_string() { stored=json!({"text":stored}); }
+                stored["fileAttachments"] = files.clone();
+            }
+        }
+        let attachments = super::super::attachments::input_attachments(&stored)?;
         let reference = self.content.save_stored_user_history(&stored)?;
         Ok(PreparedInputEdit {
+            attachments,
             id: self.id,
             revision: self.revision,
             epoch: self.epoch,
@@ -351,6 +362,7 @@ impl Catalog {
     }
     pub fn admit_input_edit(&mut self, prepared: PreparedInputEdit) -> Result<QueuedInputRead> {
         let PreparedInputEdit {
+            attachments,
             id,
             revision,
             epoch,
@@ -398,6 +410,10 @@ impl Catalog {
                 "queued history reference missing".into(),
             ));
         }
+        tx.execute("DELETE FROM attachment_deliveries WHERE holder_kind='input' AND holder_id=?1",[&id])?;
+        super::super::attachments::publish(&tx,&super::super::attachments::AttachmentDelivery {
+            source_thread_id:None, source_branch_id:None, holder_kind:"input".into(),holder_id:id.clone(),thread_id:input.thread_id.clone(),branch_id:input.branch_id.clone(),attachments,input_ref:None,
+        })?;
         event(&tx, &id, input.revision, "input.edited", Value::Null)?;
         tx.commit()?;
         self.capture_queued_input(&id)

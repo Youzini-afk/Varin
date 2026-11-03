@@ -22,6 +22,7 @@ pub struct Entry {
 #[serde(rename_all = "camelCase")]
 pub struct Dispatch {
     pub actor: String,
+    pub attachments: Vec<super::super::attachments::Attachment>,
     pub operation_id: String,
     pub execution_id: String,
     pub sender_thread_id: String,
@@ -37,6 +38,7 @@ pub struct Dispatch {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
+    pub attachments: Vec<super::super::attachments::Attachment>,
     pub operation_id: String,
     pub execution_id: String,
     pub sender_thread_id: String,
@@ -113,10 +115,11 @@ impl Catalog {
 impl Read {
     /// Retain the complete last assistant response, including separate text parts.
     /// Earlier commentary separated by tool work stays in the member's conversation.
-    fn report_text(&self, db: &Connection, report: &collaboration::ChildReport, cancel: &dyn Fn() -> bool) -> Result<String> {
+    fn report_content(&self, db: &Connection, report: &collaboration::ChildReport, cancel: &dyn Fn() -> bool) -> Result<(String,Vec<super::super::attachments::Attachment>)> {
         let reported = report.history_ids.iter().collect::<BTreeSet<_>>();
         let mut next = report.history_ids.last().cloned();
         let mut parts = Vec::new();
+        let mut attachments=report.attachments.clone();
         while let Some(id) = next {
             if cancel() { return Err(RuntimeError::DispatchCancelled); }
             let item: HistoryItem = record(db, "history", &id)?;
@@ -127,9 +130,15 @@ impl Read {
                 crate::execution::Content::ToolCall { .. } => break,
                 crate::execution::Content::Text { text } if reported.contains(&id) => parts.push(text),
                 crate::execution::Content::Output { output } if reported.contains(&id) => {
-                    let mut text = output.parts.into_iter().filter_map(|part| match part {
-                        crate::output::OutputPart::Text { text } => Some(text), _ => None,
-                    }).collect::<Vec<_>>();
+                    let mut text = Vec::new();
+                    for part in output.parts {
+                        match part {
+                            crate::output::OutputPart::Text {text:part}=>text.push(part),
+                            crate::output::OutputPart::Attachment {attachment}=> {
+                                if !attachments.iter().any(|file|file.reference==attachment.reference){attachments.push(attachment);}
+                            }, _=>(),
+                        }
+                    }
                     if !output.data.is_null() { text.push(format!("```json\n{}\n```", serde_json::to_string_pretty(&output.data)?)); }
                     parts.push(text.join("\n"));
                 }
@@ -138,7 +147,7 @@ impl Read {
             next = item.parent;
         }
         parts.reverse();
-        Ok(parts.join("\n\n"))
+        Ok((parts.join("\n\n"),attachments))
     }
     pub fn load(self, cancel: &dyn Fn() -> bool) -> Result<Page> {
         let check = || {
@@ -218,7 +227,9 @@ impl Read {
                 participants.insert(child.child_thread_id.clone());
                 if kind == "report" {
                     let report = execution.report.as_ref().expect("selected report");
+                    let (text,attachments)=self.report_content(&db, report, cancel)?;
                     reports.push(Report {
+                        attachments,
                         operation_id: child.operation_id,
                         execution_id: execution.execution_id,
                         sender_thread_id: child.child_thread_id,
@@ -228,7 +239,7 @@ impl Read {
                         accepted_cursor: cursor,
                         accepted_at_ms,
                         outcome: report.outcome,
-                        text: self.report_text(&db, report, cancel)?,
+                        text,
                         detail: report.detail.clone(),
                     });
                     continue;
@@ -236,6 +247,7 @@ impl Read {
                 let input: super::super::dispatch::DispatchInput = serde_json::from_value(self.content.load_cancellable(&execution.input_ref, cancel)?)?;
                 dispatches.push(Dispatch {
                     actor: if child.origin.is_none() { "user" } else { "agent" }.into(),
+                    attachments: super::super::attachments::descriptors(&db,"dispatch",&child.operation_id)?,
                     operation_id: child.operation_id,
                     execution_id: execution.execution_id,
                     sender_thread_id: child.parent_thread_id,

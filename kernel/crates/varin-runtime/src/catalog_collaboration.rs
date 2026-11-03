@@ -267,6 +267,8 @@ impl ChildCodeResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildReport {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<super::attachments::Attachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<crate::execution::ExecutionError>,
     pub outcome: Outcome,
@@ -317,6 +319,8 @@ pub enum ChildReportFormat {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChildReportPage {
+    #[serde(default)]
+    pub attachments: Vec<super::attachments::Attachment>,
     pub format: ChildReportFormat,
     pub execution_id: String,
     pub operation_id: String,
@@ -375,6 +379,7 @@ impl Catalog {
             offset,
             max_bytes,
             record(&self.db, "history", item_id)?,
+            child.report.as_ref().expect("validated report").attachments.clone(),
         ))
     }
 
@@ -470,6 +475,7 @@ impl Catalog {
                 && old.input_ref == prepared.input_ref
                 && old.source.handoff() == handoff.as_ref()
                 && &old.launch == child_launch
+                && super::attachments::descriptors(&self.db,"dispatch",&context.operation_id)? == prepared.attachments
             {
                 return Ok(old);
             }
@@ -614,6 +620,9 @@ impl Catalog {
         if let child_content::ChildAdmissionOrigin::User(user) = origin {
             super::user_dispatch::publish_receipt(&tx, user, &child, accepted_at_ms)?;
         } else { super::goals::bind_child(&tx, &op.id, &run.id)?; }
+        super::attachments::publish(&tx,&super::attachments::AttachmentDelivery {
+            source_thread_id:None, source_branch_id:None, holder_kind:"dispatch".into(),holder_id:child.operation_id.clone(),thread_id:child.child_thread_id.clone(),branch_id:child.child_branch_id.clone(),attachments:prepared.attachments,input_ref:prepared.attachment_input_ref,
+        })?;
         tx.commit()?;
         Ok(child)
     }
@@ -840,6 +849,7 @@ impl Catalog {
             })
             .transpose()?;
         Ok(ChildPreparation {
+            attachment_delivery: super::attachments::read(&self.db,"dispatch",&child.operation_id)?,
             bot: self.bot_for_thread(&child.child_thread_id)?.is_some(),
             ingress,
             execution: self.delegated_execution(operation_id)?,
@@ -902,6 +912,7 @@ impl Catalog {
     }
 }
 pub struct ChildPreparation {
+    attachment_delivery: Option<super::attachments::AttachmentDelivery>,
     bot: bool,
     execution: delegated::DelegatedExecution,
     ingress: Option<(inputs::QueuedInputMetadata, Value)>,
@@ -942,6 +953,7 @@ impl ChildPreparation {
     }
     pub fn load(self) -> Result<PreparedChild> {
         let Self {
+            attachment_delivery,
             bot,
             execution,
             ingress,
@@ -1058,7 +1070,14 @@ impl ChildPreparation {
             raw_input
         } else {
             let input: DispatchInput = serde_json::from_value(raw_input)?;
-            Value::String(input.task)
+            if let Some(reference) = attachment_delivery.as_ref().and_then(|delivery|delivery.input_ref.as_ref()) {
+                let mut input = content.load_history_payload(reference)?.0;
+                if let Some(media) = input.get_mut("attachments") {
+                    let resolved:Vec<crate::output::ResolvedMedia> = serde_json::from_value(media.take())?;
+                    *media = json!(resolved.into_iter().map(|media|crate::output::IncomingMedia {media_type:media.media_type,data_base64:media.data_base64}).collect::<Vec<_>>());
+                }
+                input
+            } else { Value::String(input.task) }
         };
         let configuration = content.load(&child.configuration_ref)?;
         let mut launch = child.launch.load_child_intent(&content)?;

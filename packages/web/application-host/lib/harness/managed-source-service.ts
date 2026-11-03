@@ -11,6 +11,7 @@ import { admitMaterializedRoot, originalMaterializationLocation } from '../kerne
 import { SourceAdmissionError, sourceReadError } from '../kernel/source-admission-error.js';
 import { normalizeThreadSourcePreparation } from '../kernel/thread-sources.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
+import { createManagedAttachmentImport } from './managed-attachment-import.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { resolveScriptNodeBinding, scriptNodeSpawnInput } from '../kernel/script-node-binding.js';
 import { isManagedMcpDerivationContinuation, isManagedMcpChildContinuation, isManagedMcpTaskContinuation, isManagedMcpResourceContinuation, isManagedMcpInteractionContinuation } from './managed-mcp-contract.js';
@@ -51,6 +52,12 @@ export interface ManagedSourceServiceOptions {
 
 export function createManagedSourceService(options: ManagedSourceServiceOptions): ManagedSourceService {
   const { kernel, documents } = options;
+  const attachments = createManagedAttachmentImport(kernel);
+  interface AttachmentCapture {
+    principalId: string; coordinatorHostId: string;
+    scope: SourceAuthorityResult['scope']; source: LaunchSource;
+    operationId: string; ref: string; path: string;
+  }
   interface ServiceFlight {
     principalId: string;
     address: ManagedSourceAddress;
@@ -63,11 +70,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     taskCreation?: import('../kernel/protocol.generated.js').SourceMcpHolderBinding;
     taskControl?: import('../kernel/protocol.generated.js').SourceMcpHolderBinding;
     resourceCreation?: import('../kernel/protocol.generated.js').McpResourceBinding;
+    attachmentCapture?: AttachmentCapture;
     drain: Promise<ManagedSourceServiceCancelReceipt['status']>;
   }
   // Live request handles only. Durable effects and recovery remain in their
   // original Storage/domain receipts; this map disappears with this Host.
   const services = new Map<string, ServiceFlight>();
+  // These fences prove only this Host lifetime. Missing flights after restart
+  // remain unknown; they are never inferred stopped from an empty map.
+  const captureFences: AttachmentCapture[] = [];
   const closing = new Set<string>();
   const authorityKey = (principal: ManagedSourcePrincipal, input: ManagedSourceAddress) =>
     JSON.stringify([principal.principalId, input.coordinatorHostId, input.authorityId, input.resourceEpoch]);
@@ -103,9 +114,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       throw new SourceAdmissionError('source_changed');
     }
     await documents.admitWorkspaceRegistration(source.workspace_id, signal);
-    if(metadataOnly&&source.mode==='native_workspace')return;
-    if(source.mode==='native_workspace'){if(!kernel.nativeWorkspaces)throw new SourceAdmissionError('source_unavailable');await kernel.nativeWorkspaces.open(source,signal);}
     if (source.execution_workspace_id !== source.workspace_id) await documents.admitWorkspaceRegistration(source.execution_workspace_id, signal);
+    if (metadataOnly) return;
+    if(source.mode==='native_workspace'){if(!kernel.nativeWorkspaces)throw new SourceAdmissionError('source_unavailable');await kernel.nativeWorkspaces.open(source,signal);}
     if (source.mode === 'live_root') {
       if (!source.live_root) throw new SourceAdmissionError('source_changed');
       await options.validateLiveSource({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
@@ -140,6 +151,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     // Stop new Host service references before taking the drain snapshot. Native
     // retirement remains the durable authority and validates its actual writers.
     closing.add(authorityKey(principal, { coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch }));
+    await attachments.drain(cleanupScope(principal, coordinatorHostId, authority));
     await processViews.release(principal, { coordinatorHostId, authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch });
     const retained = [...services.entries()].filter(([, flight]) => flight.principalId === principal.principalId
       && flight.address.coordinatorHostId === coordinatorHostId && flight.address.authorityId === authority.authorityId
@@ -178,7 +190,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     if (closing.has(authorityKey(principal, input))) throw new SourceAdmissionError('source_authority_denied');
     const authority = await inspect(principal, input, signal);
     if (authority.phase !== 'ready') throw new SourceAdmissionError('source_authority_denied');
-    await registration(authority.source, signal);
+    await registration(authority.source, signal, authority.purpose === 'result');
     await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: authority.source.mode,
       enabledTools }, signal);
     await kernel.sourceRequest('source.service.call', { ...address(principal, input), requestId: `validate:${randomUUID()}`,
@@ -233,7 +245,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     return { requestId: input.requestId, resourceEpoch: input.resourceEpoch, status: await flight.drain };
   };
 
+  const attachmentScope = async (principal: ManagedSourcePrincipal, input: ManagedSourceAddress, signal?: AbortSignal) => {
+    const authority = await admit(principal, input, signal);
+    if (authority.scope.kind !== 'run' || authority.purpose !== 'source') throw new SourceAdmissionError('source_authority_denied');
+    return localScope(principal, input.coordinatorHostId, authority);
+  };
   return {
+    async attachmentBegin(principal, input, signal) { return attachments.begin(await attachmentScope(principal, input, signal), input, signal); },
+    async attachmentPut(principal, input, body, signal) { return attachments.put(await attachmentScope(principal, input, signal), input, body, signal); },
+    async attachmentPath(principal, input, signal) { return attachments.path(await attachmentScope(principal, input, signal), input, signal); },
     async scriptControl(principal, input, signal) {
       requirePrincipal(principal, input.coordinatorHostId);
       await kernel.start();
@@ -382,7 +402,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         // target root can be used; a pre-Run read cannot materialize a path.
         const handedPhysical = input.handoff && (input.handoff.root.kind === 'physical'||input.handoff.root.kind==='derived') ? input.handoff.root.root : null;
         let physicalRoot = opened.physicalRoot ?? handedPhysical;
-        const branch = source.mode === 'live_root' || source.mode==='native_workspace' || handedPhysical ? undefined
+        const branch = resultOnly || source.mode === 'live_root' || source.mode==='native_workspace' || handedPhysical ? undefined
           : await actor.readBranch({ branchId: source.branch_id!, revision: source.revision!, includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
         if (branch && (branch.workspaceId !== source.workspace_id || branch.branchId !== source.branch_id
           || branch.view !== 'revision' || branch.revision !== source.revision)) throw new SourceAdmissionError('source_changed');
@@ -467,6 +487,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         ...(input.journal ? { journal: input.journal } : {}) }, signal);
     },
     async service(principal, input, signal) {
+      if (['attachment_cleanup', 'attachment_discard'].includes(input.operation.kind) && !principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
       const mcpRelease = input.operation.kind === 'mcp' && input.operation.action.kind === 'release';
       const mcpContinuation = input.operation.kind === 'mcp' && (isManagedMcpDerivationContinuation(input.operation.action) || isManagedMcpChildContinuation(input.operation.action) || isManagedMcpTaskContinuation(input.operation.action) || isManagedMcpResourceContinuation(input.operation.action) || isManagedMcpInteractionContinuation(input.operation.action));
       if (mcpRelease || mcpContinuation && input.operation.kind === 'mcp' && ['derivation_inspect', 'derivation_release', 'child_inspect', 'child_release', 'task_inspect', 'task_release', 'task_cancel', 'resource_inspect', 'resource_release', 'interaction_inspect', 'interaction_ack', 'interaction_release', 'interaction_close'].includes(input.operation.action.kind)) requirePrincipal(principal, input.coordinatorHostId);
@@ -507,6 +528,30 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         const authority = mcpRelease || mcpContinuation ? await inspect(principal, input, controller.signal) : await admit(principal, input, controller.signal);
         if (authority.purpose === 'process_view' || authority.purpose === 'script_environment'
           && !(operation.kind === 'native_resource' && operation.action.kind === 'process_observation')) throw new SourceAdmissionError('source_authority_denied');
+        if (authority.purpose === 'result' && !['validate', 'attachment_recover', 'attachment_describe', 'attachment_read', 'attachment_release', 'attachment_cleanup', 'attachment_discard', 'child_result_read', 'child_result_publish', 'child_release', 'native_resource'].includes(operation.kind))
+          throw new SourceAdmissionError('source_authority_denied');
+        if (authority.purpose === 'result' && operation.kind === 'native_resource' && operation.action.kind !== 'child_storage_receipt')
+          throw new SourceAdmissionError('source_authority_denied');
+        if (operation.kind === 'attachment_recover' && (authority.purpose !== 'result' || authority.scope.kind !== 'run')) throw new SourceAdmissionError('source_authority_denied');
+        if (['attachment_cleanup', 'attachment_discard'].includes(operation.kind) && (authority.purpose !== 'result' || authority.scope.kind !== 'run')) throw new SourceAdmissionError('source_authority_denied');
+        if (operation.kind === 'attachment_capture' || operation.kind === 'attachment_discard') {
+          const identity: AttachmentCapture = { principalId: principal.principalId, coordinatorHostId: input.coordinatorHostId,
+            scope: structuredClone(authority.scope), source: structuredClone(authority.source),
+            operationId: operation.operationId, ref: operation.ref, path: operation.path };
+          const fenced = captureFences.some(value => isDeepStrictEqual(value, identity));
+          if (operation.kind === 'attachment_capture') {
+            if (fenced) throw new Error('Original attachment capture is closed for cleanup');
+            services.get(key)!.attachmentCapture = identity;
+          } else {
+            const originals = [...services.values()].filter(flight => isDeepStrictEqual(flight.attachmentCapture, identity));
+            // Fence before waiting, so a delayed admission cannot create a new
+            // writer between this check and the exact intent's withdrawal.
+            if (!fenced) captureFences.push(identity);
+            for (const flight of originals) flight.controller.abort();
+            if (!originals.length || (await Promise.all(originals.map(flight => flight.drain))).some(status => status !== 'drained'))
+              throw new Error('Original attachment capture cleanup is pending: its writer termination is unconfirmed');
+          }
+        }
         if (authority.purpose === 'mcp_owner' && operation.kind !== 'mcp' && operation.kind !== 'validate'
           || operation.kind === 'mcp' && authority.purpose !== 'mcp_owner') throw new SourceAdmissionError('source_authority_denied');
         if (operation.kind === 'mcp' && isManagedMcpDerivationContinuation(operation.action)) {
@@ -557,7 +602,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
               const operationId = `source-materialize:${location.key}`;
               let materialized = await actor.getOperation(operationId, controller.signal);
               const needsPhysical = ['binary_write', 'code_capture', 'code_apply', 'integration', 'user_integration',
-                'package_capture', 'experiment_admit', 'experiment_capture'].includes(operation.kind)
+                'package_capture', 'experiment_admit', 'experiment_capture', 'attachment_capture'].includes(operation.kind)
                 || operation.kind === 'language' && operation.query.method !== 'structure';
               if (needsPhysical && (!materialized || materialized.state !== 'committed')) {
                 const branch = await actor.readBranch({ branchId: scope.source.branch_id!, revision: scope.source.revision!, includeEntries: false }, controller.signal);
@@ -666,6 +711,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       await drainViews(principal, input.coordinatorHostId, authority, retained);
       if (!retained) await cleanupArtifacts(principal, input.coordinatorHostId, authority);
       const result = await kernel.sourceRequest<NativeRelease>('source.authority.release', { ...address(principal, input), mode: input.mode }, signal);
+      if (!retained && authority.purpose === 'source' && ['retired', 'revoked'].includes(result.phase)) await attachments.cleanup(cleanupScope(principal, input.coordinatorHostId, authority));
       closing.delete(authorityKey(principal, input));
       return projectRelease(result);
     },
@@ -705,6 +751,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       const result = await kernel.sourceRequest<{ released: NativeRelease[]; pendingAuthorities: string[] }>(
         'source.authority.release_scope', { ...params, mode: input.mode }, signal);
       for (const authority of authorities) if (result.released.some(item => item.authorityId === authority.authorityId)) {
+        const released = result.released.find(item => item.authorityId === authority.authorityId)!;
+        if (authority.purpose === 'source' && !result.pendingAuthorities.includes(authority.authorityId) && ['retired', 'revoked'].includes(released.phase))
+          await attachments.cleanup(cleanupScope(principal, input.coordinatorHostId, authority));
         closing.delete(authorityKey(principal, { coordinatorHostId: input.coordinatorHostId,
           authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch }));
       }

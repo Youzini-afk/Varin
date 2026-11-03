@@ -1,5 +1,12 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface Attachment {
+  ref: string;
+  filename: string;
+  mimeType: string;
+  byteLength: number;
+}
+
 export interface ExecutionError {code:string;message:string;tool_name?:string;details?:unknown;}
 
 export type Outcome = "succeeded" | "failed" | "cancelled" | "indeterminate";
@@ -63,7 +70,7 @@ export interface StoredMedia { media_type: string; source: OutputSource; content
 
 export interface ResolvedMedia { media_type: string; source: OutputSource; data_base64: string }
 
-export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M};
+export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M} | {kind:'attachment';attachment:Attachment};
 
 export interface OutputBody<M = StoredMedia> { data: unknown; parts: OutputPart<M>[] }
 

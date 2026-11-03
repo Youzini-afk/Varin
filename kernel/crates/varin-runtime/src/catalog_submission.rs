@@ -51,6 +51,7 @@ pub(super) enum SubmissionOrigin {
     Summary,
 }
 pub struct PreparedSubmission {
+    pub(super) attachments: Vec<super::attachments::Attachment>,
     pub(super) title: Option<String>,
     pub(super) input_id: String,
     pub(super) run_id: String,
@@ -264,6 +265,7 @@ impl SubmissionPreparation {
                 .0
                 .clone();
             return Ok(PreparedSubmission {
+                attachments: Vec::new(),
                 title: None,
                 input_id: receipt.input_id,
                 run_id: receipt.run_id,
@@ -555,10 +557,13 @@ impl PreparedSubmission {
                 parent_thread_id,
                 ..
             } => {
-                let task = command
-                    .input
-                    .as_str()
-                    .ok_or_else(|| RuntimeError::Invalid("child task must be text".into()))?;
+                let task = resources::input_text(&command.input)
+                    .ok_or_else(|| RuntimeError::Invalid("child task must include text".into()))?;
+                let files = super::attachments::input_attachments(&command.input)?;
+                let incoming = crate::output::admit_user_input(&input_id,&command.input)?;
+                let media:Vec<crate::output::ResolvedMedia> = incoming.get("attachments").cloned().map(serde_json::from_value).transpose()?.unwrap_or_default();
+                let child_content = if files.is_empty() && media.is_empty() { crate::execution::Content::Text { text:task.into() } }
+                    else { crate::execution::Content::Output { output: super::attachments::output(task.into(),&files,media) } };
                 content.save_history(
                     &serde_json::to_value(crate::execution::ConversationItem::<
                         crate::output::ResolvedMedia,
@@ -568,7 +573,7 @@ impl PreparedSubmission {
                         provenance: crate::execution::Provenance::AgentMessage {
                             thread_id: parent_thread_id.clone(),
                         },
-                        content: crate::execution::Content::Text { text: task.into() },
+                        content: child_content,
                         opaque: None,
                     })?,
                     &None,
@@ -593,6 +598,7 @@ impl PreparedSubmission {
             .map(|selection| launch_content::LaunchSelectionMetadata::stage(&content, selection))
             .transpose()?;
         Ok(Self {
+            attachments: super::attachments::input_attachments(&command.input)?,
             title: threads::input_title(&command.input),
             input_id,
             run_id,

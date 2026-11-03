@@ -14,7 +14,7 @@ import { Icon } from '@/components/icon/Icon';
 
 /** The edit draft retains its original revision even if the Catalog changes or delivers it. */
 export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCancel, onSendNow }: {
-  api: Pick<ThreadsAPI, 'mediaRead'>; identity: ThreadIdentity; inputs: QueuedInput[]; pending: boolean;
+  api: Pick<ThreadsAPI, 'mediaRead'> & Partial<Pick<ThreadsAPI, 'attachments'>>; identity: ThreadIdentity; inputs: QueuedInput[]; pending: boolean;
   onSave(input: QueuedInput, text: string, images?: ImageAttachment[]): Promise<boolean>;
   onCancel(input: QueuedInput): Promise<void>;
   onSendNow?(input: QueuedInput): Promise<void>;
@@ -60,7 +60,7 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
   const editor = editing && <form className="mt-2 space-y-2" onSubmit={event => { event.preventDefault(); void save(); }}>
     <label className="text-xs text-muted-foreground">{t(editing.input.mode === 'next_run' ? 'thread.composer.afterRun' : editing.input.mode === 'interrupt' ? 'thread.composer.interrupt' : 'thread.composer.boundary')}</label>
     {images === undefined ? <ThreadContent api={api} identity={identity} holder={{ kind: 'input', inputId: editing.input.id, expectedRevision: editing.input.revision }}
-      messageId={editing.input.id} parts={inputParts(editing.input.content).filter(part => part.kind !== 'text')} /> : <ImageAttachmentStrip images={images}
+      messageId={editing.input.id} parts={inputParts(editing.input.content).filter(part => part.kind !== 'text' && part.kind !== 'attachment')} /> : <ImageAttachmentStrip images={images}
         onReference={pending || !editIsCurrent ? undefined : number => {
           const input = textarea.current; if (!input) return;
           const token = t('chat.imageReference.token', { number });
@@ -68,6 +68,8 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
           setEditing({ ...editing, text: editing.text.slice(0, position) + token + editing.text.slice(end) });
           requestAnimationFrame(() => { input.focus(); input.setSelectionRange(position + token.length, position + token.length); });
         }} />}
+    <ThreadContent api={api} identity={identity} holder={{ kind: 'input', inputId: editing.input.id, expectedRevision: editing.input.revision }}
+      messageId={editing.input.id} parts={inputParts(editing.input.content).filter(part => part.kind === 'attachment')} />
     <ThreadSkillMaterials content={editing.input.content} />
     <Textarea ref={textarea} name="text" aria-label={t('chat.queuedMessage.edit')} value={editing.text} disabled={pending} autoFocus
       onChange={event => setEditing({ ...editing, text: event.target.value })}
@@ -101,6 +103,8 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
         <button type="button" disabled={pending || Boolean(editing)} aria-label={t('chat.queuedMessage.edit')} aria-expanded={editing?.input.id === input.id} className="rounded p-1 hover:bg-interactive-hover" onClick={() => begin(input)}><Icon name="edit" className="size-3.5" /></button>
         <button type="button" disabled={pending || Boolean(editing)} aria-label={t('chat.queuedMessage.removeAria')} className="rounded p-1 hover:bg-interactive-hover" onClick={() => void onCancel(input)}><Icon name="close" className="size-3.5" /></button>
       </div>
+      {editing?.input.id !== input.id && <ThreadContent api={api} identity={identity} holder={{ kind: 'input', inputId: input.id, expectedRevision: input.revision }}
+        messageId={input.id} parts={inputParts(input.content).filter(part => part.kind === 'attachment')} />}
       {editing?.input.id === input.id && editor}
     </div>)}
     {editing && !queued.some(input => input.id === editing.input.id) && <div className="mx-auto max-w-3xl rounded-xl border border-border/60 px-3 py-2 text-sm">{editor}</div>}

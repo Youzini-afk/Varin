@@ -43,8 +43,7 @@ fn inherited_background_is_fixed_portable_and_retained_through_preparation_and_r
             let child = f.accept();
             assert_eq!(child.inherited_context.is_some(), inherit);
             let materials = f.db.capture_material_retention(Some(&child.child_thread_id), &[]).unwrap().load().unwrap();
-            assert_eq!(materials.inheritances.len(), usize::from(inherit));
-            if inherit { assert_eq!(materials.inheritances[0].snapshot_ids, ["snapshot-original"]); }
+            assert!(materials.inheritances.is_empty(), "new background text cannot create material grants");
             content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
             if policy { f.settle_policy_call(&f.context.clone(), "preparing"); } else { f.settle_exchange(); }
             assert_eq!(f.accept(), child, "replay keeps the dispatch-time background");
@@ -1898,12 +1897,18 @@ fn collaboration_reply_keeps_multipart_final_output_and_leaves_earlier_work_in_m
     let run = child.receipt.as_ref().unwrap().run_id.clone();
     let epoch = f.db.epoch();
     f.db.commit_execution(&run, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+    let file=varin_runtime::catalog::attachments::Attachment {
+        reference:"attachment:child-report".into(), filename:"report.csv".into(), mime_type:"text/csv".into(), byte_length:42,
+    };
     let output: [(HistorySource, Content<ResolvedMedia>); 4] = [
-        (HistorySource::Assistant, Content::Text { text: "Earlier progress before reading".into() }),
+        (HistorySource::Assistant, Content::Output {output:OutputBody {data:serde_json::Value::Null,parts:vec![
+            OutputPart::Text { text:"Earlier progress before reading".into() },
+            OutputPart::Attachment {attachment:varin_runtime::catalog::attachments::Attachment {reference:"attachment:earlier-work".into(),..file.clone()}},
+        ]}}),
         (HistorySource::Tool, Content::Text { text: "Original file evidence".into() }),
         (HistorySource::Assistant, Content::Text { text: "Final answer, first part".into() }),
         (HistorySource::Assistant, Content::Output { output: OutputBody {
-            data: serde_json::Value::Null, parts: vec![OutputPart::Text { text: "Final answer, second part".into() }],
+            data: serde_json::Value::Null, parts: vec![OutputPart::Text { text: "Final answer, second part".into() }, OutputPart::Attachment {attachment:file.clone()}],
         } }),
     ];
     for (index, (source, content)) in output.into_iter().enumerate() {
@@ -1925,6 +1930,18 @@ fn collaboration_reply_keeps_multipart_final_output_and_leaves_earlier_work_in_m
     assert_eq!(page.reports.len(), 1);
     assert_eq!(page.reports[0].text, "Final answer, first part\n\nFinal answer, second part");
     assert_eq!(page.reports[0].outcome, Outcome::Succeeded);
+    assert_eq!(page.reports[0].attachments, [file.clone()]);
+    let report=f.db.delegated_execution(&child.execution_id).unwrap().report.unwrap();
+    let final_item=report.history_ids.last().unwrap();
+    let original=f.db.capture_delegated_report(&child.execution_id,final_item,0,4096).unwrap().load().unwrap();
+    assert_eq!(original.attachments, [file.clone()]);
+    assert!(report.attachments.is_empty(), "report metadata never invents an outgoing send");
+    let retention=f.db.capture_material_retention(Some(&child.parent_thread_id),&[]).unwrap().load().unwrap();
+    let edge=retention.attachments.iter().find(|edge|edge.holder_kind=="report").unwrap();
+    assert_eq!(edge.holder_id,child.execution_id);
+    assert_eq!(edge.thread_id,child.parent_thread_id);
+    assert_eq!(edge.source_thread_id.as_deref(),Some(child.child_thread_id.as_str()));
+    assert_eq!(edge.attachments,[file]);
     assert!(page.after.is_none());
     assert_eq!(read().reports[0].accepted_cursor, page.reports[0].accepted_cursor);
     assert_eq!(f.db.delegated_execution(&child.execution_id).unwrap().report.unwrap().history_ids.len(), 3);
@@ -2137,4 +2154,99 @@ fn missing_file_handoff_and_pending_file_preparation_cannot_become_absent() {
     let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_attachment_dispatch_commits_fixed_files_with_task_and_survives_restart() {
+    use varin_runtime::catalog::attachments::{Attachment,AttachmentSelection};
+    use varin_runtime::catalog::collaboration::ChildSourceHandoff;
+    let file=Attachment {reference:"attachment:dispatch-file".into(),filename:"source.csv".into(),mime_type:"text/csv".into(),byte_length:12};
+    let mut f=Fixture::new_with_attachments(vec![AttachmentSelection::Ref{reference:file.reference.clone()}]);
+    let prepare=|f:&Fixture| {
+        let selected=f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap().resolve_with_attachments(&f.input,&[file.clone()]).unwrap();
+        let launch=f.db.prepare_child_launch(&f.context.run_id,f.launch.clone(),selected).unwrap().load().unwrap();
+        f.db.prepare_child_admission(&f.context,f.input.clone(),Some(ChildSourceHandoff::fixed(&f.context.operation_id,f.pin.clone())),launch).unwrap()
+    };
+    assert!(prepare(&f).load().is_err(),"dispatch cannot publish an incomplete attachment set");
+    assert!(f.db.child_tasks().unwrap().is_empty());
+    let prepared=prepare(&f).with_attachments(vec![file.clone()]).load().unwrap();
+    let child=f.db.accept_child_references(prepared).unwrap();
+    assert_eq!(f.db.attachment_delivery("dispatch",&child.operation_id).unwrap().unwrap().attachments,[file.clone()]);
+    let feed=f.db.capture_message_feed(child.parent_thread_id.clone(),child.parent_branch_id.clone(),None,None,None).unwrap().load(&||false).unwrap();
+    assert_eq!(feed.dispatches[0].attachments,[file.clone()]);
+    f.settle_exchange();
+    let (source,proposal,basis)=child_context(&child);
+    let launched=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
+    let receipt=launched.receipt.unwrap();
+    let root=f.root.clone();drop(f.db);f.db=Catalog::open(&root).unwrap();
+    let history=f.db.execution_history(&child.child_branch_id).unwrap();
+    assert!(history.iter().any(|item|matches!(&item.provenance,Provenance::AgentMessage{thread_id} if thread_id==&child.parent_thread_id)
+        && match &item.content {Content::Output{output}=>output.parts.iter().any(|part|matches!(part,OutputPart::Attachment{attachment} if attachment==&file)),_=>false}));
+    assert_eq!(f.db.execution_task(&child.operation_id).unwrap().receipt.unwrap(),receipt);
+    let plan=f.db.capture_material_retention(Some(&child.child_thread_id),&[]).unwrap().load().unwrap();
+    assert!(plan.attachments.iter().any(|delivery|delivery.attachments==[file.clone()]));
+    drop(f);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn legacy_material_inheritance_is_converted_once_without_reinterpreting_new_prose() {
+    let mut f=Fixture::new_in_project_with_inheritance(true,false);
+    let child=f.accept();
+    assert!(f.db.capture_material_retention(Some(&child.child_thread_id),&[]).unwrap().load().unwrap().inheritances.is_empty());
+    let root=f.root.clone();drop(f.db);
+    let raw=rusqlite::Connection::open(root.join("conversation.sqlite")).unwrap();
+    raw.execute_batch("DROP TABLE attachment_deliveries; PRAGMA user_version=84;").unwrap();drop(raw);
+    f.db=Catalog::open(&root).unwrap();
+    let plan=f.db.capture_material_retention(Some(&child.child_thread_id),&[]).unwrap().load().unwrap();
+    assert_eq!(plan.inheritances.len(),1);
+    assert_eq!(plan.inheritances[0].snapshot_ids,["snapshot-original"]);
+    assert_eq!(f.db.child_task(&child.operation_id).unwrap().input_ref,child.input_ref);
+    drop(f.db);f.db=Catalog::open(&root).unwrap();
+    assert_eq!(f.db.capture_material_retention(Some(&child.child_thread_id),&[]).unwrap().load().unwrap().inheritances[0].snapshot_ids,["snapshot-original"]);
+    drop(f);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn failed_attachment_preparations_retain_exact_remote_call_until_safe_owner_cleanup() {
+    use sha2::{Digest, Sha256};
+    use varin_runtime::catalog::attachments::{Attachment, AttachmentSelection};
+    for effect in [Effect::None, Effect::Unknown] {
+        let schema = |name: &str, version: &str| ToolSchema { requirements: None, name: name.into(), version: version.into(),
+            description: String::new(), schema: json!({"type":"object"}), output_schema: None, metadata: None };
+        let mut f = Fixture::new_parent_custom(7, schema("file_read", "1"), schema("dispatch", "8"), false, false, false, |input, launch| {
+            input.attachments = vec![AttachmentSelection::Path { path: "fixed.csv".into() }, AttachmentSelection::Ref { reference: "attachment:already-owned".into() }];
+            launch.source.as_mut().unwrap().resource_owner = serde_json::from_value(json!({"kind":"managed_host","hostId":"original","connectionId":"connection","endpointIdentity":"endpoint"})).unwrap();
+        });
+        assert!(f.db.capture_material_retention(None, &[]).unwrap().load().unwrap().attachment_preparations.is_empty());
+        let run = f.db.run(&f.context.run_id).unwrap();
+        f.db.commit_execution(&run.id, f.db.epoch(), &ExecutionRecord::ToolSettled { executor_stopped: true,
+            context: f.context.clone(), completion: ToolCompletion::Result { outcome: if effect == Effect::None { Outcome::Failed } else { Outcome::Indeterminate },
+                effect, content: json!({"error":"original source unavailable"}).into() } }).unwrap();
+        f.db.commit_execution(&run.id, f.db.epoch(), &ExecutionRecord::ToolBatchCommitted {
+            request_id: "parent-request".into(), results: vec![ToolResult { request_id: "parent-request".into(),
+                call_id: "dispatch-call".into(), completion: f.db.capture_call_completion(&f.context.operation_id).unwrap().load().unwrap() }] }).unwrap();
+        let malformed = f.admit_policy_call(ToolCall { call_id: "malformed-attachment".into(), name: "dispatch".into(), schema_version: "8".into(),
+            arguments: json!({"task":"invalid selection must not block cleanup","attachments":{"path":"not-an-array"}}) });
+        f.db.commit_execution(&run.id, f.db.epoch(), &ExecutionRecord::ToolSettled { executor_stopped: true, context: malformed,
+            completion: ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None, content: json!({"error":"Attachments must be an array"}).into() } }).unwrap();
+        let plan = f.db.capture_material_retention(None, &[]).unwrap().load().unwrap();
+        if effect == Effect::Unknown { assert!(plan.attachment_preparations.is_empty()); }
+        else {
+            assert_eq!(plan.attachment_preparations.len(), 1);
+            let original = &plan.attachment_preparations[0];
+            let reference = format!("attachment:{}", hex::encode(Sha256::digest(serde_json::to_vec(&json!([run.thread_id, f.context.operation_id, 0])).unwrap())));
+            assert_eq!(original.operation_id, f.context.operation_id);
+            assert_eq!(original.run_id, run.id); assert_eq!(original.thread_id, run.thread_id);
+            assert_eq!(original.attachments.len(), 1); assert_eq!(original.attachments[0].reference, reference);
+            assert_eq!(original.attachments[0].path, "fixed.csv");
+            assert_eq!(original.source, f.db.launch_intent(&run.id).unwrap().unwrap().selection.source.unwrap());
+            let file = Attachment { reference: reference.clone(), filename: "fixed.csv".into(), mime_type: "text/csv".into(), byte_length: 7 };
+            let message = serde_json::from_value(json!({"kind":"inform","targetThreadId":run.thread_id,"attachments":[{"ref":reference}]})).unwrap();
+            let prepared = f.db.prepare_user_message("retained-file".into(), run.thread_id.clone(), run.branch_id.clone(), message).unwrap()
+                .with_attachments(vec![file]).load().unwrap();
+            f.db.admit_message(prepared).unwrap();
+            assert!(f.db.capture_material_retention(None, &[]).unwrap().load().unwrap().attachment_preparations.is_empty(), "accepted typed use must survive a failed preparer's cleanup");
+        }
+        let root = f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
+    }
 }

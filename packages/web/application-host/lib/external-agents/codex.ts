@@ -1,11 +1,11 @@
 import type {
   ExternalAgentCapabilities,
-  ExternalInput,
   ExternalItem,
   ExternalInteractionResponse,
 } from '@varin/application-client';
-import type { HarnessConnection, HarnessSink } from './adapter.js';
+import type { HarnessConnection, HarnessSink, HarnessInput } from './adapter.js';
 import { formInteraction } from './interaction-form.js';
+import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
 import { HarnessTransport, record, text, clientInfo, type RecordValue } from './transport.js';
 
@@ -67,6 +67,7 @@ export async function connectCodex(
   const capabilities: ExternalAgentCapabilities = {
     resume: true,
     images: true,
+    files: 'paths',
     steering: false,
     modelsError,
     modelsRefresh: true,
@@ -455,7 +456,7 @@ export async function connectCodex(
       capabilities.modelsError = modelsError;
       for (const listener of changed) listener();
     },
-    async prompt(input: ExternalInput, next: HarnessSink) {
+    async prompt(input: HarnessInput, next: HarnessSink) {
       if (failure) throw failure;
       if (sink) throw new Error('Codex turn already active');
       const selected = dedicatedOptions(input, 'Codex');
@@ -489,7 +490,7 @@ export async function connectCodex(
         const result = await peer.request('turn/start', {
           threadId: sessionId,
           input: [
-            { type: 'text', text: input.text },
+            { type: 'text', text: fileInputText(input) },
             ...(input.images ?? []).map((image) => ({
               type: 'image',
               url: `data:${image.mimeType};base64,${image.data}`,

@@ -435,6 +435,34 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       return result;
     };
     return {
+      attachmentBegin: async (input, signal) => {
+        const result = await request('attachmentBegin', input, signal);
+        if (result.retained !== true || typeof result.complete !== 'boolean') throw new Error('Managed attachment retention is unconfirmed');
+        return result;
+      },
+      attachmentPath: async (input, signal) => {
+        const result = await request('attachmentPath', input, signal);
+        if (typeof result.viewId !== 'string' || !result.viewId || typeof result.path !== 'string' || !result.path
+          || result.kernelEpoch !== input.resourceEpoch || result.readOnly !== true) throw new Error('Managed attachment path is unconfirmed');
+        return result;
+      },
+      attachmentPut: async (input, body, signal) => {
+        if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('Managed attachment belongs to another coordinator');
+        const result = await client.request<import('../kernel/protocol.generated.js').KernelPutBlobResult>(`/sources/attachments/objects/${encodeURIComponent(input.objectHash)}`, {
+          method: 'PUT', body, ...(signal ? { signal } : {}), headers: { 'Content-Type': 'application/octet-stream',
+            'x-varin-coordinator-host': input.coordinatorHostId, 'x-varin-source-authority': input.authorityId,
+            'x-varin-source-epoch': input.resourceEpoch, 'x-varin-attachment-operation': input.operationId,
+            'x-varin-attachment-ref': input.ref, 'x-varin-attachment-content': input.contentHash, 'x-varin-object-length': String(input.byteLength) },
+        }).catch(error => {
+          if (error instanceof ManagedResponseError && typeof error.code === 'string' && threadSourceFailureMessage(error.code))
+            throw new SourceAdmissionError(error.code as SourceFailureCode, { cause: error });
+          throw error;
+        });
+        if (result.hash !== input.objectHash || !Number.isSafeInteger(result.byteLength) || result.byteLength < 0
+          || !input.objectHash.startsWith('ranges-') && result.byteLength !== input.byteLength)
+          throw new Error('Managed attachment object receipt changed identity');
+        return result;
+      },
       recovery: (input, signal) => request('recovery', input, signal),
       scriptControl: (input, signal) => request('scriptControl', input, signal),
       scriptBinding: (input, signal) => request('scriptBinding', input, signal),
@@ -791,6 +819,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
               const sourceTransfer = transfer;
               await copyRangeContent({
                 async putBlobStream(body, input, requestSignal) {
+                  if (!input.expectedHash) throw new Error('Source transfer requires its original content identity');
                   const receipt = await client.request<{ objectHash: string; byteLength: number }>(`/objects/${encodeURIComponent(input.expectedHash)}`, {
                     method: 'PUT', headers: { 'X-Varin-Coordinator-Host': options.coordinatorHostId,
                       'X-Varin-Object-Length': String(input.byteLength), 'Content-Type': 'application/octet-stream' },

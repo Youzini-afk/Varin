@@ -436,7 +436,7 @@ fn cancel_unlaunched_trigger(
                 effect: Effect::None,
             };
         }
-        execution.report = Some(ChildReport {
+        execution.report = Some(ChildReport { attachments: Vec::new(),
             error: None,
             outcome: Outcome::Cancelled,
             sender_thread_id: child.child_thread_id,
@@ -644,6 +644,7 @@ impl RequestActivationPreparation {
                 }
                 let intent=content.save(&json!({"input_id":row.id,"previous_run_id":run.id,"previous_run_revision":run.revision,"launch_revision":launch.revision}))?;
                 let submission = submissions::PreparedSubmission {
+                    attachments: Vec::new(),
                     title: None,
                     input_id: row.id.clone(),
                     run_id: id(),

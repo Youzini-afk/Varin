@@ -4,6 +4,8 @@ import { ToolDisclosure, ToolStatus } from './ToolDisclosure';
 import { toolRecord, toolText } from './toolInvocation';
 import type { ToolViewProps } from './toolViewTypes';
 import { useOptionalConversationPresentation } from './ConversationContext';
+import { ThreadAttachments } from '../thread/ThreadAttachments';
+import { isAttachment } from '@/lib/agent-runtime/thread-content';
 import { ChatAgentMessageBubble } from './ChatAgentMessageBubble';
 
 export function ChatThreadMessageCard({ call, execution, result, status, generating, output, details }: ToolViewProps) {
@@ -20,6 +22,7 @@ export function ChatThreadMessageCard({ call, execution, result, status, generat
   return <ChatAgentMessageBubble id={`sent:${call.id}`} senderThreadId={senderId} senderBranchId={senderBranch}
     targetThreadId={targetId || undefined} targetBranchId={targetBranch || undefined} text={text} outgoing
     live={Boolean(generating) || status === 'running'}
+    attachments={conversation && <ThreadAttachments api={conversation.api} identity={conversation.identity} attachments={result?.attachments ?? (Array.isArray(message.attachments) ? message.attachments.filter(isAttachment) : [])} />}
     status={<ToolStatus status={status} generating={generating} />}>
     <MarkdownRenderer content={text} messageId={`sent-message:${call.id}`} enableFileReferences={false} />
     {(result || details) && <ToolDisclosure id={`message-receipt:${call.id}`} className="chat-agent-message-receipt">

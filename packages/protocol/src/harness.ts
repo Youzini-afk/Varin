@@ -1084,7 +1084,7 @@ export interface ExploreQueryFinishDetails {
 }
 
 export type HarnessError = {
-  code: "unavailable" | "timeout" | "invalid-params" | "not-found" | "expired" | "denied" | "forbidden" | "failed" | "ambiguous";
+  code: "conflict" | "unavailable" | "timeout" | "invalid-params" | "not-found" | "expired" | "denied" | "forbidden" | "failed" | "ambiguous";
   message: string;
   retryable?: boolean;
 };

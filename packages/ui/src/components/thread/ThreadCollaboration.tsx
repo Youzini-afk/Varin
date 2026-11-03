@@ -301,7 +301,7 @@ function CollaborationRoomContent({
       {showDay && <div className="mb-5 mt-1 flex items-center gap-3 typography-micro text-muted-foreground">
         <span className="h-px flex-1 bg-border/40" />{day}<span className="h-px flex-1 bg-border/40" />
       </div>}
-      <CollaborationMessage item={item} members={state.members} original={original}
+      <CollaborationMessage api={api} identity={identity} item={item} members={state.members} original={original}
         expanded={expandedMessages.has(item.id)}
         onExpandedChange={open => {
           if (open) setAtEnd(false);

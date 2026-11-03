@@ -5,7 +5,7 @@ import type { ChildReportPage } from '@varin/protocol';
 import { createThreadsHttpAPI } from '../src/threads-http.js';
 
 const identity = { runtime: 'agent' as const, threadId: 'parent', branchId: 'parent-branch' };
-const page: ChildReportPage = { format: 'output_body', operation_id: 'original-dispatch', execution_id: 'original-execution', item_id: 'original-report',
+const page: ChildReportPage = { attachments: [], format: 'output_body', operation_id: 'original-dispatch', execution_id: 'original-execution', item_id: 'original-report',
   offset: 12, next_offset: 32, total_bytes: 55, text: 'original page bytes' };
 
 it('reads original dispatch and execution report pages through the actual HTTP client without choosing their format', async () => {

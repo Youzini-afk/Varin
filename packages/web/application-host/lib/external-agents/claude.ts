@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ExternalAgentCapabilities } from '@varin/application-client';
+import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
 import { ClaudeContent } from './claude-content.js';
 import type { HarnessConnection, HarnessSink } from './adapter.js';
@@ -36,6 +37,7 @@ export async function connectClaude(
   const capabilities: ExternalAgentCapabilities = {
     resume: true,
     images: true,
+    files: 'paths',
     steering: false,
     models: [],
   };
@@ -329,7 +331,7 @@ export async function connectClaude(
         if (stopped) return { status: 'cancelled' };
         active = true;
         const accepted = await peer.request('prompt', {
-          text: input.text,
+          text: fileInputText(input),
           images: input.images,
           uuid: turnId,
         });

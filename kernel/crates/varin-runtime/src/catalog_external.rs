@@ -229,6 +229,33 @@ mod tests {
         call(&mut c, json!({"action":"observe","id":"external:a","turnId":turn,"status":"completed","nativeId":"native-current"})).unwrap();
     }
 
+    #[test]
+    fn external_attachment_only_input_is_fixed_across_retry_and_restart() {
+        let directory = Fixture::new();
+        let mut c = Catalog::open(directory.path()).unwrap();
+        create(&mut c, "external:files");
+        let attachment = json!({"ref":"attachment:fixed","filename":"raw.bin","mimeType":"application/octet-stream","byteLength":4});
+        let input = json!({"action":"admit","id":"external:files","key":"files","input":{"text":"","attachments":[attachment],"_attachmentSelections":[{"path":"raw.bin"}]}});
+        let receipt = call(&mut c, input.clone()).unwrap();
+        assert_eq!(receipt, call(&mut c, input.clone()).unwrap());
+        drop(c);
+        let mut c = Catalog::open(directory.path()).unwrap();
+        assert_eq!(receipt, call(&mut c, input).unwrap());
+        let restored = call(&mut c, json!({"action":"input","id":"external:files","turnId":receipt["id"]})).unwrap();
+        assert_eq!(restored["attachments"][0], attachment);
+        assert!(call(&mut c, json!({"action":"admit","id":"external:files","key":"files","input":{"text":"","attachments":[{"ref":"attachment:other","filename":"raw.bin","mimeType":"application/octet-stream","byteLength":4}]}})).is_err());
+        assert_eq!(call(&mut c, json!({"action":"read","id":"external:files"})).unwrap()["turns"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn external_incomplete_attachment_never_admits_the_text_half_of_a_message() {
+        let directory = Fixture::new();
+        let mut c = Catalog::open(directory.path()).unwrap();
+        create(&mut c, "external:files");
+        assert!(call(&mut c, json!({"action":"admit","id":"external:files","key":"bad","input":{"text":"Do not deliver without file","attachments":[{"ref":"attachment:missing"}]}})).is_err());
+        assert!(call(&mut c, json!({"action":"read","id":"external:files"})).unwrap()["turns"].as_array().unwrap().is_empty());
+    }
+
 }
 fn now() -> u64 {
     std::time::SystemTime::now()
@@ -292,7 +319,17 @@ impl ExternalPreparation {
         use sha2::{Digest, Sha256};
         let intent = hex::encode(Sha256::digest(serde_json::to_vec(&self.command)?));
         let body = match &self.command {
-            ExternalCommand::Admit { input, .. } => Some(self.content.save(input)?),
+            ExternalCommand::Admit { input, .. } => {
+                let files: Vec<super::attachments::Attachment> = input.get("attachments").cloned()
+                    .map(serde_json::from_value).transpose()?.unwrap_or_default();
+                for file in &files { file.validate()?; }
+                if input.get("text").and_then(Value::as_str).is_none_or(|text| text.trim().is_empty())
+                    && input.get("images").and_then(Value::as_array).is_none_or(Vec::is_empty)
+                    && files.is_empty() {
+                    return Err(RuntimeError::Invalid("external input requires text, an image or an attachment".into()));
+                }
+                Some(self.content.save(input)?)
+            },
             ExternalCommand::Item { content, .. } => Some(self.content.save(content)?),
             _ => None,
         };

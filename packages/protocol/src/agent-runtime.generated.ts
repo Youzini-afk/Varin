@@ -43,9 +43,12 @@ export interface MaterialRetentionParams {
 }
 
 export interface MaterialRetention {
+  attachmentPreparations: Array<{threadId: string; runId: string; epoch: number; source: LaunchSource; operationId: string; attachments: Array<{ref: string; path: string}>}>;
+  attachmentSources: Array<{threadId: string; runId: string; epoch: number; source: LaunchSource}>;
   sources: Array<{cleanupId: string; source: LaunchSource}>;
   threads: Array<{threadId: string; rootThreadId: string; release: boolean}>;
   inheritances: Array<{parentThreadId: string; childThreadId: string; rootThreadId: string; snapshotIds: string[]}>;
+  attachments: AttachmentDelivery[];
 }
 
 export interface CodeRetrievalDiagnostic {
@@ -485,9 +488,52 @@ export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';i
 
 export type OperationResult = {kind:'control';value:unknown} | {kind:'output';output:OutputBody};
 
+export interface Attachment {
+  ref: string;
+  filename: string;
+  mimeType: string;
+  byteLength: number;
+}
+
+export type AttachmentSelection = {ref:string;path?:never} | {path:string;ref?:never};
+
+export interface AttachmentDelivery {
+  holderKind: 'input' | 'dispatch' | 'context' | 'report';
+  holderId: string;
+  threadId: string;
+  branchId: string;
+  sourceThreadId?: string;
+  sourceBranchId?: string;
+  attachments: Attachment[];
+  inputRef?: unknown;
+}
+
+export interface KernelObjectViewPrepareParams {
+  workspaceId: string;
+  executionWorkspaceId: string;
+  recordId: string;
+  slot: string;
+  viewId: string;
+  filename: string;
+  runId?: string;
+  externalConversationId?: string;
+}
+
+export interface KernelObjectViewParams {
+  workspaceId: string;
+  viewId: string;
+}
+
+export interface KernelObjectView {
+  viewId: string;
+  path: string;
+  kernelEpoch: string;
+  readOnly: boolean;
+}
+
 export interface OutputBody<M = StoredMedia> { data: unknown; parts: OutputPart<M>[] }
 
-export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M};
+export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M} | {kind:'attachment';attachment:Attachment};
 
 export interface ResolvedMedia { media_type: string; source: OutputSource; data_base64: string }
 
@@ -919,6 +965,9 @@ export interface MessageSendParams {
   replyTo?: string;
   kind: MessageKind;
   text: string;
+  attachments?: AttachmentSelection[];
+  preparedAttachments?: Attachment[];
+  preparedAttachmentMedia?: IncomingMedia[];
 }
 
 export interface MessageListParams {
@@ -960,6 +1009,7 @@ export interface MessageSummary extends MessageReceipt {
   replyWait: ReplyWaitView | null;
   deliveredRunId: string | null;
   deliveredCursor: number | null;
+  attachments: Attachment[];
 }
 
 export interface MessageView extends MessageSummary {
@@ -995,6 +1045,7 @@ export interface MessageFeedDispatch {
   acceptedAtMs: number;
   preset?: string;
   task: string;
+  attachments: Attachment[];
 }
 
 export interface MessageFeedReport {
@@ -1009,6 +1060,7 @@ export interface MessageFeedReport {
   outcome: Outcome;
   text: string;
   detail?: string;
+  attachments: Attachment[];
 }
 
 export interface MessageParticipant {
@@ -1490,7 +1542,7 @@ export interface InputResourcePreparation {
   skills?: PreparedExplicitSkill[];
 }
 
-export type AgentResourceRequest = { kind: 'skill'; resourceId: string; activationId?: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string; activationId?: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' } | { kind: 'ui'; ref: string; view?: 'summary' | 'source' | 'state' | 'screen' | 'structure'; file?: string; startLine?: number; endLine?: number; offset?: number; limit?: number };
+export type AgentResourceRequest = { kind: 'skill'; resourceId: string; activationId?: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string; activationId?: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' } | { kind: 'ui'; ref: string; view?: 'summary' | 'source' | 'state' | 'screen' | 'structure'; file?: string; startLine?: number; endLine?: number; offset?: number; limit?: number } | {kind:'attachment';ref:string;view:'path'|'content';offset?:number;limit?:number};
 
 export interface ResourceRefreshParams {
   branchId: string;
@@ -1713,7 +1765,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 78; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 80; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3033,6 +3085,7 @@ export interface ChildReportPage {
   total_bytes: number;
   text: string;
   execution_id: string;
+  attachments: Attachment[];
 }
 
 export interface ChildReport {
@@ -3042,6 +3095,7 @@ export interface ChildReport {
   run_id: string | null;
   history_ids: string[];
   detail: string | null;
+  attachments?: Attachment[];
 }
 
 export interface ChildTask {

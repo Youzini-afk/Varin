@@ -216,7 +216,8 @@ export interface DocumentFindHit {
 
 /** Independent document reading; a Host must resolve and authorize path bytes. */
 export interface DocumentReadRequest {
-  office?: Omit<import('./office.js').OfficeReadRequest, 'path' | 'snapshotId'>;
+  ref?: string;
+  office?: Omit<import('./office.js').OfficeReadRequest, 'path' | 'snapshotId' | 'ref'>;
   snapshotId?: string;
   path?: string;
   artifact?: { attemptId: string; artifactId: string };

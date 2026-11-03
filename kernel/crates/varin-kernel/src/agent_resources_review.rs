@@ -158,14 +158,17 @@ fn resources(text: &str) -> ContextResources {
 }
 #[test]
 fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_operations() {
-    for (policy_call, cancel_before_reply, explicit) in [
-        (false, false, false),
-        (false, true, false),
-        (true, false, false),
-        (true, true, false),
-        (false, false, true),
-        (true, true, true),
+    for (policy_call, cancel_before_reply, explicit, file_attachment) in [
+        (false, false, false, false),
+        (false, true, false, false),
+        (true, false, false, false),
+        (true, true, false, false),
+        (false, false, true, false),
+        (true, true, true, false),
+        (false, false, false, true),
+        (true, true, false, true),
     ] {
+        let selected_schema=if file_attachment {crate::tools::KernelToolExecutor::selected_schemas(&[crate::tools::ToolKind::FileRead].into_iter().collect()).remove(0)} else {schema()};
         let root =
             std::env::temp_dir().join(format!("varin-resource-builtin-{}", uuid::Uuid::new_v4()));
         let mut catalog = Catalog::open(&root).unwrap();
@@ -243,14 +246,14 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
         let activations =
             varin_runtime::catalog::resources::retained_activations(&projected.history);
         let checkpoint_id = projected.resource_checkpoint_id.clone();
-        let mut arguments = json!({"kind":"skill","resourceId":"skill"});
+        let mut arguments = if file_attachment {json!({"ref":"attachment:fixed","offset":7,"length":12})} else {json!({"kind":"skill","resourceId":"skill"})};
         if explicit {
             arguments["activationId"] = json!(activations[0].activation_id);
         }
         let call = ToolCall {
             call_id: "read".into(),
-            name: "resource_read".into(),
-            schema_version: "3".into(),
+            name: selected_schema.name.clone(),
+            schema_version: selected_schema.version.clone(),
             arguments,
         };
         let range = HistoryRange {
@@ -272,7 +275,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             credential_ref: None,
             configuration_generation: 1,
             tool_schema_generation: 1,
-            tools: vec![schema()],
+            tools: vec![selected_schema.clone()],
             instruction_sources: vec![],
             memory_checkpoint: None,
             attachment_refs: vec![],
@@ -347,7 +350,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                         run_id: receipt.run_id.clone(),
                         origin: origin.clone(),
                         tool_schema_generation: 1,
-                        tools: Arc::new(vec![schema()]),
+                        tools: Arc::new(vec![selected_schema.clone()]),
                         source: None,
                     },
                 }],
@@ -366,7 +369,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
         let bridge = OwnerChannel::new("resource", out);
         bridge.initialize("epoch");
         let directory = Arc::new(
-            ToolDirectory::assemble(vec![declaration(db.clone(), bridge.clone())]).unwrap(),
+            ToolDirectory::assemble(vec![if file_attachment {crate::attachment_reads::declaration(None,db.clone(),bridge.clone())} else {declaration(db.clone(), bridge.clone())}]).unwrap(),
         );
         let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
             child_dispatch: None,
@@ -375,10 +378,11 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             run_id: receipt.run_id.clone(),
             origin,
             tool_schema_generation: 1,
-            tools: Arc::new(vec![schema()]),
+            tools: Arc::new(vec![selected_schema.clone()]),
             source: None,
         };
         let cancel = CancellationToken::default();
+        if file_attachment {let mut path=call.clone();path.arguments=json!({"path":"not-admitted.txt"});assert!(directory.clone().bind_call(&path,&frozen,&cancel).is_err(),"An attachment reader never grants source path access");}
         let bound = directory.bind_call(&call, &frozen, &cancel).unwrap();
         let contract = bound.prepare(&cancel).unwrap();
         assert!(contract.read_only);
@@ -412,6 +416,12 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             let bridge = bridge.clone();
             let run = receipt.run_id.clone();
             std::thread::spawn(move || {
+                // A fixture owner failure must close its rendezvous, just like
+                // a disconnected Host. Otherwise a failed assertion leaves the
+                // caller waiting forever and hides the actual protocol error.
+                struct CloseOwner(OwnerChannel);
+                impl Drop for CloseOwner {fn drop(&mut self) {self.0.close();}}
+                let _connection=CloseOwner(bridge.clone());
                 let frame = frames
                     .recv_timeout(std::time::Duration::from_secs(5))
                     .unwrap();
@@ -420,6 +430,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                 assert_eq!(frame["query"]["resourceCheckpointId"], "old-context");
                 let mut query = frame["query"].clone();
                 let request = query.as_object_mut().unwrap().remove("request").unwrap();
+                if file_attachment {assert_eq!(request,json!({"kind":"attachment","ref":"attachment:fixed","view":"content","offset":7,"limit":12}));}
                 if let Some(activation) = request.get("activationId") {
                     query["activationId"] = activation.clone();
                 }

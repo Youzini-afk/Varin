@@ -18,7 +18,7 @@ vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ cont
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:child', branchId: 'branch:child' };
 const family: FamilyList = { rootThreadId: 'thread:root', members: [{ threadId: 'thread:peer', parentThreadId: 'thread:root', task: 'Peer task', state: 'waiting', branches: [{ branchId: 'branch:peer', headId: null, activeRunId: 'run:peer', latestRun: { runId: 'run:peer', state: 'waiting' } }] }] };
 const receipt: MessageReceipt = { messageId: 'message:original', senderThreadId: 'thread:peer', senderBranchId: 'branch:peer', targetThreadId: identity.threadId, targetBranchId: identity.branchId, actor: { kind: 'agent', runId: 'run:peer', operationId: 'original-send', origin: { kind: 'model_step', request_id: 'original-request' } }, kind: 'inform', replyTo: null, acceptedCursor: 19, acceptedAtMs: 1000 };
-const summary: MessageSummary = { ...receipt, state: 'queued', activation: { state: 'passive' }, replyWait: null, deliveredRunId: null, deliveredCursor: null };
+const summary: MessageSummary = { ...receipt, attachments: [], state: 'queued', activation: { state: 'passive' }, replyWait: null, deliveredRunId: null, deliveredCursor: null };
 function fixture() {
   return {
     cancelObservation: vi.fn<(operationId: string) => Promise<void>>(async () => {}),

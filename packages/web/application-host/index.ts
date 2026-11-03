@@ -1,3 +1,7 @@
+import { createAbsoluteAttachmentCapture } from './lib/kernel/attachment-absolute.js';
+import { releaseDeletedAttachmentSources } from './lib/kernel/attachment-retention.js';
+import { createThreadAttachments } from './lib/kernel/thread-attachments.js';
+import { registerThreadAttachmentRoutes } from './lib/kernel/thread-attachment-routes.js';
 import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
 import { isDeepStrictEqual } from 'node:util';
 import { permissionService } from './lib/kernel/permission-service.js';
@@ -2093,6 +2097,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const threadMaterialLifetime = createThreadMaterialLifetime({ runtime: agentRuntime, storage: materialStorage, materials: webMaterials,
+    retainAttachments: (plan, signal) => threadAttachments.retain(plan, signal),
+    reconcileAttachments: (plan, signal) => threadAttachments.reconcilePreparations(plan, signal),
+    releaseAttachmentSources: (plan, signal) => releaseDeletedAttachmentSources(kernelClient, agentRuntime, plan, signal),
     releaseSource:(source,id,signal)=>nativeWorkspaces!.retireSource(source,id,signal),
     releasePreparations:threads=>releaseSourcePreparations(threads),
     ...(options.browser ? { releaseBrowser: (threadId: string) => options.browser!.releaseThread(threadId) } : {}) });
@@ -2152,9 +2159,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return projects.find(project => projectContainsPath(project, root))?.id;
       },
     });
+  const threadAttachments = createThreadAttachments({ kernel: kernelClient, runtime: agentRuntime, storage: materialStorage,
+    materials: webMaterials, resolveLiveSource: liveSources.validate, requestMaintenance: () => contentMaintenance.request() });
+  threadAttachments.bindAbsolutePathCapture(createAbsoluteAttachmentCapture({ kernel: kernelClient,
+    resolveWorkspace: async (directory, signal) => {
+      signal?.throwIfAborted();
+      const selected = await documentsAuthority.resolveWorkspace({ path: directory });
+      const workspace = await documentsAuthority.getWorkspace(selected.workspaceId, signal);
+      return { workspaceId: selected.workspaceId, canonicalRoot: workspace.root };
+    } }));
+  documentSources.bindAttachments(threadAttachments);
+  registerThreadAttachmentRoutes(app, threadAttachments, uiAuthController.requireAuth);
+  externalAgents.bindAttachments(threadAttachments);
   const interactiveUi = createInteractiveUiRuntime({ kernel: kernelClient, runtime: agentRuntime, media: mediaResources });
   registerInteractiveUiRoutes(app, interactiveUi, uiAuthController.requireAuth);
-  kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi }));
+  kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi, attachments: threadAttachments }));
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext,
     bot: createBotMemoryOwner({ runtime: agentRuntime, history: botHistory, memory: memoryService, organizer: memoryOrganizer, prepareContext: threadContext,
@@ -2220,6 +2239,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
     documents: documentsAuthority, validateLiveSource: liveSources.validate,nativeWorkspaces }));
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
+  threads.bindAttachments(threadAttachments);
   threads.bindMessageTime(async () => {
     const settings = await modelsService.readGlobalInferenceSettings();
     return resolveMessageTimeSettings((settings.harness as { context?: { messageTime?: unknown } } | undefined)?.context?.messageTime);
@@ -2228,6 +2248,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindContextAgent(contextAgent);
   scheduledTaskService.bindSourceDirectory(sourceDirectory);
   const targetSourceQuery = createSourceQueryService({ kernel: kernelClient, documents: documentsAuthority,
+    captureAbsoluteAttachment: createAbsoluteAttachmentCapture({ kernel: kernelClient, resolveWorkspace: async (directory, signal) => {
+      signal?.throwIfAborted(); const selected = await documentsAuthority.resolveWorkspace({ path: directory });
+      const workspace = await documentsAuthority.getWorkspace(selected.workspaceId, signal);
+      return { workspaceId: selected.workspaceId, canonicalRoot: workspace.root };
+    } }),
     validateLiveSource: liveSources.validate, storage: kernelStorageAdapter,
     resourceOwners: threadResourceOwners, languageSupervisor, structureSource: () => structureSource });
   const targetChildSources = createManagedChildSourceService({ storage: kernelStorageAdapter,

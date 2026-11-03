@@ -9,6 +9,7 @@ struct Upgrade {
 }
 
 const UPGRADES: &[Upgrade] = &[
+    Upgrade { from: 84, to: 85, convert: |tx, _| attachments::initialize(tx) },
     Upgrade { from: 83, to: 84, convert: |tx, _| driver::upgrade(tx) },
     Upgrade {
         from: 78,
@@ -54,7 +55,7 @@ pub(super) fn supports(mut version: i64) -> bool {
 /// Standalone 82 does not contain Zone2. A blanket >=81 check would reject that
 /// valid asset or, worse, relabel a different layout without running its converter.
 pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> {
-    if matches!(version, 81 | 83 | 84) {
+    if matches!(version, 81 | 83 | 84 | 85) {
         return context_observations::check_format(db);
     }
     let present: bool = db.query_row(
@@ -73,7 +74,7 @@ pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> 
 /// Environment queue entries (including Zone2 captures) intentionally have a
 /// different representation and are not evidence of a missing history index.
 pub(super) fn check_history_indexes(db: &Connection, version: i64) -> Result<()> {
-    if !matches!(version, 82 | 83 | 84) {
+    if !matches!(version, 82 | 83 | 84 | 85) {
         return Ok(());
     }
     let missing: bool = db.query_row(
@@ -166,6 +167,36 @@ fn install_history_indexes(tx: &Transaction<'_>, indexes: &[HistoryIndex]) -> Re
     Ok(())
 }
 
+// The retired text-reference convention is interpreted only at conversion. New
+// dispatches inherit typed file parts; ordinary text never creates a read relation.
+fn prepare_material_inheritances(db:&Connection,content:&crate::content::ContentStore)->Result<Vec<HistoryIndex>> {
+    let reference=regex::Regex::new(r#""(?:snapshotId|sourceSnapshotId)"\s*:\s*"([^"\\]+)""#).expect("legacy material pattern");
+    fn collect(value:&Value,reference:&regex::Regex,ids:&mut std::collections::BTreeSet<String>) {
+        match value {
+            Value::Object(fields)=>for (key,value) in fields {
+                if matches!(key.as_str(),"snapshotId"|"sourceSnapshotId") {
+                    if let Some(id)=value.as_str(){ids.insert(id.to_owned());}
+                }
+                collect(value,reference,ids);
+            },
+            Value::Array(values)=>for value in values {collect(value,reference,ids);},
+            Value::String(text)=>for capture in reference.captures_iter(text){ids.insert(capture[1].to_owned());},
+            _=>(),
+        }
+    }
+    let mut rows=Vec::new();
+    for row in db.prepare("SELECT id,body FROM child_tasks WHERE json_extract(body,'$.inherited_context') IS NOT NULL")?.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))? {
+        let (id,before)=row?;let mut body:Value=serde_json::from_str(&before)?;
+        let mut ids=std::collections::BTreeSet::new();
+        collect(&content.load(&body["inherited_context"]["items"] )?,&reference,&mut ids);
+        if !ids.is_empty() {
+            body["material_snapshot_ids"]=json!(ids);
+            rows.push(HistoryIndex{table:"child_tasks",key:"id",id,before,after:encode(&body)?});
+        }
+    }
+    Ok(rows)
+}
+
 pub(super) fn apply(
     db: &mut Connection,
     from: i64,
@@ -186,6 +217,7 @@ fn apply_before_commit(
         } else {
             Vec::new()
         };
+        let materials = prepare_material_inheritances(db,content)?;
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut version = inspect_catalog_format(&tx)?;
         if version != from {
@@ -202,6 +234,7 @@ fn apply_before_commit(
             version = step.to;
             tx.pragma_update(None, "user_version", version)?;
         }
+        install_history_indexes(&tx,&materials)?;
         check_catalog_schema(&tx, FORMAT)?;
         event(
             &tx,

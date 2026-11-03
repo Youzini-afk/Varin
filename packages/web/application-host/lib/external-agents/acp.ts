@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import {
   ExternalAgentError,
   type ExternalAgentCapabilities,
@@ -98,6 +99,7 @@ export async function connectAcp(
   const capabilities: ExternalAgentCapabilities = {
     resume: false,
     images: false,
+    files: 'resource_links',
     steering: false,
     models: [],
   };
@@ -396,7 +398,11 @@ export async function connectAcp(
         const response = await peer.request('session/prompt', {
           sessionId,
           prompt: [
-            { type: 'text', text: input.text },
+            { type: 'text', text: input.files?.some(file => file.attachment.mimeType.startsWith('image/')) ? `${input.text}\nImages linked as files were not supplied as direct visual input.` : input.text },
+            ...(input.files ?? []).map(({ attachment, path }) => ({
+              type: 'resource_link', uri: pathToFileURL(path).href,
+              name: attachment.filename, mimeType: attachment.mimeType, size: attachment.byteLength,
+            })),
             ...(input.images ?? []).map((image) => ({
               type: 'image',
               data: image.data,

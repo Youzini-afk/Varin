@@ -214,6 +214,14 @@ impl Task {
                 "File effect worker panicked; inspect its original operation receipt".into(),
             ))
         });
+        let outcome=outcome.and_then(|mut value| {
+            if self.method=="file.apply" && value["status"]=="applied" {
+                let operation=self.operation().to_owned();
+                let attachment=owner.call(move |storage|Ok(storage.operation_get(&json!({"operationId":operation}))?["result"].get("attachment").cloned()))?;
+                if let Some(attachment)=attachment {value["attachment"]=attachment;}
+            }
+            Ok(value)
+        });
         if retained {
             let task = self.clone();
             let released = owner.call(move |s| {

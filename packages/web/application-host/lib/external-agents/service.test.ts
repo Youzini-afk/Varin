@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ExternalConversationSnapshot, ExternalInteractionResponse } from '@varin/application-client';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { HarnessConnection } from './adapter.js';
+import type { ExternalAttachmentOwner } from './attachments.js';
 import { connectCodex } from './codex.js';
 import { ExternalAgentsService } from './service.js';
 
@@ -22,6 +23,8 @@ async function fixture() {
     commands.push(params.command);
     if (params.command.action === 'settings') return { revision: 0, defaultAgent: null, agents: [config] };
     if (params.command.action === 'read') return snapshot;
+    if (params.command.action === 'cleanup_list') return [];
+    if (params.command.action === 'update') return { ...snapshot.conversation, deleted: params.command.deleted === true };
     return {};
   }) };
   const children: Array<{ end(): void; terminating: boolean }> = [];
@@ -263,4 +266,40 @@ it('never aborts a successor connection controller after a late preparation stop
   expect(next.signal.aborted).toBe(false);
   owner.connectionControllers.delete('external:test');
   owner.connections.set('external:test', live);
+});
+
+
+it.each(['upload', 'send'] as const)('deletion seals and drains original file %s before retiring its records', async mode => {
+  const f = await fixture();
+  let enter!: () => void, finish!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const released = new Promise<void>(resolve => { finish = resolve; });
+  let cancelled = false;
+  const prepare = async (...args: unknown[]) => {
+    const signal = args.at(-1) as AbortSignal;
+    signal.addEventListener('abort', () => { cancelled = true; }, { once: true });
+    enter();
+    await released;
+    signal.throwIfAborted();
+    throw new Error('Expected deletion to cancel original preparation');
+  };
+  f.service.bindAttachments({
+    prepareExternal: prepare, uploadExternal: prepare,
+    releaseExternal: vi.fn(), externalPath: vi.fn(), readExternal: vi.fn(),
+  } as unknown as ExternalAttachmentOwner);
+  const pending = mode === 'upload'
+    ? f.service.uploadAttachment('external:test', { key: 'file', filename: 'data.bin', mimeType: '', byteLength: 1 }, (async function* () { yield Buffer.from('x'); })())
+    : f.service.send('external:test', 'message', { text: '', attachments: [{ path: 'data.bin' }] });
+  const outcome = pending.catch(error => error);
+  await entered;
+  const deletion = f.service.update('external:test', 1, { deleted: true });
+  await vi.waitFor(() => expect(cancelled).toBe(true));
+  expect(f.commands.some(command => command.action === 'update')).toBe(false);
+  await expect(f.service.uploadAttachment('external:test', { key: 'late', filename: 'late.bin', mimeType: '', byteLength: 0 }, (async function* () {})())).rejects.toMatchObject({ code: 'conversation_busy' });
+  finish();
+  for (const child of f.children) child.end();
+  expect(await outcome).toBeInstanceOf(Error);
+  await deletion;
+  expect(f.commands.some(command => command.action === 'admit')).toBe(false);
+  expect(f.commands.filter(command => command.action === 'update')).toHaveLength(1);
 });

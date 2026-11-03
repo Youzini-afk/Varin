@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 78 as const;
+export const KERNEL_PROTOCOL_VERSION = 80 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.importSources","runtime.context.observations.receipt","runtime.context.observations.snapshot","runtime.context.observations.read","runtime.context.observations.importPosition","runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,7 +11,7 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.driver.finish","runtime
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["runtime.driver.model","runtime.driver.tool","runtime.driver.wait","process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.child.user.accept":"branchId","runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId","runtime.input.sendNow":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.driver.finish","runtime.driver.wait","runtime.driver.context","runtime.driver.cancel","runtime.driver.model","runtime.driver.tool","runtime.driver.checkpoint","runtime.driver.deliver","runtime.driver.receipt","runtime.context.observations.capture","runtime.context.observations.import","runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v78" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v80" as const;
 
 export type KernelMethod =
   | "runtime.driver.finish"
@@ -296,6 +296,8 @@ export type KernelMethod =
   | "file.scan"
   | "file.measure"
   | "file.materialize"
+  | "file.objectView.prepare"
+  | "file.objectView.release"
   | "file.materializedView.prepare"
   | "file.materializedView.check"
   | "file.executionView.inspect"
@@ -527,9 +529,12 @@ export interface MaterialRetentionParams {
 }
 
 export interface MaterialRetention {
+  attachmentPreparations: Array<{threadId: string; runId: string; epoch: number; source: LaunchSource; operationId: string; attachments: Array<{ref: string; path: string}>}>;
+  attachmentSources: Array<{threadId: string; runId: string; epoch: number; source: LaunchSource}>;
   sources: Array<{cleanupId: string; source: LaunchSource}>;
   threads: Array<{threadId: string; rootThreadId: string; release: boolean}>;
   inheritances: Array<{parentThreadId: string; childThreadId: string; rootThreadId: string; snapshotIds: string[]}>;
+  attachments: AttachmentDelivery[];
 }
 
 export interface CodeRetrievalDiagnostic {
@@ -1402,9 +1407,52 @@ export type OutputMediaHolder = {kind:'history';itemId:string} | {kind:'input';i
 
 export type OperationResult = {kind:'control';value:unknown} | {kind:'output';output:OutputBody};
 
+export interface Attachment {
+  ref: string;
+  filename: string;
+  mimeType: string;
+  byteLength: number;
+}
+
+export type AttachmentSelection = {ref:string;path?:never} | {path:string;ref?:never};
+
+export interface AttachmentDelivery {
+  holderKind: 'input' | 'dispatch' | 'context' | 'report';
+  holderId: string;
+  threadId: string;
+  branchId: string;
+  sourceThreadId?: string;
+  sourceBranchId?: string;
+  attachments: Attachment[];
+  inputRef?: unknown;
+}
+
+export interface KernelObjectViewPrepareParams {
+  workspaceId: string;
+  executionWorkspaceId: string;
+  recordId: string;
+  slot: string;
+  viewId: string;
+  filename: string;
+  runId?: string;
+  externalConversationId?: string;
+}
+
+export interface KernelObjectViewParams {
+  workspaceId: string;
+  viewId: string;
+}
+
+export interface KernelObjectView {
+  viewId: string;
+  path: string;
+  kernelEpoch: string;
+  readOnly: boolean;
+}
+
 export interface OutputBody<M = StoredMedia> { data: unknown; parts: OutputPart<M>[] }
 
-export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M};
+export type OutputPart<M = StoredMedia> = {kind:'text';text:string} | {kind:'media';media:M} | {kind:'attachment';attachment:Attachment};
 
 export interface ResolvedMedia { media_type: string; source: OutputSource; data_base64: string }
 
@@ -1879,6 +1927,9 @@ export interface MessageSendParams {
   replyTo?: string;
   kind: MessageKind;
   text: string;
+  attachments?: AttachmentSelection[];
+  preparedAttachments?: Attachment[];
+  preparedAttachmentMedia?: IncomingMedia[];
 }
 
 export interface MessageListParams {
@@ -1920,6 +1971,7 @@ export interface MessageSummary extends MessageReceipt {
   replyWait: ReplyWaitView | null;
   deliveredRunId: string | null;
   deliveredCursor: number | null;
+  attachments: Attachment[];
 }
 
 export interface MessageView extends MessageSummary {
@@ -1955,6 +2007,7 @@ export interface MessageFeedDispatch {
   acceptedAtMs: number;
   preset?: string;
   task: string;
+  attachments: Attachment[];
 }
 
 export interface MessageFeedReport {
@@ -1969,6 +2022,7 @@ export interface MessageFeedReport {
   outcome: Outcome;
   text: string;
   detail?: string;
+  attachments: Attachment[];
 }
 
 export interface MessageParticipant {
@@ -2643,7 +2697,7 @@ export interface InputResourcePreparation {
   skills?: PreparedExplicitSkill[];
 }
 
-export type AgentResourceRequest = { kind: 'skill'; resourceId: string; activationId?: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string; activationId?: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' } | { kind: 'ui'; ref: string; view?: 'summary' | 'source' | 'state' | 'screen' | 'structure'; file?: string; startLine?: number; endLine?: number; offset?: number; limit?: number };
+export type AgentResourceRequest = { kind: 'skill'; resourceId: string; activationId?: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string; activationId?: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' } | { kind: 'ui'; ref: string; view?: 'summary' | 'source' | 'state' | 'screen' | 'structure'; file?: string; startLine?: number; endLine?: number; offset?: number; limit?: number } | {kind:'attachment';ref:string;view:'path'|'content';offset?:number;limit?:number};
 
 export interface ResourceRefreshParams {
   branchId: string;
@@ -2915,7 +2969,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 78; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 80; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -4442,6 +4496,7 @@ export interface KernelFileCaptureParams {
   path: string;
   store: boolean;
   leaseId?: string;
+  retentionRecordId?: string;
 }
 
 export interface KernelFileCaptureBatchParams {
@@ -5793,6 +5848,7 @@ export interface ChildReportPage {
   total_bytes: number;
   text: string;
   execution_id: string;
+  attachments: Attachment[];
 }
 
 export interface ChildReport {
@@ -5802,6 +5858,7 @@ export interface ChildReport {
   run_id: string | null;
   history_ids: string[];
   detail: string | null;
+  attachments?: Attachment[];
 }
 
 export interface ChildTask {
@@ -5849,6 +5906,17 @@ export interface UserChildDispatchCommand {
   runId: string;
   expectedHead: string | null;
   input: ChildInput;
+}
+
+export interface UserChildDispatchAcceptParams {
+  key: string;
+  threadId: string;
+  branchId: string;
+  runId: string;
+  expectedHead: string | null;
+  input: ChildInput;
+  preparedAttachments?: Attachment[];
+  preparedAttachmentMedia?: IncomingMedia[];
 }
 
 export interface UserChildDispatchReceipt {
@@ -7070,6 +7138,8 @@ export type KernelMethodParams = {
   "file.scan": KernelFileScanParams;
   "file.measure": KernelFileMeasureParams;
   "file.materialize": KernelFileMaterializeParams;
+  "file.objectView.prepare": KernelObjectViewPrepareParams;
+  "file.objectView.release": KernelObjectViewParams;
   "file.materializedView.prepare": KernelMaterializedViewPrepareParams;
   "file.materializedView.check": KernelMaterializedViewParams;
   "file.executionView.inspect": KernelExecutionViewParams;
@@ -7158,7 +7228,7 @@ export type KernelMethodParams = {
   "runtime.child.dependencies.pending": KernelEmptyParams;
   "runtime.child.dependencies.release": OperationParams;
   "runtime.child.user.catalog": UserChildDispatchCatalogParams;
-  "runtime.child.user.accept": UserChildDispatchCommand;
+  "runtime.child.user.accept": UserChildDispatchAcceptParams;
   "runtime.child.user.receipt": UserChildDispatchCommand;
   "runtime.child.continuation.accept": ChildContinuationAcceptParams;
   "runtime.child.execution.inspect": ChildExecutionParams;
@@ -9775,6 +9845,24 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "file.objectView.prepare";
+      params: KernelObjectViewPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.objectView.release";
+      params: KernelObjectViewParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "file.materializedView.prepare";
       params: KernelMaterializedViewPrepareParams;
       epoch?: string;
@@ -10568,7 +10656,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.child.user.accept";
-      params: UserChildDispatchCommand;
+      params: UserChildDispatchAcceptParams;
       epoch?: string;
       grantId?: string;
     }

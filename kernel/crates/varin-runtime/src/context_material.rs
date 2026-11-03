@@ -122,6 +122,7 @@ pub(crate) fn quote_sources(
         for (index, part) in parts.into_iter().enumerate() {
             let content = match part {
                 OutputPart::Text { text } => Content::Text { text },
+                OutputPart::Attachment { attachment } => Content::Text { text: attachment.description() },
                 OutputPart::Media { media } => Content::Media { media },
             };
             quote(
@@ -494,6 +495,40 @@ mod tests {
         }
         assert_eq!(reconstructed, body);
         assert_eq!(retained_media, 1);
+    }
+
+    #[test]
+    fn file_parts_are_quoted_once_without_reinterpreting_or_losing_fixed_identity() {
+        let attachment = crate::catalog::attachments::Attachment {
+            reference: "attachment:fixed".into(), filename: "report.csv".into(),
+            mime_type: "text/csv".into(), byte_length: 23,
+        };
+        let output = crate::output::OutputBody {
+            data: Value::Null,
+            parts: vec![OutputPart::Attachment { attachment: attachment.clone() }],
+        };
+        for content in [
+            Content::Output { output: output.clone() },
+            Content::ToolResult { result: ToolResult {
+                request_id: "model".into(), call_id: "write".into(),
+                completion: ToolCompletion::Result { outcome: crate::Outcome::Succeeded, effect:crate::Effect::Confirmed, content: output.clone() },
+            } },
+            Content::ToolResult { result: ToolResult {
+                request_id: "model".into(), call_id: "job".into(),
+                completion: ToolCompletion::JobAccepted { operation_id: "job".into(), phase:"running".into(), effect:crate::Effect::Confirmed, lifetime:crate::Lifetime::Thread, content: Some(output.clone()) },
+            } },
+        ] {
+            let original = ConversationItem { id: "original".into(),
+                provenance: Provenance::ExternalData {source: "file-owner".into()},
+                content, opaque: None, resource_activation: None };
+            let sources = quote_sources("summary", vec![original.into()]).unwrap();
+            assert_eq!(sources.len(), 2);
+            let Content::Text { text } = &sources[1].item.content else {panic!("quoted file descriptor")};
+            let quoted:ConversationItem=serde_json::from_str(text).unwrap();
+            assert_eq!(quoted.id, "original:part:0");
+            assert_eq!(quoted.content, Content::Text {text:attachment.description()});
+            assert!(matches!(sources[1].item.provenance, Provenance::ExternalData {..}));
+        }
     }
 
     #[test]
