@@ -48,7 +48,7 @@
     "@remixicon/react": "^4.7.0",
     "@replit/codemirror-vim": "^6.4.0",
     "@simplewebauthn/browser": "14.0.0",
-    "@tanstack/react-virtual": "3.14.24",
+    "@tanstack/react-virtual": "3.14.25",
     "@varin/application-client": "workspace:*",
     "@varin/extension-builtins": "workspace:*",
     "@varin/extension-contract": "workspace:*",
