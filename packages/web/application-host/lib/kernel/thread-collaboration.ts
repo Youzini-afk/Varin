@@ -13,7 +13,7 @@ import { KernelClientError, type KernelClient } from './kernel-client.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
 import type { LiveSourceResolver } from './live-source.js';
 import { type StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
-import { waitWithSignal } from '../cancellation.js';
+import { isAbortError, waitWithSignal } from '../cancellation.js';
 import { createChildPhysicalCapture, type ChildPhysicalCapture } from './child-source-capture.js';
 import { requireNativeWorkspaceBackend } from './native-workspaces.js';
 import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
@@ -200,7 +200,7 @@ export class ThreadCollaboration {
         }
         await this.discoverLaunches(epoch.signal);
         await this.owners.recoverColdBotWork?.(epoch.signal);
-        for (const runId of resumed ?? []) void this.owners.continueRun(runId, epoch.signal).catch(error => {
+        for (const runId of resumed ?? []) void this.continueRun(runId, epoch.signal).catch(error => {
           if (!epoch.signal.aborted) this.owners.onError(undefined, error);
         });
       }
@@ -209,6 +209,22 @@ export class ThreadCollaboration {
     } finally {
       this.pumping = false;
       if (epoch !== this.epoch && this.dirty && !this.stopped && !this.suspended) void this.recover();
+    }
+  }
+  /** A stale background wake can lose its preparation to this exact terminal Run.
+   * Join the original Host work before recognizing that no-op; an abort/request
+   * alone proves neither successful preparation nor native/resource stop. */
+  private async continueRun(runId: string, signal: AbortSignal): Promise<void> {
+    try { await this.owners.continueRun(runId, signal); }
+    catch (error) {
+      if (signal.aborted || !isAbortError(error)) throw error;
+      const settled = this.owners.kernel.runPreparationCancellation(runId, error);
+      if (!settled) throw error;
+      await waitWithSignal(settled, signal);
+      let run;
+      try { run = await this.owners.runtime.run(runId, signal); }
+      catch (readError) { throw new AggregateError([error, readError], 'Cannot verify cancelled Run preparation'); }
+      if (run.id !== runId || !['completed', 'cancelled', 'failed'].includes(run.state)) throw error;
     }
   }
   private async discoverLaunches(signal: AbortSignal): Promise<void> {
@@ -243,7 +259,7 @@ export class ThreadCollaboration {
         }
         const data = event.data as { run_id?: unknown } | null;
         if ((event.kind === 'policy.resumed' || event.kind === 'ingress.run_ready' || event.kind === 'goal.run_ready' || event.kind === 'observation.run_ready') && data && typeof data.run_id === 'string') {
-          void this.owners.continueRun(data.run_id, signal).catch(error => {
+          void this.continueRun(data.run_id, signal).catch(error => {
             if (!signal.aborted) this.owners.onError(undefined, error);
           });
         }
@@ -677,7 +693,7 @@ export class ThreadCollaboration {
         const launch = await runtime.launch(child.receipt.run_id, signal);
         // A recorded preparation failure is the Retry boundary. Its own durable event
         // must not repeatedly re-enter the same failed launch.
-        if (!launch?.preparation_failure) await this.owners.continueRun(child.receipt.run_id, signal);
+        if (!launch?.preparation_failure) await this.continueRun(child.receipt.run_id, signal);
       }
       if (child.report && child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind)) child = await this.settle(child, signal);
     } catch (error) {
