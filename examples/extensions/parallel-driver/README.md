@@ -6,13 +6,18 @@ read-only evidence tools as soon as its own request completes, while the other m
 in flight. After the branches join, the driver calls `context.driver.context()` to consume
 available entries from the original Inbox and compile fresh native context. It then combines
 that current history with both branches and their actual receipts, makes a tool-free synthesis
-request, and delivers the answer. New user input is not lost behind an initial-history snapshot.
+request, and delivers the answer. It then calls the original atomic `finish` admission. If steering
+arrived during synthesis, the same callback refreshes context and makes a newly identified synthesis;
+it keeps the original two branch/tool receipts rather than replaying their work. If original work
+still needs to settle, it waits on original events. New user input is not lost behind a last-refresh race.
 This context refresh is non-blocking: it does not wait for future messages or create another queue.
 Other algorithms can explicitly await original input/work events through `context.driver.wait`;
 this one chooses to finish after its two branches rather than wait for a further user turn.
 
-This example deliberately chooses one evidence round and only tools whose admitted metadata
-declares read/result. Those are algorithm choices, not restrictions on the driver API. The
+This example deliberately chooses one evidence round, the explicitly named native file helpers
+`file_read`, `file_list`, `file_search`, and registered tools whose metadata declares read/result.
+Native file helpers do not carry registered-service metadata; other tools with missing metadata
+are not assumed read-only. Those are algorithm choices, not restrictions on the driver API. The
 original tool owner still owns permission/resource admission. Branch output is quoted as
 `external_data`, never relabeled as user authorization or stitched into a fictitious serial
 tool exchange. Adapter-private opaque data is not copied between requests.
@@ -47,7 +52,7 @@ does not substitute `run` when resume is absent.
 
 An aborted signal is stop intent, not evidence that an executor has stopped. New capability
 calls stop being admitted; already-dispatched work is settled by its original owner. Returning
-`{ kind: 'complete' }` ends the algorithm, not the lifetime of unjoined native operations.
+`{ kind: 'complete' }` after a committed `finish` ends the algorithm, not the lifetime of unjoined native operations.
 Broker capability grants constrain broker APIs; trusted Host code is **not** OS-sandboxed.
 Drivers may independently cancel a no-longer-useful branch with
 `context.driver.cancel({ kind: 'model' | 'tool', id })` while their scope remains live. The

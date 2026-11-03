@@ -1,7 +1,7 @@
 //! Frozen Run-driver bindings and private checkpoints. Effects and model output remain
 //! with the existing invocation / ModelStep owners; this domain never replays them.
 use super::*;
-use crate::driver::{DriverRecovery, DriverSelection};
+use crate::driver::{DriverFinishReceipt, DriverRecovery, DriverSelection, DriverTerminalOutcome};
 use crate::execution::{
     Content, ConversationItem, ExecutionInput, ExecutionRecord, FrozenToolContext, HistoryRange,
     Provenance, RequestBinding, RequestOrigin, RequestSnapshot, ToolCall, ToolOrigin,
@@ -74,6 +74,26 @@ pub struct DriverWorkReference {
 pub struct DriverActivity {
     pub cursor: u64,
     pub input_pending: bool,
+}
+
+/// Preparation only stages bodies. The live callback retains admission until the
+/// original execution transaction has accepted its terminal transition.
+pub struct DriverFinishPreparation {
+    record: ExecutionRecord,
+    bodies: super::execution_persistence::ExecutionBodyPreparation,
+}
+pub struct PreparedDriverFinish {
+    record: ExecutionRecord,
+    bodies: super::execution_persistence::PreparedExecutionBodies,
+}
+impl DriverFinishPreparation {
+    pub fn load(self) -> Result<PreparedDriverFinish> {
+        let bodies = self.bodies.write(&self.record)?;
+        Ok(PreparedDriverFinish {
+            record: self.record,
+            bodies,
+        })
+    }
 }
 
 pub(super) fn initialize(tx: &Transaction<'_>) -> Result<()> {
@@ -713,6 +733,107 @@ impl DriverModelRead {
 }
 
 impl Catalog {
+    pub fn prepare_driver_finish(
+        &self,
+        outcome: DriverTerminalOutcome,
+    ) -> Result<DriverFinishPreparation> {
+        let record = match outcome {
+            DriverTerminalOutcome::Complete => ExecutionRecord::StateChanged {
+                state: RunState::Completed,
+                waiting_on: None,
+            },
+            DriverTerminalOutcome::Fail { error } => {
+                ExecutionRecord::ExecutionFailed { failure: error }
+            }
+        };
+        let bodies = self.prepare_execution_bodies(&record)?;
+        Ok(DriverFinishPreparation { record, bodies })
+    }
+
+    /// Called while holding the original Catalog owner, without releasing it between
+    /// the work/input cut and its existing terminal execution transaction. A refusal
+    /// leaves both the Run and the callback's ability to consume input unchanged.
+    pub fn admit_driver_finish(
+        &mut self,
+        run_id: &str,
+        epoch: u64,
+        selection: &DriverSelection,
+        prepared: PreparedDriverFinish,
+    ) -> Result<DriverFinishReceipt> {
+        let (run, _) = bound(&self.db, run_id, epoch, selection, false)?;
+        if run.state == RunState::Cancelled {
+            return Err(RuntimeError::DispatchCancelled);
+        }
+        if run.state.terminal() {
+            return Ok(DriverFinishReceipt::Committed { state: run.state });
+        }
+        bound(&self.db, run_id, epoch, selection, true)?;
+        if super::inputs::has_boundary_inputs(&self.db, run_id)? {
+            return Ok(DriverFinishReceipt::InputPending);
+        }
+        if self.pending_question_wait(run_id)?.is_some()
+            || self
+                .pending_run_operations(run_id)?
+                .iter()
+                .any(|operation| !operation.handed_off)
+        {
+            return Ok(DriverFinishReceipt::WorkPending);
+        }
+        let unsettled_model: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state IN ('prepared','dispatched'))
+             OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)",
+            [run_id], |row| row.get(0),
+        )?;
+        if unsettled_model {
+            return Ok(DriverFinishReceipt::WorkPending);
+        }
+        for work in self.driver_work_ids(run_id, epoch, selection)? {
+            if work.kind != DriverWorkKind::Tool {
+                continue;
+            }
+            if let Some(operation) = optional_record::<Operation>(&self.db, "operations", &work.id)?
+            {
+                if !operation.handed_off && !self.driver_tool_stopped(&work.id)? {
+                    return Ok(DriverFinishReceipt::WorkPending);
+                }
+            }
+        }
+        match self.commit_prepared_execution(run_id, epoch, &prepared.record, prepared.bodies) {
+            Ok(()) => Ok(DriverFinishReceipt::Committed {
+                state: self.run(run_id)?.state,
+            }),
+            Err(RuntimeError::InputPending) => Ok(DriverFinishReceipt::InputPending),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Post-commit callback failure is diagnostic only. It cannot undo the original
+    /// terminal receipt or replace the Run's failure with a transport/provider error.
+    pub fn record_driver_callback_failure(
+        &mut self,
+        run_id: &str,
+        epoch: u64,
+        selection: &DriverSelection,
+        code: &str,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        let (run, _) = bound(&tx, run_id, epoch, selection, false)?;
+        if !run.state.terminal() {
+            return Err(RuntimeError::Conflict(
+                "driver callback still owns a nonterminal Run".into(),
+            ));
+        }
+        event(
+            &tx,
+            run_id,
+            run.revision,
+            "driver.callback_failed",
+            json!({"code":code}),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn prepare_run_driver(
         &self,
         run_id: &str,

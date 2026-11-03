@@ -4,6 +4,7 @@ import {
   VARIN_AGENT_DRIVER_SERVICE,
   type DriverCheckpoint, type DriverCheckpointInput, type DriverDeliveryInput, type DriverDeliveryReceipt,
   type DriverContextReceipt, type DriverCancelInput, type DriverCancelReceipt,
+  type DriverFinishInput, type DriverFinishReceipt,
   type DriverWaitInput, type DriverWaitReceipt,
   type DriverModelInput, type DriverModelReceipt, type DriverReceipt, type DriverReceiptInput,
   type DriverRunInput, type DriverRunOutcome, type DriverToolInput, type DriverToolReceipt,
@@ -18,6 +19,7 @@ export {
 export type {
   DriverCheckpoint, DriverCheckpointInput, DriverDeliveryInput, DriverDeliveryReceipt,
   DriverContextInput, DriverContextReceipt, DriverCancelInput, DriverCancelReceipt,
+  DriverFinishInput, DriverFinishReceipt, DriverTerminalOutcome,
   DriverWaitInput, DriverWaitReceipt,
   DriverModelInput, DriverModelReceipt, DriverReceipt, DriverReceiptInput, DriverRunInput,
   DriverRunOutcome, DriverToolInput, DriverToolReceipt, VarinAgentDriverDescription,
@@ -39,6 +41,9 @@ export interface VarinAgentDriverContext {
     checkpoint(input: DriverCheckpointInput): Promise<DriverCheckpoint>;
     deliver(input: DriverDeliveryInput): Promise<DriverDeliveryReceipt>;
     receipt(input: DriverReceiptInput): Promise<DriverReceipt | null>;
+    /** Atomic terminal admission, not a preflight. Conflicts keep this callback live to handle input/work.
+     * A committed result closes new capability calls, but does not claim the callback has stopped. */
+    finish(input: DriverFinishInput): Promise<DriverFinishReceipt>;
   };
 }
 type DriverAlgorithm = (input: Readonly<DriverRunInput>, context: VarinAgentDriverContext,
@@ -88,8 +93,11 @@ export function provideAgentDriver(context: VarinBrokeredHostContext, implementa
         if (!open) throw new Error('Driver invocation has completed');
         call.signal.throwIfAborted();
         // No post-await abort check: an original effect receipt remains evidence after stop intent.
-        return await call.capabilities.call(VARIN_AGENT_DRIVER_CAPABILITY, method,
-          structuredClone(request) as unknown as JsonValue) as T;
+        const result = await call.capabilities.call(VARIN_AGENT_DRIVER_CAPABILITY, method,
+          structuredClone(request) as unknown as JsonValue);
+        if (method === 'finish' && result && typeof result === 'object' && !Array.isArray(result)
+          && result.kind === 'committed') open = false;
+        return result as T;
       };
       const driver = driverClient(invoke, description.checkpointSchema);
       try {
@@ -114,5 +122,6 @@ function driverClient(invoke: <T>(method: string, request: object) => Promise<T>
     },
     deliver: (request: DriverDeliveryInput) => invoke<DriverDeliveryReceipt>('deliver', request),
     receipt: (request: DriverReceiptInput) => invoke<DriverReceipt | null>('receipt', request),
+    finish: (request: DriverFinishInput) => invoke<DriverFinishReceipt>('finish', request),
   });
 }

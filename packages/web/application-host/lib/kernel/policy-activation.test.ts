@@ -72,7 +72,7 @@ function fixture(child = false) {
     policyBinding: (run: string, generation: number) => bridge.binding(run, generation),
     unregisterPolicyOwner: (run: string, generation: number) => bridge.unregister(run, generation),
     releaseRunPolicyOwners: (run: string) => bridge.releaseRun(run),
-    releaseRunDriverOwner() {},
+    releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
     async agentRuntimeRequest(method: string, params: unknown) {
       requests.push({ method, params: structuredClone(params) });
       if (method === 'runtime.run.inspect') return structuredClone(run);

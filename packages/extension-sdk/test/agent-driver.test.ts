@@ -151,7 +151,33 @@ test('an author can read a baseline, await input, and explicitly refresh context
   } });
 });
 
-test('the real parallel-driver author code starts both model branches, executes early tools before their join, then delivers synthesis', async () => {
+test('terminal admission conflicts keep the same callback live; a committed finish closes new calls without aborting the callback', async () => {
+  await runHostExtensionConformance({ extensionId: 'review.finish', dependencies: [], activation: async context => {
+    let handler!: VarinHostServiceHandler;
+    context.services.provide = (_descriptor, implementation) => { handler = implementation; };
+    const signal = new AbortController().signal; const calls: string[] = []; let attempts = 0;
+    provideAgentDriver(context, { identity: { name: 'finish', version: '1' }, configuration: null,
+      modelRoles: [], recovery: 'none', checkpointSchema: null,
+      async run(_input, invocation) {
+        assert.deepEqual(await invocation.driver.finish({ outcome: { kind: 'complete' } }), { kind: 'input_pending' });
+        assert.deepEqual((await invocation.driver.context()).inputIds, ['late']);
+        assert.deepEqual(await invocation.driver.finish({ outcome: { kind: 'complete' } }), { kind: 'committed', state: 'completed' });
+        assert.equal(invocation.signal.aborted, false, 'terminal admission is not callback cancellation');
+        await assert.rejects(invocation.driver.receipt({ kind: 'delivery', id: 'late' }), /completed/);
+        return { kind: 'complete' };
+      } });
+    await handler.run!([json(input())], { callId: 'finish', signal, capabilities: { async call(_capability, method, params) {
+      calls.push(method);
+      if (method === 'context') return { history: [], tools: [], inputIds: ['late'], activating: true };
+      assert.equal(method, 'finish'); assert.deepEqual(params, { outcome: { kind: 'complete' } });
+      return ++attempts === 1 ? { kind: 'input_pending' } : { kind: 'committed', state: 'completed' };
+    } } });
+    assert.deepEqual(calls, ['finish', 'context', 'finish']);
+  } });
+});
+
+for (const lateInput of [false, true])
+test(`real parallel driver interleaves evidence and ${lateInput ? 'handles late input in the same callback without replay' : 'commits synthesis'}`, async () => {
   await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../../../examples/extensions/parallel-driver/build.mjs', import.meta.url))]);
   const parallelExtension = createRequire(import.meta.url)('../../../examples/extensions/parallel-driver/host.cjs').default;
   await runHostExtensionConformance({ extensionId: 'example.parallel-driver', dependencies: [], activation: async context => {
@@ -159,25 +185,29 @@ test('the real parallel-driver author code starts both model branches, executes 
     context.services.provide = (_descriptor, implementation) => { handler = implementation; };
     await parallelExtension.activate(context);
     const challenge = deferred<JsonValue>(); const toolStarted = deferred<void>(); const toolDone = deferred<JsonValue>();
-    const trace: string[] = [];
+    const trace: string[] = []; let contexts = 0, finishes = 0;
+    const toolName = lateInput ? 'file_read' : 'read';
     const model = (id: string, items: unknown[]) => json({ id, requestId: `request:${id}`, outcome: 'completed', items, usage, finishReason: 'stop', failure: null });
-    const outcome = handler.run!([json(input({ tools: [{ name: 'read', version: '1', description: 'Read evidence', schema: {}, output_schema: {},
-      metadata: { service_id: 'files', service_version: 1, operation: 'read', completion: 'result' } }] }))], {
+    const outcome = handler.run!([json(input({ tools: [{ name: toolName, version: '1', description: 'Read evidence', schema: {}, output_schema: {},
+      metadata: lateInput ? null : { service_id: 'files', service_version: 1, operation: 'read', completion: 'result' } }] }))], {
       callId: 'parallel', signal: new AbortController().signal, capabilities: { async call(_capability, method, raw) {
-        const request = raw as Record<string, JsonValue>; trace.push(method === 'context' ? method : `${method}:${request.id}`);
-        if (method === 'model' && request.id === 'proposal') return model('proposal', [{ id: 'call', content: { kind: 'tool_call',
-          call: { call_id: 'evidence', name: 'read', schema_version: '1', arguments: { path: 'notes' } } }, opaque: null }]);
+        const request = raw as Record<string, JsonValue>; trace.push(['context', 'wait', 'finish'].includes(method) ? method : `${method}:${request.id}`);
+        if (method === 'model' && request.id === 'proposal') { assert.ok((request.tools as string[]).includes(toolName)); return model('proposal', [{ id: 'call', content: { kind: 'tool_call',
+          call: { call_id: 'evidence', name: toolName, schema_version: '1', arguments: { path: 'notes' } } }, opaque: null }]); }
         if (method === 'model' && request.id === 'challenge') return challenge.promise;
         if (method === 'tool') { toolStarted.resolve(); return toolDone.promise; }
+        if (method === 'wait') return { cursor: finishes, inputPending: false, receipts: [] };
+        if (method === 'finish') return lateInput && finishes++ === 0 ? { kind: 'input_pending' } : { kind: 'committed', state: 'completed' };
         if (method === 'context') {
-          assert.deepEqual(request, {});
+          contexts++; assert.deepEqual(request, {});
           return json({ history: [...input().history, { id: 'new-message', provenance: { kind: 'user_instruction', input_id: 'new-input' },
-            content: { kind: 'text', text: 'Also explain the remaining uncertainty' }, opaque: null }], tools: [], inputIds: ['new-input'], activating: true });
+            content: { kind: 'text', text: contexts === 1 ? 'Also explain the remaining uncertainty' : 'LATE_INPUT_REQUIRES_NEW_SYNTHESIS' }, opaque: null }], tools: [], inputIds: ['new-input'], activating: true });
         }
-        if (method === 'model' && request.id === 'synthesis') {
+        if (method === 'model' && String(request.id).startsWith('synthesis')) {
           const history = request.history as Array<{ id: string; content: { text: string } }>;
           assert.equal(history[0]!.id, 'user-original'); assert.equal(history.length, 4);
           assert.equal(history[1]!.id, 'new-message');
+          if (request.id !== 'synthesis') assert.equal(history[1]!.content.text, 'LATE_INPUT_REQUIRES_NEW_SYNTHESIS');
           assert.match(history[2]!.content.text, /actual evidence/);
           return model('synthesis', [{ id: 'answer-text', content: { kind: 'text', text: 'Evidence-backed answer' }, opaque: null }]);
         }
@@ -192,6 +222,9 @@ test('the real parallel-driver author code starts both model branches, executes 
     await Promise.resolve(); assert.equal(trace.some(entry => entry === 'model:synthesis'), false);
     challenge.resolve(model('challenge', [{ id: 'challenge-text', content: { kind: 'text', text: 'An independent counterexample' }, opaque: null }]));
     assert.deepEqual(await outcome, { kind: 'complete' });
-    assert.deepEqual(trace.slice(-3), ['context', 'model:synthesis', 'deliver:answer']);
+    assert.deepEqual(trace.slice(-5), ['context', `model:synthesis${lateInput ? ':1' : ''}`, `deliver:answer${lateInput ? ':1' : ''}`, 'wait', 'finish']);
+    assert.equal(trace.filter(value => value === 'model:proposal').length, 1);
+    assert.equal(trace.filter(value => value === 'model:challenge').length, 1);
+    assert.equal(trace.filter(value => value === 'tool:proposal:evidence').length, 1);
   } });
 });

@@ -182,6 +182,11 @@ export class AgentDriverBridge {
     const owner = this.#owners.get(runId);
     return owner && owner.epoch === this.currentEpoch() && !owner.retired ? structuredClone(owner.lease.binding) : undefined;
   }
+  /** Logical terminal admission can precede the actual original callback/RPC exit. */
+  isInvoking(runId: string): boolean {
+    return Boolean(this.#owners.get(runId)?.active.size)
+      || [...(this.#draining.get(runId) ?? [])].some(owner => owner.active.size > 0);
+  }
   private retire(owner: DriverOwner): void {
     if (owner.retired) return;
     owner.retired = true;

@@ -195,7 +195,7 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     mcpLiveBinding: () => mcp,
     mcpImplementationIdentity: () => undefined,
     unregisterCredentialOwner() {},
-    releaseRunPolicyOwners() {}, releaseRunDriverOwner() {},
+    releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
     cancelRunPreparation() {},
     releaseChildToolHandoff: vi.fn(),
     unregisterToolOwners() {},

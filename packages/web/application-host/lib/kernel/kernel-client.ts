@@ -900,6 +900,7 @@ export class KernelClient {
   }
   driverBinding(runId: string): import('./protocol.generated.js').DriverBinding | undefined { return this.driverBridge.binding(runId); }
   releaseRunDriverOwner(runId: string): void { this.driverBridge.release(runId); }
+  isRunDriverInvoking(runId: string): boolean { return this.driverBridge.isInvoking(runId); }
 
   get kernelEpoch(): string | null { return this.epoch; }
   get handshake(): KernelHandshakeResult | null { return this.handshakeResult; }

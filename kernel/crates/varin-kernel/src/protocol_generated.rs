@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 77;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 78;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -106,6 +106,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
+    "runtime.driver.finish",
     "runtime.context.observations.importSources",
     "runtime.context.observations.capture",
     "runtime.context.observations.receipt",
@@ -203,6 +204,9 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.calendar.calculation.retry",
 ];
 pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] = &[
+    "runtime.driver.model",
+    "runtime.driver.tool",
+    "runtime.driver.wait",
     "process.write",
     "process.resize",
     "runtime.tools.invoke",
@@ -218,6 +222,7 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.sendNow", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
+    "runtime.driver.finish",
     "runtime.driver.wait",
     "runtime.driver.context",
     "runtime.driver.cancel",
@@ -1517,6 +1522,13 @@ pub(crate) struct DriverReceiptParams {
 pub(crate) struct DriverContextParams {
     pub(crate) instance_id: String,
     pub(crate) input: varin_runtime::driver::DriverContextInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DriverFinishParams {
+    pub(crate) instance_id: String,
+    pub(crate) input: varin_runtime::driver::DriverFinishInput,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4765,6 +4777,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.driver.context" => serde_json::from_value::<DriverContextParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.driver.finish" => serde_json::from_value::<DriverFinishParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.driver.wait" => serde_json::from_value::<DriverWaitParams>(params.clone())

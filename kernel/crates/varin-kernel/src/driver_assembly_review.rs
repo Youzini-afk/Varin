@@ -280,7 +280,7 @@ fn custom_driver_assembly_rebinds_original_available_dormant_policy_without_live
     assert_eq!(assembled.driver.selection(), selection);
     assert!(assembled.provider.policy_model_capabilities().is_empty());
     assert_eq!(original_selection(&restored, &run.id), original);
-    let handle = restored.runtime.start(&run.id, assembled).unwrap();
+    let mut handle = Some(restored.runtime.start(&run.id, assembled).unwrap());
     loop {
         let frame = frames.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_no_dormant_request(&frame);
@@ -291,19 +291,83 @@ fn custom_driver_assembly_rebinds_original_available_dormant_policy_without_live
                 frame["input"]["models"],
                 json!([{"capabilityId":"primary","status":"available"}])
             );
+            let context = restored
+                .driver
+                .context(frame["instanceId"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(
+                context
+                    .finish(varin_runtime::driver::DriverFinishInput {
+                        outcome: varin_runtime::driver::DriverTerminalOutcome::Complete
+                    })
+                    .unwrap(),
+                varin_runtime::driver::DriverFinishReceipt::Committed {
+                    state: RunState::Completed
+                }
+            );
+            let controls = crate::agent_runtime::control_commands::ControlCommands {
+                runtime: restored.runtime.clone(),
+                resources: restored.resources.clone(),
+                models: restored.models.clone(),
+                tools: restored.tools.clone(),
+            };
+            let cancelled = controls
+                .execute(
+                    "runtime.run.cancel",
+                    json!({"runId":run.id}),
+                    &std::sync::atomic::AtomicBool::new(false),
+                )
+                .unwrap();
+            assert_eq!(cancelled["state"], "completed");
+            assert!(!restored.runtime.start_available(&run.id).unwrap());
+            assert!(handle.as_ref().unwrap().try_result().unwrap().is_none());
+            assert!(
+                context.cancel.is_cancelled(),
+                "explicit cancellation still signals the actual callback"
+            );
+            for pending in frames.try_iter() {
+                assert_no_dormant_request(&pending);
+                assert_ne!(pending["kind"], "host-tool-owner-release", "terminal business state cannot release original leases while the callback still runs");
+            }
+            restored.observe_completion(handle.take().unwrap());
             restored.driver.receive(json!({"v":1,"kind":"agent-driver-response","kernelEpoch":EPOCH,
                 "id":frame["id"],"instanceId":frame["instanceId"],"ok":true,"outcome":{"kind":"complete"}}));
             break;
         }
     }
-    assert_eq!(handle.wait().unwrap().state, RunState::Completed);
+    let mut released_tools = false;
+    let mut released_driver = false;
+    while !released_tools || !released_driver {
+        let frame = frames.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_no_dormant_request(&frame);
+        if frame["kind"] == "host-tool-owner-release" {
+            released_tools = true;
+        }
+        if frame["kind"] == "agent-driver-release" {
+            released_driver = true;
+        }
+    }
+    assert_eq!(
+        restored
+            .runtime
+            .catalog()
+            .lock()
+            .unwrap()
+            .run(&run.id)
+            .unwrap()
+            .state,
+        RunState::Completed
+    );
+    assert!(restored
+        .runtime
+        .execution_failure(&run.id)
+        .unwrap()
+        .is_none());
     assert_eq!(original_selection(&restored, &run.id), original);
     for frame in frames.try_iter() {
         assert_no_dormant_request(&frame);
     }
     restored.runtime.shutdown().unwrap();
-    restored.tools.release(&run.id);
-    restored.models.release(&run.id);
     restored.driver.close();
     drop(restored);
     drop(frames);

@@ -171,6 +171,26 @@ pub enum DriverRunOutcome {
     Fail { error: ExecutionError },
 }
 
+/// A callback-live attempt at the original Run's actual terminal transaction.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DriverTerminalOutcome {
+    Complete,
+    Fail { error: ExecutionError },
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DriverFinishInput {
+    pub outcome: DriverTerminalOutcome,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DriverFinishReceipt {
+    Committed { state: crate::RunState },
+    InputPending,
+    WorkPending,
+}
+
 /// The default and third-party algorithms implement the same supervised lifetime. The
 /// context, not the algorithm's return value, closes admission and drains accepted work.
 pub trait RunDriver: Send + Sync {
@@ -203,6 +223,8 @@ pub struct DriverContext {
 struct ContextState {
     accepting: bool,
     active: usize,
+    observers: usize,
+    finished: Option<(DriverTerminalOutcome, crate::RunState)>,
     input: Option<ExecutionInput>,
     calls: HashMap<String, Arc<PrimitiveCall>>,
 }

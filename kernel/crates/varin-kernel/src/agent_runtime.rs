@@ -688,7 +688,7 @@ pub(crate) fn spawn(
                                 | "runtime.launch.mcp.prepare"
                                 | "runtime.launch.policy.prepare"
                                 | "runtime.launch.driver.prepare"
-                                | "runtime.driver.wait" | "runtime.driver.context" | "runtime.driver.cancel" | "runtime.driver.model" | "runtime.driver.tool" | "runtime.driver.checkpoint" | "runtime.driver.deliver" | "runtime.driver.receipt"
+                                | "runtime.driver.finish" | "runtime.driver.wait" | "runtime.driver.context" | "runtime.driver.cancel" | "runtime.driver.model" | "runtime.driver.tool" | "runtime.driver.checkpoint" | "runtime.driver.deliver" | "runtime.driver.receipt"
                                 | "runtime.policy.ready"
                                 | "runtime.question.answer"
                                 | "runtime.permission.open"
@@ -744,6 +744,7 @@ pub(crate) fn spawn(
                             let response_id = id.clone();
                             let response_sender = responses.clone();
                             let done = finished.clone();
+                            let release_credit = release_credit.clone();
                             thread::spawn(move || {
                                 let result = (|| -> Result<Value, KernelError> {
                                     if selected_method == "runtime.launch.driver.prepare" {
@@ -756,7 +757,8 @@ pub(crate) fn spawn(
                                     let context = bridge.context(params.get("instanceId").and_then(Value::as_str).ok_or_else(||KernelError::Protocol("driver instance required".into()))?).map_err(|e|KernelError::Authorization(e.to_string()))?;
                                     let failed = |error:varin_runtime::execution::ExecutionError| KernelError::Operation(error.to_string());
                                     Ok(match selected_method.as_str() {
-                                        "runtime.driver.wait" => { let p:DriverWaitParams=serde_json::from_value(params)?; serde_json::to_value(context.wait(p.input).map_err(failed)?)? }
+                                        "runtime.driver.finish" => { let p:DriverFinishParams=serde_json::from_value(params)?; serde_json::to_value(context.finish(p.input).map_err(failed)?)? }
+                                        "runtime.driver.wait" => { let p:DriverWaitParams=serde_json::from_value(params)?; serde_json::to_value(context.wait_owned(p.input, || release_credit(&response_id, &selected_method)).map_err(failed)?)? }
                                         "runtime.driver.context" => { let p:DriverContextParams=serde_json::from_value(params)?; serde_json::to_value(context.context(p.input).map_err(failed)?)? }
                                         "runtime.driver.cancel" => {
                                             let p:DriverCancelParams=serde_json::from_value(params)?;
@@ -766,8 +768,8 @@ pub(crate) fn spawn(
                                             } }
                                             serde_json::to_value(receipt)?
                                         }
-                                        "runtime.driver.model" => { let p:DriverModelParams=serde_json::from_value(params)?; serde_json::to_value(context.model(p.input).map_err(failed)?)? }
-                                        "runtime.driver.tool" => { let p:DriverToolParams=serde_json::from_value(params)?; serde_json::to_value(context.tool(p.input).map_err(failed)?)? }
+                                        "runtime.driver.model" => { let p:DriverModelParams=serde_json::from_value(params)?; serde_json::to_value(context.model_owned(p.input, || release_credit(&response_id, &selected_method)).map_err(failed)?)? }
+                                        "runtime.driver.tool" => { let p:DriverToolParams=serde_json::from_value(params)?; serde_json::to_value(context.tool_owned(p.input, || release_credit(&response_id, &selected_method)).map_err(failed)?)? }
                                         "runtime.driver.checkpoint" => { let p:DriverCheckpointParams=serde_json::from_value(params)?; serde_json::to_value(context.checkpoint(p.input).map_err(failed)?)? }
                                         "runtime.driver.deliver" => { let p:DriverDeliveryParams=serde_json::from_value(params)?; serde_json::to_value(context.deliver(p.input).map_err(failed)?)? }
                                         "runtime.driver.receipt" => { let p:DriverReceiptParams=serde_json::from_value(params)?; serde_json::to_value(context.receipt(p.input).map_err(failed)?)? }

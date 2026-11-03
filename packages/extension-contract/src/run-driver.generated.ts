@@ -2,6 +2,12 @@
 import type { ExecutionError, LaunchTool } from './nested-tools.generated.js';
 import type { ModelConversationItem, ModelContent, ModelOpaqueItem, ModelToolCompletion, ModelUsageReceipt, FinishReason } from './model-protocol.generated.js';
 
+export type DriverTerminalOutcome = {kind:'complete'} | {kind:'fail';error:ExecutionError};
+
+export interface DriverFinishInput {outcome:DriverTerminalOutcome}
+
+export type DriverFinishReceipt = {kind:'committed';state:'completed'|'failed'} | {kind:'input_pending'} | {kind:'work_pending'};
+
 export interface DriverWaitInput {after:number|null;work:DriverReceiptInput[]}
 
 export interface DriverWaitReceipt {cursor:number;inputPending:boolean;receipts:DriverReceipt[]}

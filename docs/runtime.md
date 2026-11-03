@@ -54,8 +54,13 @@ Host 只为原 callback 建立 Run/内核 epoch/instance 的临时调用 scope�
   `work` 选择返回的原工作回执，不过滤唤醒原因。自行根据返回条件继续等待是事件驱动，不是轮询。
 - `cancel` 只向本实例所指原模型/工具提交停止意图；`receipt` 读原事实；`deliver` 才提交用户可见输出。
   `checkpoint` 在原 Catalog/ContentStore 中追加私有状态和本 Run 的真实工作引用。
+- `finish` 在仍活的 callback 内尝试原子终结。它真正提交原 Catalog 完成/失败事务，不是先检查再提交。
+  `input_pending` 或 `work_pending` 保持原 scope 可用，由作者消费新输入或等待真实工作后决定下一步；
+  `committed` 才关闭新原语。最后一次 `context()` 不能消除其后到达输入的竞态。
 
-算法 callback 结束先关闭新调用，并唤醒遗留的观察等待，再排空已受理模型和工具，最后返回完成。
+算法正常完成/失败须先得到 `finish` 的提交回执，再结束 callback；单独返回 `complete` 不授予终结权。
+逻辑终态不等于 callback 已停：Host 终态轮询不能抢先卸掉仍活的原 driver/凭据/工具，原 worker 实际退出后才释放。
+callback 结束关闭新调用，并唤醒遗留的观察等待，再排空已受理模型和工具。
 私有 closing 通知不是 executor-stopped 回执。普通 provider 退休保留原 pin；撤权立即禁止新能力并请求
 原 Run 停止。旧内核退出但原 Host callback 尚未结束时，不能在新 epoch 并行启动同一 Run 的恢复。
 可信 Host 代码仍不是 OS sandbox；Varin 的 capability 与资源合同不声称拦截任意直接系统调用。

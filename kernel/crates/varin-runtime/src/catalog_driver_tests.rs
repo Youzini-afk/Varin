@@ -56,6 +56,23 @@ impl Fixture {
     fn db(&mut self) -> &mut Catalog {
         self.db.as_mut().unwrap()
     }
+    fn finish(
+        &mut self,
+        selection: &DriverSelection,
+        outcome: DriverTerminalOutcome,
+    ) -> DriverFinishReceipt {
+        let run = self.run.clone();
+        let epoch = self.db().epoch();
+        let prepared = self
+            .db()
+            .prepare_driver_finish(outcome)
+            .unwrap()
+            .load()
+            .unwrap();
+        self.db()
+            .admit_driver_finish(&run, epoch, selection, prepared)
+            .unwrap()
+    }
     fn select(&mut self, selection: &DriverSelection) {
         let run = self.run.clone();
         let prepared = self
@@ -467,6 +484,16 @@ fn driver_tool_stop_uses_original_executor_evidence_not_a_terminal_business_resu
     let selected = selection("a");
     f.select(&selected);
     let epoch = f.db().epoch();
+    f.db()
+        .commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::StateChanged {
+                state: RunState::Runnable,
+                waiting_on: None,
+            },
+        )
+        .unwrap();
     let call = f.call(&selected, "read", json!({}));
     let original = f
         .db()
@@ -533,6 +560,11 @@ fn driver_tool_stop_uses_original_executor_evidence_not_a_terminal_business_resu
         OperationPhase::Terminal
     );
     assert!(!f.db().driver_tool_stopped(&call.id).unwrap());
+    assert_eq!(
+        f.finish(&selected, DriverTerminalOutcome::Complete),
+        DriverFinishReceipt::WorkPending
+    );
+    assert_eq!(f.db().run(&run).unwrap().state, RunState::Runnable);
     f.db()
         .commit_execution(
             &run,
@@ -545,6 +577,12 @@ fn driver_tool_stop_uses_original_executor_evidence_not_a_terminal_business_resu
         )
         .unwrap();
     assert!(f.db().driver_tool_stopped(&call.id).unwrap());
+    assert_eq!(
+        f.finish(&selected, DriverTerminalOutcome::Complete),
+        DriverFinishReceipt::Committed {
+            state: RunState::Completed
+        }
+    );
     let original_operation = f.db().operation(&call.id).unwrap();
     f.reopen();
     assert!(f.db().driver_tool_stopped(&call.id).unwrap());
@@ -933,4 +971,238 @@ fn driver_activity_tracks_only_its_original_run_and_admitted_input_queue() {
     let pending = f.db().driver_activity(&run, epoch, &driver).unwrap();
     assert!(pending.cursor > selected.cursor);
     assert!(pending.input_pending);
+}
+
+#[test]
+fn driver_finish_observes_late_input_without_closing_and_commits_original_promotion() {
+    let mut f = Fixture::new();
+    let run = f.run.clone();
+    let driver = selection("a");
+    f.select(&driver);
+    let epoch = f.db().epoch();
+    f.db()
+        .commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::StateChanged {
+                state: RunState::Runnable,
+                waiting_on: None,
+            },
+        )
+        .unwrap();
+    let prepared = f
+        .db()
+        .prepare_driver_finish(DriverTerminalOutcome::Complete)
+        .unwrap()
+        .load()
+        .unwrap();
+    let late = f
+        .db()
+        .enqueue_input(&inputs::EnqueueInput {
+            key: "late-input".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: InputMode::Boundary,
+            input: json!("Arrived during finish body preparation"),
+            configuration: None,
+        })
+        .unwrap();
+    let before = f.db().run(&run).unwrap();
+    assert_eq!(
+        f.db()
+            .admit_driver_finish(&run, epoch, &driver, prepared)
+            .unwrap(),
+        DriverFinishReceipt::InputPending
+    );
+    assert_eq!(f.db().run(&run).unwrap(), before);
+    let head = f.db().head("main").unwrap();
+    let delivered = f.db().consume_inputs(&run, epoch, head.as_deref()).unwrap();
+    assert!(
+        !delivered.is_empty(),
+        "the same still-live driver can consume the original queued input"
+    );
+    assert_eq!(
+        f.db().queued_input(&late.input_id).unwrap().state,
+        InputState::Delivered
+    );
+    let next = f
+        .db()
+        .enqueue_input(&inputs::EnqueueInput {
+            key: "next-run".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: InputMode::NextRun,
+            input: json!("Next original run"),
+            configuration: None,
+        })
+        .unwrap();
+    let next_run = f.db().queued_input(&next.input_id).unwrap().run_id;
+    assert!(f.db().is_queued_run(&next_run).unwrap());
+    assert_eq!(
+        f.finish(&driver, DriverTerminalOutcome::Complete),
+        DriverFinishReceipt::Committed {
+            state: RunState::Completed
+        }
+    );
+    assert!(!f.db().is_queued_run(&next_run).unwrap());
+    let terminal = f.db().run(&run).unwrap();
+    let head = f.db().head("main").unwrap();
+    assert_eq!(
+        f.finish(&driver, DriverTerminalOutcome::Complete),
+        DriverFinishReceipt::Committed {
+            state: RunState::Completed
+        }
+    );
+    assert_eq!(f.db().run(&run).unwrap(), terminal);
+    assert_eq!(
+        f.db().head("main").unwrap(),
+        head,
+        "response loss must not promote or append twice"
+    );
+    f.db()
+        .record_driver_callback_failure(&run, epoch, &driver, "callback_transport_closed")
+        .unwrap();
+    assert_eq!(f.db().run(&run).unwrap(), terminal);
+    let diagnostic: String = f
+        .db()
+        .db
+        .query_row(
+            "SELECT data FROM events WHERE subject=?1 AND kind='driver.callback_failed'",
+            [&run],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&diagnostic).unwrap(),
+        json!({"code":"callback_transport_closed"})
+    );
+    assert!(
+        f.db()
+            .record_driver_callback_failure(&run, epoch, &selection("other"), "wrong_owner")
+            .is_err()
+    );
+    assert!(
+        f.db()
+            .record_driver_callback_failure(&run, epoch + 1, &driver, "wrong_epoch")
+            .is_err()
+    );
+}
+
+#[test]
+fn driver_finish_waits_for_real_prepared_and_dispatched_models_then_preserves_failure() {
+    let mut f = Fixture::new();
+    let run = f.run.clone();
+    let driver = selection("a");
+    f.select(&driver);
+    let epoch = f.db().epoch();
+    f.db()
+        .commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::StateChanged {
+                state: RunState::Runnable,
+                waiting_on: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        f.db()
+            .record_driver_callback_failure(&run, epoch, &driver, "premature")
+            .is_err()
+    );
+    let request_id = format!("driver:model:{}:{run}:original", run.len());
+    let snapshot = RequestSnapshot {
+        view: RequestView {
+            request_id: request_id.clone(),
+            run_id: run.clone(),
+            origin: RequestOrigin::Driver {
+                driver_id: driver.owner_key(),
+                operation_id: request_id.clone(),
+                input_identity: "original-input".into(),
+            },
+            binding: f.binding.clone(),
+            history: vec![],
+        },
+        serialized: json!({"model":"fixture"}).into(),
+    };
+    f.db()
+        .commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::RequestPrepared {
+                snapshot: Arc::new(snapshot),
+            },
+        )
+        .unwrap();
+    let failure = DriverTerminalOutcome::Fail {
+        error: ExecutionError::new("driver_failed", "Original algorithm failed"),
+    };
+    assert_eq!(
+        f.finish(&driver, failure.clone()),
+        DriverFinishReceipt::WorkPending
+    );
+    f.db()
+        .commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::ModelDispatched {
+                request_id: request_id.clone(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        f.finish(&driver, failure.clone()),
+        DriverFinishReceipt::WorkPending
+    );
+    f.db()
+        .commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::ModelFinished {
+                request_id,
+                outcome: ModelOutcome::Completed,
+                finish_reason: Some(FinishReason::Stop),
+                items: vec![],
+                interrupted_deltas: vec![],
+                usage: UsageReceipt::default(),
+                failure: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        f.finish(&driver, failure),
+        DriverFinishReceipt::Committed {
+            state: RunState::Failed
+        }
+    );
+    let terminal = f.db().run(&run).unwrap();
+    let original_failure: String = f
+        .db()
+        .db
+        .query_row(
+            "SELECT data FROM events WHERE subject=?1 AND kind='run.failed'",
+            [&run],
+            |row| row.get(0),
+        )
+        .unwrap();
+    f.db()
+        .record_driver_callback_failure(&run, epoch, &driver, "callback_result_mismatch")
+        .unwrap();
+    assert_eq!(
+        f.finish(&driver, DriverTerminalOutcome::Complete),
+        DriverFinishReceipt::Committed {
+            state: RunState::Failed
+        }
+    );
+    assert_eq!(f.db().run(&run).unwrap(), terminal);
+    let failures: Vec<String> = f
+        .db()
+        .db
+        .prepare("SELECT data FROM events WHERE subject=?1 AND kind='run.failed'")
+        .unwrap()
+        .query_map([&run], |row| row.get(0))
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap();
+    assert_eq!(failures, vec![original_failure]);
 }

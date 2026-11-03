@@ -107,6 +107,12 @@ export type DriverReceipt = {kind:'model';id:string;requestId:string;state:'prep
 
 export interface DriverRunInput {runId:string;epoch:number;mode:'start'|'resume';history:ModelConversationItem[];tools:LaunchTool[];models:Array<{capabilityId:string;status:'available'|'disabled'|'unconfigured'|'invalid'|'unavailable'}>;checkpoint:DriverCheckpoint|null;receipts:DriverReceipt[]}
 
+export type DriverTerminalOutcome = {kind:'complete'} | {kind:'fail';error:ExecutionError};
+
+export interface DriverFinishInput {outcome:DriverTerminalOutcome}
+
+export type DriverFinishReceipt = {kind:'committed';state:'completed'|'failed'} | {kind:'input_pending'} | {kind:'work_pending'};
+
 export type DriverRunOutcome = {kind:'complete'} | {kind:'pause';reason:string} | {kind:'fail';error:ExecutionError};
 
 export type DriverContextInput = Record<string,never>;
@@ -1704,7 +1710,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 77; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 78; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 

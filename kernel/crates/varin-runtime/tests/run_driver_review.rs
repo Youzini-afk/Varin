@@ -271,7 +271,18 @@ fn concurrent_models_interleave_actual_tool_and_drain_before_real_report() {
     let initial = f.context.prepare_custom().unwrap();
     let c = f.context.clone();
     let slow = f.request("slow", initial.history.clone());
-    let slow_worker = std::thread::spawn(move || c.model(slow));
+    let slow_worker = std::thread::spawn(move || {
+        c.model_owned(slow, || {
+            assert_eq!(
+                c.finish(DriverFinishInput {
+                    outcome: DriverTerminalOutcome::Complete
+                })
+                .unwrap(),
+                DriverFinishReceipt::WorkPending,
+                "credit transfer runs after the actual mutable primitive admission is held"
+            );
+        })
+    });
     assert_eq!(
         f.models.recv_timeout(Duration::from_secs(5)).unwrap(),
         "slow"
@@ -288,7 +299,19 @@ fn concurrent_models_interleave_actual_tool_and_drain_before_real_report() {
         name: "inspect".into(),
         arguments: json!({}),
     };
-    let receipt = f.context.tool(tool.clone()).unwrap();
+    let receipt = f
+        .context
+        .tool_owned(tool.clone(), || {
+            assert_eq!(
+                f.context
+                    .finish(DriverFinishInput {
+                        outcome: DriverTerminalOutcome::Complete
+                    })
+                    .unwrap(),
+                DriverFinishReceipt::WorkPending
+            );
+        })
+        .unwrap();
     assert!(receipt.executor_stopped);
     let actual = f.tool_calls.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(matches!(actual.origin, ToolOrigin::Driver { .. }));
@@ -303,17 +326,38 @@ fn concurrent_models_interleave_actual_tool_and_drain_before_real_report() {
             text: "joined result".into(),
         })
         .unwrap();
-    f.context.close_admission();
-    let c = f.context.clone();
-    let (done_tx, done) = mpsc::channel();
-    let finisher = std::thread::spawn(move || {
-        done_tx
-            .send(c.finish_custom(Ok(DriverRunOutcome::Complete)))
-            .unwrap();
-    });
+    assert_eq!(
+        f.context
+            .finish(DriverFinishInput {
+                outcome: DriverTerminalOutcome::Complete
+            })
+            .unwrap(),
+        DriverFinishReceipt::WorkPending
+    );
     assert!(
-        matches!(done.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "callback return must not settle an active original model"
+        f.context
+            .receipt(DriverReceiptInput {
+                id: "fast".into(),
+                kind: varin_runtime::catalog::driver::DriverWorkKind::Model
+            })
+            .unwrap()
+            .is_some(),
+        "a rejected finish leaves the original scope open"
+    );
+    release.send(()).unwrap();
+    assert_eq!(
+        slow_worker.join().unwrap().unwrap().outcome,
+        ModelOutcome::Completed
+    );
+    assert_eq!(
+        f.context
+            .finish(DriverFinishInput {
+                outcome: DriverTerminalOutcome::Complete
+            })
+            .unwrap(),
+        DriverFinishReceipt::Committed {
+            state: RunState::Completed
+        }
     );
     assert!(f
         .context
@@ -322,13 +366,10 @@ fn concurrent_models_interleave_actual_tool_and_drain_before_real_report() {
             kind: varin_runtime::catalog::driver::DriverWorkKind::Model
         })
         .is_err());
-    release.send(()).unwrap();
-    assert_eq!(
-        slow_worker.join().unwrap().unwrap().outcome,
-        ModelOutcome::Completed
-    );
-    let report = done.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
-    finisher.join().unwrap();
+    let report = f
+        .context
+        .finish_custom(Ok(DriverRunOutcome::Complete))
+        .unwrap();
     assert_eq!(report.state, RunState::Completed);
     assert_eq!(report.model_steps, 2);
     assert!(report
@@ -590,6 +631,216 @@ fn cancellation_and_author_failure_have_one_actual_final_state() {
         report.state
     );
     assert_eq!(report.failure.unwrap().code, "author_failure");
+}
+
+struct FinishBoundaryDriver {
+    refreshed: mpsc::Sender<Arc<DriverContext>>,
+    continue_after_input: Mutex<mpsc::Receiver<()>>,
+    committed: mpsc::Sender<()>,
+    return_callback: Mutex<mpsc::Receiver<()>>,
+    return_failure: bool,
+}
+impl RunDriver for FinishBoundaryDriver {
+    fn selection(&self) -> DriverSelection {
+        selection(DriverRecovery::None)
+    }
+    fn run(&self, context: Arc<DriverContext>) -> Result<ExecutionReport, ExecutionError> {
+        context.prepare_custom()?;
+        context.context(DriverContextInput {})?;
+        self.refreshed.send(context.clone()).unwrap();
+        self.continue_after_input.lock().unwrap().recv().unwrap();
+        assert_eq!(
+            context.finish(DriverFinishInput {
+                outcome: DriverTerminalOutcome::Complete
+            })?,
+            DriverFinishReceipt::InputPending
+        );
+        assert!(
+            context
+                .wait(DriverWaitInput {
+                    after: None,
+                    work: vec![]
+                })?
+                .input_pending,
+            "rejected finish must not close observers or the original algorithm"
+        );
+        let current = context.context(DriverContextInput {})?;
+        assert!(current.history.iter().any(|item| matches!(&item.content, Content::Text { text } if text.contains("late original instruction"))));
+        context.deliver(DriverDeliveryInput {
+            id: "replanned".into(),
+            text: "Handled late original instruction in this callback".into(),
+        })?;
+        assert_eq!(
+            context.finish(DriverFinishInput {
+                outcome: DriverTerminalOutcome::Complete
+            })?,
+            DriverFinishReceipt::Committed {
+                state: RunState::Completed
+            }
+        );
+        self.committed.send(()).unwrap();
+        self.return_callback.lock().unwrap().recv().unwrap();
+        let failure = ExecutionError::new(
+            "late_callback_failure",
+            "cleanup failed after completion was already committed",
+        );
+        context.finish_custom(if self.return_failure {
+            Ok(DriverRunOutcome::Fail { error: failure })
+        } else {
+            Err(failure)
+        })
+    }
+}
+
+#[test]
+fn terminal_admission_handles_late_input_in_original_callback_and_preserves_committed_result() {
+    for return_failure in [false, true] {
+        let f = Fixture::new(DriverRecovery::None, HashMap::new());
+        let placeholder = std::env::temp_dir().join(format!(
+            "varin-driver-finish-placeholder-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let catalog = std::mem::replace(
+            &mut *f.context.catalog.lock().unwrap(),
+            Catalog::open(&placeholder).unwrap(),
+        );
+        let supervisor = varin_runtime::supervisor::RunSupervisor::new(catalog);
+        let (refreshed, ready) = mpsc::channel();
+        let (continue_after_input, input_gate) = mpsc::channel();
+        let (committed, completed) = mpsc::channel();
+        let (return_callback, callback_gate) = mpsc::channel();
+        let mut start = f.context.start.clone();
+        start.driver = Arc::new(FinishBoundaryDriver {
+            refreshed,
+            continue_after_input: Mutex::new(input_gate),
+            committed,
+            return_callback: Mutex::new(callback_gate),
+            return_failure,
+        });
+        let handle = supervisor.start(&f.context.run_id, start).unwrap();
+        let original = ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        let db = supervisor.catalog();
+        let late = db
+            .lock()
+            .unwrap()
+            .enqueue_input(&EnqueueInput {
+                key: "late".into(),
+                thread_id: "thread".into(),
+                branch_id: "main".into(),
+                mode: InputMode::Boundary,
+                input: json!({"text":"late original instruction"}),
+                configuration: None,
+            })
+            .unwrap();
+        assert_eq!(late.run_id, original.run_id);
+        continue_after_input.send(()).unwrap();
+        completed.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            handle.try_result().unwrap().is_none(),
+            "terminal business state is not actual callback exit"
+        );
+        assert!(!original.cancel.is_cancelled());
+        assert_eq!(
+            db.lock().unwrap().run(&original.run_id).unwrap().state,
+            RunState::Completed
+        );
+        assert_eq!(
+            db.lock()
+                .unwrap()
+                .queued_input(&late.input_id)
+                .unwrap()
+                .state,
+            InputState::Delivered
+        );
+        assert!(
+            original.context(DriverContextInput {}).is_err(),
+            "committed completion closes new primitive admission"
+        );
+        assert_eq!(
+            original
+                .finish(DriverFinishInput {
+                    outcome: DriverTerminalOutcome::Complete
+                })
+                .unwrap(),
+            DriverFinishReceipt::Committed {
+                state: RunState::Completed
+            }
+        );
+        let later = db
+            .lock()
+            .unwrap()
+            .enqueue_input(&EnqueueInput {
+                key: "after-commit".into(),
+                thread_id: "thread".into(),
+                branch_id: "main".into(),
+                mode: InputMode::Boundary,
+                input: json!({"text":"new request after completion"}),
+                configuration: None,
+            })
+            .unwrap();
+        assert_ne!(later.run_id, original.run_id, "input after the committed boundary uses normal native next-Run admission, never replays the old callback");
+        return_callback.send(()).unwrap();
+        let report = handle.wait().unwrap();
+        assert_eq!(report.state, RunState::Completed);
+        assert!(
+            report.failure.is_none(),
+            "late callback errors cannot rewrite the original committed outcome"
+        );
+        assert!(supervisor
+            .execution_failure(&original.run_id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            db.lock().unwrap().run(&original.run_id).unwrap().state,
+            RunState::Completed
+        );
+        assert!(!report.history.iter().any(|item| matches!(&item.content, Content::Text { text } if text.contains("new request after completion"))));
+        drop(original);
+        drop(db);
+        drop(supervisor);
+        drop(f);
+        std::fs::remove_dir_all(placeholder).unwrap();
+    }
+}
+
+#[test]
+fn callback_return_drains_unawaited_work_without_implicitly_committing_completion() {
+    let (release, gate) = mpsc::channel();
+    let f = Fixture::new(DriverRecovery::None, HashMap::from([("held".into(), gate)]));
+    let input = f.context.prepare_custom().unwrap();
+    let request = f.request("held", input.history);
+    let context = f.context.clone();
+    let model = std::thread::spawn(move || context.model(request));
+    f.models.recv_timeout(Duration::from_secs(5)).unwrap();
+    let context = f.context.clone();
+    let (finished, receive) = mpsc::channel();
+    let callback = std::thread::spawn(move || {
+        finished
+            .send(context.finish_custom(Ok(DriverRunOutcome::Complete)))
+            .unwrap()
+    });
+    assert!(matches!(receive.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    release.send(()).unwrap();
+    model.join().unwrap().unwrap();
+    assert_eq!(
+        receive
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap_err()
+            .code,
+        "driver_finish_required"
+    );
+    callback.join().unwrap();
+    assert_eq!(
+        f.context
+            .catalog
+            .lock()
+            .unwrap()
+            .run(&f.context.run_id)
+            .unwrap()
+            .state,
+        RunState::Runnable
+    );
 }
 
 /// A real process exit after both dispatch owners commit, not a fabricated unknown row.

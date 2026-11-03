@@ -8,6 +8,8 @@ import { ApplicationExtensionRuntime, HostBindingRestoreError, HostCompositionRe
 import { VARIN_AGENT_DRIVER_CAPABILITY, VARIN_BUILTIN_AGENT_DRIVER_PROVIDER_KEY } from '@varin/extension-contract';
 import { AgentDriverBridge, createAgentDriver, type AgentDriverLease, type PrivateDriverResponse } from './agent-driver.js';
 import { runDriverCall } from './run-driver-invocation.js';
+import { AgentRuntimeClient } from './agent-runtime-client.js';
+import type { KernelClient } from './kernel-client.js';
 import { leafHostComposition } from './host-composition.test-helper.js';
 import type { DriverRunInput } from './protocol.generated.js';
 
@@ -152,4 +154,39 @@ test('a new kernel epoch cannot resume the same Run over a still-running origina
   await f.releasedDone;
   assert.equal(f.released(), true); assert.equal(responses.length, 0, 'an old epoch never sends completion to the new kernel');
   bridge.register('run-a', next.lease); bridge.close(); assert.equal(next.released(), true);
+});
+
+
+test('terminal inspection and cancel acknowledgement retain original resources while the real driver callback is still active', async () => {
+  const f = heldLease(), returned = deferred<void>(), released: string[] = [];
+  const bridge = new AgentDriverBridge(() => 'epoch-a', async response => {
+    if (response.kind === 'agent-driver-response') returned.resolve();
+  }, async () => {}, () => {});
+  bridge.register('run-a', f.lease); bridge.consume(frame(f.lease.binding.reference)); await f.entered.promise;
+  const kernel = {
+    subscribeExit() {}, onToolReleased() {},
+    async agentRuntimeRequest(method: string) {
+      assert.ok(['runtime.run.inspect', 'runtime.run.cancel'].includes(method));
+      return { id: 'run-a', state: 'completed' };
+    },
+    isRunDriverInvoking: (id: string) => bridge.isInvoking(id),
+    cancelRunPreparation() {},
+    unregisterCredentialOwner() { released.push('credentials'); },
+    unregisterToolOwners() { released.push('tools'); },
+    releaseRunPolicyOwners() { released.push('policy'); },
+    releaseRunDriverOwner(id: string) { released.push('driver'); bridge.release(id); },
+  } as unknown as KernelClient;
+  const client = new AgentRuntimeClient(kernel);
+  assert.equal((await client.run('run-a')).state, 'completed');
+  assert.equal((await client.cancelRun('run-a')).state, 'completed');
+  assert.deepEqual(released, []); assert.equal(f.released(), false);
+  assert.ok(bridge.binding('run-a'), 'polling cannot retire the still-live original driver');
+  f.exit.resolve(); await returned.promise;
+  // The original native worker releases only after observing the completed callback response.
+  bridge.consume({ v: 1, kind: 'agent-driver-release', kernelEpoch: 'epoch-a', runId: 'run-a' });
+  await f.releasedDone;
+  assert.equal(bridge.isInvoking('run-a'), false);
+  await client.run('run-a');
+  assert.deepEqual(released, ['credentials', 'tools', 'policy', 'driver']);
+  assert.equal(f.released(), true);
 });

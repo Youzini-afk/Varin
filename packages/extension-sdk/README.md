@@ -292,3 +292,18 @@ mismatched recovery instead of calling `run` again. Current selection changes do
 Runs. Trusted Host code is not an OS sandbox, and a driver capability grant is not unrestricted
 tool approval. See the [parallel driver](../../examples/extensions/parallel-driver/README.md)
 for an executable multi-branch author example.
+
+### Atomic driver completion
+
+Before returning `complete` or `fail`, call `context.driver.finish({ outcome })` while the original
+callback is still live. `committed` is the original Catalog terminal transaction, not a preflight.
+`input_pending` and `work_pending` leave the same callback able to consume `context()` or await
+`wait()` and choose its next action. Authors must first join the primitive promises they launched;
+`work_pending` does not mean any next event proves settlement, especially for unknown external effects.
+When waiting on durable work, read the original baseline before the finish attempt so events cannot
+be lost between refusal and subscription. A final context refresh alone cannot prevent new input from
+arriving afterward. The SDK never reruns the algorithm automatically to hide this conflict.
+
+After `committed`, no new primitive calls are admitted. Return from the callback to let its actual
+work drain; logical completion does not authorize early release of the original callback, provider,
+credentials or tool owners. A later callback error cannot rewrite the committed execution result.

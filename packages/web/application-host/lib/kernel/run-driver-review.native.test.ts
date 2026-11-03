@@ -20,7 +20,7 @@ import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from '.
 import { ThreadAdapter } from './thread-adapter.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
 import { TransportFixture } from './tests/transport-fixture.js';
-import type { RuntimeEvent, AgentRuntimeStreamEvent } from './protocol.generated.js';
+import { KERNEL_REQUEST_WINDOW, type RuntimeEvent, type AgentRuntimeStreamEvent } from './protocol.generated.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const { build } = createRequire(path.join(repository, 'packages/extension-builtins/package.json'))('esbuild');
@@ -102,9 +102,16 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
 it('installed public driver overlaps real model requests with native file work and consumes steering before synthesis', async () => {
   const proposalEntered = deferred<void>(), challengeEntered = deferred<void>(), releaseChallenge = deferred<void>();
   let challengeFinished = false;
+  const toolSettled = deferred<string>();
+  void toolSettled.promise.catch(() => {});
   const f = await fixture(async (body, response) => {
     const instructions = JSON.stringify(body);
     if (instructions.includes('Independently propose')) {
+      const declared = Array.isArray(body.tools) && body.tools.some(tool => (tool as { name?: string }).name === 'file_read');
+      if (!declared) {
+        const error = new Error('The actual driver model request did not declare native file_read');
+        toolSettled.reject(error); releaseChallenge.resolve(); throw error;
+      }
       proposalEntered.resolve(); await challengeEntered.promise;
       complete(response, [{ id: 'proposal-call-item', type: 'function_call', call_id: 'read-evidence', name: 'file_read', arguments: JSON.stringify({ path: 'fact.txt' }) }]);
     } else if (instructions.includes('Independently challenge')) {
@@ -127,7 +134,7 @@ it('installed public driver overlaps real model requests with native file work a
   const identity = await f.adapter.create('parallel-driver-native');
   const source = await f.adapter.prepareSource({ ...identity, key: 'source', resourceOwner: { kind: 'local' },
     workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
-  const events: RuntimeEvent[] = [], toolSettled = deferred<string>();
+  const events: RuntimeEvent[] = [];
   let cursor = 0, reading = Promise.resolve();
   const driverTools = new Set<string>();
   const readEvents = async () => {
@@ -203,7 +210,49 @@ it('caller abort after native start admission retains the original driver and cr
   probe.release(); await f.kernel.drainRunPreparations(submitted.run_id);
 });
 
-it('installed driver waits on the original Inbox and closes abandoned observer work before final drain', async () => {
+it('late synthesis input stays in the original callback and committed finish does not retire a held original ACK', async () => {
+  const probe = new TransportFixture(), finishIds = new Set<string>();
+  const synthesisEntered = deferred<void>(), releaseSynthesis = deferred<void>(), finishHeld = deferred<void>();
+  probe.onSend = frame => { if (frame.kind === 'request' && frame.method === 'runtime.driver.finish') finishIds.add(String(frame.id)); };
+  probe.hold = frame => {
+    const result = frame.result as { kind?: string } | undefined;
+    if (finishIds.has(String(frame.id)) && frame.ok === true && result?.kind === 'committed') { finishHeld.resolve(); return true; }
+    return false;
+  };
+  let syntheses = 0;
+  const f = await fixture(async (body, response) => {
+    const request = JSON.stringify(body);
+    if (!request.includes('Synthesize an answer')) { complete(response, [message('evidence', 'ORIGINAL_BRANCH_EVIDENCE')]); return; }
+    syntheses++;
+    if (syntheses === 1) {
+      synthesisEntered.resolve(); await releaseSynthesis.promise;
+      complete(response, [message('first', 'ANSWER_BEFORE_LATE_STEERING')]);
+    } else {
+      expect(request).toContain('LATE_STEERING_DURING_SYNTHESIS');
+      complete(response, [message('revised', 'SAME_CALLBACK_REVISED_ANSWER')]);
+    }
+  }, probe);
+  cleanups.push(async () => { releaseSynthesis.resolve(); probe.release(); });
+  const identity = await f.adapter.create('late-driver-input');
+  const submitted = await f.adapter.submit({ ...identity, key: 'initial', expectedHead: null, text: 'Discuss the evidence', model });
+  await synthesisEntered.promise;
+  const late = await f.adapter.enqueue({ ...identity, key: 'late', mode: 'boundary', text: 'LATE_STEERING_DURING_SYNTHESIS' });
+  expect(late.run_id).toBe(submitted.run_id); releaseSynthesis.resolve();
+  await finishHeld.promise;
+  expect((await f.runtime.run(submitted.run_id)).state).toBe('completed');
+  expect(f.kernel.isRunDriverInvoking(submitted.run_id)).toBe(true);
+  expect(f.kernel.driverBinding(submitted.run_id)).toBeDefined();
+  expect(f.requests).toHaveLength(4); expect(syntheses).toBe(2);
+  const history = JSON.stringify((await f.adapter.snapshot(identity)).history);
+  expect(history).toContain('LATE_STEERING_DURING_SYNTHESIS');
+  expect(history).toContain('SAME_CALLBACK_REVISED_ANSWER');
+  expect(f.launchErrors).toEqual([]);
+  probe.release();
+  await expect.poll(() => f.kernel.isRunDriverInvoking(submitted.run_id)).toBe(false);
+  await expect.poll(() => f.kernel.driverBinding(submitted.run_id)).toBeUndefined();
+});
+
+it('installed driver waits on the original Inbox and finishes with a protocol-window of abandoned observers', async () => {
   const f = await fixture((_body, response) => { complete(response, [message('unexpected', 'unexpected')]); }, undefined, `
     import { defineHostExtension, provideAgentDriver } from '@varin/extension-sdk';
     export default defineHostExtension(host => provideAgentDriver(host, {
@@ -217,8 +266,12 @@ it('installed driver waits on the original Inbox and closes abandoned observer w
         if (!JSON.stringify(fresh.history).includes('ORIGINAL_INBOX_INPUT')) throw new Error('Missing original input');
         await driver.deliver({ id: 'answer', text: 'ORIGINAL_INBOX_CONSUMED' });
         const baseline = await driver.wait({ after: null, work: [] });
-        void driver.wait({ after: baseline.cursor, work: [] }).catch(() => {});
+        for (let i = 0; i < ${KERNEL_REQUEST_WINDOW}; i++) {
+          void driver.wait({ after: baseline.cursor, work: [] }).catch(() => {});
+        }
         await driver.receipt({ kind: 'delivery', id: 'answer' });
+        const finished = await driver.finish({ outcome: { kind: 'complete' } });
+        if (finished.kind !== 'committed') throw new Error('Original completion was not admitted');
         return { kind: 'complete' };
       }
     }));

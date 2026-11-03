@@ -31,7 +31,7 @@ export const VARIN_AGENT_DRIVER_CONTRACT = {
   id: VARIN_AGENT_DRIVER_SERVICE_ID, version: VARIN_AGENT_DRIVER_VERSION,
   methods: ['describe', 'run'], participation: 'execution',
   capability: VARIN_AGENT_DRIVER_CAPABILITY,
-  capabilityMethods: ['model', 'tool', 'context', 'wait', 'cancel', 'checkpoint', 'deliver', 'receipt'],
+  capabilityMethods: ['model', 'tool', 'context', 'wait', 'cancel', 'checkpoint', 'deliver', 'receipt', 'finish'],
   invocation: 'original_run_epoch_and_instance',
   completion: 'algorithm_return_is_not_executor_stop',
 } as const;

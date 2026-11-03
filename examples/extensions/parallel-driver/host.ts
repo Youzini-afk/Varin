@@ -20,7 +20,11 @@ function usable(receipt: DriverModelReceipt): void {
 export async function runParallelDriver(input: Readonly<DriverRunInput>, context: VarinAgentDriverContext,
   declaredConfiguration: JsonValue): Promise<DriverRunOutcome> {
   const config = declaredConfiguration as typeof configuration;
-  const tools = input.tools.filter(tool => tool.metadata?.operation === 'read' && tool.metadata.completion === 'result');
+  // Native file helpers have stable public semantics but do not carry registered-service
+  // metadata. Select them explicitly; missing metadata never makes an arbitrary tool safe.
+  const nativeReadTools = new Set(['file_read', 'file_list', 'file_search']);
+  const tools = input.tools.filter(tool => nativeReadTools.has(tool.name)
+    || tool.metadata?.operation === 'read' && tool.metadata.completion === 'result');
   const names = tools.map(tool => tool.name);
   const branch = async (name: 'proposal' | 'challenge'): Promise<ModelConversationItem> => {
     const response = await context.driver.model({ id: name, capabilityId: null,
@@ -41,16 +45,27 @@ export async function runParallelDriver(input: Readonly<DriverRunInput>, context
   };
   const branches = await Promise.all([branch('proposal'), branch('challenge')]);
   context.signal.throwIfAborted();
-  // The algorithm chooses this re-planning boundary. Native consumes its real Inbox and
-  // compiles current context; this is not a private queue or a wait for future messages.
-  const current = await context.driver.context();
-  const synthesis = await context.driver.model({ id: 'synthesis', capabilityId: null,
-    history: [...current.history, ...branches], instructions: [config.synthesis], tools: [] });
-  usable(synthesis);
-  const text = synthesis.items.flatMap(item => item.content.kind === 'text' ? [item.content.text] : []).join('\n');
-  if (!text.trim()) throw new Error('Synthesis did not produce a deliverable answer');
-  await context.driver.deliver({ id: 'answer', text });
-  return { kind: 'complete' };
+  // Reuse the independently collected evidence if steering arrives during synthesis.
+  // Only the synthesis is newly requested; old work keeps its original stable IDs/receipts.
+  for (let revision = 0; ; revision++) {
+    const current = await context.driver.context();
+    const suffix = revision ? `:${revision}` : '';
+    const synthesis = await context.driver.model({ id: `synthesis${suffix}`, capabilityId: null,
+      history: [...current.history, ...branches], instructions: [config.synthesis], tools: [] });
+    usable(synthesis);
+    const text = synthesis.items.flatMap(item => item.content.kind === 'text' ? [item.content.text] : []).join('\n');
+    if (!text.trim()) throw new Error('Synthesis did not produce a deliverable answer');
+    await context.driver.deliver({ id: `answer${suffix}`, text });
+    for (;;) {
+      // Subscribe/read the baseline before the terminal attempt, so a work completion
+      // between refusal and wait cannot be missed. This does not consume new input.
+      const observed = await context.driver.wait({ after: null, work: [] });
+      const finished = await context.driver.finish({ outcome: { kind: 'complete' } });
+      if (finished.kind === 'committed') return { kind: 'complete' };
+      if (finished.kind === 'input_pending') break;
+      await context.driver.wait({ after: observed.cursor, work: [] });
+    }
+  }
 }
 
 export const parallelDriver: VarinAgentDriverImplementation = {

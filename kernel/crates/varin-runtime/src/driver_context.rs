@@ -4,13 +4,19 @@ use crate::catalog::driver::DriverWorkKind;
 use crate::{ModelStepState, RunState};
 use serde::de::DeserializeOwned;
 
-struct Admission<'a>(&'a DriverContext);
+struct Admission<'a> {
+    context: &'a DriverContext,
+    observer: bool,
+}
 impl Drop for Admission<'_> {
     fn drop(&mut self) {
-        let mut state = self.0.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut state = self.context.state.lock().unwrap_or_else(|p| p.into_inner());
         state.active -= 1;
+        if self.observer {
+            state.observers -= 1;
+        }
         if state.active == 0 {
-            self.0.drained.notify_all();
+            self.context.drained.notify_all();
         }
     }
 }
@@ -31,6 +37,9 @@ impl DriverContext {
         self.start.driver.selection()
     }
     fn admit(&self) -> Result<Admission<'_>, ExecutionError> {
+        self.admit_kind(false)
+    }
+    fn admit_kind(&self, observer: bool) -> Result<Admission<'_>, ExecutionError> {
         let mut state = self.state.lock().map_err(error)?;
         if !state.accepting || self.cancel.is_cancelled() {
             return Err(unavailable(
@@ -38,7 +47,13 @@ impl DriverContext {
             ));
         }
         state.active += 1;
-        Ok(Admission(self))
+        if observer {
+            state.observers += 1;
+        }
+        Ok(Admission {
+            context: self,
+            observer,
+        })
     }
     fn input(&self) -> Result<ExecutionInput, ExecutionError> {
         self.state
@@ -49,7 +64,8 @@ impl DriverContext {
             .ok_or_else(|| unavailable("driver input has not been admitted"))
     }
     /// A returned algorithm Promise is not proof that its accepted work stopped. Closing
-    /// admission and joining every actual primitive happens before the Run can settle.
+    /// admission and joining every actual primitive happens before the invocation can
+    /// be released. A committed business outcome is not proof of callback exit.
     pub fn close_admission(&self) {
         self.state
             .lock()
@@ -216,9 +232,11 @@ impl DriverContext {
         kind: &str,
         id: &str,
         input: Value,
+        admitted: impl FnOnce(),
         operation: impl FnOnce() -> Result<T, ExecutionError>,
     ) -> Result<T, ExecutionError> {
         let _admission = self.admit()?;
+        admitted();
         if id.is_empty() {
             return Err(ExecutionError::new(
                 "driver_operation_id_required",
@@ -267,10 +285,20 @@ impl DriverContext {
             .map_err(error)
     }
     pub fn model(&self, request: DriverModelInput) -> Result<DriverModelReceipt, ExecutionError> {
+        self.model_owned(request, || {})
+    }
+    /// Transport admission may release its body credit; this actual invocation and
+    /// its effect/receipt ownership remain retained until the method returns.
+    pub fn model_owned(
+        &self,
+        request: DriverModelInput,
+        admitted: impl FnOnce(),
+    ) -> Result<DriverModelReceipt, ExecutionError> {
         self.once(
             "model",
             &request.id,
             serde_json::to_value(&request).map_err(error)?,
+            admitted,
             || self.execute_model(&request),
         )
     }
@@ -508,10 +536,18 @@ impl DriverContext {
         })
     }
     pub fn tool(&self, request: DriverToolInput) -> Result<DriverToolReceipt, ExecutionError> {
+        self.tool_owned(request, || {})
+    }
+    pub fn tool_owned(
+        &self,
+        request: DriverToolInput,
+        admitted: impl FnOnce(),
+    ) -> Result<DriverToolReceipt, ExecutionError> {
         self.once(
             "tool",
             &request.id,
             serde_json::to_value(&request).map_err(error)?,
+            admitted,
             || self.execute_tool(&request),
         )
     }
@@ -744,7 +780,15 @@ impl DriverContext {
     /// Notifications are hints from the original Catalog event owner. Subscribe before
     /// reading the committed scoped cursor, and re-read after each coalesced wake.
     pub fn wait(&self, request: DriverWaitInput) -> Result<DriverWaitReceipt, ExecutionError> {
-        let _admission = self.admit()?;
+        self.wait_owned(request, || {})
+    }
+    pub fn wait_owned(
+        &self,
+        request: DriverWaitInput,
+        admitted: impl FnOnce(),
+    ) -> Result<DriverWaitReceipt, ExecutionError> {
+        let _admission = self.admit_kind(true)?;
+        admitted();
         let (send, receive) = std::sync::mpsc::sync_channel(1);
         let _subscription = self
             .catalog
@@ -989,18 +1033,111 @@ impl DriverContext {
             }
         }
     }
+    /// Commit the original terminal boundary while the algorithm can still handle a
+    /// conflict. No other mutable primitive may race this boundary; observer waits
+    /// are cancelled only after the actual terminal transaction commits.
+    pub fn finish(
+        &self,
+        request: DriverFinishInput,
+    ) -> Result<DriverFinishReceipt, ExecutionError> {
+        {
+            let state = self.state.lock().map_err(error)?;
+            if let Some((original, committed_state)) = &state.finished {
+                if original != &request.outcome {
+                    return Err(ExecutionError::new(
+                        "driver_finish_conflict",
+                        "the original terminal outcome is already committed",
+                    ));
+                }
+                return Ok(DriverFinishReceipt::Committed {
+                    state: *committed_state,
+                });
+            }
+        }
+        let _admission = self.admit()?;
+        let prepared = self
+            .catalog
+            .lock()
+            .map_err(error)?
+            .prepare_driver_finish(request.outcome.clone())
+            .map_err(error)?;
+        let prepared = prepared.load().map_err(error)?;
+        let mut state = self.state.lock().map_err(error)?;
+        if !state.accepting || self.cancel.is_cancelled() {
+            return Err(unavailable(
+                "original driver invocation is closed or cancelled",
+            ));
+        }
+        if state.active != state.observers + 1 {
+            return Ok(DriverFinishReceipt::WorkPending);
+        }
+        let receipt = self
+            .catalog
+            .lock()
+            .map_err(error)?
+            .admit_driver_finish(&self.run_id, self.epoch, &self.selection(), prepared)
+            .map_err(error)?;
+        if let DriverFinishReceipt::Committed {
+            state: committed_state,
+        } = receipt
+        {
+            state.finished = Some((request.outcome, committed_state));
+            state.accepting = false;
+            drop(state);
+            self.observation_stop.cancel();
+        }
+        Ok(receipt)
+    }
     pub fn finish_custom(
         &self,
         result: Result<DriverRunOutcome, ExecutionError>,
     ) -> Result<ExecutionReport, ExecutionError> {
         self.close_and_drain();
+        let committed = {
+            let mut owner = self.catalog.lock().map_err(error)?;
+            let run = owner.run(&self.run_id).map_err(error)?;
+            if run.state.terminal() {
+                let code = match &result {
+                    Err(failure) => Some(failure.code.as_str()),
+                    Ok(DriverRunOutcome::Fail { .. }) if run.state != RunState::Failed => {
+                        Some("driver_outcome_after_commit")
+                    }
+                    Ok(DriverRunOutcome::Pause { .. }) => Some("driver_outcome_after_commit"),
+                    _ => None,
+                };
+                if let Some(code) = code {
+                    owner
+                        .record_driver_callback_failure(
+                            &self.run_id,
+                            self.epoch,
+                            &self.selection(),
+                            code,
+                        )
+                        .map_err(error)?;
+                }
+                let failure = owner
+                    .run_failure(&self.run_id)
+                    .map_err(error)?
+                    .map(|failure| ExecutionError {
+                        code: failure.code,
+                        message: failure.message,
+                        tool_name: failure.tool_name,
+                        details: None,
+                    });
+                Some((run.state, failure, run.waiting_on))
+            } else {
+                None
+            }
+        };
+        if let Some((state, failure, waiting_on)) = committed {
+            return self.final_report(state, failure, waiting_on);
+        }
         let result = match result {
             Err(_) | Ok(DriverRunOutcome::Pause { .. }) if self.cancel.is_cancelled() => {
                 DriverRunOutcome::Complete
             }
             other => other?,
         };
-        let binding = self.input()?.binding;
         let suspended = matches!(
             self.catalog.stop_reason(&self.run_id, self.epoch)?,
             crate::catalog::bot::RunStopReason::BotSuspension(_)
@@ -1028,6 +1165,9 @@ impl DriverContext {
             } else {
                 RunState::Completed
             };
+            if state != RunState::Cancelled {
+                return Err(ExecutionError::new("driver_finish_required", "finish must commit the terminal boundary while the original driver callback is still running"));
+            }
             {
                 let owner = self.catalog.lock().map_err(error)?;
                 if state == RunState::Completed
@@ -1083,6 +1223,15 @@ impl DriverContext {
             )?;
             (state, failure, None)
         };
+        self.final_report(state, failure, waiting_on)
+    }
+    fn final_report(
+        &self,
+        state: RunState,
+        failure: Option<ExecutionError>,
+        waiting_on: Option<String>,
+    ) -> Result<ExecutionReport, ExecutionError> {
+        let binding = self.input()?.binding;
         let read = self
             .catalog
             .lock()

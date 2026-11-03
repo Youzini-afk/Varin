@@ -2002,7 +2002,9 @@ export class AgentRuntimeClient {
       Run,
       'runtime.run.inspect'
     >('runtime.run.inspect', { runId }, signal);
-    if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+    // Terminal admission is not callback stop. The original run_assembly exit sends
+    // actual releases after a live driver callback and its accepted RPCs have drained.
+    if (['completed', 'failed', 'cancelled'].includes(run.state) && !this.kernel.isRunDriverInvoking(runId)) {
       this.closePolicyObservation(runId);
       this.kernel.cancelRunPreparation(runId);
       this.kernel.unregisterCredentialOwner(runId);
@@ -2036,7 +2038,9 @@ export class AgentRuntimeClient {
       RunCancellationReceipt,
       'runtime.run.cancel'
     >('runtime.run.cancel', { runId }, signal);
-    if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+    // Terminal admission is not callback stop. The original run_assembly exit sends
+    // actual releases after a live driver callback and its accepted RPCs have drained.
+    if (['completed', 'failed', 'cancelled'].includes(run.state) && !this.kernel.isRunDriverInvoking(runId)) {
       this.closePolicyObservation(runId);
       this.kernel.cancelRunPreparation(runId);
       this.kernel.unregisterCredentialOwner(runId);

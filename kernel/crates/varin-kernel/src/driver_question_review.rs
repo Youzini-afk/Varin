@@ -83,6 +83,14 @@ impl RunDriver for AskingDriver {
             id: "answer".into(),
             text: "Same original loop used answer B".into(),
         })?;
+        assert_eq!(
+            context.finish(DriverFinishInput {
+                outcome: DriverTerminalOutcome::Complete
+            })?,
+            DriverFinishReceipt::Committed {
+                state: RunState::Completed
+            }
+        );
         context.finish_custom(Ok(DriverRunOutcome::Complete))
     }
 }

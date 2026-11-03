@@ -76,7 +76,7 @@ function fixture() {
       default: throw new Error(`Unexpected RPC: ${method}`);
     }
   });
-  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, agentRuntimeRequest: requests, issueGrant, retireGrant, revokeGrant } as unknown as KernelClient, undefined, undefined, undefined, validateLive);
+  const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; }, agentRuntimeRequest: requests, issueGrant, retireGrant, revokeGrant } as unknown as KernelClient, undefined, undefined, undefined, validateLive);
   const models = { resolveModel: vi.fn(), rebindModel: vi.fn() };
   const adapter = new ThreadAdapter(runtime, models, vi.fn(), vi.fn());
   const routes = new Map<string, RequestHandler[]>();

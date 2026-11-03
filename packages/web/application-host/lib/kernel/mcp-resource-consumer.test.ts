@@ -75,7 +75,7 @@ function routeFixture() {
     }
   });
   const runtime = new AgentRuntimeClient({ subscribeExit: () => () => {}, onToolReleased: () => () => {},
-    cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {},
+    cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
     agentRuntimeRequest: requests } as unknown as KernelClient);
   const models = { resolveModel: vi.fn(), rebindModel: vi.fn() };
   const adapter = new ThreadAdapter(runtime, models, vi.fn(), vi.fn());
@@ -259,7 +259,7 @@ async function sourceReleaseFixture() {
       expect(input.handoffOperationId).toBe('handoff:original'); return { grantId: 'grant:release-original' };
     }),
     scoped: () => ({ unpinBranch: unpin }), revokeGrant: vi.fn(async () => {}), retireRunGrants: retire,
-    releaseLanguageSource: vi.fn(async () => {}), cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {},
+    releaseLanguageSource: vi.fn(async () => {}), cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, isRunDriverInvoking() { return false; },
   } as unknown as KernelClient;
   const runtime = new AgentRuntimeClient(kernel);
   const errors: unknown[] = [];
