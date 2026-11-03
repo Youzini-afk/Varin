@@ -7,9 +7,10 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {inspectDebian,validateDebianInventory} from './linux-debian.mjs';
-import {admitCandidate,verifyRecord,preparedFixtureEngine,seedOrVerify,runObserved} from './installer-smoke.mjs';
+import {failRetainedObservation,admitCandidate,verifyRecord,preparedFixtureEngine,seedOrVerify,runObserved} from './installer-smoke.mjs';
 import {requireAuthorizedLinuxInstall} from './linux-fixture-sandbox.mjs';
 import {createSmokeSession,smokeNative} from './smoke-native.mjs';
+import {runInstalledDataFixture} from './installed-data-fixture.mjs';
 import {sha256,verifyRuntimeManifest} from './runtime-manifest.mjs';
 import {verifyProtocolRegistration} from './protocol-smoke.mjs';
 const repository=path.resolve(import.meta.dirname,'../../..');
@@ -153,7 +154,7 @@ export async function smokeLinuxInstalled(candidateFile,options={}){
   const {candidate,installer,artifact,inventory}=await admitDebianCandidate(candidateFile,{sourceSha});
   const output=path.resolve(options.output);await fs.mkdir(output,{recursive:false});
   const session=await createSmokeSession(),nonce=randomUUID(),profile=path.join(process.env.XDG_CONFIG_HOME||path.join(process.env.HOME,'.config'),'Varin');
-  const evidence={schema:1,product:'varin-installed-product-smoke',target:candidate.target,sourceSha,version:candidate.version,runtimeManifestSha256:candidate.runtimeManifest.sha256,engineManifestSha256:candidate.engineManifest.sha256,artifacts:{[artifact.name]:artifact.sha256},installationKind:'system-debian',fixture:'synthetic-original-electron-profile',complete:false,qualified:false,steps:[],notProven:['portable-appimage','signed-release','automatic-update','cross-version-upgrade','real-user-profile','real-chat-history','default-tauri-data-root-uninstall','physical-desktop-permissions','cold-url-activation','original-electron-fixture-process-scope-drain']};
+  const evidence={schema:1,product:'varin-installed-product-smoke',target:candidate.target,sourceSha,version:candidate.version,runtimeManifestSha256:candidate.runtimeManifest.sha256,engineManifestSha256:candidate.engineManifest.sha256,artifacts:{[artifact.name]:artifact.sha256},installationKind:'system-debian',fixture:'synthetic-original-electron-and-application-data',complete:false,qualified:false,steps:[],notProven:['portable-appimage','signed-release','automatic-update','cross-version-upgrade','real-user-profile','default-tauri-data-root-uninstall','physical-desktop-permissions','cold-url-activation','original-electron-fixture-process-scope-drain']};
   let phase='preflight';
   const observe=async(name,operation)=>{phase=name;const result=await operation();evidence.steps.push({name,status:'passed',...result});return result;};
   try{
@@ -162,6 +163,7 @@ export async function smokeLinuxInstalled(candidateFile,options={}){
     const packages=query(['-W','-f','${binary:Package}\t${Status}\n']).split('\n');
     if(packages.some(line=>/^varin(?::[^\t]+)?\t/u.test(line)))throw new Error('Refusing pre-existing Varin dpkg state');
     const fixtureExecutable=preparedFixtureEngine();
+    await observe('seed-original-application-data',()=>runInstalledDataFixture('seed',candidate,session,nonce));
     await observe('seed-original-electron-profile',async()=>({observation:await seedOrVerify('seed',session,nonce,profile,path.join(output,'legacy-seed.json'),fixtureExecutable)}));
     await observe('reopen-original-electron-profile',async()=>({observation:await seedOrVerify('verify',session,nonce,profile,path.join(output,'legacy-before.json'),fixtureExecutable)}));
     const install=async()=>{
@@ -173,13 +175,14 @@ export async function smokeLinuxInstalled(candidateFile,options={}){
       const verified=await verifyDebianInstalled(inventory,{packageFiles:query(['-L','varin'])});
       if(await sha256(path.join(runtimeDirectory,'runtime-manifest.json'))!==candidate.runtimeManifest.sha256)throw new Error('Installed runtime manifest differs');
       await verifyRuntimeManifest(runtimeDirectory,{platform:'linux',architecture:process.arch});
-      await verifyProtocolRegistration(executable);
+      await verifyProtocolRegistration('/usr/bin/varin');
       return{method:'dpkg-install',...verified};
     };
     await observe('install-candidate',install);
     const launch=async(restart,file)=>{
-      const native=await smokeNative(candidate,{output:path.join(output,file),installedExecutable:executable,installedInventory:inventory,session,retainData:true,legacyFixtureNonce:nonce,disposableUser:true,useOsProfile:true,restart,protocolWarm:true,timeoutMs:300_000});
-      return{nativeReport:file,caseCount:native.report.cases.length,sandbox:assertLinuxSandboxReceipt(native.report),cleanupUncertain:native.cleanupUncertain};
+      const native=await smokeNative(candidate,{output:path.join(output,file),installedExecutable:executable,installedInventory:inventory,session,retainData:true,legacyFixtureNonce:nonce,disposableUser:true,useOsProfile:true,restart,applicationData:true,protocolWarm:true,timeoutMs:300_000});
+      const applicationData=await runInstalledDataFixture('verify',candidate,session,nonce,{runtime:runtimeDirectory});
+      return{nativeReport:file,caseCount:native.report.cases.length,sandbox:assertLinuxSandboxReceipt(native.report),cleanupUncertain:native.cleanupUncertain,applicationData};
     };
     await observe('launch-and-migrate-installed-product',()=>launch(false,'installed-first.json'));
     await observe('replace-same-version-candidate',install);
@@ -192,6 +195,7 @@ export async function smokeLinuxInstalled(candidateFile,options={}){
       if(await sha256(marker)!==before||!await exists(path.join(session.data,'cef/application')))throw new Error('Uninstall did not preserve original and target profile data');
       return{method:'dpkg-remove',originalProfileRetained:true,isolatedTargetRetained:true};
     });
+    await observe('reopen-application-data-after-uninstall',()=>runInstalledDataFixture('verify',candidate,session,nonce));
     await observe('reopen-original-profile-after-uninstall',async()=>({observation:await seedOrVerify('verify',session,nonce,profile,path.join(output,'legacy-after-uninstall.json'),fixtureExecutable)}));
     // Completed observations do not prove the original Electron fixture's descendant scope drained.
     // Preserve both synthetic profiles; individual Tauri native-drain observations remain unchanged.
@@ -200,8 +204,7 @@ export async function smokeLinuxInstalled(candidateFile,options={}){
     await fs.writeFile(path.join(output,'installer-smoke.json'),JSON.stringify(evidence,null,2)+'\n');return evidence;
   }catch(error){
     evidence.failedStep=phase;evidence.failure=error.message;evidence.cleanupUncertain=true;evidence.retainedPrivateDirectory=session.root;if(error.observed)evidence.process=error.observed;
-    await fs.writeFile(path.join(output,'installer-smoke.json'),JSON.stringify(evidence,null,2)+'\n');
-    throw new Error(`Debian installed smoke failed at ${phase}; inspect installer-smoke.json. Private data was retained.`);
+    await failRetainedObservation(path.join(output,'installer-smoke.json'),evidence,`Debian installed smoke failed at ${phase}.`);
   }
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

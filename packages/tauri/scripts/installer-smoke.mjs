@@ -9,6 +9,7 @@ import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {sha256,relativePath,verifyRuntimeManifest} from './runtime-manifest.mjs';
 import {createSmokeSession,smokeNative} from './smoke-native.mjs';
+import {runInstalledDataFixture} from './installed-data-fixture.mjs';
 import {verifyProtocolRegistration} from './protocol-smoke.mjs';
 import {isComplete,resolveElectronPackageDir,platformPath} from '../../electron/scripts/ensure-electron.mjs';
 import {createStartupClassifier,readLinuxStartupState} from './linux-startup-diagnostics.mjs';
@@ -29,21 +30,31 @@ export function nsisArguments(directory,{uninstall=false}={}){
 }
 export async function runObserved(file,args,{env=process.env,cwd,timeoutMs=180_000,windowsVerbatimArguments=false,startupDiagnostics=false}={}){
   return new Promise((resolve,reject)=>{
-    let timer,timedOut=false;
+    let timer,timedOut=false,settled=false;
     const classifier=startupDiagnostics?createStartupClassifier():null;
     const child=spawn(file,args,{env,cwd,stdio:['ignore','ignore',classifier?'pipe':'ignore'],windowsHide:true,detached:process.platform!=='win32',windowsVerbatimArguments});
     if(classifier)child.stderr.on('data',chunk=>classifier.write(chunk));
-    child.once('error',error=>{clearTimeout(timer);const observed={spawnFailed:true,code:error.code??'unknown',timedOut,...(classifier?{startupSignatures:classifier.finish()}:{})};reject(Object.assign(new Error(`Process launch failed (${observed.code})`),{observed}));});
-    // 'exit' can precede the last stderr chunk. Only closed streams provide a
-    // complete signature observation; raw output is never returned or written.
-    // This observes the direct process only, not completion of its descendants.
-    child.once('close',(code,signal)=>{clearTimeout(timer);const observed={code,signal,timedOut,...(classifier?{startupSignatures:classifier.finish()}:{})};if(code===0&&!timedOut)resolve(observed);else reject(Object.assign(new Error(timedOut?'Process observation timed out; cleanup is unconfirmed':`Process failed (${signal??code})`),{observed}));});
+    child.once('error',error=>{if(settled)return;settled=true;clearTimeout(timer);const observed={spawnFailed:true,code:error.code??'unknown',timedOut,...(classifier?{startupSignatures:classifier.finish()}:{})};reject(Object.assign(new Error(`Process launch failed (${observed.code})`),{observed}));});
+    // 'close' observes only this direct child, not all original descendants.
+    child.once('close',(code,signal)=>{if(settled)return;settled=true;clearTimeout(timer);const observed={code,signal,timedOut,...(classifier?{startupSignatures:classifier.finish()}:{})};if(code===0)resolve(observed);else reject(Object.assign(new Error(`Process failed (${signal??code})`),{observed}));});
     timer=setTimeout(()=>{
-      timedOut=true;
-      if(process.platform==='win32'){try{execFileSync('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore'});}catch{child.kill();}}
-      else{try{process.kill(-child.pid,'SIGKILL');}catch{child.kill('SIGKILL');}}
+      if(settled)return;settled=true;timedOut=true;
+      // There is no launch-bound Job/guardian here. A reusable PID or process
+      // group cannot safely authorize termination. Stop the lifecycle and leave
+      // the original process and private files for whole-runner disposal.
+      child.unref();child.stderr?.unref?.();
+      const observed={timedOut:true,cleanupUncertain:true,termination:'not-attempted-without-launch-bound-process-scope',...(classifier?{startupSignatures:classifier.finish()}:{})};
+      reject(Object.assign(new Error('Process observation timed out; original owner and private data retained'),{observed}));
     },timeoutMs);
   });
+}
+
+/** Observation persistence is secondary to retaining the original owner/data.
+ * A full disk or invalid report path must not erase lifecycle uncertainty. */
+export async function failRetainedObservation(file,evidence,message){
+  evidence.cleanupUncertain=true;let reportWriteFailed=false;
+  try{await fs.writeFile(file,JSON.stringify(evidence,null,2)+'\n');}catch{reportWriteFailed=true;}
+  throw Object.assign(new Error(`${message}${reportWriteFailed?' Observation file could not be written.':''} Private data was retained.`),{cleanupUncertain:true,reportWriteFailed});
 }
 export async function verifyRecord(directory,record){
   if(!record||typeof record.name!=='string'||path.basename(record.name)!==record.name||!record.name||!Number.isSafeInteger(record.size)||record.size<=0||!/^[a-f0-9]{64}$/u.test(record.sha256??''))throw new Error('Candidate artifact receipt is invalid');
@@ -127,12 +138,21 @@ export function assertCleanWindowsState(state){
   if(['installations','uninstall','protocol','notifications','shortcuts'].some(key=>!Array.isArray(state[key])||state[key].length))throw new Error('Refusing a runner with an existing Varin installation or OS registration');
   if(!path.win32.isAbsolute(state.appData??''))throw new Error('Native Windows AppData is unavailable');
 }
-export function assertInstalledWindowsState(state,directory,version){
+export async function assertInstalledWindowsState(state,directory,version,{canonicalize=fs.realpath}={}){
   const executable=path.win32.join(directory,'varin.exe');
   if(state.installations.length!==1||state.installations[0].hive!=='HKCU'||!sameWindowsPath(state.installations[0].location,directory)||state.uninstall.length!==1||state.uninstall[0].hive!=='HKCU'||state.uninstall[0].version!==version)throw new Error('Original NSIS per-user uninstall registration is missing or belongs to another install');
   if(state.protocol.length!==1||state.protocol[0].hive!=='HKCU'||!sameWindowsPath(state.protocol[0].owner,executable)||state.protocol[0].command?.toLowerCase()!==`"${executable}" "%1"`.toLowerCase())throw new Error('Installed Varin URL registration differs from the real executable');
   if(state.notifications.length!==2||state.notifications.some(entry=>entry.hive!=='HKCU'))throw new Error('Installed notification registration is missing or changed scope');
-  if(!state.shortcuts.length||state.shortcuts.some(entry=>!sameWindowsPath(entry.target,executable)))throw new Error('Original NSIS shortcuts do not launch the installed product');
+  if(!Array.isArray(state.shortcuts)||!state.shortcuts.length)throw Object.assign(new Error('Original NSIS shortcuts are missing'),{shortcutObservation:{count:0}});
+  let expected;try{expected=await canonicalize(executable);}catch{throw new Error('Installed executable identity is unavailable');}
+  const observations=await Promise.all(state.shortcuts.map(async entry=>{
+    if(!path.win32.isAbsolute(entry.target??''))return{resolved:false,sameFile:false,alias:false};
+    try{const target=await canonicalize(entry.target);return{resolved:true,sameFile:sameWindowsPath(target,expected),alias:!sameWindowsPath(entry.target,executable)};}
+    catch{return{resolved:false,sameFile:false,alias:false};}
+  }));
+  const shortcutObservation={count:observations.length,resolved:observations.filter(v=>v.resolved).length,matching:observations.filter(v=>v.sameFile).length,aliases:observations.filter(v=>v.sameFile&&v.alias).length};
+  if(observations.some(entry=>!entry.sameFile))throw Object.assign(new Error('Original NSIS shortcuts do not launch the installed product'),{shortcutObservation});
+  return{shortcutObservation};
 }
 export function preparedFixtureEngine(){
   if(process.env.ELECTRON_OVERRIDE_DIST_PATH||(process.env.npm_config_platform&&process.env.npm_config_platform!==process.platform)||(process.env.npm_config_arch&&process.env.npm_config_arch!==process.arch))throw new Error('Installer fixture requires the native repository-pinned Electron, not an environment override');
@@ -144,6 +164,9 @@ export function preparedFixtureEngine(){
   return path.join(directory,'dist',platformPath());
 }
 export async function seedOrVerify(mode,session,nonce,profile,output,fixtureExecutable,{isolatedPreflight=false}={}){
+  if(!['seed','verify'].includes(mode))throw new Error('Unsupported original Electron fixture operation');
+  // Exported callers must not bypass the controller's stop after a seed receipt.
+  if(mode==='verify')throw Object.assign(new Error('Original Electron profile reopen requires confirmed full original process-scope completion; private data retained'),{cleanupUncertain:true});
   const require=createRequire(path.join(repository,'packages/electron/package.json'));
   const env={...process.env};for(const key of ['ELECTRON_RUN_AS_NODE','NODE_OPTIONS','NODE_PATH','VARIN_ELECTRON_DEV','VARIN_ELECTRON_PROFILE'])delete env[key];
   if(isolatedPreflight){
@@ -152,10 +175,14 @@ export async function seedOrVerify(mode,session,nonce,profile,output,fixtureExec
     for(const key of ['XDG_CONFIG_HOME','XDG_CACHE_HOME','XDG_DATA_HOME','XDG_STATE_HOME'])await fs.mkdir(env[key],{recursive:true,mode:0o700});
   }
   await fs.rm(path.join(session.root,`legacy-${mode}.json`),{force:true});
-  await runObserved(fixtureExecutable,[path.join(import.meta.dirname,'legacy-profile-smoke.cjs'),'--varin-installer-fixture',mode,session.root,nonce,profile,...(isolatedPreflight?['--isolated-preflight']:[])],{env,timeoutMs:90_000,startupDiagnostics:process.platform==='linux'});
+  const processObservation=await runObserved(fixtureExecutable,[path.join(import.meta.dirname,'legacy-profile-smoke.cjs'),'--varin-installer-fixture',mode,session.root,nonce,profile,...(isolatedPreflight?['--isolated-preflight']:[])],{env,timeoutMs:90_000,startupDiagnostics:process.platform==='linux'});
   const evidence=JSON.parse(await fs.readFile(path.join(session.root,`legacy-${mode}.json`),'utf8'));
   if(evidence.schema!==1||evidence.product!=='varin-legacy-profile-smoke'||evidence.profileScope!==(isolatedPreflight?'isolated-preflight':'original-os-profile')||evidence.mode!==mode||evidence.nonce!==nonce||evidence.complete!==true||evidence.frontendVerified!==true||evidence.credentialSlotsVerified!==6||evidence.browserCookieVerified!==true||evidence.browserLocalStorageVerified!==true||evidence.valuesDisclosed!==false||evidence.electronVersion!==require('electron/package.json').version)throw new Error('Original Electron did not verify its synthetic profile');
-  await fs.writeFile(output,JSON.stringify(evidence,null,2)+'\n');return evidence;
+  evidence.directProcessObservation=processObservation;evidence.fullProcessScopeDrained=false;
+  // The Electron app-level readback and exit0 do not prove every original
+  // Chromium descendant ended. No second reader or migration may reuse this
+  // profile until a launch-bound guardian accounts for the full original scope.
+  await failRetainedObservation(output,evidence,'Original Electron fixture readback completed, but full original Chromium process scope completion is unconfirmed.');
 }
 export async function preflightFixture({output,disposableRunner=false}={}){
   requireDisposableRunner({acknowledged:disposableRunner});
@@ -185,8 +212,8 @@ export async function preflightFixture({output,disposableRunner=false}={}){
   }catch(error){
     evidence.failedStep=phase;evidence.failure=error.message;evidence.cleanupUncertain=true;evidence.retainedPrivateDirectory=session.root;
     if(error.observed)evidence.process=error.observed;
-    await fs.writeFile(path.join(output,'fixture-preflight.json'),JSON.stringify(evidence,null,2)+'\n');
-    throw new Error(`Original Electron fixture preflight failed at ${phase}; inspect fixture-preflight.json. Private data was retained.`);
+    if(error.shortcutObservation)evidence.shortcutObservation=error.shortcutObservation;
+    await failRetainedObservation(path.join(output,'fixture-preflight.json'),evidence,`Original Electron fixture preflight failed at ${phase}.`);
   }
 }
 export async function smokeInstaller(candidateFile,{output,disposableRunner=false}={}){
@@ -202,7 +229,7 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
   const executable=windows?path.join(installation,'varin.exe'):path.join(installation,'Varin.AppImage');
   const evidence={schema:1,product:'varin-installed-product-smoke',target:candidate.target,sourceSha,version:candidate.version,
     runtimeManifestSha256:candidate.runtimeManifest.sha256,engineManifestSha256:candidate.engineManifest.sha256,
-    artifacts:{[artifact.name]:artifact.sha256},installationKind:windows?'original-nsis-per-user':'portable-appimage',fixture:'synthetic-original-electron-profile',
+    artifacts:{[artifact.name]:artifact.sha256},installationKind:windows?'original-nsis-per-user':'portable-appimage',fixture:'synthetic-original-electron-and-application-data',
     complete:false,steps:[],notProven:['signed-release','automatic-update','cross-version-upgrade','real-user-profile','default-tauri-data-root-uninstall','physical-desktop-permissions','cold-url-activation',...(!windows?['system-installation','desktop-registration-uninstall']:[])]};
   let phase='preflight',profile;
   const record=(name,detail={})=>evidence.steps.push({name,status:'passed',...detail});
@@ -216,6 +243,7 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
     phase='verify-prepared-fixture-engine';
     const fixtureExecutable=preparedFixtureEngine();
     record(phase,{source:'repository-pinned-original-electron',installedExporterUnchanged:true});
+    await observe('seed-original-application-data',()=>runInstalledDataFixture('seed',candidate,session,nonce));
     await observe('seed-original-electron-profile',async()=>({observation:await seedOrVerify('seed',session,nonce,profile,path.join(output,'legacy-seed.json'),fixtureExecutable)}));
     await observe('reopen-original-electron-profile',async()=>({observation:await seedOrVerify('verify',session,nonce,profile,path.join(output,'legacy-before.json'),fixtureExecutable)}));
     const install=async()=>{
@@ -226,7 +254,7 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
         const runtime=path.join(installation,'runtime');
         if(await sha256(path.join(runtime,'runtime-manifest.json'))!==candidate.runtimeManifest.sha256)throw new Error('Installed runtime receipt differs from the candidate');
         await verifyRuntimeManifest(runtime,{platform:process.platform,architecture:process.arch});
-        assertInstalledWindowsState(await readWindowsState(),installation,candidate.version);
+        await assertInstalledWindowsState(await readWindowsState(),installation,candidate.version);
         await verifyProtocolRegistration(executable);
       }else if(await sha256(executable)!==artifact.sha256)throw new Error('Portable installed bytes differ from the actual AppImage');
       return{method:windows?'original-nsis-silent-current-user':'portable-artifact-copy',sameCandidateBytes:true};
@@ -234,8 +262,9 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
     await observe('install-candidate',install);
     const launch=async(restart,file)=>{
       const native=await smokeNative(candidate,{output:path.join(output,file),installedExecutable:executable,session,retainData:true,
-        legacyFixtureNonce:nonce,disposableUser:true,useOsProfile:true,restart,protocolWarm:windows,timeoutMs:300_000});
-      return{nativeReport:file,caseCount:native.report.cases.length,cleanupUncertain:native.cleanupUncertain};
+        legacyFixtureNonce:nonce,disposableUser:true,useOsProfile:true,restart,applicationData:true,protocolWarm:windows,timeoutMs:300_000});
+      const applicationData=await runInstalledDataFixture('verify',candidate,session,nonce,{runtime:windows?path.join(installation,'runtime'):candidate.runtime});
+      return{nativeReport:file,caseCount:native.report.cases.length,cleanupUncertain:native.cleanupUncertain,applicationData};
     };
     await observe('launch-and-migrate-installed-product',()=>launch(false,'installed-first.json'));
     await observe('replace-same-version-candidate',install);
@@ -244,7 +273,7 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
     const sourceMarker=path.join(profile,'varin-installer-fixture.json'),before=await sha256(sourceMarker);
     await observe('uninstall-retain-data',async()=>{
       if(windows){
-        const state=await readWindowsState();assertInstalledWindowsState(state,installation,candidate.version);
+        const state=await readWindowsState();await assertInstalledWindowsState(state,installation,candidate.version);
         const names=(await fs.readdir(installation)).filter(name=>/^Uninstall .*\.exe$/iu.test(name));
         if(names.length!==1)throw new Error('Original NSIS uninstaller is absent or ambiguous');
         const original=path.join(installation,names[0]);
@@ -258,6 +287,7 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
       if(await sha256(sourceMarker)!==before||!await exists(path.join(session.data,'cef/application')))throw new Error('Uninstall did not preserve the admitted profile and isolated target data');
       return{method:windows?'original-nsis-uninstaller-keep-data':'portable-file-removal',originalProfileRetained:true,isolatedTargetRetained:true};
     });
+    await observe('reopen-application-data-after-uninstall',()=>runInstalledDataFixture('verify',candidate,session,nonce));
     await observe('reopen-original-profile-after-uninstall',async()=>({observation:await seedOrVerify('verify',session,nonce,profile,path.join(output,'legacy-after-uninstall.json'),fixtureExecutable)}));
     // The final original-Electron readback observes only its direct process
     // close. Earlier Tauri native-drain receipts do not cover that later scope.
@@ -271,9 +301,9 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
   }catch(error){
     evidence.failedStep=phase;evidence.failure=error.message;evidence.cleanupUncertain=true;evidence.retainedPrivateDirectory=session.root;
     if(error.observed)evidence.process=error.observed;
+    if(error.shortcutObservation)evidence.shortcutObservation=error.shortcutObservation;
     // A failed/unknown owner is never followed by file cleanup or a second install.
-    await fs.writeFile(path.join(output,'installer-smoke.json'),JSON.stringify(evidence,null,2)+'\n');
-    throw new Error(`Installed product smoke failed at ${phase}; inspect installer-smoke.json. Private data was retained.`);
+    await failRetainedObservation(path.join(output,'installer-smoke.json'),evidence,`Installed product smoke failed at ${phase}.`);
   }
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

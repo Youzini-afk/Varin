@@ -91,9 +91,19 @@ optional artwork retains its existing product delivery policy.
 Manifest schema 1 records the target, product version, exact Node archive provenance,
 process/UI entry points, kernel manifest path, build product digests when available, and
 **every** file's SHA256, byte length and executable mode. Verification rejects absent,
-changed or unlisted files, duplicate/path-traversal entries, symbolic links, mismatched binary
+changed or unlisted files, duplicate/path-traversal entries, unsupported symbolic links, mismatched binary
 architecture, missing worker/PDF/parser assets or licenses, incompatible Node pins and inconsistent Host/kernel versions.
 The manifest is an integrity receipt, not a substitute for installer/code signatures.
+
+The controlled macOS reader retains Apple's canonical versioned framework layout.
+Only framework binary/resource aliases and `Versions/Current` inside its
+`Varin.app/Contents/Frameworks/*.framework` are admitted. `legacyElectron.links`
+seals their exact relative paths and targets separately from physical file hashes;
+absolute targets, parent traversal, cycles, unlisted links and aliased process/Host
+entries remain forbidden. Copies preserve link text, including the final app copy.
+The macOS runtime bypasses Tauri's generic file-resource walker, which omits directory
+aliases. Signing rehashes physical bytes without replacing the original link receipts;
+the native owner revalidates the complete reader before executing its one-shot entry.
 
 Code, native assets and receipts are verified before publication. Publication restores the
 previous generation if promotion fails, and retains its backup with an explicit error if
@@ -279,6 +289,39 @@ installation, default URL-handler or signed-release test. It never changes
 quarantine attributes, Gatekeeper policy, sandboxing or OS permissions. Same-version
 replacement does not claim a cross-version upgrade or exercise the production updater.
 
+`installed-data-fixture.mjs` is shared by the Windows NSIS, macOS DMG and Debian
+installer lifecycles. It first seeds a separate private data root through the
+candidate's bundled Node and the actual Application Host/Rust owners. One completed
+chat turn uses an authenticated, deterministic loopback SSE provider; no external
+model is contacted. The ordinary settings and credential APIs register a temporary
+project, app/agent preferences and one synthetic model credential. The original
+settings owner also retains desktop preferences and installation identity. The
+helper publishes its nonce-bound, secret-free control receipt only after the Host
+has acknowledged shutdown.
+
+When full original process-scope completion can be established, both installed
+launches read the exact original history and completed Run, project,
+Host preferences and model binding through their authenticated production APIs.
+After each native drain, a fresh bundled-Node process additionally reads back the
+synthetic credential value/account identity, desktop settings and original project
+file through their existing owners. The same owner readback runs after uninstall.
+Only this fixture's marker digest admits pre-existing data to the native smoke;
+ordinary smoke still requires an empty private directory. Failure or uncertain owner
+termination stops the installation sequence and retains the private data. Passing these
+observations establishes same-owner data continuity across shell migration and
+same-version replacement; it is not an older-release schema upgrade or default-OS-data-root uninstall test.
+
+The original Electron reader currently also stops after its first successful
+readback and direct-process exit, before reopening or migrating the same profile:
+full original Chromium descendant completion is not yet established.
+
+The current native runner deliberately stops even after passed native cases and
+main-process exit. Its Browser/OSR/Host shutdown receipt does not yet prove every
+original CEF OS descendant ended. OS-brokered warm URL activation has a separate
+unresolved process scope. Until launch-bound scope completion is available, the
+runner retains the native observations and private data, and does not allow
+application-data reopen, replacement, uninstall or profile cleanup to follow.
+
 `legacy-profile-smoke.cjs` uses the explicitly prepared original Electron engine
 to create a new profile at Electron's **native OS appData** location, then reopens
 it before migration. It writes only known synthetic records: a document-owner
@@ -322,8 +365,8 @@ until these exact commands pass against the native candidate on their target OS.
 
 Linux candidate construction now produces **both** the existing AppImage and an additional
 `.deb` using the pinned Tauri CLI's native Debian bundler. The Debian executable and CEF
-live under `/usr/share/Varin`, `/usr/bin/varin` links to that executable, and the immutable
-Host/runtime lives under `/usr/lib/Varin/runtime`. The package retains the complete SDK
+live under `/usr/share/Varin`, `/usr/bin/varin` is a byte-verified fixed `exec` launcher,
+and the immutable Host/runtime lives under `/usr/lib/Varin/runtime`. The package retains the complete SDK
 locale inventory, CEF license and credits. Its dependencies explicitly require GTK4 4.14,
 current CEF system libraries, XDG portals and XWayland; pure Wayland remains unsupported.
 
@@ -337,8 +380,13 @@ root-owned and not group/world-writable. Only the exact pinned official CEF help
 Their hashes are in `linux-sandbox.lock.json`; every helper ancestor must be a real,
 root-owned directory. The bundler sets these modes **inside archive metadata**, not on
 files on the build machine. `candidate.packaged.installed` binds the Debian artifact to
-its separate final inventory because the bundler stamps the executable and strips `.so`
-files after the portable payload is prepared.
+its separate final inventory because the bundler stamps the executable after the portable
+payload is prepared. The pinned CLI's automatic CEF copy list requires obsolete EGL/GLES
+libraries that the current pinned SDK no longer contains. Only the Debian bundling step
+disables that copy list with `bundle.cef.embed=false`; explicit resources include the
+complete current SDK beside the unchanged CEF executable. Every shared library retains
+its exact SDK digest, size and native ELF architecture, without stripping. This packaging
+option does not alter the compiled runtime or require an external CEF installation.
 
 Actual installation requires a separate per-run approval, not just permission to install
 build tools. On an explicitly approved disposable GitHub-hosted Linux runner, after all

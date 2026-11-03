@@ -77,6 +77,8 @@ pub mod update_install;
 #[cfg(feature = "desktop")]
 mod legacy_migration;
 pub mod legacy_migration_data;
+#[path = "smoke/application_data.rs"]
+pub mod smoke_application_data;
 
 #[cfg(feature = "desktop")]
 mod smoke;

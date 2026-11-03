@@ -43,6 +43,7 @@ pub struct SmokeRequest {
     pub nonce: String,
     pub protocol_warm: bool,
     pub legacy_fixture_nonce: Option<String>,
+    pub application_fixture: Option<crate::smoke_application_data::Fixture>,
 }
 pub fn requested() -> bool {
     std::env::args_os().any(|arg| arg == "--varin-desktop-smoke")
@@ -98,6 +99,12 @@ pub fn prepare() -> Result<Option<SmokeRequest>, String> {
             Some(fixture.to_owned())
         }
     };
+    let application_fixture = match marker.get("applicationFixtureSha256") {
+        None => None,
+        Some(value) => Some(crate::smoke_application_data::read(&data_dir,
+            legacy_fixture_nonce.as_deref().ok_or("Application data requires the original legacy fixture nonce")?,
+            value.as_str().ok_or("Application fixture digest is invalid")?)?),
+    };
     if let Some(previous) = marker.get("previousNonce") {
         if legacy_fixture_nonce.is_none() {
             return Err("Only the fixed legacy fixture can reopen a smoke data directory".into());
@@ -116,10 +123,11 @@ pub fn prepare() -> Result<Option<SmokeRequest>, String> {
             || prior["platform"] != crate::manifest::platform()
             || prior["architecture"] != crate::manifest::architecture()
             || cases.iter().any(|case| case["status"] != "passed")
-            || ["native-drain", "legacy-native-migration"].iter().any(|name| !cases.iter().any(|case| case["name"] == *name)) {
+            || ["native-drain", "legacy-native-migration"].iter().any(|name| !cases.iter().any(|case| case["name"] == *name))
+            || application_fixture.is_some() && !cases.iter().any(|case| case["name"] == "application-data-preservation") {
             return Err("Previous fixture did not confirm successful native migration and drain".into());
         }
-    } else {
+    } else if application_fixture.is_none() {
         let entries = fs::read_dir(&data_dir)
             .map_err(|_| "Smoke directory cannot be inspected")?
             .collect::<Result<Vec<_>, _>>()
@@ -138,6 +146,7 @@ pub fn prepare() -> Result<Option<SmokeRequest>, String> {
         nonce: nonce.into(),
         protocol_warm,
         legacy_fixture_nonce,
+        application_fixture,
     }))
 }
 fn report(request: &SmokeRequest, cases: &[Value], complete: bool) -> Result<(), String> {
@@ -157,7 +166,8 @@ pub fn startup_failed(request: &SmokeRequest, error: &str) -> Result<(), String>
         .iter()
         .copied()
         .chain(request.protocol_warm.then_some("protocol-warm-activation"))
-        .chain(request.legacy_fixture_nonce.as_ref().map(|_| "legacy-native-migration"));
+        .chain(request.legacy_fixture_nonce.as_ref().map(|_| "legacy-native-migration"))
+        .chain(request.application_fixture.as_ref().map(|_| "application-data-preservation"));
     let cases:Vec<_>=names.map(|name|json!({"name":name,"status":"failed","error":format!("Native startup did not complete: {error}")})).collect();
     report(request, &cases, false)
 }
@@ -299,6 +309,9 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
         cases.push(checked("legacy-native-migration", crate::legacy_migration::observe_smoke(
             &app, &request.data_dir, &main, &bootstrap["migration"], nonce,
         )).await);
+    }
+    if let Some(fixture) = &request.application_fixture {
+        cases.push(checked("application-data-preservation", crate::smoke_application_data::observe(&main, fixture)).await);
     }
     let page = "native-smoke-page";
     cases.push(checked("browser-same-page",async{
@@ -452,7 +465,7 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
         Err(error) => json!({"name":"native-drain","status":"failed","error":error}),
     });
     server.stop();
-    let passed = cases.len() == CASES.len() + usize::from(request.protocol_warm) + usize::from(request.legacy_fixture_nonce.is_some())
+    let passed = cases.len() == CASES.len() + usize::from(request.protocol_warm) + usize::from(request.legacy_fixture_nonce.is_some()) + usize::from(request.application_fixture.is_some())
         && cases.iter().all(|c| c["status"] == "passed");
     report(&request, &cases, true).is_ok() && passed
 }

@@ -155,6 +155,9 @@ jobs:
       - name: Verify native macOS installation observations
         if: matrix.platform == 'darwin'
         run: node --test packages/tauri/scripts/macos-installer-smoke.test.mjs
+      - name: Verify native Windows installation observations
+        if: matrix.platform == 'win32'
+        run: node --test packages/tauri/scripts/installer-smoke.test.mjs packages/tauri/scripts/installed-data-fixture.test.mjs
       - name: Prepare the explicit Linux fixture engine
         if: matrix.platform == 'linux'
         run: node packages/electron/scripts/ensure-electron.mjs
@@ -178,6 +181,10 @@ jobs:
           node packages/tauri/scripts/stage-desktop.mjs --output artifacts/tauri-runtime --legacy-electron artifacts/tauri-input/exporter/source
       - name: Exercise actual bundled Node, kernel, Knowledge and extension broker
         run: node packages/tauri/scripts/smoke-runtime.mjs artifacts/tauri-runtime
+      - name: Exercise actual chat, project, settings and credential owners
+        env:
+          VARIN_INSTALLED_DATA_RUNTIME: artifacts/tauri-runtime
+        run: node --test packages/tauri/scripts/installed-data-fixture.test.mjs
       - name: Build actual release-mode native shell and preserved installer
         id: candidate
         run: node packages/tauri/scripts/build-candidate.mjs --runtime artifacts/tauri-runtime --output artifacts/tauri-candidate

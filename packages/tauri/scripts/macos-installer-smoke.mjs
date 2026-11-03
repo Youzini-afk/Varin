@@ -7,7 +7,8 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {relativePath,sha256,verifyRuntimeManifest} from './runtime-manifest.mjs';
 import {createSmokeSession,smokeNative,validateNativeSmoke} from './smoke-native.mjs';
-import {preparedFixtureEngine,runObserved,seedOrVerify,verifyInstalledFiles,verifyRecord} from './installer-smoke.mjs';
+import {runInstalledDataFixture} from './installed-data-fixture.mjs';
+import {failRetainedObservation,preparedFixtureEngine,runObserved,seedOrVerify,verifyInstalledFiles,verifyRecord} from './installer-smoke.mjs';
 
 const repository=path.resolve(import.meta.dirname,'../../..');
 const runtimeRelative='Contents/Resources/runtime';
@@ -145,7 +146,7 @@ export async function smokeMacInstaller(candidateFile,{output,disposableRunner=f
   const nonce=randomUUID(),profile=path.join(process.env.HOME??'','Library/Application Support/Varin');
   const evidence={schema:1,product:'varin-installed-product-smoke',target:candidate.target,sourceSha,version:candidate.version,
     runtimeManifestSha256:candidate.runtimeManifest.sha256,engineManifestSha256:candidate.engineManifest.sha256,
-    artifacts:{[artifact.name]:artifact.sha256},installationKind:'macos-dmg-private-copy',fixture:'synthetic-original-electron-profile',
+    artifacts:{[artifact.name]:artifact.sha256},installationKind:'macos-dmg-private-copy',fixture:'synthetic-original-electron-and-application-data',
     complete:false,qualified:false,steps:[],notProven:['signed-release','gatekeeper-quarantine-assessment','automatic-update','cross-version-upgrade','real-user-profile','default-tauri-data-root-uninstall','system-applications-installation','zip-or-tar-installation','default-url-handler','cold-url-activation','physical-desktop-permissions','original-electron-fixture-process-scope-drain']};
   let phase='preflight',mountAttempted=false,mounted=false,detachConfirmed=false;
   const observe=async(name,operation)=>{phase=name;const detail=await operation();evidence.steps.push({name,status:'passed',...detail});return detail;};
@@ -176,6 +177,7 @@ export async function smokeMacInstaller(candidateFile,{output,disposableRunner=f
       }
       return{userScope:'ephemeral-github-hosted',preexistingUserInstallations:false,preexistingProfile:false,verifiedBuildRegistrationRemoved:state.registeredApplications.length>0};
     });
+    await observe('seed-original-application-data',()=>runInstalledDataFixture('seed',candidate,session,nonce));
     phase='verify-prepared-fixture-engine';
     const fixtureExecutable=preparedFixtureEngine();
     let sourceMarkerDigest;
@@ -212,9 +214,10 @@ export async function smokeMacInstaller(candidateFile,{output,disposableRunner=f
         const file=restart?'installed-reopen.json':'installed-first.json';let native;
         await observe(restart?'reopen-retained-target-state':'launch-and-migrate-installed-product',async()=>{
           await verifyApp(installedApp);
-          native=await smokeNative(candidate,{output:path.join(output,file),installedExecutable:executable,session,retainData:true,legacyFixtureNonce:nonce,disposableUser:true,useOsProfile:true,restart,timeoutMs:300_000});
+          native=await smokeNative(candidate,{output:path.join(output,file),installedExecutable:executable,session,retainData:true,legacyFixtureNonce:nonce,disposableUser:true,useOsProfile:true,restart,applicationData:true,timeoutMs:300_000});
           assertNativeDrain(native);assertMacState(readMacState(),stateOptions);
-          return{nativeReport:file,caseCount:native.report.cases.length,originalNativeScopesEnded:true};
+          const applicationData=await runInstalledDataFixture('verify',candidate,session,nonce,{runtime:path.join(installedApp,runtimeRelative)});
+          return{nativeReport:file,caseCount:native.report.cases.length,originalNativeScopesEnded:true,applicationData};
         });return native;
       },
       replace:()=>observe('replace-same-version-candidate',async()=>{
@@ -242,7 +245,10 @@ export async function smokeMacInstaller(candidateFile,{output,disposableRunner=f
         if(await exists(installedApp)||await sha256(path.join(profile,'varin-installer-fixture.json'))!==sourceMarkerDigest||!await exists(path.join(session.data,'cef/application')))throw new Error('Uninstall did not remove its own app and retain source/target data');
         return{method:'private-app-bundle-removal',originalProfileRetained:true,isolatedTargetRetained:true};
       }),
-      verifySourceAfter:()=>observe('reopen-original-profile-after-uninstall',()=>fixture('verify','legacy-after-uninstall.json')),
+      verifySourceAfter:async()=>{
+        await observe('reopen-application-data-after-uninstall',()=>runInstalledDataFixture('verify',candidate,session,nonce));
+        return observe('reopen-original-profile-after-uninstall',()=>fixture('verify','legacy-after-uninstall.json'));
+      },
       detach:()=>observe('detach-owned-dmg',async()=>{
         assertOwnedMount(readImages(),plist(readCommand('/usr/sbin/diskutil',['info','-plist',mountpoint]),'disk'),{installer,mountpoint});
         await runObserved('/usr/bin/hdiutil',['detach',mountpoint],{timeoutMs:90_000});
@@ -264,8 +270,7 @@ export async function smokeMacInstaller(candidateFile,{output,disposableRunner=f
     evidence.complete=false;evidence.failedStep=phase;evidence.failure=error.message;evidence.cleanupUncertain=true;evidence.retainedPrivateDirectory=root;
     evidence.dmgDetachConfirmed=detachConfirmed;evidence.dmgMountState=detachConfirmed?'detached':mounted?'mounted':mountAttempted?'unknown':'not-attempted';evidence.retainedMountpoint=mountpoint;
     if(error.observed)evidence.process=error.observed;
-    await fs.writeFile(path.join(output,'installer-smoke.json'),JSON.stringify(evidence,null,2)+'\n');
-    throw new Error(`macOS installed product smoke failed at ${phase}; inspect installer-smoke.json. No automatic failure cleanup was attempted.`);
+    await failRetainedObservation(path.join(output,'installer-smoke.json'),evidence,`macOS installed product smoke failed at ${phase}. No automatic failure cleanup was attempted.`);
   }
 }
 
