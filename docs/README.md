@@ -48,6 +48,7 @@
 
 ## 持续演进的设计
 
+- [输入框功能菜单、技能与对象引用](design/composer-command-and-reference-menu.md)：设计提案；丰富 `/` 会话功能，技能独立紧凑分组，贯通 `@` 真实对象与实际发送行为。
 - [Agent 文件与附件交接](design/agent-file-handoff.md)：设计提案；统一派发、已有任务消息和回传文件的引用、版本、读取权限与生命周期。
 - [可替换执行循环：Run Driver](design/pluggable-run-drivers.md)：设计提案；默认 Rust driver、自由循环与真实执行 owner 的边界，尚未实现。
 
