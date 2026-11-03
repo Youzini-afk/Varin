@@ -961,7 +961,7 @@ it('discovers target-model thinking options before validating the combined selec
 });
 
 it('delivers original generic files as baseline resource links without requiring image support', async () => {
-  const path = process.platform === 'win32' ? 'C:\retained\data #1.csv' : '/retained/data #1.csv';
+  const path = process.platform === 'win32' ? String.raw`C:\retained\data #1.csv` : '/retained/data #1.csv';
   const uri = process.platform === 'win32' ? 'file:///C:/retained/data%20%231.csv' : 'file:///retained/data%20%231.csv';
   const f = fixture({ init: { protocolVersion: 1, agentCapabilities: {} } });
   const connection = await connectAcp(f.peer, '/workspace');
