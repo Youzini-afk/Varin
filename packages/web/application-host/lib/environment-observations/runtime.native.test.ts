@@ -107,8 +107,7 @@ it('uses the actual TS/native bridge for canonical Unicode raw bytes, omitted mo
   f.kernel.setContextOwner({ close() {}, query: async (query, signal) => ({ status: 'ready',
     ...(query.action === 'execution_environment' ? { environment: await f.runtime.executionEnvironmentForSource((await f.runtime.launch(query.runId, signal))?.selection.source, signal) } : {}),
   }) });
-  await f.runtime.startFromSource({ runId: f.first.run_id, workspaceId: f.workspaceId, executionWorkspaceId: f.workspaceId,
-    resourceOwner: { kind: 'local' }, mode: 'live_root', liveRoot: f.liveRoot, tools: [] });
+  await f.runtime.rebindLaunch(f.first.run_id);
   await expect.poll(async () => (await f.runtime.run(f.first.run_id)).state, { timeout: 15_000 }).toBe('completed');
   expect(provider.requests).toHaveLength(1);
   let offset = 0, text = '';
@@ -184,8 +183,7 @@ it('imports the actual old Knowledge journal under Run A after Run B exists, pre
   f.kernel.setContextOwner({ close() {}, query: async (query, signal) => ({ status: 'ready',
     ...(query.action === 'execution_environment' ? { environment: await f.runtime.executionEnvironmentForSource((await f.runtime.launch(query.runId, signal))?.selection.source, signal) } : {}),
   }) });
-  await f.runtime.startFromSource({ runId: successor.run_id, workspaceId: f.workspaceId, executionWorkspaceId: f.workspaceId,
-    resourceOwner: { kind: 'local' }, mode: 'live_root', liveRoot: f.liveRoot, tools: [] });
+  await f.runtime.rebindLaunch(successor.run_id);
   await expect.poll(async () => (await f.runtime.run(successor.run_id)).state, { timeout: 15_000 }).toBe('completed');
   expect(provider.requests).toHaveLength(1);
   const history = (await f.runtime.historyPage({ branchId: 'branch', limit: 20 })).items.filter(item => item.id === id);
@@ -209,8 +207,7 @@ it('round-trips the actual Host preparation diagnostics, including retired/sourc
     ...(query.action === 'prepare' ? { observations: await observations.prepare({ id: query.runId }, signal) } : {}),
     ...(query.action === 'execution_environment' ? { environment: await f.runtime.executionEnvironmentForSource((await f.runtime.launch(query.runId, signal))?.selection.source, signal) } : {}),
   }) });
-  await f.runtime.startFromSource({ runId: successor.run_id, workspaceId: f.workspaceId, executionWorkspaceId: f.workspaceId,
-    resourceOwner: { kind: 'local' }, mode: 'live_root', liveRoot: f.liveRoot, tools: [] });
+  await f.runtime.rebindLaunch(successor.run_id);
   await expect.poll(async () => (await f.runtime.run(successor.run_id)).state, { timeout: 15_000 }).toBe('completed');
   expect(requests).toHaveLength(1);
   const snapshot = (await f.runtime.events(0, 1000)).find(event => event.kind === 'context.observation_snapshot');
