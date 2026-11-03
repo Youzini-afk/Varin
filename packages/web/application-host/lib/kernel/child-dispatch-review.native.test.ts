@@ -957,8 +957,20 @@ it.each([false, true])('observes the real assistant message and read action, the
   }
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
+  expect(child.receipt).not.toBeNull();
+  for (const error of h.errors) {
+    // A stale ready wake can race either original Run's finish. The observer must
+    // report cancellation while native stop remains unconfirmed. Accept only these
+    // owners' original causes, joining preparation before checking terminal state.
+    const drained = h.kernel.runPreparationCancellation(child.receipt!.run_id, error)
+      ?? h.kernel.runPreparationCancellation(receipt.run_id, error);
+    expect(drained, 'Only these original Run preparations may report cancellation').toBeDefined();
+    await drained;
+  }
+  expect(await h.runtime.run(receipt.run_id)).toMatchObject({ id: receipt.run_id, state: 'completed' });
+  expect(await h.runtime.run(child.receipt!.run_id)).toMatchObject({ id: child.receipt!.run_id, state: 'cancelled', cancel_requested: true });
   expect(child.report?.outcome).toBe('cancelled'); expect(child.resources_released).toBe(true);
-  expect(parentSteps).toBe(5); expect(childSteps).toBe(2); expect(h.errors).toEqual([]);
+  expect(parentSteps).toBe(5); expect(childSteps).toBe(2);
 });
 
 it.each([
