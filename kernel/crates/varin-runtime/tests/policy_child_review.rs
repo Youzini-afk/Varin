@@ -218,7 +218,7 @@ fn early_report_and_reopen_fill_graph_gap_from_accepted_call_without_reexecution
     );
     let owner = db.lock().unwrap();
     assert_eq!(owner.child_tasks().unwrap().len(), 1);
-    let ToolOrigin::PolicyAction { action_id, .. } = &child.origin else {
+    let Some(ToolOrigin::PolicyAction { action_id, .. }) = &child.origin else {
         unreachable!()
     };
     assert_eq!(
