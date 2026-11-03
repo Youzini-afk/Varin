@@ -28,7 +28,8 @@ jobs:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache/restore@v6
+      - id: rust-cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry
@@ -41,16 +42,26 @@ jobs:
       - run: bun run --cwd packages/web type-check:application-host:tests
       - name: Build the exact probe kernel
         run: node scripts/test-kernel-authority.mjs --build-only
+      - name: Preserve the exact compiled probe inputs
+        if: ${{ steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
       - name: Capture the first failure without retrying it
         timeout-minutes: 15
-        shell: pwsh
+        # Match the original failing CI launcher. The terminal inherits this
+        # process environment, including Git Bash/MSYS context.
+        shell: bash
         env:
           VARIN_TEST_TERMINAL_TRACE: stalled
         run: |
           # Independent fresh fixtures sample the intermittent race. A failure
           # terminates this job immediately; it can never become retry-to-green.
-          for ($iteration = 1; $iteration -le 12; $iteration++) {
-            Write-Host "Live-shell stop sample $iteration / 12"
+          for iteration in $(seq 1 12); do
+            echo "Git Bash live-shell stop sample $iteration / 12"
             node scripts/test-kernel-authority.mjs --vitest-file=application-host/lib/terminal/shell-integration.live.native.test.ts
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+          done
