@@ -35,6 +35,7 @@
     "candidate:assemble": "node ./scripts/release.mjs assemble",
     "smoke:native": "node ./scripts/smoke-native.mjs",
     "smoke:installer": "node ./scripts/installer-smoke.mjs",
+    "smoke:installer:macos": "node ./scripts/macos-installer-smoke.mjs",
     "benchmark:build": "node ./scripts/benchmark-build.mjs",
     "benchmark:suite": "node ./scripts/benchmark-suite.mjs",
     "benchmark:template": "node ./scripts/benchmark-desktop.mjs template",

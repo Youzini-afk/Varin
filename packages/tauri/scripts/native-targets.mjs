@@ -10,7 +10,7 @@ export const nativeTargets = Object.freeze([
 
 export function selectNativeTargets({ full = false, target = '' } = {}) {
   if (typeof full !== 'boolean' || typeof target !== 'string') throw new Error('Invalid native target selection');
-  if (!target || target === 'default') return nativeTargets.slice(0, full ? 6 : 3);
+  if (!target || target === 'default') return full ? [...nativeTargets] : nativeTargets.slice(0, 3);
   if (full) throw new Error('A focused native target cannot replace an explicitly requested full run');
   const selected = nativeTargets.find(value => `${value.platform}-${value.architecture}` === target);
   if (!selected) throw new Error('Unknown native target');

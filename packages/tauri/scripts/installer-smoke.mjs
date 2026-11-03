@@ -137,7 +137,7 @@ export function preparedFixtureEngine(){
   if(!directory||!isComplete(directory,process.arch))throw new Error('Run node packages/electron/scripts/ensure-electron.mjs explicitly before installer smoke');
   return path.join(directory,'dist',platformPath());
 }
-async function seedOrVerify(mode,session,nonce,profile,output,fixtureExecutable){
+export async function seedOrVerify(mode,session,nonce,profile,output,fixtureExecutable){
   const require=createRequire(path.join(repository,'packages/electron/package.json'));
   const env={...process.env};for(const key of ['ELECTRON_RUN_AS_NODE','NODE_OPTIONS','NODE_PATH','VARIN_ELECTRON_DEV','VARIN_ELECTRON_PROFILE'])delete env[key];
   await fs.rm(path.join(session.root,`legacy-${mode}.json`),{force:true});

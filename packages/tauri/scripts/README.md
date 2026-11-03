@@ -187,6 +187,8 @@ See Chromium's [AppArmor guidance](https://chromium.googlesource.com/chromium/sr
 ephemeral **GitHub-hosted** Windows or Linux runner. It rejects self-hosted/local
 machines, a dirty or different source SHA, altered candidate assets, an existing
 original `Varin` profile, and any pre-existing Windows installation/registration.
+`macos-installer-smoke.mjs` applies the same disposable-runner restriction to
+macOS DMG copy-installation, with native profile and LaunchServices checks.
 Run it immediately after building the same job's candidate, **before** any plain
 native smoke that could create the original OS profile. It runs the full native
 suite twice, so it can replace that target's plain native-smoke step.
@@ -202,7 +204,10 @@ node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candid
 # Linux, with its already installed GTK/CEF/FUSE/display dependencies:
 dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
 
-node --test --test-concurrency=1 packages/tauri/scripts/installer-smoke.test.mjs packages/tauri/scripts/smoke-native.test.mjs packages/tauri/scripts/protocol-smoke.test.mjs
+# macOS, in the disposable runner's actual user/session:
+node packages/tauri/scripts/macos-installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
+
+node --test --test-concurrency=1 packages/tauri/scripts/installer-smoke.test.mjs packages/tauri/scripts/macos-installer-smoke.test.mjs packages/tauri/scripts/smoke-native.test.mjs packages/tauri/scripts/protocol-smoke.test.mjs
 ```
 
 Windows executes the actual NSIS artifact with `/S /currentuser`, verifies the
@@ -224,6 +229,37 @@ retained target state and removes the portable file. It does **not** claim deskt
 registration removal, a system installation or an installed setuid sandbox helper.
 FUSE, user-namespace or CEF sandbox failures are recorded; there is no automatic
 `--no-sandbox`, sysctl, AppArmor or permission workaround.
+
+macOS mounts the exact candidate DMG read-only with `hdiutil`, without opening
+Finder, and verifies the device, private mountpoint and volume/media read-only
+flags. `ditto` copies its actual `Varin.app` to a new private installation path.
+The source and installed engine inventories include all files, executable bits
+and internal framework symlinks; the separately verified runtime is byte-exact
+and discovers its resources from the installed app. Extra files, external links,
+changed signatures/resources and mismatched app identities fail the observation.
+The installed executable runs the native suite, including original browser,
+application and Host scope terminal evidence, before same-version replacement.
+The reopened installation must pass those checks again before app removal.
+
+No application or URL handler is explicitly registered. The read-only native
+LaunchServices query rejects a pre-existing profile, user installation, running
+Varin scope, foreign registration or unknown observation. Build tools can expose
+the candidate app to LaunchServices: the sole pre-existing exception is the
+original `candidate.json` payload path under this checkout's `artifacts/`, after
+complete engine/runtime verification. Only that exact build output, the owned
+mounted app and the owned installed app may be unregistered using `lsregister -u
+<exact-path>`. The command never resets LaunchServices, scans/registers a domain
+or changes a default handler. Residual registrations/default handlers fail rather
+than silently widening cleanup. A normal unforced DMG detach must be observed
+before deleting the private session. A failed or timed-out attach, app, copy,
+registration operation or detach stops the sequence and retains the private
+directory and any unresolved mount. There is no failure-path automatic detach.
+
+This is a private DMG copy-install/remove observation, not a Finder interaction,
+system `/Applications` installation, Gatekeeper/quarantine assessment, ZIP/tar
+installation, default URL-handler or signed-release test. It never changes
+quarantine attributes, Gatekeeper policy, sandboxing or OS permissions. Same-version
+replacement does not claim a cross-version upgrade or exercise the production updater.
 
 `legacy-profile-smoke.cjs` uses the explicitly prepared original Electron engine
 to create a new profile at Electron's **native OS appData** location, then reopens
@@ -249,7 +285,7 @@ uninstall retention until the ephemeral runner is discarded.
 
 These observations do not qualify signed releases, automatic updates, upgrades
 from a different released version, migration of a real user's profile, default
-Tauri data-root uninstall behavior, macOS installation, cold URL activation or
+Tauri data-root uninstall behavior, system `/Applications` installation, cold URL activation or
 physical desktop permissions. Same-version reinstall is recorded as replacement,
 not a cross-version upgrade. Kernel/Catalog historical-store conversion remains
 with its existing owner suites; these synthetic records do not prove every legacy
@@ -358,12 +394,17 @@ than automatically retrying. A damaged local cache is never installed.
 `ci.yml` detects native changes, but the new runner jobs are currently manual opt-in through
 `workflow_dispatch` with `tauri_native: true`, after approval of the required runner tool
 installations. `tauri_full: true` selects all six targets; false selects Linux x64, Windows
-x64 and macOS arm64 for iteration. An omitted native run is explicitly skipped, not a passed
+x64 and macOS arm64 for iteration. With `tauri_full: false`, an explicit `tauri_target`
+such as `win32-arm64` selects only that native target for focused diagnosis. Combining
+a focused target with `tauri_full: true` is rejected rather than silently reducing the
+requested coverage. An omitted native run is explicitly skipped, not a passed
 native qualification. The reusable workflow has its own `authorized_tools` gate. Existing
 Electron release jobs are not replaced or disabled.
 
-Native-only iteration can dispatch `tauri-desktop.yml` directly with the immutable
-`source_sha`, `authorized_tools: true` and `full: true|false`. This runs the same candidate
+Once `tauri-desktop.yml` is registered on the default branch, native-only iteration can
+dispatch it directly with the immutable `source_sha`, `authorized_tools: true`,
+`full: true|false` and optional focused `target`. Until then, use `ci.yml` on the working
+branch. The direct route runs the same candidate
 builder and native observations without repeating the unrelated full source/container
 pipeline. It does not replace the final source-quality checks for that exact commit.
 

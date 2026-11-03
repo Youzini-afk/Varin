@@ -144,6 +144,9 @@ jobs:
           path: artifacts/tauri-input/cef
           key: tauri-cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/tauri/scripts/cef-runtime.lock.json') }}
       - run: bun install --frozen-lockfile
+      - name: Verify native macOS installation observations
+        if: matrix.platform == 'darwin'
+        run: node --test packages/tauri/scripts/macos-installer-smoke.test.mjs
       - uses: actions/download-artifact@v8
         with:
           name: tauri-shared-frontend
@@ -168,20 +171,19 @@ jobs:
         id: candidate
         run: node packages/tauri/scripts/build-candidate.mjs --runtime artifacts/tauri-runtime --output artifacts/tauri-candidate
       - name: Prepare the explicit pinned old-engine fixture executor
-        if: matrix.platform != 'darwin'
         run: node packages/electron/scripts/ensure-electron.mjs
       # This must precede a bare native smoke: only a known fresh OS profile may
       # be admitted for the synthetic old-engine fixture. The lifecycle driver
       # itself runs the complete native suite twice from the installed product.
-      - name: Exercise real Linux portable lifecycle and native profile migration
+      - name: Exercise real Linux portable lifecycle and application-data handoff
         if: matrix.platform == 'linux'
         run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
       - name: Exercise real Windows installation, migration, reinstall and uninstall
         if: matrix.platform == 'win32'
         run: node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
-      - name: Exercise real CEF windows, browser, sandbox and native drain
+      - name: Exercise real macOS DMG copy-install, replacement and removal
         if: matrix.platform == 'darwin'
-        run: node packages/tauri/scripts/smoke-native.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-native-smoke.json
+        run: node packages/tauri/scripts/macos-installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
       - name: Build the complete same-source Electron performance baseline
         if: inputs.performance && matrix.platform == 'linux' && matrix.architecture == 'x64'
         run: node packages/tauri/scripts/benchmark-build.mjs --candidate artifacts/tauri-candidate/candidate.json --output artifacts/desktop-benchmark-products
