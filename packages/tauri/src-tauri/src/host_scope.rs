@@ -501,21 +501,51 @@ mod tests {
     }
     #[tokio::test]
     async fn exited_original_process_does_not_certify_a_live_job_descendant() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT},
+            System::{JobObjects::IsProcessInJob, Threading::WaitForSingleObject},
+        };
         let data = tempfile::tempdir().unwrap();
         let _lease = crate::desktop_lock::Lease::acquire(data.path()).unwrap();
         let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
         let mut command = Command::new(node);
-        command.args(["-e", "const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});process.stdout.write(c.pid+'\\n');c.unref();"])
+        // libuv places non-detached children in its own kill-on-parent-close
+        // Job. unref alone cannot establish a surviving descendant. Detach
+        // from that inner lifetime, never from Varin's non-breakaway outer Job,
+        // and wait for the child's real ready message before ending its parent.
+        command.args(["-e", r#"const c=require('node:child_process').spawn(process.execPath,['-e',"process.send('ready');process.disconnect();setInterval(()=>{},1000)"],{detached:true,stdio:['ignore','ignore','ignore','ipc']});c.once('message',()=>{process.stdin.once('end',()=>process.exit(0));process.stdin.resume();process.stdout.write(c.pid+'\n');c.unref();});"#])
             .stdout(Stdio::piped());
         let (mut child, scope) = ProcessScope::spawn(command, data.path()).unwrap();
         let mut line = String::new();
-        BufReader::new(child.stdout.take().unwrap())
-            .read_line(&mut line)
+        let mut output = BufReader::new(child.stdout.take().unwrap());
+        tokio::time::timeout(Duration::from_secs(10), output.read_line(&mut line))
             .await
+            .expect("The original descendant must report actual readiness")
             .unwrap();
-        assert!(line.trim().parse::<u32>().unwrap() > 0);
-        let status = child.wait().await;
+        let descendant = race_process(line.trim().parse::<u32>().unwrap());
+        let mut belongs = 0;
+        assert_ne!(
+            unsafe {
+                IsProcessInJob(
+                    descendant.as_raw_handle(),
+                    scope.job.as_raw_handle(),
+                    &mut belongs,
+                )
+            },
+            0
+        );
+        assert_ne!(belongs, 0, "The live descendant must belong to Varin's Job");
+        let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
+            .await
+            .expect("The original root must exit after its input closes");
         drop(child);
+        assert!(status.as_ref().unwrap().success());
+        assert_eq!(
+            unsafe { WaitForSingleObject(descendant.as_raw_handle(), 0) },
+            WAIT_TIMEOUT,
+            "The fixture must survive its original parent's actual exit"
+        );
         assert!(
             !scope.empty().unwrap(),
             "root exit cannot release the Job's descendant"
@@ -528,6 +558,10 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(!ended.clean);
+        assert_eq!(
+            unsafe { WaitForSingleObject(descendant.as_raw_handle(), 0) },
+            WAIT_OBJECT_0
+        );
         assert!(scope.empty().unwrap());
     }
 
@@ -542,7 +576,9 @@ mod tests {
                 "--nocapture",
             ])
             .env("VARIN_SCOPE_RACE_ROLE", role)
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW, including fixture descendants
+            // No console object, rather than merely hiding its window. Never
+            // CREATE_BREAKAWAY_FROM_JOB: every actor stays in the original Job.
+            .creation_flags(windows_sys::Win32::System::Threading::DETACHED_PROCESS)
             .stdin(Stdio::null())
             .stdout(Stdio::null());
         command
@@ -577,8 +613,16 @@ mod tests {
 
     fn race_process(pid: u32) -> std::os::windows::io::OwnedHandle {
         use std::os::windows::io::{FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
-        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        };
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                0,
+                pid,
+            )
+        };
         assert!(
             !handle.is_null(),
             "Native race process: {}",
@@ -650,7 +694,8 @@ mod tests {
         let mut command = race_command("root");
         command
             .env("VARIN_SCOPE_RACE_ROOT", data.path())
-            .env("VARIN_SCOPE_RACE_EVENTS", &prefix);
+            .env("VARIN_SCOPE_RACE_EVENTS", &prefix)
+            .env("VARIN_TEST_WINDOWS_GUARDIAN_DETACHED_SERVICE", "1");
         let (mut child, scope) = ProcessScope::spawn(command.into(), data.path()).unwrap();
         let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
             .await

@@ -671,6 +671,20 @@ fn create_service(
         block.push(0);
     }
     block.push(0);
+    #[cfg(not(test))]
+    let console_flags = CREATE_NO_WINDOW;
+    #[cfg(test)]
+    let console_flags =
+        if std::env::var_os("VARIN_TEST_WINDOWS_GUARDIAN_DETACHED_SERVICE").is_some() {
+            // CREATE_NO_WINDOW still permits a hidden conhost. The exact Job
+            // snapshot regression requires only its explicitly synchronized native
+            // actors, so that fixture has no console at all. This flag never permits
+            // Job breakaway and does not alter production service startup.
+        // https://github.com/microsoft/terminal/blob/main/doc/specs/%23492%20-%20Default%20Terminal/spec.md
+            windows_sys::Win32::System::Threading::DETACHED_PROCESS
+        } else {
+            CREATE_NO_WINDOW
+        };
     if unsafe {
         CreateProcessW(
             null(),
@@ -678,7 +692,7 @@ fn create_service(
             null(),
             null(),
             1,
-            CREATE_NO_WINDOW
+            console_flags
                 | CREATE_SUSPENDED
                 | EXTENDED_STARTUPINFO_PRESENT
                 | windows_sys::Win32::System::Threading::CREATE_UNICODE_ENVIRONMENT,
