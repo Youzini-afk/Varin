@@ -14,6 +14,10 @@ on:
         description: Exercise all six existing native desktop targets
         type: boolean
         default: true
+      target:
+        description: Focus one native target only when full is false
+        type: string
+        default: ''
       performance:
         description: Collect complete same-source Linux desktop observations under a declared virtual display
         type: boolean
@@ -30,6 +34,9 @@ on:
       full:
         type: boolean
         default: true
+      target:
+        type: string
+        default: ''
       performance:
         type: boolean
         default: false
@@ -62,19 +69,14 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           FULL: ${{ inputs.full }}
+          TARGET: ${{ inputs.target }}
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           node --input-type=module <<'JS'
           import fs from 'node:fs';
-          const all = [
-            { platform: 'linux', architecture: 'x64', runner: 'ubuntu-24.04' },
-            { platform: 'win32', architecture: 'x64', runner: 'windows-latest' },
-            { platform: 'darwin', architecture: 'arm64', runner: 'macos-15' },
-            { platform: 'linux', architecture: 'arm64', runner: 'ubuntu-24.04-arm' },
-            { platform: 'win32', architecture: 'arm64', runner: 'windows-11-arm' },
-            { platform: 'darwin', architecture: 'x64', runner: 'macos-15-intel' },
-          ];
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify({ include: process.env.FULL === 'true' ? all : all.slice(0, 3) })}\n`);
+          import { selectNativeTargets } from './packages/tauri/scripts/native-targets.mjs';
+          const include = selectNativeTargets({ full: process.env.FULL === 'true', target: process.env.TARGET });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify({ include })}\n`);
           JS
       - run: bun run --cwd packages/tauri test:tooling
       - run: node scripts/build-products.mjs frontend --export artifacts/tauri-shared-frontend

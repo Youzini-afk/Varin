@@ -246,9 +246,9 @@ mod windows {
             {
                 return Err("Managed service could not enter its process Job".into());
             }
-            // Publish the exact active ancestry before any child instruction.
-            // An inherited lease consumer authenticates this chain on Windows
-            // just as it authenticates a Unix guardian's durable scope record.
+            // Publish the original shell/process scope before any child instruction.
+            // This durable receipt remains active until the retained Job's actual
+            // members have all stopped, independently of the shell's lifetime.
             lease.mark_active(std::process::id(), pid)?;
             let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             if snapshot == INVALID_HANDLE_VALUE {
@@ -284,6 +284,16 @@ mod windows {
         }
     }
     pub fn empty(scope: &ProcessScope) -> Result<bool, String> {
+        empty_after_snapshot(scope, |_| {})
+    }
+
+    // The hook lets the native regression deterministically create a descendant
+    // after the first kernel snapshot, without changing production observation.
+    pub(super) fn empty_after_snapshot(
+        scope: &ProcessScope,
+        after_snapshot: impl FnOnce(&[u32]),
+    ) -> Result<bool, String> {
+        let mut after_snapshot = Some(after_snapshot);
         // Job membership/accounting can advance during process rundown. The
         // original admitted object must be signaled even if a query already
         // reports zero members; neither PID disappearance nor an exit code is
@@ -316,49 +326,13 @@ mod windows {
         // ActiveProcesses includes terminated objects retained by any external
         // handle. Inspect a complete Job list and the original kernel objects,
         // never infer termination from elapsed time or a bare reusable PID.
-        let mut capacity = accounting.ActiveProcesses as usize;
         'snapshot: loop {
-            let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
-            let word = size_of::<usize>();
-            let bytes = capacity
-                .checked_mul(word)
-                .and_then(|size| size.checked_add(header))
-                .and_then(|size| u32::try_from(size).ok())
-                .ok_or("Managed Job process list is too large")?;
-            let mut buffer = vec![0usize; (bytes as usize).div_ceil(word)];
-            let ok = unsafe {
-                QueryInformationJobObject(
-                    scope.job.as_raw_handle(),
-                    JobObjectBasicProcessIdList,
-                    buffer.as_mut_ptr().cast(),
-                    bytes,
-                    null_mut(),
-                )
-            };
-            if ok == 0
-                && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_MORE_DATA as i32)
-            {
-                return Err("Managed Job members cannot be inspected".into());
+            let ids = members(scope, accounting.ActiveProcesses as usize)?;
+            if let Some(after_snapshot) = after_snapshot.take() {
+                after_snapshot(&ids);
             }
-            let list = unsafe { &*(buffer.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST) };
-            let count = list.NumberOfProcessIdsInList as usize;
-            if ok == 0 || count < list.NumberOfAssignedProcesses as usize {
-                capacity = capacity
-                    .checked_mul(2)
-                    .map(|value| value.max(list.NumberOfAssignedProcesses as usize))
-                    .ok_or("Managed Job process list overflow")?;
-                continue;
-            }
-            if count > capacity {
-                return Err("Managed Job member list is invalid".into());
-            }
-            let ids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
-            let mut handles = Vec::with_capacity(count);
-            for &id in ids {
-                let pid = u32::try_from(id)
-                    .ok()
-                    .filter(|pid| *pid != 0)
-                    .ok_or("Managed Job member identity is invalid")?;
+            let mut handles = std::collections::HashMap::with_capacity(ids.len());
+            for pid in ids {
                 if pid == scope.original_pid {
                     continue;
                 }
@@ -398,7 +372,9 @@ mod windows {
                     continue 'snapshot;
                 }
                 match unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) } {
-                    WAIT_OBJECT_0 => handles.push(handle),
+                    WAIT_OBJECT_0 => {
+                        handles.insert(pid, handle);
+                    }
                     WAIT_TIMEOUT => {
                         #[cfg(test)]
                         trace_unsignaled(handle.as_raw_handle(), false);
@@ -407,23 +383,107 @@ mod windows {
                     _ => return Err("Managed Job process termination is unknown".into()),
                 }
             }
-            // All members of this complete snapshot are signaled, so none can
-            // spawn after observation. Preserve their handles through this fact.
+            // A member could spawn a child after the snapshot and then exit
+            // before our signal check. Re-read the complete Job membership while
+            // every proven process object is still pinned. Only a set contained
+            // in these signaled objects is stable: none can now create a child.
+            // A new member is still live/unknown work, never a stopped receipt.
+            let current = members(scope, handles.len().saturating_add(1))?;
+            let stopped = current
+                .iter()
+                .all(|pid| *pid == scope.original_pid || handles.contains_key(pid));
             drop(handles);
-            return Ok(true);
+            return Ok(stopped);
+        }
+    }
+
+    fn members(scope: &ProcessScope, capacity: usize) -> Result<Vec<u32>, String> {
+        let mut capacity = capacity.max(1);
+        loop {
+            let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
+            let word = size_of::<usize>();
+            let bytes = capacity
+                .checked_mul(word)
+                .and_then(|size| size.checked_add(header))
+                .and_then(|size| u32::try_from(size).ok())
+                .ok_or("Managed Job process list is too large")?;
+            let mut buffer = vec![0usize; (bytes as usize).div_ceil(word)];
+            let ok = unsafe {
+                QueryInformationJobObject(
+                    scope.job.as_raw_handle(),
+                    JobObjectBasicProcessIdList,
+                    buffer.as_mut_ptr().cast(),
+                    bytes,
+                    null_mut(),
+                )
+            };
+            if ok == 0
+                && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_MORE_DATA as i32)
+            {
+                return Err("Managed Job members cannot be inspected".into());
+            }
+            let list = unsafe { &*(buffer.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST) };
+            let count = list.NumberOfProcessIdsInList as usize;
+            if ok == 0 || count < list.NumberOfAssignedProcesses as usize {
+                capacity = capacity
+                    .checked_mul(2)
+                    .map(|value| value.max(list.NumberOfAssignedProcesses as usize))
+                    .ok_or("Managed Job process list overflow")?;
+                continue;
+            }
+            if count > capacity {
+                return Err("Managed Job member list is invalid".into());
+            }
+            let ids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
+            return ids
+                .iter()
+                .map(|id| {
+                    u32::try_from(*id)
+                        .ok()
+                        .filter(|pid| *pid != 0)
+                        .ok_or_else(|| "Managed Job member identity is invalid".into())
+                })
+                .collect();
         }
     }
 
     #[cfg(test)]
     fn trace_unsignaled(handle: std::os::windows::io::RawHandle, original: bool) {
+        use windows_sys::Win32::{
+            Foundation::FILETIME,
+            System::Threading::{
+                GetExitCodeProcess, GetProcessId, GetProcessTimes, QueryFullProcessImageNameW,
+            },
+        };
         let mut code = 0;
-        let readable =
-            unsafe { windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut code) }
+        let readable = unsafe { GetExitCodeProcess(handle, &mut code) } != 0;
+        let pid = unsafe { GetProcessId(handle) };
+        let mut image = [0u16; 32768];
+        let mut length = image.len() as u32;
+        let image =
+            if unsafe { QueryFullProcessImageNameW(handle, 0, image.as_mut_ptr(), &mut length) }
+                != 0
+            {
+                let path = String::from_utf16_lossy(&image[..length as usize]);
+                path.rsplit(['\\', '/']).next().map(str::to_owned)
+            } else {
+                None
+            };
+        let mut created = FILETIME::default();
+        let mut exited = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+        let times =
+            unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) }
                 != 0;
-        // Process role and OS exit status only. Never print command lines,
-        // environment, application data or inherited pipe contents.
+        let ticks =
+            |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+        // Kernel identity and executable basename only. Never print full paths,
+        // command lines, environment, application data or inherited pipe contents.
         eprintln!(
-            "Managed Job member is not signaled: original={original}, exit_code={:?}",
+            "Managed Job member is not signaled: original={original}, pid={pid}, image={image:?}, creation_time={:?}, exit_time={:?}, exit_code={:?}",
+            times.then_some(ticks(created)),
+            times.then_some(ticks(exited)),
             readable.then_some(code),
         );
     }
@@ -495,6 +555,194 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(!ended.clean);
+        assert!(scope.empty().unwrap());
+    }
+
+    fn race_command(role: &str) -> std::process::Command {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "host_scope::tests::snapshot_race_process",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("VARIN_SCOPE_RACE_ROLE", role)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null());
+        command
+    }
+
+    fn race_event(prefix: &str, suffix: &str, create: bool) -> std::os::windows::io::OwnedHandle {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::System::Threading::{
+            CreateEventW, EVENT_MODIFY_STATE, OpenEventW, SYNCHRONIZATION_SYNCHRONIZE,
+        };
+        let name: Vec<u16> = format!("Local\\Varin.Scope.{prefix}.{suffix}\0")
+            .encode_utf16()
+            .collect();
+        let handle = unsafe {
+            if create {
+                CreateEventW(std::ptr::null(), 1, 0, name.as_ptr())
+            } else {
+                OpenEventW(
+                    EVENT_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE,
+                    0,
+                    name.as_ptr(),
+                )
+            }
+        };
+        assert!(
+            !handle.is_null(),
+            "Native race event: {}",
+            std::io::Error::last_os_error()
+        );
+        unsafe { OwnedHandle::from_raw_handle(handle) }
+    }
+
+    fn race_process(pid: u32) -> std::os::windows::io::OwnedHandle {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        assert!(
+            !handle.is_null(),
+            "Native race process: {}",
+            std::io::Error::last_os_error()
+        );
+        unsafe { OwnedHandle::from_raw_handle(handle) }
+    }
+
+    #[test]
+    #[ignore = "private Windows process fixture for exact Job snapshot interleaving"]
+    fn snapshot_race_process() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::WAIT_OBJECT_0,
+            System::Threading::{INFINITE, SetEvent, WaitForSingleObject},
+        };
+        let root = std::path::PathBuf::from(std::env::var_os("VARIN_SCOPE_RACE_ROOT").unwrap());
+        let prefix = std::env::var("VARIN_SCOPE_RACE_EVENTS").unwrap();
+        match std::env::var("VARIN_SCOPE_RACE_ROLE").unwrap().as_str() {
+            "root" => {
+                let child = race_command("ancestor").spawn().unwrap();
+                std::fs::write(root.join("ancestor-pid"), child.id().to_string()).unwrap();
+            }
+            "ancestor" => {
+                let ready = race_event(&prefix, "ancestor-ready", false);
+                let spawn = race_event(&prefix, "spawn", false);
+                assert_ne!(unsafe { SetEvent(ready.as_raw_handle()) }, 0);
+                assert_eq!(
+                    unsafe { WaitForSingleObject(spawn.as_raw_handle(), INFINITE) },
+                    WAIT_OBJECT_0
+                );
+                let child = race_command("late").spawn().unwrap();
+                std::fs::write(root.join("late-pid"), child.id().to_string()).unwrap();
+                let ready = race_event(&prefix, "late-ready", false);
+                assert_eq!(
+                    unsafe { WaitForSingleObject(ready.as_raw_handle(), 10_000) },
+                    WAIT_OBJECT_0
+                );
+            }
+            "late" => {
+                let ready = race_event(&prefix, "late-ready", false);
+                let stop = race_event(&prefix, "stop", false);
+                assert_ne!(unsafe { SetEvent(ready.as_raw_handle()) }, 0);
+                assert_eq!(
+                    unsafe { WaitForSingleObject(stop.as_raw_handle(), INFINITE) },
+                    WAIT_OBJECT_0
+                );
+            }
+            role => panic!("Unknown race fixture role: {role}"),
+        }
+        // The scope owns descendants. Do not wait for them in this fixture.
+        std::process::exit(0);
+    }
+
+    #[tokio::test]
+    async fn descendant_spawned_after_snapshot_is_not_certified_stopped() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT},
+            System::Threading::{SetEvent, WaitForSingleObject},
+        };
+        let data = tempfile::tempdir().unwrap();
+        let _lease = crate::desktop_lock::Lease::acquire(data.path()).unwrap();
+        let prefix = uuid::Uuid::new_v4().to_string();
+        let ready = race_event(&prefix, "ancestor-ready", true);
+        let spawn = race_event(&prefix, "spawn", true);
+        let _late_ready = race_event(&prefix, "late-ready", true);
+        let _stop = race_event(&prefix, "stop", true);
+        let mut command = race_command("root");
+        command
+            .env("VARIN_SCOPE_RACE_ROOT", data.path())
+            .env("VARIN_SCOPE_RACE_EVENTS", &prefix);
+        let (mut child, scope) = ProcessScope::spawn(command.into(), data.path()).unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
+            .await
+            .unwrap();
+        assert!(status.as_ref().unwrap().success());
+        assert_eq!(
+            unsafe { WaitForSingleObject(ready.as_raw_handle(), 10_000) },
+            WAIT_OBJECT_0
+        );
+        let ancestor_pid: u32 = std::fs::read_to_string(data.path().join("ancestor-pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        // Pin A before it exits. The original single-snapshot algorithm would
+        // successfully reopen this signaled object and incorrectly return true.
+        let ancestor = race_process(ancestor_pid);
+        let mut late = None;
+        let empty = windows::empty_after_snapshot(&scope, |ids| {
+            assert!(
+                ids.contains(&ancestor_pid),
+                "First snapshot must include live A"
+            );
+            assert_eq!(
+                unsafe { WaitForSingleObject(ancestor.as_raw_handle(), 0) },
+                WAIT_TIMEOUT
+            );
+            assert_ne!(unsafe { SetEvent(spawn.as_raw_handle()) }, 0);
+            assert_eq!(
+                unsafe { WaitForSingleObject(ancestor.as_raw_handle(), 10_000) },
+                WAIT_OBJECT_0
+            );
+            let late_pid: u32 = std::fs::read_to_string(data.path().join("late-pid"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert!(
+                !ids.contains(&late_pid),
+                "B must be born after the first snapshot"
+            );
+            let handle = race_process(late_pid);
+            assert_eq!(
+                unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) },
+                WAIT_TIMEOUT
+            );
+            late = Some(handle);
+        })
+        .unwrap();
+        assert!(
+            !empty,
+            "A's signaled object cannot certify its later child B"
+        );
+        assert_eq!(
+            unsafe { WaitForSingleObject(late.as_ref().unwrap().as_raw_handle(), 0) },
+            WAIT_TIMEOUT
+        );
+        let ended = tokio::time::timeout(
+            Duration::from_secs(10),
+            scope.settle_after_node_exit(&status),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(!ended.clean, "Live B requires real Job termination");
+        assert_eq!(
+            unsafe { WaitForSingleObject(late.as_ref().unwrap().as_raw_handle(), 0) },
+            WAIT_OBJECT_0
+        );
         assert!(scope.empty().unwrap());
     }
 }

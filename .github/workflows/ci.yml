@@ -14,6 +14,11 @@ on:
         description: Exercise every existing native desktop architecture (six runners)
         type: boolean
         default: false
+      tauri_target:
+        description: Focus one native target only when tauri_full is false
+        type: choice
+        default: default
+        options: [default, linux-x64, linux-arm64, win32-x64, win32-arm64, darwin-x64, darwin-arm64]
       tauri_performance:
         description: Observe same-source complete Electron/Tauri products on the disposable Linux virtual display
         type: boolean
@@ -568,6 +573,7 @@ jobs:
     with:
       authorized_tools: true
       performance: ${{ inputs.tauri_performance || false }}
+      target: ${{ inputs.tauri_target || '' }}
       source_sha: ${{ inputs.source_sha || github.sha }}
       full: ${{ inputs.tauri_full || inputs.full || github.event_name == 'schedule' }}
 
