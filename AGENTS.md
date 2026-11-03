@@ -24,8 +24,9 @@ documents. Git preserves their history.
   THIRD_PARTY_NOTICES obligations independently of documentation cleanup.
 - `application-client` owns framework-neutral RuntimeAPIs/DTOs/failures; `ui` owns React, projections,
   Document Registry and editor groups. Privileged work belongs to trusted owners, never renderers.
-- `web` owns the Application Host. Electron embeds it and adds the native shell; mobile connects to it.
-  Do not introduce a second Electron backend. Runtime, protocol and extension packages retain their
+- `web` owns the Application Host. Tauri manages that same Host through a private Node service;
+  Electron remains a transition adapter, and mobile connects to the Host. Do not introduce a second
+  desktop backend. Runtime, protocol and extension packages retain their
   named process/contract boundaries in [architecture](docs/architecture.md).
 - Rust is the production authority for transferred storage, file, materialization, process and compute
   resources. The Agent Catalog additionally owns native execution. No parallel TS writer or fallback
