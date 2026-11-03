@@ -4,6 +4,19 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { discoverCef, engineInventory } from './build-candidate.mjs';
+import { pinnedCefLicense } from './cef-license.mjs';
+
+test('retains the pinned CEF license when the upstream downloader omits it and rejects drift', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-cef-license-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const original = await pinnedCefLicense(root);
+  const bytes = await fs.readFile(original);
+  assert.match(bytes.toString('utf8'), /Redistribution and use in source and binary forms/);
+  await fs.copyFile(original, path.join(root, 'LICENSE.txt'));
+  assert.equal(await pinnedCefLicense(root), original);
+  await fs.appendFile(path.join(root, 'LICENSE.txt'), 'changed');
+  await assert.rejects(pinnedCefLicense(root), /differs from the pinned/);
+});
 
 test('candidate discovery accepts only the official target/version receipt', async t => {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-cef-discovery-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));

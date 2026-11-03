@@ -96,7 +96,7 @@ mod platform {
     };
     use tauri::{Emitter, Manager, WebviewWindow};
     use winit::{
-        raw_window_handle::{AppKitWindowHandle, RawWindowHandle},
+        raw_window_handle::{AppKitWindowHandle, HasWindowHandle, RawWindowHandle},
         window::Window,
     };
 
@@ -107,13 +107,14 @@ mod platform {
         pub struct MetalView;
         unsafe impl NSObjectProtocol for MetalView {}
         impl MetalView {
-            #[unsafe(method(hitTest:))]
+            #[unsafe(method_id(hitTest:))]
             fn hit_test(&self, _point: NSPoint) -> Option<Retained<NSView>> { None }
         }
     );
     impl MetalView {
         fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
-            unsafe { msg_send![super(Self::alloc(mtm)), initWithFrame: frame] }
+            let this = Self::alloc(mtm).set_ivars(());
+            unsafe { msg_send![super(this), initWithFrame: frame] }
         }
     }
     define_class!(
@@ -123,13 +124,14 @@ mod platform {
         struct MaterialView;
         unsafe impl NSObjectProtocol for MaterialView {}
         impl MaterialView {
-            #[unsafe(method(hitTest:))]
+            #[unsafe(method_id(hitTest:))]
             fn hit_test(&self, _point: NSPoint) -> Option<Retained<NSView>> { None }
         }
     );
     impl MaterialView {
         fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
-            unsafe { msg_send![super(Self::alloc(mtm)), initWithFrame: frame] }
+            let this = Self::alloc(mtm).set_ivars(());
+            unsafe { msg_send![super(this), initWithFrame: frame] }
         }
     }
 

@@ -581,18 +581,10 @@ pub async fn prepare(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    ProcessScope::prepare(&mut command);
-    let mut child = command
-        .spawn()
-        .map_err(|_| "Verified legacy exporter could not start")?;
-    let scope = match ProcessScope::attach(&child) {
-        Ok(scope) => ScopeGuard(scope),
-        Err(error) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            return Err(error);
-        }
-    };
+    // The exporter owns private Chromium children as well as its main process.
+    // Use the same guardian/Job from admission, never attach after execution.
+    let (mut child, process_scope) = ProcessScope::spawn_with_stderr(command, data_dir, Stdio::null())?;
+    let scope = ScopeGuard(process_scope);
     let mut input = child
         .stdout
         .take()
@@ -601,13 +593,6 @@ pub async fn prepare(
         .stdin
         .take()
         .ok_or("Legacy private input unavailable")?;
-    let mut errors = child
-        .stderr
-        .take()
-        .ok_or("Legacy diagnostic stream unavailable")?;
-    let drain = tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut errors, &mut tokio::io::sink()).await;
-    });
     let nonce = uuid::Uuid::new_v4().to_string();
     let mut application: Option<HiddenPage> = None;
     let mut browser: Option<HiddenPage> = None;
@@ -674,23 +659,29 @@ pub async fn prepare(
                 cleanup_error = Some(error);
             }
         }
-        let status = child
-            .wait()
-            .await
-            .map_err(|_| "Legacy exporter termination was not confirmed".to_owned());
-        if status.is_err() || !scope.0.empty().unwrap_or(false) {
-            if let Err(error) = scope.0.terminate() {
-                cleanup_error.get_or_insert(error);
+        if outcome.is_ok() {
+            // Complete private protocol + pipe EOF, not mere byte receipt. The
+            // exporter must close its original native readers before exit.
+            let mut trailing = [0];
+            match input.read(&mut trailing).await {
+                Ok(0) => {
+                    if let Err(error) = scope.0.confirm_owner_drained() { cleanup_error.get_or_insert(error); }
+                }
+                _ => {
+                    cleanup_error.get_or_insert("Legacy exporter emitted incomplete trailing data".into());
+                    let _ = scope.0.terminate();
+                }
             }
         }
-        if let Err(error) = scope.0.wait_empty().await {
-            cleanup_error.get_or_insert(error);
+        let status = child.wait().await;
+        drop(child);
+        let settled = scope.0.settle_after_node_exit(&status).await;
+        if let Some(error) = cleanup_error { return Err(error); }
+        let settled = settled?;
+        if !settled.clean || !settled.success {
+            return Err("Legacy exporter did not confirm clean process-scope termination".into());
         }
-        let _ = drain.await;
-        if let Some(error) = cleanup_error {
-            return Err(error);
-        }
-        status
+        Ok::<_, String>(())
     };
     let (status, app_close, browser_close) = tokio::join!(
         process_cleanup,
@@ -712,9 +703,7 @@ pub async fn prepare(
     app_close?;
     browser_close?;
     let receipt = outcome?;
-    if !status?.success() {
-        return Err("Legacy export did not finish cleanly; original profile was retained".into());
-    }
+    status?;
     lease.verify()?;
     settings
         .call(

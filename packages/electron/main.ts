@@ -3184,6 +3184,9 @@ const handleInvoke = async (
       };
     }
 
+    case 'desktop_browser_device':
+      throw new Error('Browser device sharing is available in the native Tauri desktop');
+
     case 'desktop_browser_present': case 'desktop_browser_layout': case 'desktop_browser_detach':
     case 'desktop_browser_action': case 'desktop_browser_read': case 'desktop_browser_control': {
       if (!desktopBrowser || !browserWindow || browserWindow.isDestroyed()) throw new Error('The local browser is unavailable');
@@ -3199,7 +3202,7 @@ const handleInvoke = async (
       if (!raw || !['x', 'y', 'width', 'height'].every(key => typeof raw[key] === 'number' && Number.isFinite(raw[key]))) throw new Error('A finite browser viewport is required');
       const bounds = { x: Math.round(Number(raw.x)), y: Math.round(Number(raw.y)), width: Math.max(1, Math.round(Number(raw.width))), height: Math.max(1, Math.round(Number(raw.height))) };
       if (command === 'desktop_browser_layout') { await desktopBrowser.layout(pageId, viewId, browserWindow, bounds, args.visible === true); return null; }
-      return desktopBrowser.present({ pageId, viewId, url: String(args.url ?? 'about:blank'), bounds, visible: args.visible === true }, browserWindow);
+      return desktopBrowser.present({ ...(args.createNew === true ? { createNew: true } : {}), pageId, viewId, url: String(args.url ?? 'about:blank'), bounds, visible: args.visible === true }, browserWindow);
     }
 
     case 'desktop_capture_page_rect': {

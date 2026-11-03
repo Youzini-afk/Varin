@@ -5957,6 +5957,7 @@ dependencies = [
  "core-foundation-sys",
  "fs2",
  "gtk4",
+ "libc",
  "minisign-verify",
  "notify-rust",
  "objc2",

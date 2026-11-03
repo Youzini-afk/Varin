@@ -84,7 +84,7 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
         const projectLabels = projects.filter(project => thread.observer_project_ids.includes(project.id)).map(project => project.label || project.path.split(/[\\/]/).filter(Boolean).at(-1));
         return <ContextMenu key={thread.thread_id}><ContextMenuTrigger asChild><div className={`group/thread mb-1 flex items-center gap-1 rounded-md ${selected?.threadId === thread.thread_id ? 'bg-interactive-active' : 'hover:bg-interactive-hover'}`}>
         {disclosure}
-        <button className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm" aria-current={selected?.threadId === thread.thread_id ? 'page' : undefined}
+        <button className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm" data-thread-id={thread.thread_id} aria-current={selected?.threadId === thread.thread_id ? 'page' : undefined}
           onClick={() => void act(() => navigate(thread.thread_id))}>
           <AgentAvatar identity={thread.thread_id} avatar={thread.avatar} size={20} {...(isLeadThread(thread, threadsById) ? { role: 'lead' as const } : {})} />
           {working || thread.pinned ? <Icon name={working ? 'loader-4' : 'pushpin'} className={`size-4 shrink-0 ${working ? 'animate-spin text-primary' : ''}`} /> : null}

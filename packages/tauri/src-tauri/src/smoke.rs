@@ -1,6 +1,8 @@
 //! Fixed, opt-in native acceptance suite. Never a production remote-debug API.
 //! Runs only in an explicitly prepared empty temporary data directory.
 mod fixture;
+mod http;
+mod http_body;
 mod input;
 mod sandbox;
 use crate::{
@@ -197,15 +199,29 @@ fn event_sink(events: Arc<Mutex<Vec<Value>>>) -> Arc<dyn Fn(Value) + Send + Sync
 /// CDP session. The caller exits only after this returns and the report exists.
 pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap: Value) -> bool {
     let events = Arc::new(Mutex::new(Vec::new()));
-    let browser = BrowserViews::new(
-        app.clone(),
-        event_sink(events.clone()),
-        request.data_dir.clone(),
-    );
+    let service = match crate::desktop::smoke_browser_service(&app).await {
+        Ok(service) => service,
+        Err(error) => {
+            let _ = crate::desktop::smoke_shutdown(&app).await;
+            let _ = startup_failed(&request, &error);
+            return false;
+        }
+    };
+    let browser = service.browser.clone();
+    let _observer = match browser.smoke_observe(event_sink(events.clone())) {
+        Ok(observer) => observer,
+        Err(error) => {
+            let _ = crate::desktop::smoke_shutdown(&app).await;
+            let _ = startup_failed(&request, &error);
+            return false;
+        }
+    };
+    let http = http::Client::new(service.process.snapshot());
     let mut cases = Vec::new();
     let server = match fixture::Server::start() {
         Ok(server) => server,
         Err(error) => {
+            let _ = crate::desktop::smoke_shutdown(&app).await;
             let _ = startup_failed(&request, &error);
             return false;
         }
@@ -230,47 +246,34 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }).await);
-    let created = browser
-        .request(
-            "browser.create",
-            json!({"pageId":"native-smoke-page","requestContext":"interactive"}),
-        )
-        .await;
     let page = "native-smoke-page";
-    let mut same_page = checked("browser-same-page",async{
-        created?;
-        browser.request("browser.load",json!({"pageId":page,"url":format!("{origin}/page")})).await?;
-        let before=wait_page(&browser,page).await?;
-        let present=|visible|json!({"pageId":page,"windowLabel":"main","viewId":"native-smoke-view","visible":visible,"bounds":{"x":40,"y":80,"width":640,"height":480}});
-        browser.request("browser.present",present(true)).await?;
+    cases.push(checked("browser-same-page",async{
+        let present=|visible|json!({"pageId":page,"viewId":"native-smoke-view","url":"about:blank","visible":visible,"bounds":{"x":40,"y":80,"width":640,"height":480}});
+        let created=node(&service,"desktop_browser_present",present(true)).await?;
+        if created["pageId"]!=page{return Err("The Node Browser owner did not preserve the requested page identity".into())}
+        node(&service,"desktop_browser_action",json!({"pageId":page,"action":{"action":"navigate","url":format!("{origin}/page")}})).await?;
+        let before=wait_node_page(&service,page).await?;
         let shown=wait_presentation(&browser,page,"main",true).await?;
-        browser.request("browser.layout",present(false)).await?;
+        node(&service,"desktop_browser_layout",present(false)).await?;
         let hidden=wait_presentation(&browser,page,"browser-parking",false).await?;
-        let hidden_stream=hidden_screencast(&browser,page,&events).await?;
-        browser.request("browser.layout",present(true)).await?;
+        let hidden_stream=hidden_screencast(&browser,page,http.as_ref().map_err(Clone::clone)?).await?;
+        node(&service,"desktop_browser_layout",present(true)).await?;
         let reshown=wait_presentation(&browser,page,"main",true).await?;
-        browser.request("browser.detach",json!({"pageId":page,"windowLabel":"main","viewId":"native-smoke-view"})).await?;
+        node(&service,"desktop_browser_detach",json!({"pageId":page,"viewId":"native-smoke-view"})).await?;
         let detached=wait_presentation(&browser,page,"browser-parking",false).await?;
-        browser.request("browser.present",present(true)).await?;
+        node(&service,"desktop_browser_present",present(true)).await?;
         let remounted=wait_presentation(&browser,page,"main",true).await?;
         if [hidden["browserId"].clone(),reshown["browserId"].clone(),detached["browserId"].clone(),remounted["browserId"].clone()].iter().any(|id|*id!=shown["browserId"]){return Err("Presentation replaced the original native Browser".into())}
-        let native_input=input::click(&app,120.,160.).await?;
+        let bounds=&remounted["bounds"];
+        let(x,y)=(bounds["x"].as_f64().ok_or("Actual embedded x coordinate missing")?,bounds["y"].as_f64().ok_or("Actual embedded y coordinate missing")?);
+        let native_input=input::click(&app,x+80.,y+80.).await?;
         let deadline=Instant::now()+Duration::from_secs(10);
-        let after=loop{let value=wait_page(&browser,page).await?;if value["clicks"]==1{break value}if Instant::now()>deadline{return Err("The actual native mouse click did not reach the embedded page".into())}tokio::time::sleep(Duration::from_millis(25)).await;};
+        let after=loop{let value=wait_node_page(&service,page).await?;if value["clicks"]==1{break value}if Instant::now()>deadline{return Err("The actual native mouse click did not reach the embedded page".into())}tokio::time::sleep(Duration::from_millis(25)).await;};
         if before["marker"]!=after["marker"]{return Err("Embedding or hide/show/remount reloaded the original page".into())}
-        Ok(json!({"before":before,"after":after,"nativeInput":native_input,"shown":shown,"hidden":hidden,"hiddenScreencast":hidden_stream,"reshown":reshown,"detached":detached,"remounted":remounted}))
-    }).await;
-    // Even a failed/expired observation must stop its original stream. This is
-    // not page closure: later cases and remounts retain the very same document.
-    let stop = command(&browser, page, "Page.stopScreencast", json!({})).await;
-    if same_page["status"] == "passed" {
-        if let Err(error) = stop {
-            same_page = json!({"name":"browser-same-page","status":"failed","error":format!("The original screencast did not stop: {error}")});
-        }
-    }
-    cases.push(same_page);
+        Ok(json!({"owner":"production-node-puppeteer-native-transport","before":before,"after":after,"nativeInput":native_input,"shown":shown,"hidden":hidden,"hiddenScreencast":hidden_stream,"reshown":reshown,"detached":detached,"remounted":remounted}))
+    }).await);
     cases.push(checked("browser-authority-isolation",async{
-        let value=eval(&browser,page,"({ipc:typeof window.ipc,tauri:typeof window.__TAURI_INTERNALS__,desktop:typeof window.__VARIN_DESKTOP__,token:typeof window.__VARIN_CLIENT_TOKEN__})").await?;
+        let value=node_eval(&service,page,"({ipc:typeof window.ipc,tauri:typeof window.__TAURI_INTERNALS__,desktop:typeof window.__VARIN_DESKTOP__,token:typeof window.__VARIN_CLIENT_TOKEN__})").await?;
         if ["ipc","tauri","desktop","token"].iter().any(|key|value[*key]!="undefined"){return Err("Untrusted Browser page received application authority".into())}
         if command(&browser,page,"Target.createTarget",json!({"url":"about:blank"})).await.is_ok(){return Err("Browser lifecycle authority escaped its owner".into())}
         Ok(value)
@@ -287,18 +290,17 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
         Ok(json!({"browserCookiePresent":true,"applicationCookiePresent":false,"anonymousCookiePresent":false}))
     }).await);
     cases.push(checked("browser-capture",async{
-        let captured=browser.request("browser.capture",json!({"pageId":page})).await?;
-        let path=captured["file"].as_str().ok_or("Capture path missing")?;
-        let bytes=fs::read(path).map_err(|e|e.to_string())?;
-        if bytes.len()<24||&bytes[..8]!=b"\x89PNG\r\n\x1a\n"||captured["width"].as_u64().unwrap_or(0)==0{return Err("Actual Browser capture is not a nonempty PNG".into())}
-        let evidence=json!({"sha256":captured["sha256"],"size":bytes.len(),"width":captured["width"],"height":captured["height"]});
-        browser.request("browser.releaseCapture",json!({"captureId":captured["captureId"]})).await?;
-        Ok(evidence)
+        let captured=node(&service,"desktop_browser_read",json!({"pageId":page,"view":"screenshot"})).await?;
+        let image=&captured["image"];
+        let pixels=image["base64"].as_str().filter(|value|value.len()<=16*1024*1024).ok_or("Original Node capture omitted bounded pixels")?;
+        let bytes=base64::engine::general_purpose::STANDARD.decode(pixels).map_err(|_|"Node capture encoding is malformed")?;
+        if bytes.len()<24||&bytes[..8]!=b"\x89PNG\r\n\x1a\n"||image["mimeType"]!="image/png"||image["width"].as_u64().unwrap_or(0)==0||captured["page"]["pageId"]!=page{return Err("Original Node capture is not a nonempty PNG from the same page".into())}
+        Ok(json!({"owner":"production-node-browser-read","sha256":format!("{:x}",Sha256::digest(&bytes)),"size":bytes.len(),"width":image["width"],"height":image["height"],"observationId":captured["observationId"]}))
     }).await);
     cases.push(
         checked("browser-download-terminal", async {
-            eval(
-                &browser,
+            node_eval(
+                &service,
                 page,
                 "document.getElementById('download').click();true",
             )
@@ -309,32 +311,23 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
             .await?;
             let id = start["downloadId"]
                 .as_str()
-                .ok_or("Download identity missing")?;
-            let directory = request
-                .data_dir
-                .join("browser-transfers")
-                .join(format!("download-{}", uuid::Uuid::new_v4()));
-            fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-            browser
-                .request(
-                    "browser.download.save",
-                    json!({"downloadId":id,"filePath":directory.join("content")}),
-                )
-                .await?;
+                .ok_or("Original native download identity missing")?;
             let terminal = wait_event(&events, |e| {
                 e["kind"] == "download-progress"
                     && e["downloadId"] == id
                     && e["state"] == "completed"
+                    && e["terminal"] == true
             })
             .await?;
-            let bytes = fs::read(directory.join("content")).map_err(|e| e.to_string())?;
-            if bytes != fixture::DOWNLOAD {
-                return Err("Native download bytes differ from the fixed response".into());
-            }
-            browser
-                .request("browser.download.release", json!({"downloadId":id}))
-                .await?;
-            Ok(json!({"terminal":terminal,"exactBytes":true}))
+            // The real Node owner owns saveTo, writer completion, bytes and release.
+            // A second save callback here would steal authority from that owner.
+            let client = http.as_ref().map_err(Clone::clone)?.clone();
+            let url = format!("{origin}/download");
+            let download =
+                tokio::task::spawn_blocking(move || client.download("native-smoke-page", &url))
+                    .await
+                    .map_err(|_| "Original Node download observation ended")??;
+            Ok(json!({"terminal":terminal,"download":download,"exactBytes":true}))
         })
         .await,
     );
@@ -362,21 +355,24 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
     );
     cases.push(checked("renderer-sandbox", sandbox::observe(&app, &browser, page)).await);
     cases.push(checked("browser-pending-close",async{
-        let pending=command(&browser,page,"Runtime.evaluate",json!({"expression":"new Promise(()=>{})","awaitPromise":true,"returnByValue":true}));
+        let pending=node_eval(&service,page,"(()=>{varinSmoke.pending=true;return new Promise(()=>{})})()");
         tokio::pin!(pending);
-        tokio::select!{value=&mut pending=>return Err(format!("Pending page effect unexpectedly finished: {}",value.is_ok())),_=tokio::time::sleep(Duration::from_millis(100))=>{}}
-        browser.request("browser.close",json!({"pageId":page})).await?;
-        if pending.await.is_ok(){return Err("Closing the page fabricated success for a pending effect".into())}
-        Ok(json!({"nativeCloseObserved":true,"pendingEffectRejected":true}))
+        let deadline=Instant::now()+Duration::from_secs(5);
+        loop {
+            tokio::select!{value=&mut pending=>return Err(format!("Original Node page effect unexpectedly finished: {}",value.is_ok())),_=tokio::time::sleep(Duration::from_millis(25))=>{}}
+            if eval(&browser,page,"window.varinSmoke.pending===true").await?==true{break}
+            if Instant::now()>deadline{return Err("The original Puppeteer effect was not actually dispatched".into())}
+        }
+        node(&service,"desktop_browser_action",json!({"pageId":page,"action":{"action":"close"}})).await?;
+        wait_event(&events,|e|e["kind"]=="closed"&&e["pageId"]==page).await?;
+        if pending.await.is_ok(){return Err("Closing the page fabricated success for the pending Puppeteer effect".into())}
+        Ok(json!({"owner":"production-node-puppeteer-native-transport","effectDispatched":true,"nativeCloseObserved":true,"pendingEffectRejected":true}))
     }).await);
     if request.protocol_warm {
         cases.push(checked("protocol-warm-activation", protocol(&request)).await);
     }
     let drained: Reply = async {
         let mut failures = Vec::new();
-        if let Err(error) = browser.shutdown().await {
-            failures.push(error)
-        }
         if let Ok(owner) = network_owner {
             if let Err(error) = owner.shutdown().await {
                 failures.push(error)
@@ -551,74 +547,107 @@ fn toolkit() -> Reply {
     }
 }
 
-/// Observe actual captured pixels while the original native child and parking
-/// window are hidden. A configuration flag, advancing JS timer, or repeated
-/// screenshot is not evidence that streaming hidden pages produce frames.
-async fn hidden_screencast(
-    browser: &BrowserViews,
-    page: &str,
-    events: &Arc<Mutex<Vec<Value>>>,
-) -> Reply {
-    // Let a pre-hide compositor submission settle before establishing the
-    // capture stream. Only newly delivered, acknowledged frames count.
+/// The same authenticated Host stream used by real Browser clients. The Node
+/// owner, rather than this suite, owns ACKs and the activity/capture lease.
+async fn hidden_screencast(browser: &BrowserViews, page: &str, http: &http::Client) -> Reply {
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let before = eval(
-        browser,
-        page,
-        "({marker:varinSmoke.marker,frames:varinSmoke.frames})",
+    let before=eval(browser,page,"({marker:varinSmoke.marker,frames:varinSmoke.frames,visibility:document.visibilityState,focus:document.hasFocus()})").await?;
+    let client = http.clone();
+    let id = page.to_owned();
+    let frames = tokio::task::spawn_blocking(move || client.frames(&id))
+        .await
+        .map_err(|_| "Original production frame observer ended")??;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let state = loop {
+        let client = http.clone();
+        let catalog = tokio::task::spawn_blocking(move || client.pages())
+            .await
+            .map_err(|_| "Original Browser catalog observer ended")??;
+        let current = catalog["pages"]
+            .as_array()
+            .and_then(|pages| pages.iter().find(|item| item["pageId"] == page))
+            .cloned()
+            .ok_or("Stopping the stream closed or replaced its original Browser page")?;
+        if current["viewers"] == 0 {
+            let owner = catalog["devices"]
+                .as_array()
+                .and_then(|devices| {
+                    devices
+                        .iter()
+                        .find(|device| device["browserId"] == current["browserId"])
+                })
+                .ok_or("Original Browser device disappeared after stream stop")?;
+            if owner["ownerGeneration"] != frames["identity"]["ownerGeneration"] {
+                return Err(
+                    "The production stream changed its original Browser owner generation".into(),
+                );
+            }
+            break current;
+        }
+        if Instant::now() > deadline {
+            return Err(
+                "The production stream did not release its original viewer/activity lease".into(),
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    };
+    let after=eval(browser,page,"({marker:varinSmoke.marker,frames:varinSmoke.frames,visibility:document.visibilityState,focus:document.hasFocus()})").await?;
+    if before["marker"] != after["marker"]
+        || after["frames"].as_u64().unwrap_or(0) <= before["frames"].as_u64().unwrap_or(u64::MAX)
+    {
+        return Err(
+            "The hidden production stream did not animate and retain the original page".into(),
+        );
+    }
+    let identity = &frames["identity"];
+    if state["browserId"] != identity["browserId"]
+        || state["generation"] != identity["pageGeneration"]
+    {
+        return Err("The production stream changed its original Browser/page generation".into());
+    }
+    if before["visibility"] != after["visibility"] || before["focus"] != after["focus"] {
+        return Err(
+            "The production capture lease did not restore the original page visibility/focus state"
+                .into(),
+        );
+    }
+    let presentation = wait_presentation(browser, page, "browser-parking", false).await?;
+    Ok(
+        json!({"before":before,"after":after,"stream":frames,"presentation":presentation,"viewersAfterStop":state["viewers"],"originalPageRetained":true}),
+    )
+}
+
+async fn node(service: &crate::service::NativeService, command: &str, args: Value) -> Reply {
+    service
+        .process
+        .request(
+            "browserInvoke",
+            json!({"command":command,"args":args,"windowLabel":"main"}),
+        )
+        .await
+}
+async fn node_eval(service: &crate::service::NativeService, page: &str, script: &str) -> Reply {
+    let result = node(
+        service,
+        "desktop_browser_action",
+        json!({"pageId":page,"action":{"action":"evaluate","script":script}}),
     )
     .await?;
-    command(browser,page,"Page.startScreencast",json!({"format":"png","maxWidth":160,"maxHeight":120,"everyNthFrame":1,"maxFramesInFlight":1})).await?;
-    let started = Instant::now();
-    let result: Reply = async {
-        let mut frames = Vec::new();
-        let mut hashes = std::collections::HashSet::new();
-        loop {
-            let frame = {
-                let mut queue = events.lock().map_err(|_|"Native frame observation buffer unavailable")?;
-                if queue.iter().any(|event|event["kind"]=="smoke-overflow") {
-                    return Err("Native frame observation buffer overflowed".into());
-                }
-                let index = queue.iter().position(|event|event["pageId"]==page && event["kind"]=="cdp" && event["method"]=="Page.screencastFrame");
-                index.map(|index|queue.remove(index))
-            };
-            if let Some(frame) = frame {
-                let params = &frame["params"];
-                let session = params["sessionId"].as_i64().ok_or("Screencast frame omitted its actual acknowledgement identity")?;
-                // Acknowledge this precise observed delivery, never a guessed
-                // counter. No PNG pixels or arbitrary page content enter logs.
-                command(browser,page,"Page.screencastFrameAck",json!({"sessionId":session})).await?;
-                let data = params["data"].as_str().ok_or("Screencast frame omitted pixels")?;
-                if data.len()>256*1024 {return Err("Fixed 160px screencast exceeded its bounded pixel budget".into())}
-                let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|_|"Screencast pixel data is malformed")?;
-                if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {return Err("Actual screencast did not deliver PNG pixels".into())}
-                let hash = format!("{:x}",Sha256::digest(&bytes));
-                if hashes.insert(hash.clone()) {
-                    frames.push(json!({"sha256":hash,"bytes":bytes.len(),"timestamp":params["metadata"]["timestamp"],"observedMs":started.elapsed().as_millis() as u64}));
-                }
-                if frames.len()>=3 && started.elapsed()>=Duration::from_millis(400) {break}
-                if frames.len()>120 {return Err("Hidden stream observation exceeded its bounded evidence budget".into())}
-            }
-            if started.elapsed()>Duration::from_secs(8) {return Err(format!("Hidden native page did not continuously deliver changing screencast pixels ({} distinct frames)",frames.len()))}
-            tokio::time::sleep(Duration::from_millis(25)).await;
+    if result["page"]["pageId"] != page || result["method"] != "page-script" {
+        return Err("The original Node page-script receipt was not returned".into());
+    }
+    Ok(result["value"].clone())
+}
+async fn wait_node_page(service: &crate::service::NativeService, page: &str) -> Reply {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Ok(value)=node_eval(service,page,"({ready:document.readyState==='complete'&&!!window.varinSmoke,marker:window.varinSmoke?.marker,clicks:window.varinSmoke?.clicks,frames:window.varinSmoke?.frames})").await {
+            if value["ready"]==true{return Ok(value)}
         }
-        let after = eval(browser,page,"({marker:varinSmoke.marker,frames:varinSmoke.frames})").await?;
-        if after["marker"]!=before["marker"] || after["frames"].as_u64().unwrap_or(0)<=before["frames"].as_u64().unwrap_or(u64::MAX) {
-            return Err("Hidden capture did not preserve and animate the original document".into());
+        if Instant::now() > deadline {
+            return Err("The original Node/Puppeteer page did not finish loading".into());
         }
-        let presentation=wait_presentation(browser,page,"browser-parking",false).await?;
-        Ok(json!({"before":before,"after":after,"frames":frames,"presentation":presentation,"acknowledged":true}))
-    }.await;
-    let stopped = command(browser, page, "Page.stopScreencast", json!({})).await;
-    match (result, stopped) {
-        (Ok(mut evidence), Ok(_)) => {
-            evidence["stopped"] = json!(true);
-            Ok(evidence)
-        }
-        (Err(error), Ok(_)) => Err(error),
-        (_, Err(error)) => Err(format!(
-            "Original hidden-page stream termination was not observed: {error}"
-        )),
+        tokio::time::sleep(Duration::from_millis(30)).await;
     }
 }
 

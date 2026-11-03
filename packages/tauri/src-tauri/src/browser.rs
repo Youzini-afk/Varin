@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicI32, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering},
     },
 };
 use tauri::{AppHandle, Manager, Webview, WebviewUrl, Window, webview::WebviewBuilder};
@@ -31,7 +31,71 @@ struct NativePage {
     pending: Pending,
     closed: tokio::sync::watch::Sender<bool>,
     presentation: Arc<Mutex<Option<(String, String)>>>,
+    presentation_revision: Arc<AtomicU64>,
+    presentation_args: Arc<Mutex<Option<Value>>>,
 }
+/// A close attempt parks pages before their native parent can disappear. A
+/// refusal restores only the unchanged original presentation generation.
+pub(crate) struct DetachedWindow {
+    owner: BrowserViews,
+    pages: Vec<(String, NativePage, u64, Value)>,
+}
+impl DetachedWindow {
+    pub(crate) fn restore(self) -> Result<(), String> {
+        for (id, original, revision, args) in self.pages {
+            let Ok(page) = self.owner.page(&id) else {
+                continue;
+            };
+            if !Arc::ptr_eq(&page.native_id, &original.native_id)
+                || page.closing.load(Ordering::Acquire)
+            {
+                continue;
+            }
+            let mut presentation = page
+                .presentation
+                .lock()
+                .map_err(|_| "Browser presentation unavailable")?;
+            if presentation.is_some()
+                || page.presentation_revision.load(Ordering::Acquire) != revision
+            {
+                continue;
+            }
+            let label = required(&args, "windowLabel")?;
+            if !crate::desktop::is_application_window(&self.owner.app, label) {
+                continue;
+            }
+            let Some(window) = self.owner.app.get_window(label) else {
+                continue;
+            };
+            let visible = args["visible"] == true;
+            let target = if visible {
+                window
+            } else {
+                self.owner.parking()?
+            };
+            let (x, y, width, height) = bounds(&args["bounds"])?;
+            page.view.reparent(&target).map_err(|e| e.to_string())?;
+            page.view
+                .set_position(tauri::LogicalPosition::new(
+                    if visible { x } else { 0. },
+                    if visible { y } else { 0. },
+                ))
+                .map_err(|e| e.to_string())?;
+            page.view
+                .set_size(tauri::LogicalSize::new(width, height))
+                .map_err(|e| e.to_string())?;
+            page.view.show().map_err(|e| e.to_string())?;
+            *presentation = Some((label.into(), required(&args, "viewId")?.into()));
+            *page
+                .presentation_args
+                .lock()
+                .map_err(|_| "Browser layout unavailable")? = Some(args);
+            page.presentation_revision.fetch_add(1, Ordering::AcqRel);
+        }
+        Ok(())
+    }
+}
+
 struct Download {
     page_id: String,
     before: Option<BeforeDownloadCallback>,
@@ -50,6 +114,46 @@ impl Download {
         }
     }
 }
+type SmokeObserver = (uuid::Uuid, Arc<dyn Fn(Value) + Send + Sync>);
+/// Scope-bound, bounded observation of the same production owner's callbacks.
+/// This never replaces the Node emitter or creates a second Browser owner.
+pub(crate) struct SmokeObserverGuard {
+    observers: std::sync::Weak<Mutex<Option<SmokeObserver>>>,
+    id: uuid::Uuid,
+}
+impl Drop for SmokeObserverGuard {
+    fn drop(&mut self) {
+        if let Some(observers) = self.observers.upgrade() {
+            if let Ok(mut observer) = observers.lock() {
+                if observer.as_ref().is_some_and(|(id, _)| *id == self.id) {
+                    observer.take();
+                }
+            }
+        }
+    }
+}
+fn smoke_event_fits(value: &Value, budget: &mut usize) -> bool {
+    let charge = match value {
+        Value::String(s) => s.len().saturating_add(2),
+        Value::Array(_) | Value::Object(_) => 2,
+        _ => 32,
+    };
+    let Some(remaining) = budget.checked_sub(charge) else {
+        return false;
+    };
+    *budget = remaining;
+    match value {
+        Value::Array(values) => values.iter().all(|v| smoke_event_fits(v, budget)),
+        Value::Object(values) => values.iter().all(|(key, v)| {
+            let Some(remaining) = budget.checked_sub(key.len().saturating_add(3)) else {
+                return false;
+            };
+            *budget = remaining;
+            smoke_event_fits(v, budget)
+        }),
+        _ => true,
+    }
+}
 #[derive(Clone)]
 pub struct BrowserViews {
     app: AppHandle,
@@ -61,6 +165,7 @@ pub struct BrowserViews {
     closing: Arc<AtomicBool>,
     lifecycle: Arc<tokio::sync::RwLock<()>>,
     shutdown: Arc<tokio::sync::Mutex<()>>,
+    smoke_observer: Arc<Mutex<Option<SmokeObserver>>>,
 }
 impl BrowserViews {
     pub fn new(app: AppHandle, emit: Arc<dyn Fn(Value) + Send + Sync>, data_dir: PathBuf) -> Self {
@@ -74,10 +179,66 @@ impl BrowserViews {
             closing: Arc::default(),
             lifecycle: Arc::default(),
             shutdown: Arc::default(),
+            smoke_observer: Arc::default(),
         }
     }
+    pub(crate) fn smoke_observe(
+        &self,
+        observer: Arc<dyn Fn(Value) + Send + Sync>,
+    ) -> Result<SmokeObserverGuard, String> {
+        if !crate::smoke::requested() {
+            return Err("Native Browser observation requires the isolated smoke invocation".into());
+        }
+        let mut slot = self
+            .smoke_observer
+            .lock()
+            .map_err(|_| "Native Browser observer registry unavailable")?;
+        if slot.is_some() {
+            return Err("The original Browser owner already has a smoke observer".into());
+        }
+        let id = uuid::Uuid::new_v4();
+        *slot = Some((id, observer));
+        Ok(SmokeObserverGuard {
+            observers: Arc::downgrade(&self.smoke_observer),
+            id,
+        })
+    }
     fn event(&self, payload: Value) {
+        let observer = self
+            .smoke_observer
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|(_, observer)| observer.clone()));
+        let observation = observer.and_then(|observer| {
+            // Frame pixels are tested through the production binary Host route,
+            // never duplicated into this callback log. Retain terminal native
+            // facts only; unrelated CDP traffic can contain arbitrary page data.
+            if !matches!(
+                payload["kind"].as_str(),
+                Some("download-start" | "download-progress" | "closed" | "crashed")
+            ) {
+                return None;
+            }
+            if !payload["pageId"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("native-smoke-"))
+            {
+                return None;
+            }
+            // Only the fixed isolated fixture's bounded metadata can be copied.
+            // Large arbitrary pages/frames are not retained by this diagnostic.
+            let value = if smoke_event_fits(&payload, &mut (256 * 1024)) {
+                payload.clone()
+            } else {
+                json!({"kind":"smoke-overflow"})
+            };
+            Some((observer, value))
+        });
+        // Actual production Node delivery always precedes diagnostic delivery.
         (self.emit)(payload);
+        if let Some((observer, payload)) = observation {
+            observer(payload)
+        }
     }
     pub async fn shutdown(&self) -> Result<(), String> {
         self.closing.store(true, Ordering::Release);
@@ -198,16 +359,44 @@ impl BrowserViews {
         }
         Ok(())
     }
-    pub(crate) async fn smoke_presentation(&self,id:&str)->Reply{
-        let page=self.page(id)?;
-        let scale=page.view.window().scale_factor().map_err(|_|"Native window scale unavailable")?;
-        let(send,receive)=oneshot::channel();
+    pub(crate) fn benchmark_sessions(&self) -> Vec<(String, crate::cdp::Session)> {
+        self.pages
+            .lock()
+            .map(|pages| {
+                pages
+                    .iter()
+                    .filter(|(_, page)| {
+                        !page.closing.load(Ordering::Acquire) && !*page.closed.borrow()
+                    })
+                    .map(|(id, page)| {
+                        (
+                            format!("browser:{id}"),
+                            crate::cdp::Session::from_owned(
+                                page.view.clone(),
+                                page.pending.clone(),
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    pub(crate) async fn smoke_presentation(&self, id: &str) -> Reply {
+        let page = self.page(id)?;
+        let scale = page
+            .view
+            .window()
+            .scale_factor()
+            .map_err(|_| "Native window scale unavailable")?;
+        let (send, receive) = oneshot::channel();
         page.view.with_cef_webview(move|view|{
             let state=view.snapshot();
             let bounds=state.bounds.map(|bounds|{let rect=bounds.to_logical::<f64,f64>(scale);json!({"x":rect.position.x,"y":rect.position.y,"width":rect.size.width,"height":rect.size.height})});
             let _=send.send(json!({"parentMatches":state.parent_matches,"visible":state.visible,"windowLabel":state.window_label,"browserId":state.browser_id,"bounds":bounds,"scale":scale}));
         }).map_err(|_|"Native presentation observation could not dispatch")?;
-        receive.await.map_err(|_|"Native presentation observation was lost".into())
+        receive
+            .await
+            .map_err(|_| "Native presentation observation was lost".into())
     }
     pub async fn capture_legacy(&self, id: i32, label: &str) -> Reply {
         let page = self
@@ -232,30 +421,49 @@ impl BrowserViews {
             json!({"mime":"image/jpeg","base64":result["data"],"width":viewport["width"],"height":viewport["height"]}),
         )
     }
-    pub fn detach_window(&self, label: &str) -> Result<(), String> {
+    pub(crate) fn detach_window(&self, label: &str) -> Result<DetachedWindow, String> {
         let pages: Vec<_> = self
             .pages
             .lock()
             .map_err(|_| "Browser registry unavailable")?
-            .values()
-            .cloned()
+            .iter()
+            .map(|(id, page)| (id.clone(), page.clone()))
             .collect();
-        for page in pages {
-            let mut presented = page
-                .presentation
-                .lock()
-                .map_err(|_| "Browser presentation unavailable")?;
-            if presented
-                .as_ref()
-                .is_some_and(|(window, _)| window == label)
-            {
-                page.view
-                    .reparent(&self.parking()?)
-                    .map_err(|e| e.to_string())?;
-                *presented = None;
+        let mut detached = DetachedWindow {
+            owner: self.clone(),
+            pages: Vec::new(),
+        };
+        let result = (|| -> Result<(), String> {
+            for (id, page) in pages {
+                let mut presented = page
+                    .presentation
+                    .lock()
+                    .map_err(|_| "Browser presentation unavailable")?;
+                if presented
+                    .as_ref()
+                    .is_some_and(|(window, _)| window == label)
+                {
+                    let args = page
+                        .presentation_args
+                        .lock()
+                        .map_err(|_| "Browser layout unavailable")?
+                        .clone()
+                        .ok_or("Original Browser layout is unavailable")?;
+                    page.view
+                        .reparent(&self.parking()?)
+                        .map_err(|e| e.to_string())?;
+                    *presented = None;
+                    let revision = page.presentation_revision.fetch_add(1, Ordering::AcqRel) + 1;
+                    detached.pages.push((id, page.clone(), revision, args));
+                }
             }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            detached.restore()?;
+            return Err(error);
         }
-        Ok(())
+        Ok(detached)
     }
     fn refresh_history(&self, id: &str) {
         let Ok(page) = self.page(id) else { return };
@@ -397,6 +605,11 @@ impl BrowserViews {
                 page.view.show().map_err(|e| e.to_string())?;
                 *presentation = Some((label.to_owned(), view_id.to_owned()));
                 *page
+                    .presentation_args
+                    .lock()
+                    .map_err(|_| "Browser layout unavailable")? = Some(args.clone());
+                page.presentation_revision.fetch_add(1, Ordering::AcqRel);
+                *page
                     .viewport
                     .lock()
                     .map_err(|_| "Browser viewport unavailable")? = json!({"width":width,"height":height,"scale":target.scale_factor().unwrap_or(1.)});
@@ -418,6 +631,11 @@ impl BrowserViews {
                         .set_position(tauri::LogicalPosition::new(0., 0.))
                         .map_err(|e| e.to_string())?;
                     *presentation = None;
+                    *page
+                        .presentation_args
+                        .lock()
+                        .map_err(|_| "Browser layout unavailable")? = None;
+                    page.presentation_revision.fetch_add(1, Ordering::AcqRel);
                 }
                 Ok(Value::Null)
             }
@@ -589,6 +807,8 @@ impl BrowserViews {
             pending: pending.clone(),
             closed,
             presentation: Arc::default(),
+            presentation_revision: Arc::default(),
+            presentation_args: Arc::default(),
         };
         self.pages
             .lock()

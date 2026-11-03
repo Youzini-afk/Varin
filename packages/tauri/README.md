@@ -27,13 +27,20 @@ bun run --cwd packages/tauri dev
 
 Linux 文件选择使用 XDG portal，普通确认直接用 GTK4，避免 GTK3/GTK4 混用和依赖外部 zenity。系统托盘或通知不可用时基础工作台仍可启动；相关能力报告实际不可用，窗口不会仅隐藏到不存在的托盘。
 
-原生 smoke 使用显式临时数据目录与固定请求标识。它通过产品真实 CEF/API 和操作系统进程状态验证 11 条路径，并等待真实 native drain。它不开放任意远程 JS/CDP 端口，也不让超时变成操作完成。GUI smoke 不等于安装、跨屏、输入法、系统授权或性能验收。
+Linux 显示协议边界（x64、arm64 相同）：
+
+- X11：当前原生 Browser 子窗口嵌入路径。
+- Wayland 会话 + XWayland：通过 XWayland 运行同一 X11 路径；发行包必须声明 XWayland 会话依赖，不能把 X11 CI 当成完整 Wayland 会话验收。
+- 纯 Wayland、没有 XWayland：当前不支持原生 Browser 子窗口嵌入。CEF [嵌入 Ozone/Wayland 的上游问题](https://github.com/chromiumembedded/cef/issues/2804) 仍需架构实现。仅更改 Chromium 开关不能替代外部窗口嵌入；完整路线需要同一页的多图层 OSR 合成、输入/IME、拖放与原生弹窗父窗口接线，不得另建页面或用轮询截图降级。
+
+原生 smoke 使用显式临时数据目录与固定请求标识。它通过产品真实 Node BrowserOwner/Puppeteer/CEF 管道、认证 Host 二进制帧流和操作系统进程状态验证 11 条路径，并等待真实 native drain。它不开放任意远程 JS/CDP 端口，也不让超时变成操作完成。GUI smoke 不等于安装、跨屏、输入法、系统授权或性能验收。
 
 ## 数据、平台与发布
 
 - [适配、深链接和旧数据迁移](DOCUMENTATION.md)
 - [通知身份、Action Center 和实际验证边界](NOTIFICATIONS.md)
 - [构建、签名、旧更新器和新更新器交接](scripts/README.md)
+- [完整产品性能采集与待验收边界](scripts/benchmark.md)
 - [原始完整迁移设计](../../docs/design/tauri-desktop-migration.md)
 
 当前分支仍按真实证据控制替换：没有对应平台安装/沙箱/数据恢复验收与签名资格的候选不能成为 production release。保留旧 Electron 的 exporter 与转换安装格式不等于把 Electron 再作为新工作台运行时。原旧 profile 不删除，不能把已知 cookie/localStorage 迁移声称为所有网站会话迁移。

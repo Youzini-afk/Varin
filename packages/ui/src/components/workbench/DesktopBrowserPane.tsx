@@ -62,7 +62,7 @@ export function DesktopBrowserPane({ initialUrl, directory, tabID, onNavigate }:
       const key = JSON.stringify([bounds, visible]); if (key === last || presenting) return; last = key;
       if (visible && !wasVisible) {
         presenting = true;
-        void invokeDesktopCommand('desktop_browser_present', { pageId, viewId, url: initial.current, bounds, visible: true }).then(value => {
+        void invokeDesktopCommand('desktop_browser_present', { pageId, viewId, createNew: !tabID.startsWith('browser:page:'), url: initial.current, bounds, visible: true }).then(value => {
           if (disposed) { void invokeDesktopCommand('desktop_browser_detach', { pageId, viewId }); return; }
           mounted = true; if (value) accept(value); setError('');
         }).catch(cause => { if (!disposed) setError(String(cause)); }).finally(() => { presenting = false; if (!disposed) schedule(); });
@@ -92,7 +92,7 @@ export function DesktopBrowserPane({ initialUrl, directory, tabID, onNavigate }:
       void invokeDesktopCommand('desktop_browser_detach', { pageId, viewId }).catch(() => undefined);
       void invokeDesktopCommand('desktop_browser_action', { pageId, action: { action: 'evaluate', script: DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT } }).catch(() => undefined);
     };
-  }, [pageId, viewId, accept, t]);
+  }, [pageId, viewId, tabID, accept, t]);
   React.useEffect(() => registerBrowserMaterialCapture(directory, tabID, async () => {
     const result = await act({ action: 'evaluate', script: '({x:scrollX,y:scrollY})' });
     const point = result?.value as { x?: unknown; y?: unknown } | undefined;

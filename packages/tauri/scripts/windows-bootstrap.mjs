@@ -4,6 +4,7 @@
  * Upstream: cef/src/build_util/win/mod.rs (MIT OR Apache-2.0).
  */
 import fs from 'node:fs/promises';
+import { pinnedCefLicense } from './cef-license.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inventory, relativePath, sha256 } from './runtime-manifest.mjs';
@@ -127,6 +128,7 @@ export async function stageWindowsBootstrap({ cefDirectory, targetDirectory, des
       sources.set(entry.name, path.join(directory, entry.name));
     }
   }
+  sources.set('LICENSE.txt', await pinnedCefLicense(cefDirectory));
   const required = ['libcef.dll', 'icudtl.dat', 'resources.pak', 'chrome_100_percent.pak', 'chrome_200_percent.pak', 'v8_context_snapshot.bin', 'LICENSE.txt', 'CREDITS.html'];
   for (const name of required) if (!sources.has(name)) throw new Error(`CEF runtime is incomplete: ${name}`);
   const locales = path.join(resources, 'locales');

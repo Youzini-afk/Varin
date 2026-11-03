@@ -1,4 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { NativeBrowserPresentation } from './native-presentation.js';
+import { NativeBrowserActivity } from './native-activity.js';
+import { randomUUID, generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import path from 'node:path';
@@ -21,7 +23,7 @@ type Reference = { node: SerializedAXNode; frame: Frame };
 type CoordinateObservation = { navigation: number; viewport: string; scroll: string };
 type Download = { state: BrowserDownload; item: NativeBrowserDownload; unsubscribe: () => void; file: string; directory: string; releasing?: Promise<void> };
 type OwnedPage = {
-  id: string; native: NativeBrowserPage; releaseNativeEvents: () => void; browser: Browser; page: Page; threads: Set<string>; retained: boolean;
+  id: string; presentationStreams: Set<string>; generation: string; controlEpoch: string; viewerId?: string; fileChooser?: { chooserId: string; multiple: boolean; backendNodeId: number }; native: NativeBrowserPage; releaseNativeEvents: () => void; browser: Browser; page: Page; threads: Set<string>; retained: boolean;
   refs: Map<string, Reference>; refKeys: Map<string, string>; frameIds: WeakMap<Frame, string>;
   observations: Map<string, CoordinateObservation>; navigation: number; queue: Promise<unknown>;
   actions: Set<AbortController>; agentPaused: boolean; activeAction?: string; dialog?: Dialog; crashed?: string;
@@ -32,7 +34,15 @@ type OwnedPage = {
 
 /** The Chromium page outlives its React view. Only explicit close/task cleanup destroys it. */
 export class NativeBrowserOwner implements BrowserOwner {
-  readonly browserId = 'varin:embedded';
+  private readonly identityKey = generateKeyPairSync('ed25519');
+  private readonly identityPublicKey = this.identityKey.publicKey.export({ type: 'spki', format: 'der' });
+  readonly ownerGeneration = createHash('sha256').update(this.identityPublicKey).digest('hex');
+  proveIdentity(hostId: string, challenge: string) {
+    return { publicKey: this.identityPublicKey.toString('base64'), signature: sign(null, Buffer.from(JSON.stringify([hostId, challenge])), this.identityKey.privateKey).toString('base64') };
+  }
+  readonly browserId = `varin:browser:${this.ownerGeneration}`;
+  private readonly activity = new NativeBrowserActivity();
+  private readonly presentation: NativeBrowserPresentation;
   private readonly pages = new Map<string, OwnedPage>();
   private readonly creating = new Map<string, Promise<OwnedPage>>();
   private readonly downloadsById = new Map<string, Download>();
@@ -45,12 +55,16 @@ export class NativeBrowserOwner implements BrowserOwner {
   private readonly unclaimedDownloads = new Set<Promise<void>>();
   constructor(private readonly options: { scratchDirectory: string; native: NativeBrowserHost }) {
     this.unsubscribeDownloads = options.native.subscribeDownloads(this.willDownload);
+    this.presentation = new NativeBrowserPresentation({ browserId: this.browserId, ownerGeneration: this.ownerGeneration, scratchDirectory: options.scratchDirectory,
+      require: id => this.require(id), changed: page => this.changed(page as OwnedPage), acquireActivity: page => this.activity.acquire(page.page),
+      queued: (page, work, signal) => this.queued(page as OwnedPage, 'user-input', signal, work, true) });
   }
   subscribe(listener: (event: BrowserEvent) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   private emit(event: BrowserEvent) { for (const listener of this.listeners) listener(event); }
   private state(entry: OwnedPage): BrowserPage {
     const contents = entry.native.state();
-    return { browserId: this.browserId, pageId: entry.id, title: contents.title,
+    return { browserId: this.browserId, pageId: entry.id, generation: entry.generation, viewers: entry.presentationStreams.size, controlEpoch: entry.controlEpoch, ...(entry.viewerId ? { controlViewerId: entry.viewerId } : {}),
+      ...(entry.fileChooser ? { fileChooser: { chooserId: entry.fileChooser.chooserId, multiple: entry.fileChooser.multiple } } : {}), title: contents.title,
       url: contents.url, loading: !contents.destroyed && contents.loading,
       canGoBack: !contents.destroyed && contents.canGoBack, canGoForward: !contents.destroyed && contents.canGoForward, retained: entry.retained,
       ...(entry.crashed ? { crashed: entry.crashed } : {}), agentPaused: entry.agentPaused,
@@ -97,7 +111,7 @@ export class NativeBrowserOwner implements BrowserOwner {
         // The original invocation owns cancellation. Page navigation and explicit wait
         // use their actual signal; no hidden library timer truncates a long operation.
         page.setDefaultTimeout(0); page.setDefaultNavigationTimeout(0);
-        const entry: OwnedPage = { id, native, releaseNativeEvents: () => {}, browser, page, threads: new Set(), retained: false, refs: new Map(), refKeys: new Map(),
+        const entry: OwnedPage = { id, presentationStreams: new Set(), generation: randomUUID(), controlEpoch: randomUUID(), native, releaseNativeEvents: () => {}, browser, page, threads: new Set(), retained: false, refs: new Map(), refKeys: new Map(),
           frameIds: new WeakMap(), observations: new Map(), navigation: 0, queue: Promise.resolve(), actions: new Set(), inputAcknowledgements: new Set(), pendingScripts: new Set(), agentPaused: false, uploadDirectories: new Set() };
         this.pages.set(id, entry);
         const changed = () => this.changed(entry);
@@ -109,7 +123,9 @@ export class NativeBrowserOwner implements BrowserOwner {
         });
         page.on('framenavigated', frame => {
           for (const [ref, value] of entry.refs) if (value.frame === frame) entry.refs.delete(ref);
-          entry.refKeys.clear(); entry.navigation++; entry.observations.clear(); changed();
+          entry.refKeys.clear(); entry.navigation++; entry.observations.clear();
+          if (frame === page.mainFrame()) entry.controlEpoch = randomUUID();
+          changed();
         });
         page.on('framedetached', frame => { for (const [ref, value] of entry.refs) if (value.frame === frame) entry.refs.delete(ref); });
         page.on('dialog', dialog => { entry.dialog = dialog; changed(); this.emit({ kind: 'dialog', pageId: id, type: dialog.type(), message: dialog.message(), defaultPrompt: dialog.defaultValue() }); });
@@ -133,8 +149,9 @@ export class NativeBrowserOwner implements BrowserOwner {
     } catch (error) { throw error instanceof BrowserExecutionError && !started ? error : new BrowserExecutionError(error, started ? 'unknown' : 'none'); }
   }
   /** Called by the trusted shell. Reattaching a page never reloads its URL. */
-  async present(input: { pageId: string; viewId: string; url: string; bounds: NativeBrowserBounds; visible: boolean }, window: unknown) {
+  async present(input: { createNew?: boolean; pageId: string; viewId: string; url: string; bounds: NativeBrowserBounds; visible: boolean }, window: unknown) {
     const existing = this.pages.get(input.pageId);
+    if (!existing && (!input.createNew || !input.pageId.startsWith('ui:'))) throw new Error('browser_page_unknown: This is not a local page. Select its original Browser device instead.');
     const entry = existing ?? await this.create(input.pageId);
     entry.retained = true;
     if (!existing && input.url !== 'about:blank') void entry.native.load(this.url(input.url)).catch(() => this.changed(entry));
@@ -147,11 +164,16 @@ export class NativeBrowserOwner implements BrowserOwner {
   async detach(pageId: string, viewId: string, window: unknown) {
     await this.pages.get(pageId)?.native.detach(viewId, window);
   }
-  takeControl(pageId: string, paused: boolean) {
-    const entry = this.require(pageId); entry.agentPaused = paused;
+  async takeControl(pageId: string, paused: boolean, viewerId?: string) {
+    const entry = this.require(pageId); entry.agentPaused = true; entry.controlEpoch = randomUUID(); delete entry.viewerId;
     if (paused) for (const action of entry.actions) action.abort(new Error('The user took control of this page'));
-    entry.navigation++; entry.observations.clear(); this.changed(entry); return this.state(entry);
+    entry.navigation++; entry.observations.clear(); this.changed(entry);
+    await this.presentation.releaseInput(pageId);
+    entry.agentPaused = paused;
+    if (paused && viewerId) entry.viewerId = viewerId;
+    this.changed(entry); return this.state(entry);
   }
+
   private frameId(entry: OwnedPage, frame: Frame) {
     let id = entry.frameIds.get(frame); if (!id) { id = randomUUID(); entry.frameIds.set(frame, id); } return id;
   }
@@ -243,7 +265,7 @@ export class NativeBrowserOwner implements BrowserOwner {
   }
   private async queued<T>(entry: OwnedPage, name: string, signal: AbortSignal | undefined, effect: (signal: AbortSignal) => Promise<T>, user = false): Promise<T> {
     const userNavigation = user && ['navigate', 'reload', 'back', 'forward'].includes(name);
-    if (userNavigation && (entry.actions.size || entry.pendingScripts.size)) this.takeControl(entry.id, true);
+    if (userNavigation && (entry.actions.size || entry.pendingScripts.size)) await this.takeControl(entry.id, true);
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason); signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
@@ -258,11 +280,20 @@ export class NativeBrowserOwner implements BrowserOwner {
     const run = (userNavigation ? Promise.resolve() : entry.queue.catch(() => undefined)).then(async () => {
       controller.signal.throwIfAborted();
       if (entry.agentPaused && !user) throw new Error('browser_user_control: The user is working on this page. Read its current state; wait for the user to allow Agent input again.');
-      started = true; entry.activeAction = name; this.changed(entry);
-      try { return await effect(controller.signal); }
-      finally {
-        if (name !== 'wait') { entry.navigation++; entry.observations.clear(); }
-        delete entry.activeAction; this.changed(entry);
+      started = true; if (name !== 'user-input') { entry.activeAction = name; this.changed(entry); }
+      let release: (() => Promise<void>) | undefined;
+      try { release = await this.activity.acquire(entry.page); return await effect(controller.signal); }
+      catch (error) {
+        if (error instanceof BrowserExecutionError && !error.executorStopped) {
+          const retained = release; release = undefined;
+          if (error.completion && retained) void error.completion.then(retained, () => {}).catch(() => {});
+        }
+        throw error;
+      } finally {
+        try { await release?.(); } finally {
+          if (name !== 'wait') { entry.navigation++; entry.observations.clear(); }
+          if (name !== 'user-input') { delete entry.activeAction; this.changed(entry); }
+        }
       }
     });
     entry.queue = run.catch(async error => {
@@ -538,13 +569,16 @@ export class NativeBrowserOwner implements BrowserOwner {
     for (const action of entry.actions) action.abort(new Error('The browser page was closed'));
     entry.releaseNativeEvents();
     const pending = (async () => {
+      await this.presentation.close(pageId).catch(() => {});
       await entry.browser.disconnect();
       // Cancellation still needs the original native page/download registry.
       // Deleting either it or its staging file before terminal would strand a writer.
       for (const download of await this.downloads(pageId)) await this.releaseDownload(pageId, download.downloadId);
       await entry.native.close();
+      await this.presentation.forgetClosed(pageId);
       await Promise.allSettled([...entry.inputAcknowledgements]);
       for (const directory of entry.uploadDirectories) await rm(directory, { recursive: true, force: true });
+      this.activity.forget(entry.page);
       this.pages.delete(pageId); this.emit({ kind: 'closed', pageId });
     })();
     this.closingPages.set(pageId, pending);
@@ -553,6 +587,10 @@ export class NativeBrowserOwner implements BrowserOwner {
   async releaseThread(threadId: string) {
     for (const entry of this.pages.values()) if (entry.threads.delete(threadId) && !entry.threads.size && !entry.retained) await this.close(entry.id);
   }
+  subscribeFrames(pageId: string, streamId: string, listener: (frame: import('@varin/protocol').BrowserFrame) => void) { return this.presentation.subscribe(pageId, streamId, listener); }
+  input(request: import('@varin/protocol').BrowserInputRequest, signal?: AbortSignal) { return this.presentation.input(request, signal); }
+  resize(pageId: string, streamId: string, width: number, height: number) { return this.presentation.resize(pageId, streamId, width, height); }
+  chooseFiles(pageId: string, chooserId: string, files: { name: string; bytes: Uint8Array }[], signal?: AbortSignal) { return this.presentation.chooseFiles(pageId, chooserId, files, signal); }
   async dispose() {
     this.disposed = true;
     await Promise.allSettled([...this.creating.values()]);

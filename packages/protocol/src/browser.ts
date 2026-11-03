@@ -2,6 +2,11 @@
 export interface BrowserPage {
   browserId: string;
   pageId: string;
+  generation?: string;
+  controlEpoch?: string;
+  controlViewerId?: string;
+  viewers?: number;
+  fileChooser?: { chooserId: string; multiple: boolean };
   title: string;
   url: string;
   loading: boolean;
@@ -98,7 +103,7 @@ export interface BrowserOwner {
   releaseDownload(pageId: string, downloadId: string): Promise<void>;
   upload(pageId: string, ref: string, files: { name: string; bytes: Uint8Array }[], signal?: AbortSignal): Promise<BrowserActionResult>;
   subscribe(listener: (event: BrowserEvent) => void): () => void;
-  retainForThread(pageId: string, threadId: string): void;
+  retainForThread(pageId: string, threadId: string): void | Promise<void>;
   releaseThread(threadId: string): Promise<void>;
 }
 /** Receipt from the browser's original executor, including rejection before input. */

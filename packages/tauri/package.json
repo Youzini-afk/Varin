@@ -33,6 +33,12 @@
     "candidate:collect": "node ./scripts/collect-candidate.mjs",
     "candidate:verify": "node ./scripts/release.mjs verify",
     "candidate:assemble": "node ./scripts/release.mjs assemble",
-    "smoke:native": "node ./scripts/smoke-native.mjs"
+    "smoke:native": "node ./scripts/smoke-native.mjs",
+    "benchmark:build": "node ./scripts/benchmark-build.mjs",
+    "benchmark:suite": "node ./scripts/benchmark-suite.mjs",
+    "benchmark:template": "node ./scripts/benchmark-desktop.mjs template",
+    "benchmark:probe": "node ./scripts/benchmark-desktop.mjs probe",
+    "benchmark:preflight": "node ./scripts/benchmark-desktop.mjs preflight",
+    "benchmark:run": "node ./scripts/benchmark-desktop.mjs run"
   }
 }

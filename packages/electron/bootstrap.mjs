@@ -1,6 +1,12 @@
 try {
-  if (process.argv.includes('--varin-export-frontend-state') || process.argv.includes('--varin-export-private-state')) await import('./dist-bundle/frontend-migration.mjs');
-  else await import('./dist-bundle/main.mjs');
+  const exporting = process.argv.includes('--varin-export-frontend-state') || process.argv.includes('--varin-export-private-state');
+  const benchmarking = process.argv.includes('--varin-desktop-benchmark');
+  if (exporting && benchmarking) throw new Error('Exporter and full-product benchmark modes are mutually exclusive');
+  if (exporting) await import('./dist-bundle/frontend-migration.mjs');
+  else {
+    if (benchmarking) await import('./dist-bundle/benchmark.mjs');
+    await import('./dist-bundle/main.mjs');
+  }
 } catch (error) {
   // Static imports run before main.ts can initialize electron-log. Report those
   // failures through stderr so packaged startup smoke has a useful cause.

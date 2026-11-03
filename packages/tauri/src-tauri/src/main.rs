@@ -3,6 +3,7 @@
 #[cfg(not(windows))]
 #[tauri_runtime_cef::cef_entry_point]
 fn main() {
+    varin_desktop::run_service_guardian_if_requested();
     varin_desktop::run();
 }
 

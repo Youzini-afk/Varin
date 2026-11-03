@@ -36,3 +36,5 @@ export * from './browser.js';
 export * from './office.js';
 
 export * from './attachments.js';
+
+export * from './browser-device.js';

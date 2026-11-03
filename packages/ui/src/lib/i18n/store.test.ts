@@ -85,7 +85,7 @@ describe('i18n store', () => {
     const values = new Map([[LOCALE_STORAGE_KEY, JSON.stringify({ locale: 'es' })]]);
     const invoke = vi.fn().mockResolvedValue(null);
     const target = Object.assign(new EventTarget(), {
-      __VARIN_ELECTRON__: { locale: 'zh-TW' },
+      __VARIN_ELECTRON__: { runtime: 'electron', locale: 'zh-TW' },
       __VARIN_DESKTOP__: { invoke },
       localStorage: {
         getItem: (key: string) => values.get(key) ?? null,
@@ -114,7 +114,7 @@ describe('i18n store', () => {
   test('keeps the latest user choice while older native language changes are still completing', async () => {
     const completions: Array<(locale: string) => void> = [];
     const invoke = vi.fn(() => new Promise<string>(resolve => completions.push(resolve)));
-    const target = Object.assign(new EventTarget(), { __VARIN_ELECTRON__: { locale: 'en' }, __VARIN_DESKTOP__: { invoke } });
+    const target = Object.assign(new EventTarget(), { __VARIN_ELECTRON__: { runtime: 'electron', locale: 'en' }, __VARIN_DESKTOP__: { invoke } });
     vi.stubGlobal('window', target);
     try {
       initializeLocale();

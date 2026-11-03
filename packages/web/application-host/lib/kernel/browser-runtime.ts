@@ -21,11 +21,11 @@ import type { ToolExecutionReceipt } from './tool-bridge.js';
 
 export { BROWSER_CAPABILITY };
 export function createBrowserRuntime(options: {
-  browser?: BrowserOwner | undefined; runtime: Pick<AgentRuntimeClient, 'run' | 'familyList'>; sources: DocumentSources;
+  browser?: BrowserOwner | undefined; browserAvailable?(): boolean; browserForInvocation?(invocation: ToolInvocationAuthority): BrowserOwner; runtime: Pick<AgentRuntimeClient, 'run' | 'familyList'>; sources: DocumentSources;
   files: ReturnType<typeof createBinaryFileOwner>; materials: WebMaterialStore; documents: DocumentReader; office: OfficeReader;
   settings(source: LaunchSource | null): Promise<AgentSettingsSnapshot>;
 }) {
-  const settings = createToolFamilySettings(BROWSER_TOOL_DECLARATIONS, options.settings, () => Boolean(options.browser));
+  const settings = createToolFamilySettings(BROWSER_TOOL_DECLARATIONS, options.settings, () => options.browserAvailable?.() ?? Boolean(options.browser));
   const declarations = new Map(BROWSER_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.browser.'.length),
     { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
   const materialContext = async (invocation: ToolInvocationAuthority, signal: AbortSignal): Promise<DocumentReaderContext> => {
@@ -46,15 +46,15 @@ export function createBrowserRuntime(options: {
         completion: { kind: 'result', outcome: 'succeeded', effect, content: { data: parseVarinToolJson(data), parts: [] } } });
       try {
         settings.assertEnabled(invocation.configurationIdentity, invocation.toolName);
-        const browser = options.browser;
-        if (!browser) throw new Error('This Host has no connected built-in browser. Use computer_browser on an explicitly connected desktop, or webfetch for document retrieval.');
+        const browser = options.browserForInvocation?.(invocation) ?? options.browser;
+        if (!browser) throw new Error('This Host has no explicitly connected Browser device. Select and authorize a Browser device in the Browser panel, or use webfetch for document retrieval.');
         call.signal.throwIfAborted();
         if (method === 'tabs') return success({ browserId: browser.browserId, pages: await browser.list() });
         if (method === 'open') {
           effectStarted = true;
           return success({ page: await browser.open(input as unknown as Parameters<BrowserOwner['open']>[0], { threadId: invocation.threadId, signal: call.signal }) }, 'confirmed');
         }
-        const pageId = String(input.pageId); browser.retainForThread(pageId, invocation.threadId);
+        const pageId = String(input.pageId); await browser.retainForThread(pageId, invocation.threadId);
         if (method === 'read') {
           const { image, ...observation } = await browser.read(input as unknown as BrowserReadRequest, call.signal);
           const receipt = success(observation);

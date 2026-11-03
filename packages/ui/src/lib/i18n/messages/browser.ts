@@ -1,4 +1,21 @@
 const en = {
+  'browser.downloads': 'Downloads',
+  'browser.saveDownload': 'Save',
+  'browser.noDownloads': 'No downloads on this page.',
+  'browser.originalUnavailable': 'The original Browser page is unavailable. No replacement page was opened.',
+  'browser.streamEnded': 'The live Browser connection ended. Reconnect to inspect the original page.',
+  'browser.device': 'Browser device',
+  'browser.selectDevice': 'Select a Browser device',
+  'browser.connectLocal': 'Connect this device',
+  'browser.revokeDevice': 'Revoke Browser access',
+  'browser.live': 'Live original page',
+  'browser.connectingStream': 'Connecting to the original page…',
+  'browser.authorizeDevice': 'Allow this Host to use my browser',
+  'browser.shareProfileWarning': 'Allow this Host to view and operate this device’s interactive browser, including signed-in websites, tabs, uploads and downloads. This does not share the app’s account or grant Computer access. You can revoke this Browser grant at any time.',
+  'browser.chooseFiles': 'Choose files for the original page',
+  'browser.remotePage': 'Live page on the selected Browser device',
+  'browser.pageInput': 'Input to the original Browser page',
+  'browser.noDevice': 'Select an explicitly connected Browser device to open a page.',
   'browser.pageClosed': 'This page was closed.',
   'browser.back': 'Back',
   'browser.forward': 'Forward',
@@ -22,11 +39,12 @@ const localized: Record<string, string[]> = {
   pl: 'Ta strona została zamknięta.|Wstecz|Dalej|Sterujesz tą stroną|Agent korzysta z tej strony|Zezwól Agentowi na działania|Przejmij sterowanie|Otwórz tę stronę|Potwierdź|Anuluj'.split('|'),
   uk: 'Цю сторінку закрито.|Назад|Вперед|Ви керуєте цією сторінкою|Agent працює з цією сторінкою|Дозволити дії Agent|Перейняти керування|Відкрити цю сторінку|Підтвердити|Скасувати'.split('|'),
 };
+const deviceChinese: Record<string, string> = {'browser.downloads': '下载', 'browser.saveDownload': '保存', 'browser.noDownloads': '此页面暂无下载。', 'browser.originalUnavailable': '原浏览器页面不可用，未创建替代页面。', 'browser.streamEnded': '浏览器实时连接已断开，请重新连接查看原页面。', 'browser.device': '浏览器设备', 'browser.selectDevice': '选择浏览器设备', 'browser.connectLocal': '连接此设备', 'browser.revokeDevice': '撤销浏览器授权', 'browser.live': '原页面实时画面', 'browser.connectingStream': '正在连接原页面…', 'browser.authorizeDevice': '允许此 Host 使用我的浏览器', 'browser.shareProfileWarning': '允许此 Host 查看并操作本机交互浏览器，包括已登录网站、标签页、上传与下载。这不会共享应用账户，也不授予电脑控制权限。你可以随时撤销本项浏览器授权。', 'browser.chooseFiles': '为原页面选择文件', 'browser.remotePage': '所选浏览器设备的实时页面', 'browser.pageInput': '向原浏览器页面输入', 'browser.noDevice': '请选择已明确授权连接的浏览器设备来打开页面。'};
 export function browserMessages(locale: string): Record<keyof typeof en, string> {
   const pending: Record<string, string> = { 'zh-CN': '页面脚本尚未结束；可重载或关闭页面终止。', 'zh-TW': '頁面腳本尚未結束；可重新載入或關閉頁面終止。',
     ja: 'ページスクリプトは実行待ちです。再読み込みまたはページを閉じると終了します。', ko: '페이지 스크립트가 아직 대기 중입니다. 새로고침하거나 페이지를 닫아 중지할 수 있습니다.',
     fr: 'Un script reste en attente ; rechargez ou fermez la page pour l’arrêter.', es: 'Hay un script pendiente; recarga o cierra la página para detenerlo.',
     'pt-BR': 'Um script ainda está pendente; recarregue ou feche a página para interrompê-lo.', pl: 'Skrypt strony nadal oczekuje; odśwież lub zamknij stronę, aby go zatrzymać.',
     uk: 'Скрипт сторінки ще очікує; перезавантажте або закрийте сторінку, щоб зупинити його.' };
-  return Object.fromEntries(Object.entries(en).map(([key, value], index) => [key, key === 'browser.scriptPending' ? pending[locale] ?? value : localized[locale]?.[index] ?? value])) as Record<keyof typeof en, string>;
+  return Object.fromEntries(Object.entries(en).map(([key, value], index) => [key, key in deviceChinese ? locale === 'zh-CN' ? deviceChinese[key] : value : key === 'browser.scriptPending' ? pending[locale] ?? value : localized[locale]?.[index - 17] ?? value])) as Record<keyof typeof en, string>;
 }

@@ -17,6 +17,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const outdir = path.join(root, 'dist-bundle');
 const updaterE2eBuild = process.env.VARIN_UPDATER_E2E_BUILD === '1';
+const source = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true });
+const sourceStatus = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: root, encoding: 'utf8', windowsHide: true });
+const sourceSha = source.status === 0 ? source.stdout.trim() : 'unavailable';
+const sourceDirty = sourceStatus.status !== 0 || sourceStatus.stdout.trim().length > 0;
 await prepareCompanionCatalog();
 
 // dist-bundle is generated output. Replace it as one unit so a removed entry
@@ -24,7 +28,7 @@ await prepareCompanionCatalog();
 fs.rmSync(outdir, { recursive: true, force: true });
 
 const result = await Bun.build({
-  entrypoints: [path.join(root, 'main.ts'), path.join(root, 'preload.ts'), path.join(root, 'frontend-migration.ts')],
+  entrypoints: [path.join(root, 'main.ts'), path.join(root, 'preload.ts'), path.join(root, 'frontend-migration.ts'), path.join(root, 'benchmark.mjs')],
   outdir,
   target: 'node',
   format: 'esm',
@@ -39,6 +43,8 @@ const result = await Bun.build({
   naming: '[name].mjs',
   define: {
     __VARIN_UPDATER_E2E_BUILD__: updaterE2eBuild ? 'true' : 'false',
+    __VARIN_BENCHMARK_SOURCE_SHA__: JSON.stringify(sourceSha),
+    __VARIN_BENCHMARK_SOURCE_DIRTY__: JSON.stringify(sourceDirty),
   },
 });
 
@@ -49,7 +55,8 @@ if (!result.success) {
 
 // Verify both entry bundles exist and are accepted by the same Node parser
 // used by Electron's main-process runtime.
-const expectedEntries = ['main.mjs', 'preload.mjs', 'frontend-migration.mjs'];
+fs.copyFileSync(path.join(root, '../tauri/scripts/benchmark-page.js'), path.join(outdir, 'benchmark-page.js'));
+const expectedEntries = ['main.mjs', 'preload.mjs', 'frontend-migration.mjs', 'benchmark.mjs', 'benchmark-page.js'];
 const nodeExecutable = process.env.VARIN_PACKAGING_NODE || 'node';
 for (const entry of expectedEntries) {
   const entryPath = path.join(outdir, entry);

@@ -63,8 +63,8 @@ unsafe fn decorate_rows(menu: &AnyObject, rows: &[TrayRow], limit: usize, index:
     }
     if rows.len() > limit {
         unsafe {
-            if let Some(item) = item(menu, *index) {
-                let submenu: Option<Retained<AnyObject>> = msg_send![&*item, submenu];
+            if let Some(parent_item) = item(menu, *index) {
+                let submenu: Option<Retained<AnyObject>> = msg_send![&*parent_item, submenu];
                 if let Some(submenu) = submenu {
                     for (index, row) in rows.iter().skip(limit).enumerate() {
                         if let Some(item) = item(&submenu, index) {

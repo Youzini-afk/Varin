@@ -1,6 +1,8 @@
 //! Native surfaces only. Shared TypeScript owns artwork, scene chronology,
 //! gesture policy and settings; inert surfaces never acquire the desktop bridge.
+use crate::geometry;
 use crate::{desktop, engine::offscreen, host::HostProcess};
+use geometry::{Display, Rect};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -19,8 +21,6 @@ use tauri_runtime_cef::{
     WebviewWindowBuilderCefExt, allocate_devtools_message_id,
 };
 use tokio::sync::{oneshot, watch};
-use crate::geometry;
-use geometry::{Display, Rect};
 type Reply = Result<Value, String>;
 type Pending = Arc<Mutex<HashMap<i32, oneshot::Sender<Reply>>>>;
 #[derive(Clone)]
@@ -140,6 +140,27 @@ impl CompanionWindows {
     fn event(&self, value: Value) {
         (self.emit)(value);
     }
+    pub(crate) fn benchmark_sessions(&self) -> Vec<(String, crate::cdp::Session)> {
+        self.surfaces
+            .lock()
+            .map(|surfaces| {
+                surfaces
+                    .iter()
+                    .filter(|(_, surface)| !*surface.closed.borrow())
+                    .map(|(id, surface)| {
+                        (
+                            format!("companion:{}:{id}", surface.role),
+                            crate::cdp::Session::from_owned(
+                                surface.window.as_ref().clone(),
+                                surface.pending.clone(),
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn surface(&self, id: u64) -> Result<Surface, String> {
         self.surfaces
             .lock()

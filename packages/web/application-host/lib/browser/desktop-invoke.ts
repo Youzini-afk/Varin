@@ -9,7 +9,7 @@ const object = (value: unknown): Record<string, unknown> => {
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const number = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const point = (value: unknown): boolean => { const p = object(value); return number(p.x) && number(p.y); };
-const action = (value: unknown): BrowserAction => {
+export const parseBrowserAction = (value: unknown): BrowserAction => {
   const input = object(value);
   let valid = input.ref === undefined || text(input.ref);
   valid &&= input.frameId === undefined || text(input.frameId);
@@ -37,6 +37,15 @@ const action = (value: unknown): BrowserAction => {
   return input as unknown as BrowserAction;
 };
 
+export function parseBrowserRead(value: unknown): BrowserReadRequest {
+  const args = object(value);
+  if (!text(args.pageId)) throw new Error('pageId is required');
+    if (args.view !== undefined && !['overview', 'text', 'structure', 'screenshot', 'find'].includes(String(args.view))) throw new Error('Invalid browser read view');
+    for (const field of ['frameId', 'ref', 'query']) if (args[field] !== undefined && typeof args[field] !== 'string') throw new Error('Invalid browser read field');
+    for (const field of ['offset', 'limit']) if (args[field] !== undefined && (!number(args[field]) || !Number.isSafeInteger(args[field]) || Number(args[field]) < (field === 'limit' ? 1 : 0))) throw new Error('Invalid browser read range');
+    return args as unknown as BrowserReadRequest;
+}
+
 /** The shell authenticates the sender window. This port never admits arbitrary native methods. */
 export async function invokeNativeBrowserCommand(owner: DesktopBrowserOwner, value: unknown): Promise<unknown> {
   const request = object(value), args = object(request.args);
@@ -46,12 +55,9 @@ export async function invokeNativeBrowserCommand(owner: DesktopBrowserOwner, val
     throw new Error('This desktop browser command is unavailable');
   }
   if (!text(args.pageId)) throw new Error('pageId is required');
-  if (command === 'desktop_browser_action') return owner.act(args.pageId, action(args.action), undefined, true);
+  if (command === 'desktop_browser_action') return owner.act(args.pageId, parseBrowserAction(args.action), undefined, true);
   if (command === 'desktop_browser_read') {
-    if (args.view !== undefined && !['overview', 'text', 'structure', 'screenshot', 'find'].includes(String(args.view))) throw new Error('Invalid browser read view');
-    for (const field of ['frameId', 'ref', 'query']) if (args[field] !== undefined && typeof args[field] !== 'string') throw new Error('Invalid browser read field');
-    for (const field of ['offset', 'limit']) if (args[field] !== undefined && (!number(args[field]) || !Number.isSafeInteger(args[field]) || Number(args[field]) < (field === 'limit' ? 1 : 0))) throw new Error('Invalid browser read range');
-    return owner.read(args as unknown as BrowserReadRequest);
+    return owner.read(parseBrowserRead(args));
   }
   if (command === 'desktop_browser_control') {
     if (typeof args.paused !== 'boolean') throw new Error('Browser control requires paused');
@@ -63,5 +69,5 @@ export async function invokeNativeBrowserCommand(owner: DesktopBrowserOwner, val
   if (!['x', 'y', 'width', 'height'].every(key => number(raw[key]))) throw new Error('A finite browser viewport is required');
   const bounds = { x: Math.round(Number(raw.x)), y: Math.round(Number(raw.y)), width: Math.max(1, Math.round(Number(raw.width))), height: Math.max(1, Math.round(Number(raw.height))) };
   if (command === 'desktop_browser_layout') { await owner.layout(args.pageId, args.viewId, request.windowLabel, bounds, args.visible === true); return null; }
-  return owner.present({ pageId: args.pageId, viewId: args.viewId, url: typeof args.url === 'string' ? args.url : 'about:blank', bounds, visible: args.visible === true }, request.windowLabel);
+  return owner.present({ ...(args.createNew === true ? { createNew: true } : {}), pageId: args.pageId, viewId: args.viewId, url: typeof args.url === 'string' ? args.url : 'about:blank', bounds, visible: args.visible === true }, request.windowLabel);
 }

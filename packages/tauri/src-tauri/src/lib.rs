@@ -17,6 +17,10 @@ pub mod files;
 pub mod host;
 pub mod host_codec;
 mod host_scope;
+#[cfg(unix)]
+mod host_guardian;
+#[cfg(unix)]
+pub use host_guardian::run_if_requested as run_service_guardian_if_requested;
 #[cfg(feature = "desktop")]
 mod lifecycle;
 pub mod manifest;
@@ -66,3 +70,6 @@ mod smoke;
 
 #[cfg(feature = "desktop")]
 mod dialogs;
+
+#[cfg(feature = "desktop")]
+mod benchmark;

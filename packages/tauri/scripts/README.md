@@ -143,6 +143,13 @@ an installed user's migration succeeded.
 Platform packaging deliberately wraps the **real Tauri payload** in the existing
 installer owner rather than changing installed identity:
 
+Every payload retains CEF's original redistribution license and Chromium credits.
+`download-cef` 3.0.0 removes the archive-root `LICENSE.txt` while flattening its cache;
+the original bytes from the pinned minimal archive are retained under `licenses/`
+and verified against `cef-runtime.lock.json` before staging. A conflicting SDK
+license is rejected rather than silently replaced. The native binary name is
+explicitly `varin`, independent of Cargo's package name.
+
 - Windows uses the official CEF sandbox bootstrap and same-stem Rust DLL. The
   bootstrap receives the original Varin icon/version resources before signing. Original
   electron-builder NSIS app ID, UI, installation scope, optional WinFsp component,
@@ -269,6 +276,11 @@ installations. `tauri_full: true` selects all six targets; false selects Linux x
 x64 and macOS arm64 for iteration. An omitted native run is explicitly skipped, not a passed
 native qualification. The reusable workflow has its own `authorized_tools` gate. Existing
 Electron release jobs are not replaced or disabled.
+
+Native-only iteration can dispatch `tauri-desktop.yml` directly with the immutable
+`source_sha`, `authorized_tools: true` and `full: true|false`. This runs the same candidate
+builder and native observations without repeating the unrelated full source/container
+pipeline. It does not replace the final source-quality checks for that exact commit.
 
 Linux runners use the official Ubuntu 24.04 repositories, installing the declared C/C++,
 GTK3/GTK4, display/audio, Xvfb, D-Bus, FUSE and Mesa dependencies. XDG file dialogs use

@@ -233,6 +233,8 @@ import { registerConnectionRoutes } from './lib/connections/connection-routes.js
 import { attachConnectionProxy } from './lib/connections/host-proxy.js';
 import { configuredVmProviders } from './lib/computer/vm-provider.js';
 import { registerComputerRoutes } from './lib/computer/computer-routes.js';
+import { BrowserRegistry } from './lib/browser/registry.js';
+import { registerBrowserRoutes, attachBrowserDevices } from './lib/browser/routes.js';
 import { attachDesktopMedia } from './lib/computer/desktop-media.js';
 import { attachServiceForward } from './lib/harness/environment-forward-server.js';
 import { createVmGuestRegistration } from './lib/computer/vm-guest-register.js';
@@ -2034,7 +2036,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const documentSources = createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
     resolveLiveSource: liveSources.validate, experiments: experimentService });
   const binaryFiles = createBinaryFileOwner({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate });
-  browserRuntimeOwner.current = createBrowserRuntime({ browser: options.browser, runtime: agentRuntime, sources: documentSources,
+  const browsers = new BrowserRegistry(hostId, options.browser);
+  browserRuntimeOwner.current = createBrowserRuntime({ browser: browsers, browserAvailable: () => browsers.available(),
+    browserForInvocation: invocation => browsers.forActor({ kind: 'thread', threadId: invocation.threadId, runId: invocation.runId, invocationId: invocation.invocationId }), runtime: agentRuntime, sources: documentSources,
     files: binaryFiles, materials: webMaterials, documents: documentReader, office: officeReader,
     settings: async source => {
       const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
@@ -2106,7 +2110,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     releaseAttachmentSources: (plan, signal) => releaseDeletedAttachmentSources(kernelClient, agentRuntime, plan, signal),
     releaseSource:(source,id,signal)=>nativeWorkspaces!.retireSource(source,id,signal),
     releasePreparations:threads=>releaseSourcePreparations(threads),
-    ...(options.browser ? { releaseBrowser: (threadId: string) => options.browser!.releaseThread(threadId) } : {}) });
+    releaseBrowser: (threadId: string) => browsers.forActor({ kind: 'thread', threadId, runId: 'thread-lifecycle', invocationId: 'release-browser' }).releaseThread(threadId) });
   const contentMaintenance = createContentMaintenance({ runtime: agentRuntime,
     releaseDeletedResources: signal => threadMaterialLifetime.releaseDeleted(signal),
     onError: () => console.error('[ContentMaintenance] Deleted conversation cleanup will retry after runtime activity'),
@@ -2477,6 +2481,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  registerBrowserRoutes(app, { browsers, requireAuth: uiAuthController.requireAuth,
+    authenticate: (request, response) => uiAuthController?.resolveAuthContext(request, response, { allowClientAuth: true, allowUrlToken: true }) ?? Promise.resolve(null) });
+  const browserDevices = attachBrowserDevices({ server, browsers,
+    authenticate: request => uiAuthController?.resolveAuthContext(request, null, { allowClientAuth: true, allowUrlToken: false }) ?? Promise.resolve(null), originAllowed: isRequestOriginAllowed });
   const desktopMedia = attachDesktopMedia({ server, hostId, computers: computerService,
     authenticate: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
     originAllowed: isRequestOriginAllowed,
@@ -3216,6 +3224,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
       await shutdown.run('realtimeProxyRuntime.stop', () => realtimeProxyRuntime.stop());
       await shutdown.run('connectionProxy.stop', () => connectionProxy.stop());
+      await shutdown.run('browserDevices.stop', () => browserDevices.stop());
       await shutdown.run('desktopMedia.stop', () => desktopMedia.stop());
       await shutdown.run('serviceForward.stop', () => serviceForward.stop());
       await shutdown.run('clearInterval', () => clearInterval(relayReconcileTimer));

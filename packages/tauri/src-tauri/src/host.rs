@@ -336,20 +336,8 @@ impl HostProcess {
         for (key, value) in env {
             command.env(key, value);
         }
-        ProcessScope::prepare(&mut command);
-        let mut child = command
-            .spawn()
-            .map_err(|_| "Bundled desktop service could not start".to_owned())?;
-        let scope = match ProcessScope::attach(&child) {
-            Ok(scope) => Arc::new(scope),
-            Err(error) => {
-                let _ = child.start_kill();
-                tokio::spawn(async move {
-                    let _ = child.wait().await;
-                });
-                return Err(error);
-            }
-        };
+        let (mut child, scope) = ProcessScope::spawn(command, data_dir)?;
+        let scope = Arc::new(scope);
         let stdin = child
             .stdin
             .take()
@@ -441,13 +429,30 @@ impl HostProcess {
                 }
             }
             decoder.clear();
+            // EOF after both protocol receipts is the original owner's drain
+            // boundary. Missing/truncated responses cannot certify macOS scopes.
+            if reader_shared.drained.load(Ordering::Acquire)
+                && reader_shared.stop_acknowledged.load(Ordering::Acquire)
+                && reader_shared.snapshot.borrow().error.is_none()
+            {
+                if reader_shared.scope.confirm_owner_drained().is_err() {
+                    fail(&reader_shared, "Managed owner drain could not be recorded").await;
+                }
+            } else {
+                #[cfg(target_os = "macos")]
+                let _ = reader_shared.scope.terminate();
+            }
             reader_shared.writer.stop();
             let _ = reader_done.send(());
         });
         let exit_shared = shared.clone();
         tokio::spawn(async move {
             let result = child.wait().await;
-            let scope = exit_shared.scope.settle_after_node_exit().await;
+            // Release Tokio's process and registered-wait handles before Job
+            // accounting. A terminated object can remain accounted while any
+            // process handle is held, even after wait() returned successfully.
+            drop(child);
+            let scope = exit_shared.scope.settle_after_node_exit(&result).await;
             // The last response can still be buffered when wait() finishes. Drain
             // the pipe first so a clean stop receipt is never replaced by unknown.
             let _ = reader_finished.await;
@@ -461,11 +466,11 @@ impl HostProcess {
             exit_shared.snapshot.send_modify(|s| {
                 s.phase = HostPhase::Exited;
                 s.scope_ended = scope.is_ok();
-                if !matches!(scope, Ok(true)) { s.error.get_or_insert_with(|| "Managed process scope required abnormal cleanup; effect outcomes remain unknown".into()); }
-                s.exit_code = result.as_ref().ok().and_then(|status| status.code());
+                if !scope.as_ref().is_ok_and(|scope| scope.clean) { s.error.get_or_insert_with(|| "Managed process scope required abnormal cleanup; effect outcomes remain unknown".into()); }
+                s.exit_code = scope.as_ref().ok().and_then(|scope| scope.code);
                 if result.is_err() {
                     s.error = Some("Desktop service termination could not be observed".into());
-                } else if result.as_ref().is_ok_and(|status| !status.success()) && s.error.is_none()
+                } else if scope.as_ref().is_ok_and(|scope| !scope.success) && s.error.is_none()
                 {
                     s.error = Some("Desktop service exited unsuccessfully".into());
                 }
@@ -609,6 +614,7 @@ impl HostProcess {
         if snapshot.exit_code == Some(0)
             && snapshot.error.is_none()
             && self.shared.drained.load(Ordering::Acquire)
+            && self.shared.stop_acknowledged.load(Ordering::Acquire)
         {
             Ok(())
         } else {
@@ -860,6 +866,7 @@ await send({kind:'event',event:'ready',payload:{mode:'browser',pid:process.pid}}
 "#;
     fn fixture(extra: &str) -> (tempfile::TempDir, HostProcess) {
         let directory = tempfile::tempdir().unwrap();
+        let _lease = crate::desktop_lock::Lease::acquire(directory.path()).unwrap();
         let entry = directory.path().join("service.mjs");
         std::fs::write(&entry, format!("{FIXTURE}\n{extra}")).unwrap();
         let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
@@ -904,10 +911,32 @@ await send({kind:'event',event:'ready',payload:{mode:'browser',pid:process.pid}}
         assert_eq!(process.snapshot().exit_code, Some(0));
     }
     #[tokio::test]
+    async fn elapsed_stop_timeout_does_not_confirm_scope_or_drain() {
+        let (_directory, process) = fixture(
+            r#"onFrame=async frame=>{if(frame.method==='stop'){await stopped();await reply(frame.id,{stopped:true});setInterval(()=>{},1000)}}"#,
+        );
+        process.ready().await.unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(200), process.stop()).await.is_err());
+        assert!(!process.snapshot().scope_ended);
+        process.disconnect("Stop observation timed out; outcome remains unknown").await;
+        let ended = tokio::time::timeout(Duration::from_secs(10), process.wait_for_scope_end()).await.unwrap();
+        assert_eq!(ended.is_ok(), !cfg!(target_os = "macos"));
+        assert!(process.stop().await.is_err());
+    }
+    #[tokio::test]
+    async fn stopped_event_without_original_stop_reply_is_not_a_clean_stop() {
+        let (_directory, process) = fixture("setTimeout(async()=>{await stopped();process.exit(0)},80)");
+        process.ready().await.unwrap();
+        exited(&process).await;
+        assert!(process.stop().await.is_err());
+    }
+    #[tokio::test]
     async fn unexpected_exit_is_not_successful_stop() {
         let (_directory, process) = fixture("setTimeout(()=>process.exit(13),80)");
         process.ready().await.unwrap();
-        assert_eq!(exited(&process).await.exit_code, Some(13));
+        let state = exited(&process).await;
+        assert_eq!(state.scope_ended, !cfg!(target_os = "macos"));
+        assert_eq!(state.exit_code, if cfg!(target_os = "macos") { None } else { Some(13) });
         assert!(process.stop().await.is_err());
     }
     #[tokio::test]
@@ -969,7 +998,7 @@ process.stdout.on('error',()=>{});
         process.disconnect("Native callback queue failed").await;
         assert!(request.await.unwrap().is_err());
         let state = exited(&process).await;
-        assert!(state.scope_ended);
+        assert_eq!(state.scope_ended, !cfg!(target_os = "macos"));
         assert!(state.error.is_some());
         assert!(process.stop().await.is_err());
     }
@@ -1016,12 +1045,11 @@ onFrame=async frame=>{{if(frame.method==='crash')process.exit(13)}};
         assert_eq!(event.frame()["event"], "brokerReady");
         drop(event);
         assert!(process.request("crash", Value::Null).await.is_err());
-        tokio::time::timeout(Duration::from_secs(10), process.wait_for_scope_end())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(process.shared.scope.empty().unwrap());
-        assert!(process.snapshot().scope_ended);
+        let ended = tokio::time::timeout(Duration::from_secs(10), process.wait_for_scope_end())
+            .await.unwrap();
+        assert_eq!(ended.is_ok(), !cfg!(target_os = "macos"));
+        assert_eq!(process.shared.scope.empty().unwrap(), !cfg!(target_os = "macos"));
+        assert_eq!(process.snapshot().scope_ended, !cfg!(target_os = "macos"));
         assert!(process.stop().await.is_err());
         assert!(
             independent.try_wait().unwrap().is_none(),
@@ -1029,6 +1057,92 @@ onFrame=async frame=>{{if(frame.method==='crash')process.exit(13)}};
         );
         independent.start_kill().unwrap();
         independent.wait().await.unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "private subprocess fixture"]
+    fn shell_fixture_entry() {
+        let Some(directory) = std::env::var_os("VARIN_TEST_SHELL_DIRECTORY") else { return };
+        let directory = std::path::PathBuf::from(directory);
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            let _lease = crate::desktop_lock::Lease::acquire(&directory).unwrap();
+            let broker = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../extension-host/broker/broker-child.mjs").canonicalize().unwrap();
+            let script = format!(r#"
+const {{fork}}=await import('node:child_process');
+const fs=await import('node:fs');
+const {{fileURLToPath}}=await import('node:url');
+const extension=new URL('./extension.cjs',import.meta.url);
+fs.writeFileSync(extension, 'module.exports.activate=context=>{{setInterval(()=>{{}},1000);context.effect(()=>new Promise(()=>{{}}));}};');
+const broker=fork({},[],{{execArgv:[],stdio:['ignore','ignore','ignore','ipc']}});
+broker.on('message',async message=>{{
+ if(message.kind==='event'&&message.event==='ready')broker.send({{kind:'request',id:'activate',method:'activate',params:{{modulePath:fileURLToPath(extension),packageRoot:fileURLToPath(new URL('.',import.meta.url)),storage:{{data:{{}},revision:'0'}},dependencies:[]}}}});
+ if(message.kind==='response'&&message.id==='activate'){{if(!message.success)process.exit(21);fs.writeFileSync(new URL('./ready.json',import.meta.url),JSON.stringify({{node:process.pid,broker:broker.pid}}))}}
+}});
+onEnd=async()=>{{broker.send({{kind:'request',id:'deactivate',method:'deactivate',params:{{}}}});await new Promise(()=>{{}})}};
+setInterval(()=>{{}},1000);
+"#, serde_json::to_string(&broker.to_string_lossy()).unwrap());
+            let entry = directory.join("service.mjs");
+            std::fs::write(&entry, format!("{FIXTURE}\n{script}")).unwrap();
+            let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
+            let _process = HostProcess::spawn_command(Path::new(&node), &entry, &directory, HostMode::Browser, &[]).unwrap();
+            std::future::pending::<()>().await;
+        });
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn abrupt_shell_death_stops_original_scope_not_independent_process() {
+        use std::os::unix::process::CommandExt;
+        unsafe extern "C" { fn kill(pid: i32, signal: i32) -> i32; }
+        fn alive(pid: i32) -> bool {
+            #[cfg(target_os = "linux")]
+            if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                if stat.rsplit_once(')').is_some_and(|(_, rest)| rest.trim_start().starts_with(['Z', 'X'])) { return false; }
+            }
+            unsafe { kill(pid, 0) == 0 }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
+        let mut independent = std::process::Command::new(node).args(["-e", "setInterval(()=>{},1000)"])
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        let mut shell = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "host::tests::shell_fixture_entry", "--ignored", "--nocapture"])
+            .env("VARIN_TEST_SHELL_DIRECTORY", directory.path()).process_group(0)
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit()).spawn().unwrap();
+        let ready = tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                if let Ok(bytes) = std::fs::read(directory.path().join("ready.json")) {
+                    if let Ok(value) = serde_json::from_slice::<Value>(&bytes) { break value; }
+                }
+                assert!(shell.try_wait().unwrap().is_none(), "shell fixture exited before broker activation");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }).await.unwrap();
+        let pid = ready["node"].as_i64().unwrap() as i32;
+        let broker = ready["broker"].as_i64().unwrap() as i32;
+        shell.kill().unwrap();
+        shell.wait().unwrap();
+        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
+            while alive(pid) || alive(broker) { tokio::time::sleep(Duration::from_millis(20)).await; }
+        }).await;
+        let unrelated_survived = independent.try_wait().unwrap().is_none();
+        independent.kill().unwrap(); independent.wait().unwrap();
+        assert!(unrelated_survived, "independently launched service must survive");
+        assert!(stopped.is_ok(), "original Node or extension broker survived abrupt shell death");
+        // Stopped processes alone are not enough: wait for the durable scope
+        // receipt before admitting another shell against this data directory.
+        #[cfg(target_os = "macos")]
+        assert!(crate::desktop_lock::Lease::acquire(directory.path()).is_err(), "abnormal PG cleanup cannot certify detached descendants");
+        #[cfg(not(target_os = "macos"))]
+        let recovered = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(lease) = crate::desktop_lock::Lease::acquire(directory.path()) { break lease; }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }).await.expect("guardian must publish scope completion after parent SIGKILL");
+        #[cfg(not(target_os = "macos"))]
+        recovered.verify().unwrap();
     }
     #[tokio::test]
     async fn real_maximum_wire_callback_cannot_block_its_close_callback() {

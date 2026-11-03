@@ -314,6 +314,10 @@ pub fn event(
                     mask(1 | 2 | 16),
                 ),
             };
+            // CEF forbids source virtual-file bytes in DragTargetDragEnter.
+            // This is an independent clone: preserve custom MIME and paths,
+            // without modifying the original outgoing native drag payload.
+            data.reset_file_contents();
             let position = position.map(|p| offscreen::mouse_event(label, view, window, p.x, p.y));
             TARGETS.with_borrow_mut(|targets| {
                 targets.insert(

@@ -2,6 +2,12 @@
   "schema": 1,
   "version": "154.0.34+g14c5a08+chromium-154.0.8037.98",
   "source": "https://cef-builds.spotifycdn.com/index.json",
+  "license": {
+    "file": "../licenses/CEF-LICENSE.txt",
+    "sha256": "058c3827ffb827ff3edda471ae7e1bb1d1aa5931985f0126043ccd33409e792f",
+    "sourceArchive": "linux-x64",
+    "archivePath": "LICENSE.txt"
+  },
   "targets": {
     "linux-x64": {"upstream": "linux64", "sha1": "15c91ad767097217b2e82ba8b933fe30b134be69"},
     "linux-arm64": {"upstream": "linuxarm64", "sha1": "fa85793519eef199e6b6fa8cc8d6f0eb45c6dac2"},

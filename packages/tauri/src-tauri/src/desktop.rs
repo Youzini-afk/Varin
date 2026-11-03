@@ -42,6 +42,7 @@ struct DesktopState {
     lease: OnceLock<crate::desktop_lock::Lease>,
     data_dir: PathBuf,
     smoke: Option<crate::smoke::SmokeRequest>,
+    benchmark: Option<crate::benchmark::BenchmarkRequest>,
     background: Mutex<Option<Value>>,
     mini_create: tokio::sync::Mutex<()>,
     deep_links: tokio::sync::mpsc::Sender<String>,
@@ -411,12 +412,7 @@ fn create_window(
                 let handle = app_handle.clone();
                 let label = event_label.clone();
                 tauri::async_runtime::spawn(async move {
-                    for service in handle.state::<DesktopState>().services.lock().await.clone() {
-                        if service.browser.detach_window(&label).is_err() {
-                            return;
-                        }
-                    }
-                    let _ = close.request(&view).await;
+                    let _ = close_workbench_window(&handle, &label, &close, &view).await;
                 });
             }
         }
@@ -543,9 +539,13 @@ async fn initialize(app: AppHandle, root: PathBuf) {
         if let Ok(windows) = state.windows.lock() {
             for window in windows.values() {
                 if window.native_ready.borrow().is_none() {
-                    window.native_ready.send_replace(Some(Err(
-                        result.as_ref().err().cloned().unwrap_or_else(||"Desktop initialization failed before native window preparation".into()),
-                    )));
+                    window.native_ready.send_replace(Some(Err(result
+                        .as_ref()
+                        .err()
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            "Desktop initialization failed before native window preparation".into()
+                        }))));
                 }
             }
         }
@@ -555,6 +555,39 @@ async fn initialize(app: AppHandle, root: PathBuf) {
     }
     state.boot.send_replace(Some(result.clone()));
     refresh_desktop_state(&app);
+    if let Some(request) = state.benchmark.clone() {
+        let app = app.clone();
+        let result = result.clone();
+        tauri::async_runtime::spawn(async move {
+            let passed = match result {
+                Ok(_) => match smoke_main_session(&app) {
+                    Ok(main) => crate::benchmark::run(app.clone(), request.clone(), main).await,
+                    Err(error) => {
+                        let _ = crate::benchmark::startup_failed(&request, &error);
+                        false
+                    }
+                },
+                Err(error) => {
+                    let _ = crate::benchmark::startup_failed(&request, &error);
+                    false
+                }
+            };
+            if !app
+                .state::<DesktopState>()
+                .exit_ready
+                .load(Ordering::Acquire)
+            {
+                let _ = drain(&app).await;
+            }
+            if app
+                .state::<DesktopState>()
+                .exit_ready
+                .load(Ordering::Acquire)
+            {
+                app.exit(if passed { 0 } else { 1 });
+            }
+        });
+    }
     if let Some(request) = state.smoke.clone() {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -1200,6 +1233,45 @@ async fn varin_invoke(
                 )
                 .await
         }
+        "desktop_browser_device" => {
+            let action = string(&args, "action")?;
+            if !matches!(action.as_str(), "status" | "connect" | "disconnect") {
+                return Err("Unsupported Browser device action".into());
+            }
+            if action != "status" {
+                let host_id = string(&args, "expectedHostId")?;
+                uuid::Uuid::parse_str(&host_id)
+                    .map_err(|_| "The original Browser Host identity is invalid")?;
+            }
+            if action == "connect" && args["shareInteractiveProfile"] != true {
+                return Err(
+                    "Sharing the interactive Browser profile requires explicit consent".into(),
+                );
+            }
+            // Resolve credentials from the caller's current, authoritative window
+            // ledger. Renderer-supplied URLs, tokens and target objects never
+            // cross this boundary. Node separately authenticates the actual Host
+            // UUID; a saved connection alias is not that identity.
+            let bootstrap = state.bootstrap(webview.label()).await?;
+            let target = json!({
+                "apiBaseUrl": bootstrap["apiBaseUrl"],
+                "clientToken": bootstrap["clientToken"],
+                "requestHeaders": bootstrap["requestHeaders"],
+                "relayHostId": bootstrap["relayHostId"],
+                "connectionId": bootstrap["bootOutcome"]["hostId"]
+            });
+            let service = browser_service(&app).await?;
+            service
+                .process
+                .request(
+                    "browserInvoke",
+                    json!({
+                        "command": command, "args": args,
+                        "windowLabel": webview.label(), "trustedTarget": target
+                    }),
+                )
+                .await
+        }
         command if command.starts_with("desktop_browser_") || command == "desktop_web_render" => {
             let service = browser_service(&app).await?;
             service
@@ -1357,6 +1429,28 @@ async fn varin_file_grant_existing(
         .ok_or("Local file grant owner is unavailable")?;
     host.request("fileGrant", json!({"path":file_path})).await
 }
+async fn close_workbench_window(
+    app: &AppHandle,
+    label: &str,
+    close: &crate::lifecycle::CloseReceipt,
+    view: &Webview,
+) -> Result<(), String> {
+    let mut parked = Vec::new();
+    let result = async {
+        for service in app.state::<DesktopState>().services.lock().await.clone() {
+            parked.push(service.browser.detach_window(label)?);
+        }
+        close.request(view).await
+    }
+    .await;
+    if result.is_err() && !close.closed() {
+        for original in parked {
+            original.restore()?;
+        }
+    }
+    result
+}
+
 async fn drain(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<DesktopState>();
     if state.quitting.swap(true, Ordering::SeqCst) {
@@ -1439,12 +1533,8 @@ async fn drain(app: &AppHandle) -> Result<(), String> {
             .filter_map(|(label, w)| w.close.clone().map(|close| (label.clone(), close)))
             .collect();
         for (label, close) in windows {
-            let services = state.services.lock().await.clone();
-            for service in services {
-                service.browser.detach_window(&label)?;
-            }
             if let Some(view) = app.get_webview(&label) {
-                close.request(&view).await?;
+                close_workbench_window(app, &label, &close, &view).await?;
             }
         }
         state.settings.shutdown().await?;
@@ -1478,6 +1568,19 @@ async fn drain(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn run() {
+    if std::env::args().any(|a| a == "--varin-desktop-smoke")
+        && std::env::args().any(|a| a == "--varin-desktop-benchmark")
+    {
+        eprintln!("Native smoke and benchmark launches are mutually exclusive");
+        return;
+    }
+    let benchmark = match crate::benchmark::prepare() {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("{error}");
+            return;
+        }
+    };
     let smoke = match crate::smoke::prepare() {
         Ok(request) => request,
         Err(error) => {
@@ -1520,6 +1623,7 @@ pub fn run() {
             lease: OnceLock::new(),
             data_dir,
             smoke: smoke.clone(),
+            benchmark: benchmark.clone(),
             background: Mutex::new(None),
             mini_create: tokio::sync::Mutex::new(()),
             deep_links,
@@ -1584,13 +1688,20 @@ pub fn run() {
             if let Some(request) = smoke {
                 let _ = crate::smoke::startup_failed(&request, error);
             }
+            if let Some(request) = benchmark {
+                let _ = crate::benchmark::startup_failed(&request, error);
+            }
             eprintln!("{error}");
             return;
         }
     };
     app.run(|app, event| {
         if let tauri::RunEvent::Opened { urls } = &event {
-            queue_deep_links(app, urls.iter().map(ToString::to_string).collect(), "opened");
+            queue_deep_links(
+                app,
+                urls.iter().map(ToString::to_string).collect(),
+                "opened",
+            );
             show_main(app);
         }
         if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
@@ -1631,6 +1742,34 @@ pub fn run() {
     });
 }
 
+pub(crate) async fn benchmark_sessions(app: &AppHandle) -> Vec<(String, crate::cdp::Session)> {
+    let state = app.state::<DesktopState>();
+    if state.benchmark.is_none() {
+        return Vec::new();
+    }
+    let mut sessions = state
+        .windows
+        .lock()
+        .map(|windows| {
+            windows
+                .iter()
+                .filter_map(|(label, window)| {
+                    window
+                        .cdp
+                        .clone()
+                        .map(|session| (format!("application:{label}"), session))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let services = state.services.lock().await.clone();
+    for service in services {
+        sessions.extend(service.companion.benchmark_sessions());
+        sessions.extend(service.browser.benchmark_sessions());
+    }
+    sessions
+}
+
 pub(crate) fn smoke_main_session(app: &AppHandle) -> Result<crate::cdp::Session, String> {
     app.state::<DesktopState>()
         .windows
@@ -1639,6 +1778,14 @@ pub(crate) fn smoke_main_session(app: &AppHandle) -> Result<crate::cdp::Session,
         .get("main")
         .and_then(|window| window.cdp.clone())
         .ok_or("Main application session is unavailable".into())
+}
+pub(crate) async fn smoke_browser_service(
+    app: &AppHandle,
+) -> Result<crate::service::NativeService, String> {
+    if app.state::<DesktopState>().smoke.is_none() {
+        return Err("Native Browser inspection requires the isolated smoke launch".into());
+    }
+    browser_service(app).await
 }
 pub(crate) async fn smoke_shutdown(app: &AppHandle) -> Result<(), String> {
     drain(app).await
@@ -2383,15 +2530,21 @@ async fn varin_runtime_changed(
     Ok(Value::Null)
 }
 
-fn queue_deep_links(app: &AppHandle, urls: Vec<String>, source:&str) {
+fn queue_deep_links(app: &AppHandle, urls: Vec<String>, source: &str) {
     let state = app.state::<DesktopState>();
     for raw in urls {
-        if let Some(request)=&state.smoke{
-            if raw==format!("varin://smoke/{}",request.nonce){
-                let temporary=request.data_dir.join(".smoke-protocol-activation.tmp");
-                let receipt=json!({"schema":1,"nonce":request.nonce,"pid":std::process::id(),"source":source});
-                if serde_json::to_vec(&receipt).ok().is_some_and(|bytes|std::fs::write(&temporary,bytes).is_ok()){
-                    let _=std::fs::rename(temporary,request.data_dir.join("smoke-protocol-activation.json"));
+        if let Some(request) = &state.smoke {
+            if raw == format!("varin://smoke/{}", request.nonce) {
+                let temporary = request.data_dir.join(".smoke-protocol-activation.tmp");
+                let receipt = json!({"schema":1,"nonce":request.nonce,"pid":std::process::id(),"source":source});
+                if serde_json::to_vec(&receipt)
+                    .ok()
+                    .is_some_and(|bytes| std::fs::write(&temporary, bytes).is_ok())
+                {
+                    let _ = std::fs::rename(
+                        temporary,
+                        request.data_dir.join("smoke-protocol-activation.json"),
+                    );
                 }
                 continue;
             }

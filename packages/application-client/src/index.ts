@@ -51,3 +51,5 @@ export * from './interactive-ui.js';
 export * from './content-reference.js';
 export * from './external-agents.js';
 export * from './usage.js';
+
+export * from './browser-http.js';

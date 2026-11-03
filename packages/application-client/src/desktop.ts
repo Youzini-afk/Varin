@@ -614,8 +614,9 @@ export interface VarinDesktopCommandMap {
   desktop_restart: { args: void; result: null };
 
   // --- capture/file/shell ---
+  desktop_browser_device: { args: import('@varin/protocol').BrowserDeviceCommand; result: import('@varin/protocol').BrowserDeviceStatus };
   desktop_browser_capture_page: { args: { webContentsId: number }; result: DesktopCaptureResult };
-  desktop_browser_present: { args: { pageId: string; viewId: string; url: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean }; result: import('@varin/protocol').BrowserPage };
+  desktop_browser_present: { args: { pageId: string; createNew?: boolean; viewId: string; url: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean }; result: import('@varin/protocol').BrowserPage };
   desktop_browser_layout: { args: { pageId: string; viewId: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean }; result: null };
   desktop_browser_detach: { args: { pageId: string; viewId: string }; result: null };
   desktop_browser_action: { args: { pageId: string; action: import('@varin/protocol').BrowserAction }; result: import('@varin/protocol').BrowserActionResult };
@@ -770,6 +771,7 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_set_local_host_mode: true,
   desktop_restart_without_update: true,
   desktop_restart: true,
+  desktop_browser_device: true,
   desktop_browser_capture_page: true,
   desktop_browser_present: true,
   desktop_browser_layout: true,

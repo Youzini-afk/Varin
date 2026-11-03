@@ -1,0 +1,88 @@
+name: Complete desktop performance observations
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact immutable source for both complete desktop products
+        required: true
+        type: string
+      cef_path:
+        description: Absolute pre-provisioned pinned CEF SDK directory outside the checkout
+        required: true
+        type: string
+      authorized_tools:
+        description: Caller has approval for the documented official build/runtime tools
+        type: boolean
+        default: false
+      runner_labels:
+        description: JSON runner labels for a provisioned native desktop benchmark machine
+        type: string
+        default: '["self-hosted", "varin-desktop-benchmark"]'
+      disposable_os_user:
+        description: The entire OS account/session is disposable, including protocol registrations
+        type: boolean
+        default: false
+      virtual_display:
+        description: Linux-only Xvfb correctness/workload observations, never physical multi-display qualification
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  measure:
+    if: inputs.authorized_tools && inputs.disposable_os_user
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    timeout-minutes: 240
+    env:
+      CEF_PATH: ${{ inputs.cef_path }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/artifacts/desktop-benchmark-cargo
+      VARIN_BENCHMARK_DISPOSABLE_OS_USER: '1'
+      VARIN_BENCHMARK_VIRTUAL_DISPLAY: ${{ inputs.virtual_display && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - name: Verify immutable source and pre-provisioned native tools
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          cargo --version
+          if [ "$RUNNER_OS" = Linux ]; then pkg-config --atleast-version=4.14 gtk4; fi
+          if [ "$RUNNER_OS" = macOS ]; then xcrun --show-sdk-path; fi
+      - run: bun install --frozen-lockfile
+      - name: Exercise real platform process-tree counters and strict measurement protocol
+        run: node --test packages/tauri/scripts/benchmark-processes.test.mjs packages/tauri/scripts/benchmark.test.mjs packages/tauri/scripts/benchmark-suite.test.mjs
+      - name: Build same-source complete Electron baseline and Tauri candidate
+        run: node packages/tauri/scripts/benchmark-build.mjs --output artifacts/desktop-benchmark-products
+      - name: Run fixed complete-product scenarios with the native display
+        if: '!inputs.virtual_display'
+        run: node packages/tauri/scripts/benchmark-suite.mjs --pair artifacts/desktop-benchmark-products/pair.json --output artifacts/desktop-benchmark-evidence
+      - name: Run actual products under a declared virtual Linux display
+        if: inputs.virtual_display && runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/benchmark-suite.mjs --pair artifacts/desktop-benchmark-products/pair.json --output artifacts/desktop-benchmark-evidence
+      - name: Reject unsupported virtual display mode
+        if: inputs.virtual_display && runner.os != 'Linux'
+        run: node -e "throw new Error('Virtual display mode is Linux-only; use the actual native desktop')"
+      - name: Preserve numeric observations and explicit pending coverage, not profiles or credentials
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-benchmark-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            artifacts/desktop-benchmark-evidence/**/preflight.json
+            artifacts/desktop-benchmark-evidence/**/comparison.json
+            artifacts/desktop-benchmark-evidence/**/probe.json
+            artifacts/desktop-benchmark-evidence/**/suite.json
+            artifacts/desktop-benchmark-evidence/measurements/**/*.json
+            artifacts/desktop-benchmark-evidence/measurements/**/*.jsonl
+          if-no-files-found: warn
+          retention-days: 14

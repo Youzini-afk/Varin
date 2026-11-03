@@ -15,6 +15,14 @@ pub struct Session {
     pending: Arc<Mutex<HashMap<i32, oneshot::Sender<Reply>>>>,
 }
 impl Session {
+    /// Reuse an existing native owner's observer and settlement registry. This
+    /// is private diagnostic access, never a renderer command or second owner.
+    pub(crate) fn from_owned(
+        view: Webview,
+        pending: Arc<Mutex<HashMap<i32, oneshot::Sender<Reply>>>>,
+    ) -> Self {
+        Self { view, pending }
+    }
     pub fn attach(view: Webview, close: crate::lifecycle::CloseReceipt) -> Result<Self, String> {
         let pending: Arc<Mutex<HashMap<i32, oneshot::Sender<Reply>>>> = Arc::default();
         let replies = pending.clone();

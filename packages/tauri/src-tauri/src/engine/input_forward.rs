@@ -8,7 +8,7 @@ use winit::window::Window;
 mod platform {
     use super::*;
     use std::{cell::Cell, ffi::c_void};
-    use winit::raw_window_handle::RawWindowHandle;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     type Handle = *mut c_void;
     #[repr(C)]
     struct Point {
@@ -88,7 +88,7 @@ mod platform {
     use objc2::{rc::Retained, runtime::AnyObject};
     use objc2_app_kit::{NSEvent, NSEventMask, NSView};
     use std::{cell::RefCell, ptr::NonNull};
-    use winit::raw_window_handle::RawWindowHandle;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     struct Monitors {
         global: Retained<AnyObject>,
         local: Retained<AnyObject>,

@@ -5,6 +5,8 @@ use std::{
     sync::{Arc, Weak},
 };
 use winit::window::Window;
+#[cfg(target_os = "macos")]
+use winit::raw_window_handle::HasDisplayHandle;
 
 struct Context {
     instance: wgpu::Instance,

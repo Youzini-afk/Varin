@@ -29,7 +29,8 @@ async function fixture(t, architecture = 'x64') {
   await fs.writeFile(path.join(cefDirectory, 'bootstrap.exe'), pe({ machine: lock.machine }));
   await fs.writeFile(path.join(targetDirectory, 'varin_desktop.dll'), pe({ machine: lock.machine, dll: true }));
   await fs.writeFile(path.join(targetDirectory, 'varin.exe'), 'build-only sentinel');
-  for (const name of ['libcef.dll', 'icudtl.dat', 'resources.pak', 'chrome_100_percent.pak', 'chrome_200_percent.pak', 'v8_context_snapshot.bin', 'LICENSE.txt', 'CREDITS.html']) await fs.writeFile(path.join(cefDirectory, name), `fixture ${name}`);
+  for (const name of ['libcef.dll', 'icudtl.dat', 'resources.pak', 'chrome_100_percent.pak', 'chrome_200_percent.pak', 'v8_context_snapshot.bin', 'CREDITS.html']) await fs.writeFile(path.join(cefDirectory, name), `fixture ${name}`);
+  await fs.copyFile(new URL('../licenses/CEF-LICENSE.txt', import.meta.url), path.join(cefDirectory, 'LICENSE.txt'));
   await fs.writeFile(path.join(cefDirectory, 'locales/en-US.pak'), 'en-US');
   await fs.writeFile(path.join(cefDirectory, 'locales/zh-CN.pak'), 'zh-CN');
   return { cefDirectory, targetDirectory, destination, architecture };
@@ -53,6 +54,12 @@ test('rejects a DLL without the genuine bootstrap entry rather than start withou
   await fs.writeFile(path.join(input.targetDirectory, 'varin_desktop.dll'), pe({ dll: true, exportName: 'UnrelatedEntry' }));
   await assert.rejects(stageWindowsBootstrap(input), /RunWinMain|bootstrap entry/);
   await assert.rejects(fs.stat(input.destination), { code: 'ENOENT' });
+});
+test('the flattened upstream SDK still delivers the original CEF redistribution notice', async t => {
+  const input = await fixture(t);
+  await fs.rm(path.join(input.cefDirectory, 'LICENSE.txt'));
+  const output = await stageWindowsBootstrap(input);
+  assert.deepEqual(await fs.readFile(path.join(output.directory, 'LICENSE.txt')), await fs.readFile(new URL('../licenses/CEF-LICENSE.txt', import.meta.url)));
 });
 test('architecture mismatch and wrong fixed CEF receipt fail before publication', async t => {
   const input = await fixture(t);

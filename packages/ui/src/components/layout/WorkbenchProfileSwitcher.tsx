@@ -105,6 +105,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
             aria-label={`${t('workbench.switcher.presentation')}: ${selectedMode.label}`}
             // WORKBENCH_SWITCHER_ATTRIBUTE: the lattice wave starts here.
             data-varin-workbench-switcher=""
+            data-workbench-mode={selectedMode.id}
             className={cn('h-7 shrink-0 gap-1.5 rounded-md bg-interactive-hover px-2 typography-meta font-medium', className)}
           >
             {selectedMode.id === 'bot' ? <VarinLogo decorative width={16} height={16} className="shrink-0" /> : <Icon name={selectedMode.icon} className="size-4 shrink-0" />}
@@ -118,7 +119,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
             if (mode) void switchProfile(mode.profileId);
           }}>
             {modes.map((mode) => (
-              <DropdownMenuRadioItem key={mode.id} value={mode.id} disabled={busy} className="gap-2.5">
+              <DropdownMenuRadioItem key={mode.id} value={mode.id} data-workbench-mode-option={mode.id} disabled={busy} className="gap-2.5">
                 {mode.id === 'bot' ? <VarinLogo decorative width={16} height={16} className="shrink-0 text-muted-foreground" /> : <Icon name={mode.icon} className="size-4 shrink-0 text-muted-foreground" />}
                 {mode.label}
               </DropdownMenuRadioItem>

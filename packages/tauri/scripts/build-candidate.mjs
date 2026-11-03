@@ -9,6 +9,7 @@ import {verifyRuntimeManifest,inventory,sha256} from './runtime-manifest.mjs';
 import {stageWindowsBootstrap} from './windows-bootstrap.mjs';
 import {packageTransition} from './package.mjs';
 import {recordArtifact} from './release.mjs';
+import {pinnedCefLicense} from './cef-license.mjs';
 const repository=path.resolve(import.meta.dirname,'../../..'),packageRoot=path.resolve(import.meta.dirname,'..');
 const lock=JSON.parse(await fs.readFile(new URL('./cef-runtime.lock.json',import.meta.url),'utf8'));
 const require=createRequire(path.join(packageRoot,'package.json'));
@@ -60,8 +61,9 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
     payload=path.join(output,'payload');await fs.cp(engineDirectory,payload,{recursive:true});await fs.cp(runtime,path.join(payload,'runtime'),{recursive:true});
   }else if(process.platform==='linux'){
     payload=path.join(output,'payload');await fs.mkdir(payload);
-    const required=['libcef.so','chrome-sandbox','icudtl.dat','resources.pak','chrome_100_percent.pak','chrome_200_percent.pak','v8_context_snapshot.bin','libvk_swiftshader.so','libvulkan.so.1','vk_swiftshader_icd.json','LICENSE.txt','CREDITS.html'];
+    const required=['libcef.so','chrome-sandbox','icudtl.dat','resources.pak','chrome_100_percent.pak','chrome_200_percent.pak','v8_context_snapshot.bin','libvk_swiftshader.so','libvulkan.so.1','vk_swiftshader_icd.json','CREDITS.html'];
     for(const name of required)await fs.copyFile(path.join(sdk,name),path.join(payload,name));
+    await fs.copyFile(await pinnedCefLicense(sdk),path.join(payload,'LICENSE.txt'));
     for(const name of ['libEGL.so','libGLESv2.so'])if(await fs.stat(path.join(sdk,name)).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;}))await fs.copyFile(path.join(sdk,name),path.join(payload,name));
     await fs.cp(path.join(sdk,'locales'),path.join(payload,'locales'),{recursive:true});
     await fs.copyFile(path.join(cargo,'varin'),path.join(payload,'varin'));await fs.chmod(path.join(payload,'varin'),0o755);
@@ -69,6 +71,8 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
   }else if(process.platform==='darwin'){
     run(process.execPath,[cli,'bundle','--ci','--no-sign','--bundles','app',...configs]);
     payload=path.join(output,'Varin.app');await fs.cp(path.join(cargo,'bundle/macos/Varin.app'),payload,{recursive:true,verbatimSymlinks:true});
+    await fs.copyFile(await pinnedCefLicense(sdk),path.join(payload,'Contents/Resources/CEF-LICENSE.txt'));
+    await fs.copyFile(path.join(sdk,'CREDITS.html'),path.join(payload,'Contents/Resources/CEF-CREDITS.html'));
   }else throw new Error('Unsupported native target');
   const runtimeDirectory=process.platform==='darwin'?path.join(payload,'Contents/Resources/runtime'):process.platform==='linux'?path.join(payload,'usr/lib/Varin/runtime'):path.join(payload,'runtime');
   const runtimeManifest=JSON.parse(await fs.readFile(path.join(runtimeDirectory,'runtime-manifest.json'),'utf8'));

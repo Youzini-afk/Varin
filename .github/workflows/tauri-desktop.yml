@@ -1,5 +1,19 @@
 name: Native Tauri candidate
 on:
+  workflow_dispatch:
+    inputs:
+      authorized_tools:
+        description: Approval covers the documented official native runner tools
+        type: boolean
+        default: false
+      source_sha:
+        description: Immutable committed source to build and exercise
+        required: true
+        type: string
+      full:
+        description: Exercise all six existing native desktop targets
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       authorized_tools:

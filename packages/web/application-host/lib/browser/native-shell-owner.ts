@@ -1,3 +1,4 @@
+import { BrowserDeviceService } from './device-service.js';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
@@ -220,6 +221,7 @@ export class NativeShellBrowserHost implements NativeBrowserHost {
 /** Creating the owner is lazy: no browser, Catalog or Application Host is started. */
 export function createNativeShellBrowserOwner(options: { port: NativeBrowserShellPort; scratchDirectory: string }) {
   const owner = new NativeBrowserOwner({ scratchDirectory: options.scratchDirectory, native: new NativeShellBrowserHost(options) });
+  const devices = new BrowserDeviceService({ owner, identityFile: path.join(path.dirname(options.scratchDirectory), 'browser-device.json') });
   const rendering = new NativeShellBrowserHost({ ...options, requestContext: 'web-render' });
   const disposeOwner = owner.dispose.bind(owner);
   const renderWebPage = (url: string, input?: { timeoutMs?: number; signal?: AbortSignal }) => renderNativeWebPage(rendering, url, input);
@@ -227,6 +229,7 @@ export function createNativeShellBrowserOwner(options: { port: NativeBrowserShel
     renderWebPage,
     invoke(input: unknown): Promise<unknown> {
       const request = record(input);
+      if (request.command === 'desktop_browser_device') return devices.invoke(input);
       if (request.command === 'desktop_web_render') {
         const args = record(request.args);
         if (args.timeoutMs !== undefined && (typeof args.timeoutMs !== 'number' || !Number.isFinite(args.timeoutMs))) throw new Error('Invalid web render timeout');
@@ -235,6 +238,7 @@ export function createNativeShellBrowserOwner(options: { port: NativeBrowserShel
       return invokeNativeBrowserCommand(owner, input);
     },
     async dispose() {
+      await devices.dispose();
       const results = await Promise.allSettled([disposeOwner(), rendering.dispose()]);
       const failed = results.find(result => result.status === 'rejected');
       if (failed?.status === 'rejected') throw failed.reason;
