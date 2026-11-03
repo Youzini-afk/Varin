@@ -8,6 +8,7 @@ import { KernelClientError, type KernelClient, type KernelGrantIssueInput, type 
 import { KernelStorageAdapter } from './storage-adapter.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
+import { withManagedChildSource } from './managed-source-collaboration.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import type { DelegatedExecution, LaunchSource } from './protocol.generated.js';
 
@@ -199,7 +200,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
       expect(prepareSkillInput).not.toHaveBeenCalled();
       expect(runtime.prepareChild.mock.calls[0]![0]).not.toHaveProperty('inputPreparation');
     }
-    expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, expect.objectContaining({ mode: 'native_workspace', branchId: 'child-source:execution:new', executionWorkspaceId }), expect.any(AbortSignal));
+    expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, expect.objectContaining({ mode: 'native_workspace', branchId: 'child-source:execution:new', executionWorkspaceId, tools: ['file_read'] }), expect.any(AbortSignal));
     expect(continueRun).toHaveBeenCalledWith('new-run', expect.any(AbortSignal));
     expect(kernel.claimChildSource).not.toHaveBeenCalled(); expect(kernel.releaseChildToolHandoff).not.toHaveBeenCalled();
     expect(runtime.releaseMcpResourceSource).not.toHaveBeenCalled();
@@ -219,6 +220,30 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     expect(scoped.fileRootRegister).not.toHaveBeenCalled(); expect(resolveWorkspaceRoot).not.toHaveBeenCalled();
     expect(runtime.failChild).not.toHaveBeenCalled(); expect(errors).toEqual([]);
   } finally { collaboration.stop(); }
+});
+
+it.each(['preparing', 'ready'] as const)('managed continuation %s retains file_read on its original preparation source', async phase => {
+  const child = execution();
+  const original = { ...source, resource_owner: { kind: 'managed_host' as const, hostId: 'source-host', connectionId: 'source-connection', endpointIdentity: 'source-endpoint' } };
+  child.source_basis = { ...child.source_basis!, source: original };
+  if (phase === 'ready') child.source = { kind: 'ready', handoff: null,
+    pin: { pin_id: 'child-pin', root: 'fixed-result-root', source: { ...original, branch_id: 'new-child-source', revision: 0 } },
+    selection: { ...original, mode: 'native_workspace', branch_id: 'new-child-source', revision: null },
+    provenance: { consistency: 'fixed-root', root: 'fixed-result-root' } };
+  const bound = { source: original, authorityId: 'preparation-authority', resourceEpoch: 'source-epoch' };
+  const service = { bind: vi.fn(async () => bound), release: vi.fn(async () => {}) };
+  const runtime = { coordinatorHostId: 'coordinator', managedSource: vi.fn(async () => service) };
+  const signal = new AbortController().signal;
+  const consume = vi.fn(async () => 'original-source-consumed');
+  expect(await withManagedChildSource(runtime as unknown as AgentRuntimeClient, child, signal, consume)).toBe('original-source-consumed');
+  expect(service.bind).toHaveBeenCalledWith(expect.objectContaining({
+    scope: { kind: 'source_read', threadId: child.child_thread_id, branchId: child.child_branch_id, key: `child:${child.execution_id}` },
+    source: expect.objectContaining({ mode: 'fixed_branch', branchId: 'old-result', revision: 7, tools: ['file_read'] }),
+    continuation: { executionId: child.execution_id, previousRunId: 'old-run', root: 'fixed-result-root' },
+  }), signal);
+  expect(consume).toHaveBeenCalledWith(service, { coordinatorHostId: 'coordinator', authorityId: bound.authorityId, resourceEpoch: bound.resourceEpoch });
+  expect(service.release).toHaveBeenCalledOnce();
+  expect(child.launch.source).toBeNull();
 });
 
 it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calendar'] as const)('source-free %s prepares real null context and launches without a file handoff or branch', async kind => {
