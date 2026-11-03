@@ -213,3 +213,22 @@ test('new native runner installations require the explicit manual dispatch optio
   needs['tauri-desktop'].result = 'skipped';
   assert.throws(() => assertRequiredResults(scope, needs, { tauriNative: true }), /expected success/);
 });
+
+test('unsupported application-data ownership remains a downloadable non-qualification', t => {
+  const native = parse(fs.readFileSync(new URL('../.github/workflows/tauri-desktop.yml', import.meta.url), 'utf8'));
+  const steps = native.jobs.native.steps;
+  const fixture = steps.find(step => step.env?.VARIN_INSTALLED_DATA_RUNTIME);
+  assert.equal(fixture.if, "matrix.platform != 'darwin'");
+  const status = steps.find(step => step.run?.includes("writeFile('artifacts/tauri-application-data-status.json'"));
+  assert.equal(status.if, "always() && matrix.platform == 'darwin'");
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ci-data-status-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  execFileSync('bash', ['-e', '-c', status.run], { cwd, stdio: 'pipe' });
+  const receipt = JSON.parse(fs.readFileSync(path.join(cwd, 'artifacts/tauri-application-data-status.json'), 'utf8'));
+  assert.equal(receipt.complete, false);
+  assert.equal(receipt.qualified, false);
+  assert.equal(receipt.status, 'not-executed');
+  assert.deepEqual(receipt.checks, ['application-data-full-scope-shutdown-reopen']);
+  const small = steps.find(step => step.with?.name?.startsWith('tauri-observations-'));
+  assert.ok(small.with.path.split('\n').includes('artifacts/tauri-application-data-status.json'));
+});

@@ -194,9 +194,18 @@ jobs:
       - name: Exercise actual bundled Node, kernel, Knowledge and extension broker
         run: node packages/tauri/scripts/smoke-runtime.mjs artifacts/tauri-runtime
       - name: Exercise actual chat, project, settings and credential owners
+        if: matrix.platform != 'darwin'
         env:
           VARIN_INSTALLED_DATA_RUNTIME: artifacts/tauri-runtime
         run: node --test packages/tauri/scripts/installed-data-fixture.test.mjs
+      - name: Record unavailable macOS application-data process proof
+        if: always() && matrix.platform == 'darwin'
+        run: |
+          mkdir -p artifacts
+          node --input-type=module <<'JS'
+          import fs from 'node:fs/promises';
+          await fs.writeFile('artifacts/tauri-application-data-status.json',JSON.stringify({schema:1,complete:false,status:'not-executed',reason:'Launch-bound full descendant ownership is not available on macOS',checks:['application-data-full-scope-shutdown-reopen'],qualified:false},null,2)+'\n');
+          JS
       - name: Build actual release-mode native shell and preserved installer
         id: candidate
         run: node packages/tauri/scripts/build-candidate.mjs --runtime artifacts/tauri-runtime --output artifacts/tauri-candidate
@@ -308,6 +317,7 @@ jobs:
             artifacts/tauri-native-smoke.json
             artifacts/tauri-appimage-smoke.json
             artifacts/tauri-linux-installation-status.json
+            artifacts/tauri-application-data-status.json
             artifacts/tauri-installer-smoke/*.json
             artifacts/tauri-fixture-preflight/*.json
           if-no-files-found: warn
@@ -323,6 +333,7 @@ jobs:
             artifacts/tauri-native-smoke.json
             artifacts/tauri-appimage-smoke.json
             artifacts/tauri-linux-installation-status.json
+            artifacts/tauri-application-data-status.json
             artifacts/tauri-installer-smoke/*.json
           include-hidden-files: true
           if-no-files-found: warn
