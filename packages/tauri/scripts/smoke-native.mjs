@@ -34,7 +34,7 @@ export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWa
   delete env.NODE_OPTIONS;delete env.NODE_PATH;delete env.ELECTRON_RUN_AS_NODE;
   const child=spawn(executable,['--varin-desktop-smoke'],{cwd:candidate.payload,env,stdio:['ignore','pipe','pipe'],detached:process.platform!=='win32',windowsHide:false});
   for(const stream of [child.stdout,child.stderr])stream.resume(); // Never surface renderer/Host output as test evidence.
-  let timer,timedOut=false;
+  let timer,timedOut=false,verified=false,evidence;
   const activationController=new AbortController();
   const activation=protocolWarm?activateWarmProtocol(data,nonce,{environment:process.env,signal:activationController.signal}).then(ready=>({ready}),error=>({error})):Promise.resolve({});
   try{
@@ -50,14 +50,26 @@ export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWa
     activationController.abort();
     const activationResult=await activation;
     const report=await fs.readFile(path.join(data,'smoke-report.json'),'utf8').then(JSON.parse,error=>({missing:true,reason:error.code??'invalid-json'}));
-    const evidence={schema:1,target:candidate.target,sourceSha:candidate.sourceSha,version:candidate.version,
+    evidence={schema:1,target:candidate.target,sourceSha:candidate.sourceSha,version:candidate.version,
       runtimeManifestSha256:candidate.runtimeManifest.sha256,engineManifestSha256:candidate.engineManifest.sha256,status,timedOut,protocolActivation:protocolWarm?{isolation:'explicit-disposable-os-user',status:activationResult.error?'failed':'triggered',reason:activationResult.error?.message,ready:activationResult.ready}:null,report};
-    if(output){await fs.mkdir(path.dirname(path.resolve(output)),{recursive:true});await fs.writeFile(output,JSON.stringify(evidence,null,2)+'\n');}
     if(timedOut||status.code!==0)throw new Error(`Native desktop smoke failed (${timedOut?'timeout':status.signal??status.code}); inspect its native receipt`);
     if(activationResult.error)throw activationResult.error;
     validateNativeSmoke(report,{nonce,requiredCases:['application-bridge','browser-same-page','browser-authority-isolation','browser-context-isolation','browser-capture','browser-pending-close','browser-download-terminal','osr-alpha-composition','network-stream-cancel','renderer-sandbox','native-drain',...(protocolWarm?['protocol-warm-activation']:[])]});
+    verified=true;
+    evidence.cleanupUncertain=false;
+    if(output){await fs.mkdir(path.dirname(path.resolve(output)),{recursive:true});await fs.writeFile(output,JSON.stringify(evidence,null,2)+'\n');}
     return evidence;
-  }finally{activationController.abort();clearTimeout(timer);await fs.rm(root,{recursive:true,force:true});}
+  }catch(error){
+    // A shell exit or a timeout kill is not proof that its detached native,
+    // Host or migration owners relinquished these files. Keep the private root
+    // on every unverified path, including spawn errors and malformed receipts.
+    evidence??={schema:1,target:candidate.target,sourceSha:candidate.sourceSha,version:candidate.version,
+      status:{spawnFailed:true,code:error.code??'UNKNOWN'},timedOut};
+    evidence.cleanupUncertain=!verified;
+    if(!verified)evidence.retainedPrivateDirectory=root;
+    if(output){await fs.mkdir(path.dirname(path.resolve(output)),{recursive:true});await fs.writeFile(output,JSON.stringify(evidence,null,2)+'\n');}
+    throw error;
+  }finally{activationController.abort();clearTimeout(timer);if(verified)await fs.rm(root,{recursive:true,force:true});}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const args=process.argv.slice(2),get=name=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};

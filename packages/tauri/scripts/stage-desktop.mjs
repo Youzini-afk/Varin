@@ -76,7 +76,9 @@ export async function stageDesktopRuntime({ platform = process.platform, archite
     await prepareCompanionCatalog({ output: path.join(candidate, 'frontend/companion-catalog.json') });
     await fs.mkdir(path.join(candidate, 'legal'));
     for (const [source, name] of [['LICENSE', 'LICENSE'], ['THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.md'],
-      ['kernel/THIRD_PARTY_NOTICES.md', 'kernel-third-party-notices.md']]) await fs.copyFile(path.join(repository, source), path.join(candidate, 'legal', name));
+      ['kernel/THIRD_PARTY_NOTICES.md', 'kernel-third-party-notices.md'],
+      ['packages/tauri/src-tauri/vendor/tauri-runtime-cef/LICENSE-MIT', 'tauri-runtime-cef-LICENSE-MIT'],
+      ['packages/tauri/src-tauri/vendor/tauri-runtime-cef/VARIN-PATCH.md', 'tauri-runtime-cef-source.md']]) await fs.copyFile(path.join(repository, source), path.join(candidate, 'legal', name));
     const sourceSha = (await import('node:child_process')).execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim();
     const sourceDirty = Boolean((await import('node:child_process')).execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: repository, encoding: 'utf8' }).trim());
     const legacyElectron = legacyElectronDirectory ? await (await import('./legacy-runtime.mjs')).stageLegacyElectron({

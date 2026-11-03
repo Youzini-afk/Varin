@@ -76,6 +76,8 @@ runtime/
   legal/LICENSE
   legal/THIRD_PARTY_NOTICES.md
   legal/kernel-third-party-notices.md
+  legal/tauri-runtime-cef-LICENSE-MIT
+  legal/tauri-runtime-cef-source.md
 ```
 
 The ordinary Node dependency tree reuses the existing staging implementation, without
@@ -121,6 +123,11 @@ node packages/tauri/scripts/stage-desktop.mjs --output artifacts/tauri-runtime -
 node packages/tauri/scripts/build-candidate.mjs --runtime artifacts/tauri-runtime --output artifacts/tauri-candidate
 node packages/tauri/scripts/smoke-native.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-native-smoke.json
 ```
+
+Failed native smoke retains its private data/profile directory when actual drain cannot be
+verified, and writes `cleanupUncertain` plus `retainedPrivateDirectory` in its evidence.
+A shell exit or a timeout kill never licenses deletion of an unresolved owner's files.
+Only verified native completion permits automatic cleanup; private profiles are not uploaded.
 
 Unsigned native CI builds are test candidates only. `--allow-dirty` permits local diagnostic
 builds but their dirty-source receipts cannot qualify. `--no-installers` deliberately omits

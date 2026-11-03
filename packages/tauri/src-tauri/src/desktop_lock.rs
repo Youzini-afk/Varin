@@ -19,9 +19,13 @@ pub struct Record {
 pub struct Lease {
     root: PathBuf,
     record: Record,
+    boot: Option<BootIdentity>,
 }
 impl Lease {
     pub fn acquire(data: &Path) -> Result<Self, String> {
+        Self::acquire_with_identity(data, current_boot_identity())
+    }
+    fn acquire_with_identity(data: &Path, boot: Option<BootIdentity>) -> Result<Self, String> {
         fs::create_dir_all(data).map_err(|_| "Desktop data directory is unavailable")?;
         let data = data
             .canonicalize()
@@ -31,10 +35,16 @@ impl Lease {
             match fs::symlink_metadata(&root) {
                 Ok(_) => {
                     let record = read_record(&root)?;
-                    if process_alive(record.pid)? {
+                    let prior_boot =
+                        boot_relation(&root, &record, boot.as_ref())? == BootRelation::Previous;
+                    if !prior_boot && process_alive(record.pid)? {
                         return Err("Another Varin desktop is using this data directory. Close it before switching desktop engines.".into());
                     }
-                    scopes_ended(&root, &record)?;
+                    if !prior_boot {
+                        scopes_ended(&root, &record)?;
+                    }
+                    // A different boot on this same host proves executor death,
+                    // not successful drain. Retire unchanged receipts for review.
                     let tombstone = data.join(format!(".desktop-session-retired-{}", record.token));
                     // Keep the nonempty tombstone. Deleting it could let a racing
                     // reclaimer move a newly published owner's live directory.
@@ -69,6 +79,9 @@ impl Lease {
                 .map_err(|_| "Desktop lease record could not be written")?;
                 file.sync_all()
                     .map_err(|_| "Desktop lease record could not be committed")?;
+                if let Some(identity) = &boot {
+                    write_boot_proof(&candidate, &record, identity)?;
+                }
                 Ok(())
             })();
             if let Err(error) = prepared {
@@ -76,7 +89,7 @@ impl Lease {
                 return Err(error);
             }
             match fs::rename(&candidate, &root) {
-                Ok(()) => return Ok(Self { root, record }),
+                Ok(()) => return Ok(Self { root, record, boot }),
                 Err(_) => {
                     let _ = fs::remove_dir_all(&candidate);
                 }
@@ -89,7 +102,10 @@ impl Lease {
     }
     pub fn verify(&self) -> Result<(), String> {
         let record = read_record(&self.root)?;
-        if record.token != self.record.token || record.pid != self.record.pid {
+        if record.token != self.record.token
+            || record.pid != self.record.pid
+            || boot_relation(&self.root, &record, self.boot.as_ref())? == BootRelation::Previous
+        {
             return Err("Desktop data ownership changed".into());
         }
         Ok(())
@@ -135,6 +151,159 @@ fn read_record(root: &Path) -> Result<Record, String> {
         return Err("Desktop lease owner record is invalid".into());
     }
     Ok(record)
+}
+// Keep owner.json and scope schema 1 compatible with the transition exporter.
+// This sidecar is committed inside the candidate directory before publication.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BootIdentity {
+    host_uuid: String,
+    boot_uuid: String,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BootProof {
+    schema: u32,
+    source: String,
+    owner_token: String,
+    owner_pid: u32,
+    identity: BootIdentity,
+}
+#[derive(PartialEq, Eq, Debug)]
+enum BootRelation {
+    Unrecorded,
+    Current,
+    Previous,
+}
+fn canonical_uuid(value: &str) -> bool {
+    uuid::Uuid::parse_str(value)
+        .is_ok_and(|id| !id.is_nil() && id.hyphenated().to_string() == value)
+}
+fn boot_relation(
+    root: &Path,
+    owner: &Record,
+    current: Option<&BootIdentity>,
+) -> Result<BootRelation, String> {
+    let path = root.join("boot-session.json");
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(BootRelation::Unrecorded);
+        }
+        Err(_) => return Err("Desktop boot identity cannot be inspected".into()),
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 4096 {
+        return Err("Desktop boot identity is invalid".into());
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .map_err(|_| "Desktop boot identity cannot be read")?
+        .take(4097)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Desktop boot identity cannot be read")?;
+    if bytes.len() > 4096 {
+        return Err("Desktop boot identity is invalid".into());
+    }
+    let proof: BootProof =
+        serde_json::from_slice(&bytes).map_err(|_| "Desktop boot identity is invalid")?;
+    if proof.schema != 1
+        || proof.source != "darwin-platform-boot-v1"
+        || proof.owner_token != owner.token
+        || proof.owner_pid != owner.pid
+        || !canonical_uuid(&proof.identity.host_uuid)
+        || !canonical_uuid(&proof.identity.boot_uuid)
+    {
+        return Err("Desktop boot identity does not match its original owner".into());
+    }
+    let current = current.ok_or(
+        "Current desktop host/boot identity is unavailable; original ownership is retained",
+    )?;
+    if !canonical_uuid(&current.host_uuid)
+        || !canonical_uuid(&current.boot_uuid)
+        || current.host_uuid != proof.identity.host_uuid
+    {
+        // In particular, never apply local PID liveness to an owner of a shared
+        // data root on another host, even if its boot UUID is different.
+        return Err(
+            "Desktop data belongs to another or unconfirmed host; original ownership is retained"
+                .into(),
+        );
+    }
+    Ok(if current.boot_uuid == proof.identity.boot_uuid {
+        BootRelation::Current
+    } else {
+        BootRelation::Previous
+    })
+}
+fn require_current_boot(root: &Path, owner: &Record) -> Result<(), String> {
+    if boot_relation(root, owner, current_boot_identity().as_ref())? == BootRelation::Previous {
+        return Err("Desktop ownership belongs to a previous operating-system boot".into());
+    }
+    Ok(())
+}
+fn write_boot_proof(root: &Path, owner: &Record, identity: &BootIdentity) -> Result<(), String> {
+    let proof = BootProof {
+        schema: 1,
+        source: "darwin-platform-boot-v1".into(),
+        owner_token: owner.token.clone(),
+        owner_pid: owner.pid,
+        identity: identity.clone(),
+    };
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(root.join("boot-session.json"))
+        .map_err(|_| "Desktop boot identity could not be prepared")?;
+    file.write_all(&serde_json::to_vec(&proof).map_err(|_| "Desktop boot identity is invalid")?)
+        .and_then(|_| file.sync_all())
+        .map_err(|_| "Desktop boot identity could not be committed".into())
+}
+#[cfg(not(target_os = "macos"))]
+fn current_boot_identity() -> Option<BootIdentity> {
+    None
+}
+#[cfg(target_os = "macos")]
+fn current_boot_identity() -> Option<BootIdentity> {
+    // XNU gethostuuid reads IOPlatformUUID, the same property used by the Node
+    // owner. Neither value is supplied by an environment variable or wall clock.
+    let mut host = [0u8; 16];
+    let timeout = libc::timespec {
+        tv_sec: 1,
+        tv_nsec: 0,
+    };
+    if unsafe { libc::gethostuuid(host.as_mut_ptr(), &timeout) } != 0 {
+        return None;
+    }
+    let host_uuid = uuid::Uuid::from_bytes(host).hyphenated().to_string();
+    let mut boot = [0u8; 37];
+    let mut size = boot.len();
+    if unsafe {
+        libc::sysctlbyname(
+            c"kern.bootsessionuuid".as_ptr(),
+            boot.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    } != 0
+        || size != boot.len()
+        || boot[36] != 0
+    {
+        return None;
+    }
+    let boot_uuid = std::str::from_utf8(&boot[..36]).ok()?.to_ascii_lowercase();
+    if !canonical_uuid(&host_uuid) || !canonical_uuid(&boot_uuid) {
+        return None;
+    }
+    Some(BootIdentity {
+        host_uuid,
+        boot_uuid,
+    })
 }
 #[cfg(unix)]
 fn process_alive(pid: u32) -> Result<bool, String> {
@@ -204,6 +373,7 @@ impl ScopeLease {
             .map_err(|_| "Desktop data directory is unavailable")?
             .join(".desktop-session.lock");
         let owner = read_record(&root)?;
+        require_current_boot(&root, &owner)?;
         if owner.pid != std::process::id() || owner.shell != "tauri" {
             return Err("Managed service does not own the original desktop lease".into());
         }
@@ -256,6 +426,7 @@ impl ScopeLease {
         }
         let root = scopes.parent().ok_or("Managed scope path is invalid")?;
         let owner = read_record(root)?;
+        require_current_boot(root, &owner)?;
         let record = read_scope(path, &owner)?;
         if record.token != token
             || path.file_name().and_then(|s| s.to_str()) != Some(format!("{token}.json").as_str())
@@ -294,6 +465,7 @@ impl ScopeLease {
             .and_then(Path::parent)
             .ok_or("Managed scope path is invalid")?;
         let owner = read_record(root)?;
+        require_current_boot(root, &owner)?;
         let record = read_scope(&self.path, &owner)?;
         if owner.token != self.lease_token || record.token != self.token {
             return Err("Managed scope identity changed".into());
@@ -391,6 +563,199 @@ fn scopes_ended(root: &Path, owner: &Record) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn identity() -> BootIdentity {
+        BootIdentity {
+            host_uuid: uuid::Uuid::new_v4().to_string(),
+            boot_uuid: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+    #[test]
+    fn proven_reboot_retires_unconfirmed_scope_despite_reused_live_pid() {
+        let data = tempfile::tempdir().unwrap();
+        let old = Lease::acquire_with_identity(data.path(), None).unwrap();
+        let scope = ScopeLease::prepare(data.path()).unwrap();
+        scope
+            .mark_active(std::process::id(), std::process::id())
+            .unwrap();
+        let before = identity();
+        write_boot_proof(&old.root, &old.record, &before).unwrap();
+        let current = BootIdentity {
+            boot_uuid: uuid::Uuid::new_v4().to_string(),
+            ..before
+        };
+        let next = Lease::acquire_with_identity(data.path(), Some(current)).unwrap();
+        assert_ne!(next.record.token, old.record.token);
+        next.verify().unwrap();
+        let retired = data
+            .path()
+            .join(format!(".desktop-session-retired-{}", old.record.token));
+        let original = read_scope(
+            &retired.join("scopes").join(scope.path.file_name().unwrap()),
+            &old.record,
+        )
+        .unwrap();
+        assert_eq!(
+            original.phase, "active",
+            "reboot cannot fabricate a successful drain"
+        );
+        drop(old);
+        next.verify().unwrap();
+    }
+    #[test]
+    fn only_same_host_and_a_different_known_boot_grant_recovery() {
+        let data = tempfile::tempdir().unwrap();
+        let before = identity();
+        let old = Lease::acquire_with_identity(data.path(), Some(before.clone())).unwrap();
+        assert!(Lease::acquire_with_identity(data.path(), Some(before.clone())).is_err());
+        assert!(
+            Lease::acquire_with_identity(data.path(), None)
+                .err()
+                .unwrap()
+                .contains("unavailable")
+        );
+        assert!(
+            Lease::acquire_with_identity(data.path(), Some(identity()))
+                .err()
+                .unwrap()
+                .contains("another")
+        );
+        old.verify().unwrap();
+        fs::remove_file(old.root.join("boot-session.json")).unwrap();
+        assert!(
+            Lease::acquire_with_identity(data.path(), Some(identity())).is_err(),
+            "old missing proof grants no reboot inference"
+        );
+    }
+    #[test]
+    fn missing_or_same_boot_proof_cannot_retire_a_dead_owners_active_scope() {
+        let data = tempfile::tempdir().unwrap();
+        let old = Lease::acquire_with_identity(data.path(), None).unwrap();
+        let scope = ScopeLease::prepare(data.path()).unwrap();
+        let mut child = std::process::Command::new("node")
+            .args(["-e", "process.exit(0)"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!process_alive(pid).unwrap());
+        let mut owner = old.record.clone();
+        owner.pid = pid;
+        let mut pending: serde_json::Value =
+            serde_json::from_slice(&fs::read(scope.path()).unwrap()).unwrap();
+        pending["shellPid"] = serde_json::json!(pid);
+        fs::write(
+            old.root.join("owner.json"),
+            serde_json::to_vec(&owner).unwrap(),
+        )
+        .unwrap();
+        fs::write(scope.path(), serde_json::to_vec(&pending).unwrap()).unwrap();
+        let boot = identity();
+        assert!(
+            Lease::acquire_with_identity(data.path(), Some(boot.clone()))
+                .err()
+                .unwrap()
+                .contains("not confirmed termination")
+        );
+        write_boot_proof(&old.root, &owner, &boot).unwrap();
+        assert!(
+            Lease::acquire_with_identity(data.path(), Some(boot))
+                .err()
+                .unwrap()
+                .contains("not confirmed termination")
+        );
+        assert!(
+            Lease::acquire_with_identity(data.path(), Some(identity()))
+                .err()
+                .unwrap()
+                .contains("another")
+        );
+        assert!(old.root.exists());
+    }
+    #[test]
+    fn malformed_or_foreign_boot_sidecars_never_relax_the_original_lease() {
+        let data = tempfile::tempdir().unwrap();
+        let before = identity();
+        let old = Lease::acquire_with_identity(data.path(), Some(before.clone())).unwrap();
+        let path = old.root.join("boot-session.json");
+        let original: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        for (key, value) in [
+            ("schema", serde_json::json!(2)),
+            (
+                "ownerToken",
+                serde_json::json!(uuid::Uuid::new_v4().to_string()),
+            ),
+            ("ownerPid", serde_json::json!(0)),
+            ("source", serde_json::json!("clock")),
+            ("extra", serde_json::json!(true)),
+            (
+                "identity",
+                serde_json::json!({"hostUuid":before.host_uuid,"bootUuid":"00000000-0000-0000-0000-000000000000"}),
+            ),
+        ] {
+            let mut changed = original.clone();
+            changed[key] = value;
+            fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
+            assert!(Lease::acquire_with_identity(data.path(), Some(before.clone())).is_err());
+        }
+        fs::write(&path, b"{").unwrap();
+        assert!(Lease::acquire_with_identity(data.path(), Some(before)).is_err());
+        assert!(old.root.exists());
+    }
+    #[test]
+    fn concurrent_reboot_reclaimers_cannot_retire_the_new_live_owner() {
+        let data = tempfile::tempdir().unwrap();
+        let before = identity();
+        let old = Lease::acquire_with_identity(data.path(), Some(before.clone())).unwrap();
+        let current = BootIdentity {
+            boot_uuid: uuid::Uuid::new_v4().to_string(),
+            ..before
+        };
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let path = data.path().to_owned();
+                let identity = current.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    Lease::acquire_with_identity(&path, Some(identity))
+                })
+            })
+            .collect();
+        let winners: Vec<_> = workers
+            .into_iter()
+            .filter_map(|worker| worker.join().unwrap().ok())
+            .collect();
+        assert_eq!(winners.len(), 1);
+        drop(old);
+        winners[0].verify().unwrap();
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_boot_identity_is_stable_and_matches_the_node_owner() {
+        let first = current_boot_identity()
+            .expect("macOS qualification requires readable host and boot UUIDs");
+        assert_eq!(current_boot_identity().unwrap(), first);
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/application-host/lib/platform/desktop-boot-identity.ts");
+        let script = format!(
+            "import {{currentDesktopBootIdentity}} from {};process.stdout.write(JSON.stringify(currentDesktopBootIdentity()));",
+            serde_json::to_string(
+                url::Url::from_file_path(source.canonicalize().unwrap())
+                    .unwrap()
+                    .as_str()
+            )
+            .unwrap()
+        );
+        let output = std::process::Command::new("node")
+            .args(["--import", "tsx", "--input-type=module", "-e", &script])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let node: BootIdentity = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(node, first);
+    }
     #[test]
     fn lease_is_exclusive_and_released_by_only_its_owner() {
         let root = tempfile::tempdir().unwrap();

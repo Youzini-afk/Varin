@@ -5,6 +5,23 @@ upstream portions and do not make Varin as a whole available under the MIT Licen
 fonts, icons, and other separately distributed components remain under the licenses shipped with
 their respective packages or source files.
 
+## Native Tauri and Chromium Embedded Framework desktop
+
+The native desktop uses Tauri 3.0.0-alpha.5 and a modified
+`tauri-runtime-cef` 3.0.0-alpha.6. Copyright (c) 2017 - Present Tauri Apps
+Contributors. The original MIT license and the exact source/patch description
+are preserved in `packages/tauri/src-tauri/vendor/tauri-runtime-cef` and shipped
+with the native runtime as `legal/tauri-runtime-cef-LICENSE-MIT` and
+`legal/tauri-runtime-cef-source.md`.
+
+Chromium Embedded Framework 154.0.34 and its Chromium 154.0.8037.98 runtime
+remain separately licensed components. The original CEF license is pinned in
+`packages/tauri/licenses/CEF-LICENSE.txt`; its full text and the matching SDK's
+`CREDITS.html` are included with every native platform payload. The macOS bundle
+uses `Contents/Resources/CEF-LICENSE.txt` and `CEF-CREDITS.html`; Windows and
+Linux use `LICENSE.txt` and `CREDITS.html` beside the engine. These notices do
+not replace the licenses of other dependencies in the locked native graph.
+
 ## Native workspace filesystem bindings
 
 The optional `workspace-mount` source feature uses `winfsp` 0.13.2+winfsp-2.1 and

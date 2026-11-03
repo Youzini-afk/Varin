@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { currentDesktopBootIdentity, desktopBootRelation, writeDesktopBootProof } from './desktop-boot-identity.js';
 export interface DesktopSessionRecord { schema: 1; pid: number; token: string; shell: 'electron'|'tauri'|'migration' }
 const ownerDirectory = (dataDirectory:string) => path.join(dataDirectory,'.desktop-session.lock');
 const code = (error:unknown) => (error as NodeJS.ErrnoException)?.code;
@@ -40,6 +41,7 @@ const alive=(pid:number)=>{
 export function verifyInheritedDesktopSessionLease(dataDirectory:string,record:DesktopSessionRecord):void {
   const directory=ownerDirectory(fs.realpathSync(dataDirectory)),current=read(directory);
   const rejected=()=>new Error('Migration does not inherit the original desktop data lease');
+  if(desktopBootRelation(directory,current,currentDesktopBootIdentity())==='previous')throw rejected();
   if(record.schema!==1||record.pid!==current.pid||record.token!==current.token||record.shell!==current.shell||current.shell!=='tauri'||!alive(current.pid))throw rejected();
   if(record.pid===process.ppid)return;
   // The guardian publishes this exact active chain before exposing the private
@@ -58,20 +60,22 @@ export function verifyInheritedDesktopSessionLease(dataDirectory:string,record:D
 }
 export function acquireDesktopSessionLease(dataDirectory:string,shell:'electron'|'migration'='electron'){
   fs.mkdirSync(dataDirectory,{recursive:true,mode:0o700});const data=fs.realpathSync(dataDirectory),directory=ownerDirectory(data);
+  const boot=currentDesktopBootIdentity();
   for(let attempt=0;attempt<4;attempt++){
     let exists=false;
     try{fs.lstatSync(directory);exists=true;}catch(error){if(code(error)!=='ENOENT')throw error;}
     if(exists){
       const record=read(directory);
-      if(alive(record.pid))throw new Error('Another Varin desktop is using this data directory. Close it before switching desktop engines.');
-      scopesEnded(directory,record);
+      const previousBoot=desktopBootRelation(directory,record,boot)==='previous';
+      if(!previousBoot&&alive(record.pid))throw new Error('Another Varin desktop is using this data directory. Close it before switching desktop engines.');
+      if(!previousBoot)scopesEnded(directory,record);
       try{fs.renameSync(directory,path.join(data,`.desktop-session-retired-${record.token}`));}
       catch(error){if(!['ENOENT','EEXIST','ENOTEMPTY','EPERM'].includes(code(error)??''))throw error;}
       continue;
     }
     const record:DesktopSessionRecord={schema:1,pid:process.pid,token:randomUUID(),shell};const candidate=path.join(data,`.desktop-session-pending-${record.token}`);
     fs.mkdirSync(candidate,{mode:0o700});let descriptor:number|undefined;
-    try{descriptor=fs.openSync(path.join(candidate,'owner.json'),'wx',0o600);fs.writeFileSync(descriptor,JSON.stringify(record));fs.fsyncSync(descriptor);}
+    try{descriptor=fs.openSync(path.join(candidate,'owner.json'),'wx',0o600);fs.writeFileSync(descriptor,JSON.stringify(record));fs.fsyncSync(descriptor);writeDesktopBootProof(candidate,record,boot);}
     catch(error){fs.rmSync(candidate,{recursive:true,force:true});throw error;}
     finally{if(descriptor!==undefined)fs.closeSync(descriptor);}
     try{fs.renameSync(candidate,directory);}
@@ -79,7 +83,7 @@ export function acquireDesktopSessionLease(dataDirectory:string,shell:'electron'
     let released=false;
     return {record,release(){
       if(released)return;
-      try{const current=read(directory);if(current.pid!==record.pid||current.token!==record.token)return;
+      try{const current=read(directory);if(current.pid!==record.pid||current.token!==record.token||desktopBootRelation(directory,current,boot)==='previous')return;
         scopesEnded(directory,current);
         const retired=path.join(data,`.desktop-session-released-${record.token}`);fs.renameSync(directory,retired);released=true;fs.rmSync(retired,{recursive:true,force:true});
       }catch{/* Never delete a lease whose ownership cannot be proved. */}

@@ -14,6 +14,16 @@ The shared `web/application-host/lib/platform/desktop-deep-links.ts` owns the or
 
 `packages/electron/bootstrap.mjs --varin-export-frontend-state` selects a standalone old-engine exporter before `main.ts`. It takes the existing Electron instance lock, opens an inert page at the original `varin-ui://app` origin and reads localStorage through main-process DOMStorage CDP. It starts no Application Host or Catalog and does not execute renderer export code. It obtains the same cross-language desktop data-root lease used by normal startup, or verifies the inherited native parent lease before reading any old profile.
 
+Managed Host/exporter processes enter the Windows Job or Unix guardian before their
+private input becomes available. Linux's guardian is a subreaper and waits for adopted
+descendants, including detached sessions. macOS cannot prove arbitrary escaped descendants
+are gone after an abnormal termination, so those scope receipts remain unresolved rather
+than permitting another writer. A lease published on macOS also binds the original owner
+to the OS host UUID and boot-session UUID. Only a verified different boot on the same host
+permits retirement of an unresolved old lease, before checking reusable PIDs. Foreign-host,
+unreadable, malformed or absent proofs grant no reboot recovery. Retirement preserves the
+old scope records and does not turn unknown business effects into successful completion.
+
 `application-client/src/desktop-frontend-migration.ts` enumerates persisted product stores and their allowed fields. It covers UI/voice preferences, projects, explorer/editor snapshots, durable document owner identity, session presentation and review drafts. Disposable caches, PWA-only choices, transient surface identity, connection grants and unknown fields are excluded. There is no production IndexedDB owner in these UI modules, so the receipt records `no-product-owner`, not a fabricated database copy.
 
 The original settings transaction stores the staged payload, canonical SHA-256, stable export identity and source version. Restaging preserves a pending generation so a partial target import cannot mix generations. Main-window bootstrap verifies the payload again, imports only absent destination keys and verifies writes before acknowledging every imported or retained key. Quota/write/validation failure leaves staging available for retry. The settings owner drops the temporary payload only after a complete matching receipt; old-origin storage is never deleted.

@@ -27,6 +27,7 @@ export const requiredHostAssets = [
   `${hostPackage}/server/lib/structure/runtime/web-tree-sitter.wasm`,
 ];
 export const legalPaths = ['legal/LICENSE', 'legal/THIRD_PARTY_NOTICES.md', 'legal/kernel-third-party-notices.md', 'node/LICENSE',
+  'legal/tauri-runtime-cef-LICENSE-MIT', 'legal/tauri-runtime-cef-source.md',
   'tools/ripgrep-LICENSE', 'tools/ripgrep-MIT-LICENSE.txt', 'tools/pcre2-LICENSE.txt'];
 const hashPattern = /^[a-f0-9]{64}$/u;
 export const kernelProtocolVersion = JSON.parse(await fs.readFile(new URL('../../../kernel/protocol/schema.json', import.meta.url), 'utf8')).protocolVersion;
