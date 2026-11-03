@@ -99,7 +99,7 @@ function complete(response: ServerResponse, output: unknown[]) {
 }
 function tool(name: string, args: unknown, id: string) {
   // dispatch is directly declared; the provider decoder resolves its frozen request schema.
-  const versions: Record<string, string> = { wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
+  const versions: Record<string, string> = { wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '5', memory: '1' };
   const exchange = CODE_EXCHANGE_TOOL_DECLARATIONS.find(d => d.tool?.name === name);
   if (exchange) versions[name] = extensionToolSchema(exchange).version;
   if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }
@@ -575,7 +575,7 @@ it('two real send observations retain their original requests across Host restar
       const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output' && ['reply-send-one', 'reply-send-two'].includes(String(item.call_id)));
       expect(outputs).toHaveLength(2);
       for (const output of outputs) expect(JSON.parse(responsesMetadataText(output.output))).toMatchObject({
-        content: { reference: { name: 'send', version: '4' }, completion: { kind: 'job_accepted', effect: 'confirmed' } },
+        content: { reference: { name: 'send', version: '5' }, completion: { kind: 'job_accepted', effect: 'confirmed' } },
       });
       expect(JSON.stringify(body.input)).toContain('FIRST_LINKED_REPLY_BODY');
       expect(JSON.stringify(body.input)).toContain('SECOND_LINKED_REPLY_BODY');

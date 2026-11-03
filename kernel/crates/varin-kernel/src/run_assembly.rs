@@ -325,7 +325,7 @@ impl RunAssembly {
                     })
                 })
                 .transpose()?;
-            if source.is_none() && !kinds.is_empty() {
+            if source.is_none() && kinds.iter().any(|kind| *kind!=crate::tools::ToolKind::FileRead) {
                 return Err(KernelError::Protocol(
                     "selected tools require a source owner".into(),
                 ));

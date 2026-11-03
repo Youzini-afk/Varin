@@ -52,7 +52,11 @@ export function sourceToolSchemas(selection: LaunchIntent['selection']) {
     ...(selection.mcp_binding?.tools.map(tool => tool.name) ?? []),
     ...selection.extension_bindings.map(binding => binding.tool.name),
   ]);
-  return selection.tools.filter(tool => !external.has(tool.name) && tool.requirements !== undefined);
+  // file_read has a source-free attachment endpoint and an optional path endpoint.
+  // When this launch retained an actual Source, bind the latter to that same owner;
+  // a missing required-source flag must not discard its admitted path capability.
+  return selection.tools.filter(tool => !external.has(tool.name)
+    && (tool.requirements !== undefined || (tool.name === 'file_read' && selection.source != null)));
 }
 
 /** Uses the existing Storage authority for source reads, materialization and process containment.

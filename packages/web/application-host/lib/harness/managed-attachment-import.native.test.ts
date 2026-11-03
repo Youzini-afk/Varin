@@ -129,11 +129,11 @@ it('streams fixed bytes through authenticated Source routes into an independentl
   await f.actor.processSpawn({ workspaceId: 'project', rootId: String(f.root.rootId), processId, cwd: '', command: process.execPath,
     args: ['-e', `const fs = require('fs'); if (fs.readFileSync(process.argv[1])[0] !== 0x81) process.exit(2); console.log('attachment-readable'); setInterval(() => {}, 1000);`, result.path], env: [], mode: 'pipe' });
   try {
-    await expect.poll(async () => (await f.actor.processRead({ workspaceId: 'project', processId, cursor: 0 })).chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64').toString()).join('')).toContain('attachment-readable');
+    await expect.poll(async () => (await f.actor.processRead({ workspaceId: 'project', rootId: String(f.root.rootId), processId, cursor: 0 })).chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64').toString()).join('')).toContain('attachment-readable');
     await expect(f.client.release({ ...f.request, mode: 'retire' })).rejects.toThrow(/retained|executing|active/i);
     expect(await fs.readFile(result.path)).toEqual(bytes);
-  } finally { await f.actor.processKill({ workspaceId: 'project', processId }); }
-  await expect.poll(async () => (await f.actor.processInspect({ workspaceId: 'project', processId })).writerActive).toBe(false);
+  } finally { await f.actor.processKill({ workspaceId: 'project', rootId: String(f.root.rootId), processId }); }
+  await expect.poll(async () => (await f.actor.processInspect({ workspaceId: 'project', rootId: String(f.root.rootId), processId })).writerActive).toBe(false);
   await f.client.release({ ...f.request, mode: 'retire' });
   await expect(fs.stat(result.path)).rejects.toMatchObject({ code: 'ENOENT' });
   expect((await f.actor.listRecords({ workspaceId: 'project', recordType: 'attachment.import' })).records).toEqual([]);

@@ -879,3 +879,51 @@ fn multiple_listing_scopes_share_pages_and_resume_without_duplicates_on_disk_and
         assert_eq!(seen,expected,"source fixed={fixed}");
     }
 }
+
+#[test]
+fn hybrid_file_read_delegates_paths_to_the_original_live_and_fixed_owner() {
+    for fixed in [false,true] {
+        let mut f=Fixture::new();
+        let body=b"original source bytes, not an attachment";
+        fs::write(f.root.join("work/source.txt"),body).unwrap();
+        if fixed {
+            let mut storage=f._storage.lock().unwrap();
+            let mut invoke=|method:&str,value:Value| {
+                let (grant,value)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,method,&value).unwrap();
+                storage.dispatch(method,&value,Some("actor"),&grant).unwrap()
+            };
+            let upload=json!({"workspaceId":"workspace","operationId":"path-body","streamId":"path-body","byteLength":body.len()});
+            invoke("storage.putBlob.begin",upload.clone());
+            invoke("storage.putBlob.chunk",json!({"streamId":"path-body","sequence":0,"bytesBase64":BASE64.encode(body)}));
+            let blob=invoke("storage.putBlob.finish",upload);
+            invoke("branch.create.begin",json!({"operationId":"path-create","builderId":"path-create","workspaceId":"workspace","branchId":"fixed","draftBasePaths":[],"captureScopes":[]}));
+            invoke("branch.create.append",json!({"builderId":"path-create","sequence":0,"entries":[{"path":"source.txt","state":{"kind":"regular-file","objectHash":blob["hash"],"byteLength":body.len(),"mode":420},"ownerId":blob["ownerId"]}]}));
+            invoke("branch.create.finish",json!({"operationId":"path-create","builderId":"path-create"}));
+            f.executor.binding.source_mode=SourceMode::FixedBranch;
+            f.executor.binding.root_id=None;f.executor.binding.live_root=None;
+            f.executor.binding.file_source=Some(FixedFileSource{branch_id:"fixed".into(),revision:0});
+            fs::write(f.root.join("work/source.txt"),b"later unrelated live bytes").unwrap();
+        }
+        let native=f.executor.clone().declarations(false).into_iter().find(|entry|entry.schema.name=="file_read").unwrap();
+        let (output,frames)=mpsc::sync_channel(4);
+        let bridge=crate::host_query::OwnerChannel::new("resource",output);bridge.initialize(EPOCH);
+        let catalog=Arc::new(Mutex::new(varin_runtime::Catalog::open(f.root.join("catalog")).unwrap()));
+        let wrapped=crate::attachment_reads::declaration(Some(native),catalog,bridge.clone());
+        let directory=Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(vec![wrapped]).unwrap());
+        let call=ToolCall{call_id:"read-original".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.txt"})};
+        let origin=ToolOrigin::ModelStep{request_id:"original-request".into()};
+        let context=execution_context("run",&call,&origin);
+        let frozen=FrozenToolContext{tool_output_visible_bytes:None,execution_environment:None,direct_tools:None,run_id:"run".into(),origin,
+            tools:Arc::new(f.executor.schemas.clone()),tool_schema_generation:1,source:Some(f.executor.binding.source_selection().unwrap()),
+            child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
+        let cancel=CancellationToken::default();let bound=directory.bind_call(&call,&frozen,&cancel).unwrap();
+        let contract=bound.prepare(&cancel).unwrap();bound.authorize(&context,&contract,&cancel).unwrap();
+        let result=bound.execute(&context,&contract,&cancel);
+        let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=result.completion else {panic!("original path read failed: {:?}",result.completion)};
+        assert_eq!(content.data["content"]["text"],std::str::from_utf8(body).unwrap(),"fixed={fixed}");
+        assert!(frames.try_recv().is_err(),"ordinary paths never use the attachment owner");
+        let mut wrong=context.clone();wrong.run_id="other-run".into();
+        assert!(bound.authorize(&wrong,&contract,&cancel).is_err(),"wrapper must preserve source Run authority");
+        bridge.close();
+    }
+}
