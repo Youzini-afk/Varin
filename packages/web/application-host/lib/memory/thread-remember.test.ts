@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { knowledgeStoreKeyForScope } from '../harness/owner-scope.js';
 import { openKnowledgeStoreEngine } from '../knowledge/store-engine.js';
 import { createMemoryService } from './memory-service.js';
 import { createThreadRemember } from './thread-remember.js';
@@ -13,7 +14,7 @@ const identity = { runtime: 'agent' as const, threadId: 'thread:1', branchId: 'b
 async function fixture(bot = true) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'varin-remember-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
-  const store = await openKnowledgeStoreEngine({ dataDir: root, hostId: 'host', workspaceId: 'bot:1', scope: 'bot', embedding: null });
+  const store = await openKnowledgeStoreEngine({ dataDir: root, hostId: 'host', workspaceId: knowledgeStoreKeyForScope('bot:1'), scope: 'bot', embedding: null });
   cleanups.push(() => store.close());
   const memory = createMemoryService({ storeForScopeId: async () => store, userStore: async () => store, ownerForThread: async () => ({ scope: 'bot', ownerId: 'bot:1' }) });
   const runtime = { thread: vi.fn(async () => ({ bot_id: bot ? 'bot:1' : null, branches: [{ branch_id: identity.branchId }], deleted_at_ms: null })) } as unknown as Pick<AgentRuntimeClient, 'thread'>;

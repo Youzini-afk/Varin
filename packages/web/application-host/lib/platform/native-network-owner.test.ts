@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createNativeNetworkOwner } from './native-network-owner.js';
@@ -46,15 +46,18 @@ async function fixture(options: { bytes?: Buffer; status?: number; noBody?: bool
       }
     },
   } });
-  return { owner, calls, complete, emit, responsePath, get uploaded() { return uploaded; }, get cancelled() { return cancelled; }, get released() { return released; },
+  return { owner, calls, complete, emit, requestPath, responsePath, get uploaded() { return uploaded; }, get cancelled() { return cancelled; }, get released() { return released; },
     disconnect() { listener?.('network.native.disconnected', null); }, async closeFixture() { await writer.close().catch(() => {}); } };
 }
 
 it('streams a response larger than the bounded ring with ordered ACKs and exact bytes', async () => {
   const bytes = Buffer.alloc(1048576 * 2 + 1234); for (let index = 0; index < bytes.length; index++) bytes[index] = index % 251;
   const f = await fixture({ bytes });
+  await writeFile(f.requestPath, 'a previous allocation body that must be truncated');
+  const original = await stat(f.requestPath, { bigint: true });
   const response = await f.owner.fetch('https://provider.example/model', { method: 'POST', body: 'original prompt', headers: { authorization: 'Bearer private-fixture' } });
   expect(f.uploaded).toBe('original prompt');
+  expect(await stat(f.requestPath, { bigint: true })).toMatchObject({ dev: original.dev, ino: original.ino });
   expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
   await expect.poll(() => f.released).toBe(true);
   expect((await stat(f.responsePath)).size).toBe(1048576);
@@ -131,4 +134,30 @@ it('keeps provider error status and body rather than rewriting them as a transpo
   const response = await f.owner.fetch('https://provider.example/', {});
   expect(response.status).toBe(429); expect(await response.json()).toEqual({ error: 'rate_limit' });
   await expect.poll(() => f.released).toBe(true); await f.owner.dispose();
+});
+
+
+it.each(['request', 'response'] as const)('rejects a hard-linked %s spool without changing the shared object or dispatching', async kind => {
+  const f = await fixture();
+  const spool = kind === 'request' ? f.requestPath : f.responsePath;
+  const alias = `${spool}-alias`;
+  await link(spool, alias);
+  const original = await readFile(alias);
+  await expect(f.owner.fetch('https://provider.example/', { method: 'POST', body: 'must not be written' })).rejects.toThrow('exclusive regular file');
+  expect(await readFile(alias)).toEqual(original);
+  expect(f.calls.some(call => call.method === 'network.start')).toBe(false);
+  await expect.poll(() => f.released).toBe(true);
+  await f.owner.dispose();
+});
+
+it.each(['missing', 'directory'] as const)('rejects a %s request spool without creating or replacing it', async kind => {
+  const f = await fixture();
+  await rm(f.requestPath);
+  if (kind === 'directory') await mkdir(f.requestPath);
+  await expect(f.owner.fetch('https://provider.example/', { method: 'POST', body: 'must not be written' })).rejects.toThrow();
+  if (kind === 'directory') expect((await stat(f.requestPath)).isDirectory()).toBe(true);
+  else await expect(stat(f.requestPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(f.calls.some(call => call.method === 'network.start')).toBe(false);
+  await expect.poll(() => f.released).toBe(true);
+  await f.owner.dispose();
 });

@@ -224,7 +224,9 @@ export function createDocumentResourceReader(input: {
 export async function createAdmittedDirectoryReader(input: { domainId: string; viewId: string; root: string }): Promise<ResourceReader> {
   const root = await canonicalizePathIdentity(input.root, { allowMissing: true });
   const rootInfo = async () => {
-    try { return await stat(root); }
+    // Windows file IDs can exceed Number.MAX_SAFE_INTEGER. Keep their full
+    // width so distinct admitted directories never compare equal after rounding.
+    try { return await stat(root, { bigint: true }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   };
   const admittedRoot = await rootInfo();
@@ -247,23 +249,23 @@ export async function createAdmittedDirectoryReader(input: { domainId: string; v
       try {
         signal?.throwIfAborted();
         const absolute = await resolveTarget(reader, relative); if (typeof absolute !== 'string') return absolute;
-        const observed = await stat(absolute);
+        const observed = await stat(absolute, { bigint: true });
         signal?.throwIfAborted();
         if (!observed.isFile()) return resourceFailure(reader, relative, 'invalid', 'Resource is not a regular file');
         // A regular path can be replaced with a FIFO between stat and open. POSIX nonblocking open
         // avoids waiting for a writer; fstat still rejects that actual handle before reading bytes.
         const file = await open(absolute, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
         try {
-          const before = await file.stat();
+          const before = await file.stat({ bigint: true });
           signal?.throwIfAborted();
           if (!before.isFile()) return resourceFailure(reader, relative, 'invalid', 'Resource is not a regular file');
           if (before.dev !== observed.dev || before.ino !== observed.ino) return resourceFailure(reader, relative, 'stale', 'Resource changed before capture');
           const bytes = await file.readFile(signal ? { signal } : {});
-          const after = await file.stat();
+          const after = await file.stat({ bigint: true });
           signal?.throwIfAborted();
-          const current = await stat(absolute);
-          if (before.dev !== current.dev || before.ino !== current.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs
-            || before.ctimeMs !== after.ctimeMs || await realpath(absolute) !== absolute) {
+          const current = await stat(absolute, { bigint: true });
+          if (before.dev !== current.dev || before.ino !== current.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs
+            || before.ctimeNs !== after.ctimeNs || await realpath(absolute) !== absolute) {
             return resourceFailure(reader, relative, 'stale', 'Resource changed during capture');
           }
           return decode(reader, relative, bytes, `file:${absolute}`, contentVersion(bytes));

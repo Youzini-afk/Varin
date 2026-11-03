@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open, type FileHandle } from 'node:fs/promises';
+import { lstat, open, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import type { DesktopNativePort } from './desktop-host-session.js';
 
@@ -22,6 +22,30 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const abortError = () => new DOMException('The request was aborted', 'AbortError');
+
+/** The native owner creates these files exclusively inside its private spool
+ * directory. Never recreate them or truncate a pathname before admission. Node
+ * on Windows has no O_NOFOLLOW; compare the opened object with both lstat
+ * observations before using it. All subsequent I/O stays on this handle. */
+async function openSpool(filename: string, writable: boolean): Promise<FileHandle> {
+  const before = await lstat(filename, { bigint: true });
+  if (!before.isFile() || before.nlink !== 1n) throw new Error('Native network spool is not an exclusive regular file');
+  const flags = (writable ? constants.O_WRONLY : constants.O_RDONLY)
+    | (process.platform === 'win32' ? 0 : (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  const file = await open(filename, flags);
+  try {
+    const opened = await file.stat({ bigint: true });
+    const after = await lstat(filename, { bigint: true });
+    if (!opened.isFile() || !after.isFile() || opened.nlink !== 1n || after.nlink !== 1n
+      || before.dev !== opened.dev || before.ino !== opened.ino
+      || after.dev !== opened.dev || after.ino !== opened.ino) throw new Error('Native network spool changed during admission');
+    return file;
+  } catch (error) {
+    await file.close();
+    throw error;
+  }
+}
+
 interface Transfer {
   id: string;
   capacity: number;
@@ -156,10 +180,13 @@ export function createNativeNetworkOwner({ port }: { port: DesktopNativePort }):
       }
       if (prepared.signal.aborted || disposing) { onAbort(); throw prepared.signal.reason ?? abortError(); }
       transfer.spool = (async () => {
-        const output = await open(receipt.requestPath as string, constants.O_WRONLY | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0));
+        const output = await openSpool(receipt.requestPath as string, true);
         try {
-          if (!(await output.stat()).isFile()) throw new Error('Native request spool is not a regular file');
+          prepared.signal.throwIfAborted();
           await output.chmod(0o600);
+          // OPEN_EXISTING + descriptor truncation also avoids Windows' distinct
+          // TRUNCATE_EXISTING access requirements. Keep the native-owned object.
+          await output.truncate(0);
           if (prepared.body) {
             transfer.reader = prepared.body.getReader();
             for (;;) {
@@ -181,8 +208,7 @@ export function createNativeNetworkOwner({ port }: { port: DesktopNativePort }):
       prepared.signal.throwIfAborted();
       if (transfer.failed) throw transfer.failed;
       transfer.io = (async () => {
-        transfer.responseFile = await open(receipt.responsePath as string, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-        if (!(await transfer.responseFile.stat()).isFile()) throw new Error('Native response spool is not a regular file');
+        transfer.responseFile = await openSpool(receipt.responsePath as string, false);
       })();
       await transfer.io;
       if (transfer.failed) throw transfer.failed;
