@@ -46,6 +46,7 @@ struct DesktopState {
     background: Mutex<Option<Value>>,
     mini_create: tokio::sync::Mutex<()>,
     deep_links: tokio::sync::mpsc::Sender<String>,
+    activation_restores: crate::preengine_activation::RestoreIntents,
     boot: watch::Sender<Option<Reply>>,
     windows: Mutex<HashMap<String, WindowRecord>>,
     host: tokio::sync::Mutex<Option<HostProcess>>,
@@ -1650,7 +1651,7 @@ pub fn run() {
         .on_menu_event(|app, event| crate::native_menu::dispatch(app, event.id.as_ref()))
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             queue_deep_links(app, args, "single-instance");
-            let _ = show_last_conversation(app);
+            let _ = request_activation_restore(app);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -1670,6 +1671,7 @@ pub fn run() {
             background: Mutex::new(None),
             mini_create: tokio::sync::Mutex::new(()),
             deep_links,
+            activation_restores: crate::preengine_activation::RestoreIntents::default(),
             boot,
             windows: Mutex::new(HashMap::new()),
             host: tokio::sync::Mutex::new(None),
@@ -1711,6 +1713,9 @@ pub fn run() {
             start_geometry_writer(app.handle());
             create_window(app.handle(), "main", "main", None, None)
                 .map_err(std::io::Error::other)?;
+            app.state::<DesktopState>().activation_restores.ready()
+                .map_err(std::io::Error::other)?;
+            dispatch_activation_restore(app.handle()).map_err(std::io::Error::other)?;
             start_deep_link_owner(app.handle(), deep_link_requests);
             queue_deep_links(app.handle(), std::env::args().collect(), "argv");
             tauri::async_runtime::spawn(initialize(app.handle().clone(), root));
@@ -1735,7 +1740,7 @@ pub fn run() {
     app.run(|app, event| {
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen { .. } = &event {
-            let _ = show_last_conversation(app);
+            let _ = request_activation_restore(app);
         }
         if let tauri::RunEvent::Opened { urls } = &event {
             queue_deep_links(
@@ -2107,6 +2112,24 @@ pub(crate) fn register_application_window(
             },
         );
     Ok(())
+}
+
+fn request_activation_restore(app: &AppHandle) -> Result<(), String> {
+    app.state::<DesktopState>().activation_restores.request()?;
+    dispatch_activation_restore(app)
+}
+fn dispatch_activation_restore(app: &AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    native(app.run_on_main_thread(move || {
+        let state = handle.state::<DesktopState>();
+        if state.activation_restores.take_ready().unwrap_or(false)
+            && show_last_conversation(&handle).is_err()
+        {
+            // Keep the intent if native restoration was unavailable. A later
+            // activation may retry presentation, never its deep-link action.
+            let _ = state.activation_restores.request();
+        }
+    }))
 }
 
 /// Reactivation restores an existing conversation, including a hidden or

@@ -10,7 +10,7 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const PROOF_FILE: &str = "activation-owner.json";
@@ -19,6 +19,37 @@ const IDENTITY_ERROR: &str = "Original desktop activation owner could not be ver
 const ENDPOINT_ERROR: &str = "Original desktop activation endpoint could not be verified";
 const FORWARD_ERROR: &str =
     "Desktop activation was not confirmed; original data ownership is retained";
+
+/// Window restoration is separate from deep-link delivery. Coalesce requests
+/// received before the primary window exists; setup alone owns its creation.
+#[derive(Default)]
+pub(crate) struct RestoreIntents(std::sync::Mutex<(bool, bool)>);
+impl RestoreIntents {
+    pub(crate) fn request(&self) -> Result<(), String> {
+        self.0
+            .lock()
+            .map_err(|_| "Desktop activation queue is unavailable")?
+            .1 = true;
+        Ok(())
+    }
+    pub(crate) fn ready(&self) -> Result<(), String> {
+        self.0
+            .lock()
+            .map_err(|_| "Desktop activation queue is unavailable")?
+            .0 = true;
+        Ok(())
+    }
+    pub(crate) fn take_ready(&self) -> Result<bool, String> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| "Desktop activation queue is unavailable")?;
+        if !state.0 {
+            return Ok(false);
+        }
+        Ok(std::mem::take(&mut state.1))
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "platform", rename_all = "camelCase", deny_unknown_fields)]
@@ -64,8 +95,12 @@ pub(crate) fn publish(data: &Path, lease: &Lease) -> Result<(), String> {
         .canonicalize()
         .map_err(|_| IDENTITY_ERROR)?
         .join(".desktop-session.lock");
-    // Publication is fail-closed until the complete file has been synced. A
-    // concurrent launch may see an incomplete proof, never weaker authority.
+    // Publish only complete, synced bytes. A concurrent launch observes either
+    // absence (owner still preparing) or a valid proof, never a partial write.
+    let candidate = root.join(format!(
+        ".activation-owner-pending-{}",
+        uuid::Uuid::new_v4()
+    ));
     let mut options = fs::OpenOptions::new();
     options.create_new(true).write(true);
     #[cfg(unix)]
@@ -73,14 +108,19 @@ pub(crate) fn publish(data: &Path, lease: &Lease) -> Result<(), String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options
-        .open(root.join(PROOF_FILE))
-        .map_err(|_| IDENTITY_ERROR)?;
-    file.write_all(&serde_json::to_vec(&proof).map_err(|_| IDENTITY_ERROR)?)
-        .and_then(|_| file.sync_all())
-        .map_err(|_| IDENTITY_ERROR)?;
-    lease.verify()?;
-    Ok(())
+    let result = (|| -> Result<(), String> {
+        let mut file = options.open(&candidate).map_err(|_| IDENTITY_ERROR)?;
+        file.write_all(&serde_json::to_vec(&proof).map_err(|_| IDENTITY_ERROR)?)
+            .and_then(|_| file.sync_all())
+            .map_err(|_| IDENTITY_ERROR)?;
+        lease.verify()?;
+        // Creating this link is atomic and refuses an existing proof on every
+        // supported platform. A plain rename could overwrite it on Unix.
+        fs::hard_link(&candidate, root.join(PROOF_FILE)).map_err(|_| IDENTITY_ERROR)?;
+        lease.verify()
+    })();
+    let _ = fs::remove_file(candidate);
+    result
 }
 
 struct Owner {
@@ -90,11 +130,36 @@ struct Owner {
     generation: Generation,
 }
 impl Owner {
-    fn load(data: &Path) -> Result<Self, String> {
+    fn capture(data: &Path) -> Result<Self, String> {
         let data = data.canonicalize().map_err(|_| IDENTITY_ERROR)?;
         let record = verified_live_tauri_owner(&data)?;
-        let path = data.join(".desktop-session.lock").join(PROOF_FILE);
-        let metadata = fs::symlink_metadata(&path).map_err(|_| IDENTITY_ERROR)?;
+        let process = Process::inspect(record.pid)?;
+        let generation = process.generation()?;
+        let owner = Self {
+            data,
+            record,
+            process,
+            generation,
+        };
+        owner.verify()?;
+        Ok(owner)
+    }
+    #[cfg(test)]
+    fn load(data: &Path) -> Result<Self, String> {
+        let owner = Self::capture(data)?;
+        if !owner.proof_ready()? {
+            return Err(IDENTITY_ERROR.into());
+        }
+        Ok(owner)
+    }
+    fn proof_ready(&self) -> Result<bool, String> {
+        self.verify()?;
+        let path = self.data.join(".desktop-session.lock").join(PROOF_FILE);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(_) => return Err(IDENTITY_ERROR.into()),
+        };
         if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 4096 {
             return Err(IDENTITY_ERROR.into());
         }
@@ -105,17 +170,15 @@ impl Owner {
             .read_to_end(&mut bytes)
             .map_err(|_| IDENTITY_ERROR)?;
         let proof: Proof = serde_json::from_slice(&bytes).map_err(|_| IDENTITY_ERROR)?;
-        if proof.schema != 1 || proof.owner_token != record.token || proof.owner_pid != record.pid {
+        if proof.schema != 1
+            || proof.owner_token != self.record.token
+            || proof.owner_pid != self.record.pid
+            || proof.generation != self.generation
+        {
             return Err(IDENTITY_ERROR.into());
         }
-        let owner = Self {
-            process: Process::inspect(record.pid)?,
-            generation: proof.generation,
-            record,
-            data,
-        };
-        owner.verify()?;
-        Ok(owner)
+        self.verify()?;
+        Ok(true)
     }
     fn verify(&self) -> Result<(), String> {
         let record = verified_live_tauri_owner(&self.data)?;
@@ -160,10 +223,40 @@ impl Activation {
 }
 
 pub(crate) fn forward_to_owner(data: &Path, identifier: &str) -> Result<(), String> {
-    let owner = Owner::load(data)?;
+    let owner = Owner::capture(data)?;
     let activation = Activation::current();
     activation.validate()?;
-    forward_platform(&owner, &activation, identifier)
+    wait_for_ready(&owner, || forward_platform(&owner, &activation, identifier))
+}
+
+/// False means no payload was sent because the original owner's endpoint is
+/// not ready. Once any send is attempted, both success and error are terminal:
+/// a timeout or lost reply is an unknown effect and must never be replayed.
+fn wait_for_ready(
+    owner: &Owner,
+    attempt: impl FnMut() -> Result<bool, String>,
+) -> Result<(), String> {
+    wait_for_ready_observed(owner, attempt, |_| {})
+}
+
+fn wait_for_ready_observed(
+    owner: &Owner,
+    mut attempt: impl FnMut() -> Result<bool, String>,
+    mut pending: impl FnMut(bool),
+) -> Result<(), String> {
+    let deadline = Instant::now() + FORWARD_TIMEOUT;
+    loop {
+        owner.verify()?;
+        let proof_ready = owner.proof_ready()?;
+        if proof_ready && attempt()? {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(ENDPOINT_ERROR.into());
+        }
+        pending(proof_ready);
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -215,7 +308,7 @@ fn forward_platform(
     owner: &Owner,
     activation: &Activation,
     identifier: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let address = local_bus_address(zbus::Address::session().map_err(|_| ENDPOINT_ERROR)?)?;
     let connection = zbus::blocking::connection::Builder::address(address)
         .map_err(|_| ENDPOINT_ERROR)?
@@ -239,7 +332,7 @@ fn forward_linux(
     activation: &Activation,
     identifier: &str,
     connection: &zbus::blocking::Connection,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     // zbus 5.19's replacement blocking peer_creds is accidentally async.
     // The still-supported synchronous method obtains kernel socket credentials.
     #[allow(deprecated)]
@@ -250,9 +343,11 @@ fn forward_linux(
     let name = format!("{identifier}.SingleInstance");
     let path = format!("/{}", name.replace('.', "/").replace('-', "_"));
     let bus = zbus::blocking::fdo::DBusProxy::new(connection).map_err(|_| ENDPOINT_ERROR)?;
-    let unique = bus
-        .get_name_owner(name.as_str().try_into().map_err(|_| ENDPOINT_ERROR)?)
-        .map_err(|_| ENDPOINT_ERROR)?;
+    let unique = match bus.get_name_owner(name.as_str().try_into().map_err(|_| ENDPOINT_ERROR)?) {
+        Ok(unique) => unique,
+        Err(zbus::fdo::Error::NameHasNoOwner(_)) => return Ok(false),
+        Err(_) => return Err(ENDPOINT_ERROR.into()),
+    };
     let pid = bus
         .get_connection_unix_process_id(unique.as_ref().into())
         .map_err(|_| ENDPOINT_ERROR)?;
@@ -268,7 +363,7 @@ fn forward_linux(
             &(&activation.args, &activation.cwd),
         )
         .map_err(|_| FORWARD_ERROR)?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(windows)]
@@ -348,7 +443,7 @@ fn forward_platform(
     owner: &Owner,
     activation: &Activation,
     identifier: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     use windows_sys::Win32::{
         System::DataExchange::COPYDATASTRUCT,
         UI::WindowsAndMessaging::{
@@ -363,7 +458,7 @@ fn forward_platform(
     unsafe {
         let window = FindWindowW(class.as_ptr(), title.as_ptr());
         if window.is_null() {
-            return Err(ENDPOINT_ERROR.into());
+            return Ok(false);
         }
         let mut pid = 0;
         if GetWindowThreadProcessId(window, &mut pid) == 0 {
@@ -391,7 +486,7 @@ fn forward_platform(
             return Err(FORWARD_ERROR.into());
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(target_os = "macos")]
@@ -464,10 +559,21 @@ fn forward_platform(
     owner: &Owner,
     activation: &Activation,
     identifier: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     use std::os::{fd::AsRawFd, unix::net::UnixStream};
     let socket = format!("/tmp/{}_si.sock", identifier.replace(['.', '-'], "_"));
-    let mut stream = UnixStream::connect(socket).map_err(|_| ENDPOINT_ERROR)?;
+    let mut stream = match UnixStream::connect(socket) {
+        Ok(stream) => stream,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            return Ok(false);
+        }
+        Err(_) => return Err(ENDPOINT_ERROR.into()),
+    };
     let mut uid = 0;
     let mut gid = 0;
     if unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } != 0
@@ -501,7 +607,7 @@ fn forward_platform(
         .map_err(|_| FORWARD_ERROR)?;
     // The pinned macOS plugin has no reply. Successful transport write/EOF is
     // its acceptance boundary, not evidence the callback or navigation ran.
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -533,6 +639,57 @@ mod tests {
         fs::write(path, serde_json::to_vec(&proof).unwrap()).unwrap();
     }
     #[test]
+    fn startup_restore_queue_defers_and_coalesces_then_accepts_later_activations() {
+        let intents = RestoreIntents::default();
+        intents.request().unwrap();
+        assert!(
+            !intents.take_ready().unwrap(),
+            "activation cannot create a main before setup"
+        );
+        intents.request().unwrap();
+        assert!(!intents.take_ready().unwrap());
+        // Production marks this only after setup has built/protected main.
+        intents.ready().unwrap();
+        assert!(intents.take_ready().unwrap());
+        assert!(
+            !intents.take_ready().unwrap(),
+            "early activations restore just once"
+        );
+        intents.ready().unwrap();
+        assert!(!intents.take_ready().unwrap());
+        intents.request().unwrap();
+        assert!(
+            intents.take_ready().unwrap(),
+            "later launch restores the existing window"
+        );
+        assert!(!intents.take_ready().unwrap());
+    }
+    #[test]
+    fn racing_setup_and_restore_requests_do_not_lose_the_pending_intent() {
+        for _ in 0..64 {
+            let intents = std::sync::Arc::new(RestoreIntents::default());
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let worker = {
+                let intents = intents.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    intents.request().unwrap();
+                    intents.take_ready().unwrap()
+                })
+            };
+            barrier.wait();
+            intents.ready().unwrap();
+            let during_setup = intents.take_ready().unwrap();
+            let during_request = worker.join().unwrap();
+            let pending = intents.take_ready().unwrap();
+            assert_eq!(
+                usize::from(during_setup) + usize::from(during_request) + usize::from(pending),
+                1
+            );
+        }
+    }
+    #[test]
     fn publication_binds_original_owner_and_does_not_replace_proof() {
         let (data, lease) = fixture();
         let owner = Owner::load(data.path()).unwrap();
@@ -540,6 +697,72 @@ mod tests {
         assert!(owner.verify_endpoint(std::process::id() + 1).is_err());
         assert!(publish(data.path(), &lease).is_err());
         assert!(Lease::acquire(data.path()).is_err());
+    }
+    #[test]
+    fn delayed_proof_and_endpoint_forward_only_after_both_are_ready() {
+        use std::cell::Cell;
+        let data = tempfile::tempdir().unwrap();
+        let lease = Lease::acquire(data.path()).unwrap();
+        let owner = Owner::capture(data.path()).unwrap();
+        let endpoint = Cell::new(false);
+        let dispatched = Cell::new(0);
+        let stages = Cell::new(0);
+        wait_for_ready_observed(
+            &owner,
+            || {
+                if !endpoint.get() {
+                    return Ok(false);
+                }
+                dispatched.set(dispatched.get() + 1);
+                Ok(true)
+            },
+            |proof_ready| {
+                stages.set(stages.get() + 1);
+                if !proof_ready {
+                    publish(data.path(), &lease).unwrap();
+                } else {
+                    endpoint.set(true);
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(stages.get(), 2);
+        assert_eq!(dispatched.get(), 1);
+    }
+    #[test]
+    fn replaced_owner_during_readiness_wait_is_not_followed() {
+        let data = tempfile::tempdir().unwrap();
+        let lease = Lease::acquire(data.path()).unwrap();
+        let owner = Owner::capture(data.path()).unwrap();
+        let result = wait_for_ready_observed(
+            &owner,
+            || panic!("no payload without original proof"),
+            |_| {
+                let mut replacement = lease.record();
+                replacement.token = uuid::Uuid::new_v4().to_string();
+                fs::write(
+                    data.path().join(".desktop-session.lock/owner.json"),
+                    serde_json::to_vec(&replacement).unwrap(),
+                )
+                .unwrap();
+            },
+        );
+        assert!(result.is_err());
+        assert!(data.path().join(".desktop-session.lock").exists());
+    }
+    #[test]
+    fn invalid_proof_and_uncertain_send_are_terminal_without_retry() {
+        let (data, _lease) = fixture();
+        let owner = Owner::capture(data.path()).unwrap();
+        let attempts = std::cell::Cell::new(0);
+        let result = wait_for_ready(&owner, || {
+            attempts.set(attempts.get() + 1);
+            Err(FORWARD_ERROR.into())
+        });
+        assert_eq!(result, Err(FORWARD_ERROR.into()));
+        assert_eq!(attempts.get(), 1);
+        change_proof(data.path(), |proof| proof.owner_pid += 1);
+        assert!(wait_for_ready(&owner, || panic!("invalid proof cannot dispatch")).is_err());
     }
     #[test]
     fn unknown_or_changed_proof_never_authorizes_activation() {
@@ -740,6 +963,10 @@ mod tests {
     }
     #[cfg(target_os = "linux")]
     fn server(bus: &Bus, data: &Path, owns_lease: bool) -> ChildGuard {
+        server_start(bus, data, owns_lease, false)
+    }
+    #[cfg(target_os = "linux")]
+    fn server_start(bus: &Bus, data: &Path, owns_lease: bool, delayed: bool) -> ChildGuard {
         let mut child = ChildGuard(
             Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -749,6 +976,10 @@ mod tests {
                 ])
                 .env("VARIN_ACTIVATION_TEST_BUS", &bus.address)
                 .env("VARIN_ACTIVATION_TEST_DATA", data)
+                .env(
+                    "VARIN_ACTIVATION_TEST_DELAYED",
+                    if delayed { "yes" } else { "no" },
+                )
                 .env(
                     "VARIN_ACTIVATION_TEST_OWNER",
                     if owns_lease { "yes" } else { "no" },
@@ -760,7 +991,14 @@ mod tests {
                 .unwrap(),
         );
         let started = std::time::Instant::now();
-        while !data.join("server-ready").exists() {
+        while !data
+            .join(if delayed {
+                "lease-ready"
+            } else {
+                "server-ready"
+            })
+            .exists()
+        {
             assert!(
                 child.0.try_wait().unwrap().is_none(),
                 "activation fixture exited before readiness"
@@ -781,19 +1019,34 @@ mod tests {
             return;
         };
         let data = PathBuf::from(std::env::var_os("VARIN_ACTIVATION_TEST_DATA").unwrap());
+        let delayed = std::env::var("VARIN_ACTIVATION_TEST_DELAYED").unwrap() == "yes";
+        let next_stage = || {
+            let mut input = String::new();
+            assert!(std::io::stdin().read_line(&mut input).unwrap() > 0);
+        };
         let _lease = if std::env::var("VARIN_ACTIVATION_TEST_OWNER").unwrap() == "yes" {
             let lease = Lease::acquire(&data).unwrap();
+            if delayed {
+                fs::write(data.join("lease-ready"), b"ready").unwrap();
+                next_stage();
+            }
             publish(&data, &lease).unwrap();
+            if delayed {
+                next_stage();
+            }
             Some(lease)
         } else {
             None
         };
         struct Callback {
             receipt: PathBuf,
+            count: usize,
         }
         #[zbus::interface(name = "org.SingleInstance.DBus")]
         impl Callback {
             fn execute_callback(&mut self, args: Vec<String>, cwd: String) {
+                self.count += 1;
+                fs::write(self.receipt.with_extension("count"), self.count.to_string()).unwrap();
                 fs::write(&self.receipt, serde_json::to_vec(&(args, cwd)).unwrap()).unwrap();
             }
         }
@@ -805,6 +1058,7 @@ mod tests {
                 "/dev/varin/activationtest/SingleInstance",
                 Callback {
                     receipt: data.join("received.json"),
+                    count: 0,
                 },
             )
             .unwrap()
@@ -813,6 +1067,54 @@ mod tests {
         fs::write(data.join("server-ready"), b"ready").unwrap();
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_delayed_original_owner_accepts_early_activation_exactly_once() {
+        let bus = Bus::new();
+        let data = tempfile::tempdir().unwrap();
+        let mut server = server_start(&bus, data.path(), true, true);
+        let owner = Owner::capture(data.path()).unwrap();
+        assert!(!owner.proof_ready().unwrap());
+        let connection = bus.connection();
+        let input = activation();
+        let (mut publish_released, mut endpoint_released) = (false, false);
+        wait_for_ready_observed(
+            &owner,
+            || forward_linux(&owner, &input, "dev.varin.activationtest", &connection),
+            |proof_ready| {
+                if !proof_ready && !publish_released {
+                    server
+                        .0
+                        .stdin
+                        .as_mut()
+                        .unwrap()
+                        .write_all(b"publish\n")
+                        .unwrap();
+                    publish_released = true;
+                } else if proof_ready && !endpoint_released {
+                    server
+                        .0
+                        .stdin
+                        .as_mut()
+                        .unwrap()
+                        .write_all(b"listen\n")
+                        .unwrap();
+                    endpoint_released = true;
+                }
+            },
+        )
+        .unwrap();
+        assert!(publish_released && endpoint_released);
+        assert_eq!(
+            fs::read_to_string(data.path().join("received.count")).unwrap(),
+            "1"
+        );
+        let (args, cwd): (Vec<String>, String) =
+            serde_json::from_slice(&fs::read(data.path().join("received.json")).unwrap()).unwrap();
+        assert_eq!(args, input.args);
+        assert_eq!(cwd, input.cwd);
+        owner.verify().unwrap();
     }
     #[cfg(target_os = "linux")]
     #[test]
@@ -856,18 +1158,18 @@ mod tests {
     }
     #[cfg(target_os = "linux")]
     #[test]
-    fn linux_missing_endpoint_leaves_original_data_lock_intact() {
+    fn linux_pending_endpoint_leaves_original_data_lock_intact() {
         let bus = Bus::new();
         let (data, _lease) = fixture();
         let owner = Owner::load(data.path()).unwrap();
         assert!(
-            forward_linux(
+            !forward_linux(
                 &owner,
                 &activation(),
                 "dev.varin.activationtest",
                 &bus.connection()
             )
-            .is_err()
+            .unwrap()
         );
         owner.verify().unwrap();
         assert!(Lease::acquire(data.path()).is_err());
