@@ -22,15 +22,34 @@ The shared `web/application-host/lib/platform/desktop-deep-links.ts` owns the or
 
 `packages/electron/bootstrap.mjs --varin-export-frontend-state` selects a standalone old-engine exporter before `main.ts`. It takes the existing Electron instance lock, opens an inert page at the original `varin-ui://app` origin and reads localStorage through main-process DOMStorage CDP. It starts no Application Host or Catalog and does not execute renderer export code. It obtains the same cross-language desktop data-root lease used by normal startup, or verifies the inherited native parent lease before reading any old profile.
 
-Managed Host/exporter processes enter the Windows Job or Unix guardian before their
-private input becomes available. Linux's guardian is a subreaper and waits for adopted
-descendants, including detached sessions. macOS cannot prove arbitrary escaped descendants
-are gone after an abnormal termination, so those scope receipts remain unresolved rather
-than permitting another writer. A lease published on macOS also binds the original owner
-to the OS host UUID and boot-session UUID. Only a verified different boot on the same host
-permits retirement of an unresolved old lease, before checking reusable PIDs. Foreign-host,
-unreadable, malformed or absent proofs grant no reboot recovery. Retirement preserves the
-old scope records and does not turn unknown business effects into successful completion.
+Managed Host/exporter processes enter their OS scope before their private input becomes
+available. On Windows 10+, an independent native guardian creates the original service
+with `PROC_THREAD_ATTRIBUTE_JOB_LIST` and an explicit inherited-handle list, then records
+its active receipt before resuming the exact initial thread. The service's stdin/stdout
+remain separate from guardian control; a shell crash cannot keep the service outside the
+Job or kill the only scope observer. The guardian retains the original process and Job
+objects, terminates the tree on shell loss, and commits `ended` only after observing every
+original member stopped. Its pending receipt is published while the original lease
+directory is pinned against replacement. A guardian crash remains unconfirmed, rather
+than treating a vanished PID, exit code, timeout, or Job name as termination.
+
+Linux's guardian is a subreaper and waits for adopted descendants, including detached
+sessions. macOS cannot prove arbitrary escaped descendants are gone after an abnormal
+termination, so those scope receipts remain unresolved rather than permitting another
+writer. macOS leases bind the original owner to the OS host UUID and boot-session UUID.
+Windows records a separate SMBIOS system UUID and the documented OS BootId counter; only
+a strictly later counter on the same machine permits retirement of an unresolved lease.
+Unavailable firmware/boot evidence gives no reboot privilege. Foreign-host, unreadable,
+malformed, rolled-back or absent proofs retain original ownership. Recovery also validates
+all original scope schemas and preserves their unchanged records; a reboot does not turn
+unknown business effects into successful completion. Windows crash/admission tests run
+real shell, guardian, service and descendant processes and pin their original handles.
+Cross-compilation does not replace execution of those tests on Windows.
+
+Windows lifetime contracts: [atomic Job assignment](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute),
+[object names are not object lifetime](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/life-cycle-of-an-object),
+[BootId](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/oem-hvci-enablement),
+[SMBIOS system UUID](https://learn.microsoft.com/en-us/windows-hardware/drivers/bringup/smbios).
 
 `application-client/src/desktop-frontend-migration.ts` enumerates persisted product stores and their allowed fields. It covers UI/voice preferences, projects, explorer/editor snapshots, durable document owner identity, session presentation and review drafts. Disposable caches, PWA-only choices, transient surface identity, connection grants and unknown fields are excluded. There is no production IndexedDB owner in these UI modules, so the receipt records `no-product-owner`, not a fabricated database copy.
 

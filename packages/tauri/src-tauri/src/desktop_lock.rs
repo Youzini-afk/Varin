@@ -20,12 +20,25 @@ pub struct Lease {
     root: PathBuf,
     record: Record,
     boot: Option<BootIdentity>,
+    windows_boot: Option<crate::desktop_windows_boot::Identity>,
 }
 impl Lease {
     pub fn acquire(data: &Path) -> Result<Self, String> {
-        Self::acquire_with_identity(data, current_boot_identity())
+        Self::acquire_with_identities(
+            data,
+            current_boot_identity(),
+            crate::desktop_windows_boot::current(),
+        )
     }
+    #[cfg(test)]
     fn acquire_with_identity(data: &Path, boot: Option<BootIdentity>) -> Result<Self, String> {
+        Self::acquire_with_identities(data, boot, None)
+    }
+    fn acquire_with_identities(
+        data: &Path,
+        boot: Option<BootIdentity>,
+        windows_boot: Option<crate::desktop_windows_boot::Identity>,
+    ) -> Result<Self, String> {
         fs::create_dir_all(data).map_err(|_| "Desktop data directory is unavailable")?;
         let data = data
             .canonicalize()
@@ -35,14 +48,20 @@ impl Lease {
             match fs::symlink_metadata(&root) {
                 Ok(_) => {
                     let record = read_record(&root)?;
-                    let prior_boot =
-                        boot_relation(&root, &record, boot.as_ref())? == BootRelation::Previous;
+                    let darwin_relation = boot_relation(&root, &record, boot.as_ref())?;
+                    let windows_relation = crate::desktop_windows_boot::relation(
+                        &root,
+                        &record,
+                        windows_boot.as_ref(),
+                    )?;
+                    let prior_boot = darwin_relation == BootRelation::Previous
+                        || windows_relation == crate::desktop_windows_boot::Relation::Previous;
                     if !prior_boot && process_alive(record.pid)? {
                         return Err("Another Varin desktop is using this data directory. Close it before switching desktop engines.".into());
                     }
-                    if !prior_boot {
-                        scopes_ended(&root, &record)?;
-                    }
+                    // A reboot proves old processes cannot run, but does not
+                    // authorize interpreting unknown or malformed scope schemas.
+                    inspect_scopes(&root, &record, !prior_boot)?;
                     // A different boot on this same host proves executor death,
                     // not successful drain. Retire unchanged receipts for review.
                     let tombstone = data.join(format!(".desktop-session-retired-{}", record.token));
@@ -82,6 +101,9 @@ impl Lease {
                 if let Some(identity) = &boot {
                     write_boot_proof(&candidate, &record, identity)?;
                 }
+                if let Some(identity) = &windows_boot {
+                    crate::desktop_windows_boot::write(&candidate, &record, identity)?;
+                }
                 Ok(())
             })();
             if let Err(error) = prepared {
@@ -90,7 +112,12 @@ impl Lease {
             }
             match fs::rename(&candidate, &root) {
                 Ok(()) => {
-                    return Ok(Self { root, record, boot });
+                    return Ok(Self {
+                        root,
+                        record,
+                        boot,
+                        windows_boot,
+                    });
                 }
                 Err(_) => {
                     let _ = fs::remove_dir_all(&candidate);
@@ -107,6 +134,11 @@ impl Lease {
         if record.token != self.record.token
             || record.pid != self.record.pid
             || boot_relation(&self.root, &record, self.boot.as_ref())? == BootRelation::Previous
+            || crate::desktop_windows_boot::relation(
+                &self.root,
+                &record,
+                self.windows_boot.as_ref(),
+            )? == crate::desktop_windows_boot::Relation::Previous
         {
             return Err("Desktop data ownership changed".into());
         }
@@ -257,7 +289,15 @@ fn boot_relation(
     })
 }
 fn require_current_boot(root: &Path, owner: &Record) -> Result<(), String> {
-    if boot_relation(root, owner, current_boot_identity().as_ref())? == BootRelation::Previous {
+    let darwin = boot_relation(root, owner, current_boot_identity().as_ref())?;
+    let windows = crate::desktop_windows_boot::relation(
+        root,
+        owner,
+        crate::desktop_windows_boot::current().as_ref(),
+    )?;
+    if darwin == BootRelation::Previous
+        || windows == crate::desktop_windows_boot::Relation::Previous
+    {
         return Err("Desktop ownership belongs to a previous operating-system boot".into());
     }
     Ok(())
@@ -401,6 +441,55 @@ impl ScopeLease {
         if owner.shell != "tauri" || owner.pid != std::process::id() {
             return Err("Managed service does not own the original desktop lease".into());
         }
+        Self::prepare_record(root, owner, uuid::Uuid::new_v4().to_string())
+    }
+    /// Private guardian admission is bound to a transferred original shell
+    /// process object, not a PID reopened from disk or an arbitrary ancestor.
+    #[cfg(windows)]
+    pub(crate) fn prepare_windows_guardian(
+        data: &Path,
+        shell: std::os::windows::io::BorrowedHandle<'_>,
+        owner_token: &str,
+        scope_token: &str,
+    ) -> Result<Self, String> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::WAIT_TIMEOUT,
+            System::Threading::{GetProcessId, WaitForSingleObject},
+        };
+        let root = data
+            .canonicalize()
+            .map_err(|_| "Desktop data directory is unavailable")?
+            .join(".desktop-session.lock");
+        // Pin this original directory against rename/deletion through pending
+        // publication. If the shell dies after its handle check, a reclaimer
+        // cannot install a new lease under the same pathname before this scope
+        // becomes visible. Rechecking a path alone would leave that race open.
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+        let _original_directory = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&root)
+            .map_err(|_| "Original guardian lease directory could not be pinned")?;
+        let owner = read_record(&root)?;
+        require_current_boot(&root, &owner)?;
+        if owner.shell != "tauri"
+            || owner.token != owner_token
+            || !canonical_uuid(scope_token)
+            || unsafe { GetProcessId(shell.as_raw_handle()) } != owner.pid
+            || unsafe { WaitForSingleObject(shell.as_raw_handle(), 0) } != WAIT_TIMEOUT
+        {
+            return Err("Guardian does not hold the original live desktop owner".into());
+        }
+        #[cfg(test)]
+        crate::host_windows_guardian::pause_admission("enrolling", &shell, None)?;
+        Self::prepare_record(root, owner, scope_token.to_owned())
+    }
+    fn prepare_record(root: PathBuf, owner: Record, token: String) -> Result<Self, String> {
         let scopes = root.join("scopes");
         match fs::create_dir(&scopes) {
             Ok(()) => {
@@ -419,7 +508,6 @@ impl ScopeLease {
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err("Managed scope directory is invalid".into());
         }
-        let token = uuid::Uuid::new_v4().to_string();
         let lease = Self {
             path: scopes.join(format!("{token}.json")),
             token: token.clone(),
@@ -563,6 +651,9 @@ fn read_scope(path: &Path, owner: &Record) -> Result<ScopeRecord, String> {
     Ok(record)
 }
 fn scopes_ended(root: &Path, owner: &Record) -> Result<(), String> {
+    inspect_scopes(root, owner, true)
+}
+fn inspect_scopes(root: &Path, owner: &Record, require_ended: bool) -> Result<(), String> {
     let directory = root.join("scopes");
     let metadata = match fs::symlink_metadata(&directory) {
         Ok(metadata) => metadata,
@@ -576,7 +667,7 @@ fn scopes_ended(root: &Path, owner: &Record) -> Result<(), String> {
         let entry = entry.map_err(|_| "Managed scope records cannot be inspected")?;
         let record = read_scope(&entry.path(), owner)?;
         if entry.file_name().to_str() != Some(format!("{}.json", record.token).as_str())
-            || record.phase != "ended"
+            || require_ended && record.phase != "ended"
         {
             return Err("The previous desktop's managed services have not confirmed termination; original data ownership is retained".into());
         }
@@ -700,6 +791,75 @@ mod tests {
         drop(old);
         next.verify().unwrap();
     }
+    #[test]
+    fn proven_reboot_still_rejects_unknown_or_malformed_scope_receipts() {
+        let data = tempfile::tempdir().unwrap();
+        let old = Lease::acquire_with_identity(data.path(), None).unwrap();
+        let scope = ScopeLease::prepare(data.path()).unwrap();
+        let before = identity();
+        write_boot_proof(&old.root, &old.record, &before).unwrap();
+        let current = BootIdentity {
+            boot_uuid: uuid::Uuid::new_v4().to_string(),
+            ..before
+        };
+        let original: serde_json::Value =
+            serde_json::from_slice(&fs::read(scope.path()).unwrap()).unwrap();
+        for bytes in [
+            b"{".to_vec(),
+            {
+                let mut future = original.clone();
+                future["schema"] = serde_json::json!(2);
+                serde_json::to_vec(&future).unwrap()
+            },
+            {
+                let mut foreign = original.clone();
+                foreign["leaseToken"] = serde_json::json!(uuid::Uuid::new_v4().to_string());
+                serde_json::to_vec(&foreign).unwrap()
+            },
+        ] {
+            fs::write(scope.path(), &bytes).unwrap();
+            assert!(Lease::acquire_with_identity(data.path(), Some(current.clone())).is_err());
+            assert_eq!(fs::read(scope.path()).unwrap(), bytes);
+            assert!(old.root.is_dir());
+        }
+    }
+    #[cfg(windows)]
+    #[test]
+    fn windows_guardian_admission_requires_original_live_object_and_exact_owner() {
+        use std::os::windows::io::BorrowedHandle;
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        let data = tempfile::tempdir().unwrap();
+        let lease = Lease::acquire(data.path()).unwrap();
+        let shell = unsafe { BorrowedHandle::borrow_raw(GetCurrentProcess()) };
+        let token = uuid::Uuid::new_v4().to_string();
+        assert!(
+            ScopeLease::prepare_windows_guardian(
+                data.path(),
+                shell,
+                &uuid::Uuid::new_v4().to_string(),
+                &token
+            )
+            .is_err()
+        );
+        assert!(
+            ScopeLease::prepare_windows_guardian(
+                data.path(),
+                shell,
+                &lease.record.token,
+                "invalid"
+            )
+            .is_err()
+        );
+        assert!(!lease.root.join("scopes").exists());
+        let scope =
+            ScopeLease::prepare_windows_guardian(data.path(), shell, &lease.record.token, &token)
+                .unwrap();
+        assert_eq!(scope.token(), token);
+        assert!(scopes_ended(&lease.root, &lease.record).is_err());
+        scope.mark_ended().unwrap();
+        scopes_ended(&lease.root, &lease.record).unwrap();
+    }
+
     #[test]
     fn only_same_host_and_a_different_known_boot_grant_recovery() {
         let data = tempfile::tempdir().unwrap();

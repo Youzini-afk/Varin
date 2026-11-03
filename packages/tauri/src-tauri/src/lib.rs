@@ -21,6 +21,9 @@ pub mod files;
 pub mod host;
 pub mod host_codec;
 mod host_scope;
+#[cfg(windows)]
+mod host_windows_guardian;
+mod desktop_windows_boot;
 #[cfg(unix)]
 mod host_guardian;
 #[cfg(unix)]

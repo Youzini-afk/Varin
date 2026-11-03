@@ -1,8 +1,12 @@
 //! OS scope for this shell's managed Node services, not user-opened applications.
 //! Scope termination is an OS fact only. It never turns an unknown effect into a
 //! successful business drain. Kernel native executors retain their own guardian.
+#[cfg(windows)]
+use crate::host_windows_guardian::ManagedChild as Child;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::process::{Child, Command};
+#[cfg(unix)]
+use tokio::process::Child;
+use tokio::process::Command;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,7 +25,7 @@ pub struct ProcessScope {
     #[cfg(windows)]
     original_pid: u32,
     #[cfg(windows)]
-    lease: crate::desktop_lock::ScopeLease,
+    guardian: crate::host_windows_guardian::Guardian,
     terminating: AtomicBool,
     ended: AtomicBool,
 }
@@ -50,33 +54,19 @@ impl ProcessScope {
         }
         #[cfg(windows)]
         {
-            let lease = crate::desktop_lock::ScopeLease::prepare(data_dir)?;
-            command
-                .env("VARIN_DESKTOP_SCOPE_TOKEN", lease.token())
-                .stderr(stderr);
-            // No Node instruction may run before it belongs to the kill-on-close Job.
-            command.creation_flags(0x08000000 | 0x00000004);
-            let mut child = match command.spawn() {
-                Ok(child) => child,
-                Err(_) => {
-                    lease.mark_ended()?;
-                    return Err("Bundled desktop service could not start".into());
-                }
-            };
-            match windows::attach(&child, lease.clone()) {
-                Ok(scope) => Ok((child, scope)),
-                Err(error) => {
-                    let _ = child.start_kill();
-                    tokio::spawn(async move {
-                        // Admission failed before the initial thread resumed.
-                        // Only a successful wait releases that pending scope.
-                        if child.wait().await.is_ok() {
-                            let _ = lease.mark_ended();
-                        }
-                    });
-                    Err(error)
-                }
-            }
+            let (child, guardian, job, original_process, original_pid) =
+                crate::host_windows_guardian::spawn(command, data_dir, stderr)?;
+            Ok((
+                child,
+                Self {
+                    guardian,
+                    job,
+                    original_process,
+                    original_pid,
+                    terminating: AtomicBool::new(false),
+                    ended: AtomicBool::new(false),
+                },
+            ))
         }
     }
     /// Called only after the controlled owner's complete drain protocol. This
@@ -149,140 +139,46 @@ impl ProcessScope {
         }
         #[cfg(windows)]
         {
-            let clean = !self.terminating.load(Ordering::Acquire) && self.empty()?;
-            #[cfg(test)]
-            if !clean {
-                eprintln!(
-                    "Managed Job settlement requires cleanup: termination_requested={}, node_status={status:?}",
-                    self.terminating.load(Ordering::Acquire),
+            status
+                .as_ref()
+                .map_err(|_| "Original desktop service exit is unknown")?;
+            let mut result = self.guardian.finished().await?;
+            result.clean &= !self.terminating.load(Ordering::Acquire);
+            // The independent guardian wrote the durable receipt only after it
+            // observed the original Job and process objects, not its own exit.
+            if !self.empty()? {
+                return Err(
+                    "Managed guardian receipt does not match original scope termination".into(),
                 );
             }
-            if !clean {
-                self.terminate()?;
-            }
-            self.wait_empty().await?;
-            self.lease.mark_ended()?;
-            let status = status
-                .as_ref()
-                .map_err(|_| "Desktop service termination could not be observed")?;
-            Ok(ScopeExit {
-                clean,
-                code: status.code(),
-                success: status.success(),
-            })
+            self.ended.store(true, Ordering::Release);
+            Ok(result)
         }
-    }
-    #[cfg(windows)]
-    pub async fn wait_empty(&self) -> Result<(), String> {
-        while !self.empty()? {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        self.ended.store(true, Ordering::Release);
-        Ok(())
     }
 }
 
 #[cfg(windows)]
-mod windows {
+pub(crate) mod windows {
     use super::*;
     use std::{
         mem::size_of,
-        os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
-        ptr::{null, null_mut},
+        os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        ptr::null_mut,
     };
     use windows_sys::Win32::{
-        Foundation::{
-            CloseHandle, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, INVALID_HANDLE_VALUE,
-            WAIT_OBJECT_0, WAIT_TIMEOUT,
-        },
+        Foundation::{ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, WAIT_OBJECT_0, WAIT_TIMEOUT},
         System::{
-            Diagnostics::ToolHelp::{
-                CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
-                Thread32Next,
-            },
             JobObjects::{
-                AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob,
-                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-                JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-                JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
-                JobObjectExtendedLimitInformation, QueryInformationJobObject,
-                SetInformationJobObject,
+                IsProcessInJob, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+                JOBOBJECT_BASIC_PROCESS_ID_LIST, JobObjectBasicAccountingInformation,
+                JobObjectBasicProcessIdList, QueryInformationJobObject,
             },
             Threading::{
-                OpenProcess, OpenThread, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-                ResumeThread, THREAD_SUSPEND_RESUME, WaitForSingleObject,
+                OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+                WaitForSingleObject,
             },
         },
     };
-    pub fn attach(
-        child: &Child,
-        lease: crate::desktop_lock::ScopeLease,
-    ) -> Result<ProcessScope, String> {
-        let process = child
-            .raw_handle()
-            .ok_or("Managed service process handle is unavailable")?;
-        let pid = child.id().ok_or("Managed service PID is unavailable")?;
-        // Retain the actual admitted process object through scope settlement.
-        // Closing Tokio's last handle and reopening its PID races kernel object
-        // deletion and Job bookkeeping, even after a successful wait().
-        let original_process = unsafe { BorrowedHandle::borrow_raw(process) }
-            .try_clone_to_owned()
-            .map_err(|_| "Original managed process handle could not be retained")?;
-        unsafe {
-            let handle = CreateJobObjectW(null(), null());
-            if handle.is_null() {
-                return Err("Managed process Job could not be created".into());
-            }
-            let job = OwnedHandle::from_raw_handle(handle);
-            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            if SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            ) == 0
-                || AssignProcessToJobObject(handle, process) == 0
-            {
-                return Err("Managed service could not enter its process Job".into());
-            }
-            // Publish the original shell/process scope before any child instruction.
-            // This durable receipt remains active until the retained Job's actual
-            // members have all stopped, independently of the shell's lifetime.
-            lease.mark_active(std::process::id(), pid)?;
-            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-            if snapshot == INVALID_HANDLE_VALUE {
-                return Err("Managed service initial thread could not be inspected".into());
-            }
-            let snapshot = OwnedHandle::from_raw_handle(snapshot);
-            let mut entry = THREADENTRY32::default();
-            entry.dwSize = size_of::<THREADENTRY32>() as u32;
-            let mut found = Thread32First(snapshot.as_raw_handle(), &mut entry) != 0;
-            let mut resumed = false;
-            while found {
-                if entry.th32OwnerProcessID == pid {
-                    let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
-                    if !thread.is_null() {
-                        resumed = ResumeThread(thread) != u32::MAX;
-                        CloseHandle(thread);
-                    }
-                    break;
-                }
-                found = Thread32Next(snapshot.as_raw_handle(), &mut entry) != 0;
-            }
-            if !resumed {
-                return Err("Managed service initial thread could not be resumed".into());
-            }
-            Ok(ProcessScope {
-                job,
-                original_process,
-                original_pid: pid,
-                lease,
-                terminating: AtomicBool::new(false),
-                ended: AtomicBool::new(false),
-            })
-        }
-    }
     pub fn empty(scope: &ProcessScope) -> Result<bool, String> {
         empty_after_snapshot(scope, |_| {})
     }
@@ -293,16 +189,43 @@ mod windows {
         scope: &ProcessScope,
         after_snapshot: impl FnOnce(&[u32]),
     ) -> Result<bool, String> {
+        empty_original_after_snapshot(
+            &scope.job,
+            &scope.original_process,
+            scope.original_pid,
+            after_snapshot,
+        )
+    }
+
+    pub(crate) fn empty_original(
+        job: &OwnedHandle,
+        original_process: &OwnedHandle,
+        original_pid: u32,
+    ) -> Result<bool, String> {
+        empty_original_after_snapshot(job, original_process, original_pid, |_| {})
+    }
+
+    fn empty_original_after_snapshot(
+        job: &OwnedHandle,
+        original_process: &OwnedHandle,
+        original_pid: u32,
+        after_snapshot: impl FnOnce(&[u32]),
+    ) -> Result<bool, String> {
         let mut after_snapshot = Some(after_snapshot);
         // Job membership/accounting can advance during process rundown. The
         // original admitted object must be signaled even if a query already
         // reports zero members; neither PID disappearance nor an exit code is
         // a substitute for this retained kernel-object receipt.
-        match unsafe { WaitForSingleObject(scope.original_process.as_raw_handle(), 0) } {
+        match unsafe { WaitForSingleObject(original_process.as_raw_handle(), 0) } {
             WAIT_OBJECT_0 => {}
             WAIT_TIMEOUT => {
                 #[cfg(test)]
-                trace_unsignaled(scope.original_process.as_raw_handle(), true);
+                trace_process_state(
+                    original_process.as_raw_handle(),
+                    true,
+                    WAIT_TIMEOUT,
+                    Some(true),
+                );
                 return Ok(false);
             }
             _ => return Err("Original managed process termination is unknown".into()),
@@ -310,7 +233,7 @@ mod windows {
         let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
         let result = unsafe {
             QueryInformationJobObject(
-                scope.job.as_raw_handle(),
+                job.as_raw_handle(),
                 JobObjectBasicAccountingInformation,
                 (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
                 size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
@@ -327,13 +250,13 @@ mod windows {
         // handle. Inspect a complete Job list and the original kernel objects,
         // never infer termination from elapsed time or a bare reusable PID.
         'snapshot: loop {
-            let ids = members(scope, accounting.ActiveProcesses as usize)?;
+            let ids = members(job, accounting.ActiveProcesses as usize)?;
             if let Some(after_snapshot) = after_snapshot.take() {
                 after_snapshot(&ids);
             }
             let mut handles = std::collections::HashMap::with_capacity(ids.len());
             for pid in ids {
-                if pid == scope.original_pid {
+                if pid == original_pid {
                     continue;
                 }
                 let handle = unsafe {
@@ -359,11 +282,7 @@ mod windows {
                 let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
                 let mut belongs = 0;
                 if unsafe {
-                    IsProcessInJob(
-                        handle.as_raw_handle(),
-                        scope.job.as_raw_handle(),
-                        &mut belongs,
-                    )
+                    IsProcessInJob(handle.as_raw_handle(), job.as_raw_handle(), &mut belongs)
                 } == 0
                 {
                     return Err("Managed Job process membership is unknown".into());
@@ -377,7 +296,12 @@ mod windows {
                     }
                     WAIT_TIMEOUT => {
                         #[cfg(test)]
-                        trace_unsignaled(handle.as_raw_handle(), false);
+                        trace_process_state(
+                            handle.as_raw_handle(),
+                            false,
+                            WAIT_TIMEOUT,
+                            Some(true),
+                        );
                         return Ok(false);
                     }
                     _ => return Err("Managed Job process termination is unknown".into()),
@@ -388,16 +312,16 @@ mod windows {
             // every proven process object is still pinned. Only a set contained
             // in these signaled objects is stable: none can now create a child.
             // A new member is still live/unknown work, never a stopped receipt.
-            let current = members(scope, handles.len().saturating_add(1))?;
+            let current = members(job, handles.len().saturating_add(1))?;
             let stopped = current
                 .iter()
-                .all(|pid| *pid == scope.original_pid || handles.contains_key(pid));
+                .all(|pid| *pid == original_pid || handles.contains_key(pid));
             drop(handles);
             return Ok(stopped);
         }
     }
 
-    fn members(scope: &ProcessScope, capacity: usize) -> Result<Vec<u32>, String> {
+    fn members(job: &OwnedHandle, capacity: usize) -> Result<Vec<u32>, String> {
         let mut capacity = capacity.max(1);
         loop {
             let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
@@ -410,7 +334,7 @@ mod windows {
             let mut buffer = vec![0usize; (bytes as usize).div_ceil(word)];
             let ok = unsafe {
                 QueryInformationJobObject(
-                    scope.job.as_raw_handle(),
+                    job.as_raw_handle(),
                     JobObjectBasicProcessIdList,
                     buffer.as_mut_ptr().cast(),
                     bytes,
@@ -448,7 +372,55 @@ mod windows {
     }
 
     #[cfg(test)]
-    fn trace_unsignaled(handle: std::os::windows::io::RawHandle, original: bool) {
+    pub(super) fn trace_snapshot(scope: &ProcessScope, ids: &[u32]) {
+        eprintln!(
+            "Managed Job first snapshot: original_pid={}, members={ids:?}",
+            scope.original_pid
+        );
+        // Inspect every original entry before any strict fixture assertion. A
+        // missing object is diagnostic uncertainty, never evidence of stopping.
+        for &pid in ids {
+            let opened;
+            let process = if pid == scope.original_pid {
+                scope.original_process.as_raw_handle()
+            } else {
+                let handle = unsafe {
+                    OpenProcess(
+                        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                        0,
+                        pid,
+                    )
+                };
+                if handle.is_null() {
+                    eprintln!(
+                        "Managed Job snapshot process cannot be opened: pid={pid}, os_error={:?}",
+                        std::io::Error::last_os_error().raw_os_error()
+                    );
+                    continue;
+                }
+                opened = unsafe { OwnedHandle::from_raw_handle(handle) };
+                opened.as_raw_handle()
+            };
+            let first_wait = unsafe { WaitForSingleObject(process, 0) };
+            let mut belongs = 0;
+            let queried =
+                unsafe { IsProcessInJob(process, scope.job.as_raw_handle(), &mut belongs) } != 0;
+            trace_process_state(
+                process,
+                pid == scope.original_pid,
+                first_wait,
+                queried.then_some(belongs != 0),
+            );
+        }
+    }
+
+    #[cfg(test)]
+    fn trace_process_state(
+        handle: std::os::windows::io::RawHandle,
+        original: bool,
+        first_wait: u32,
+        belongs: Option<bool>,
+    ) {
         use windows_sys::Win32::{
             Foundation::FILETIME,
             System::Threading::{
@@ -480,8 +452,9 @@ mod windows {
             |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
         // Kernel identity and executable basename only. Never print full paths,
         // command lines, environment, application data or inherited pipe contents.
+        let last_wait = unsafe { WaitForSingleObject(handle, 0) };
         eprintln!(
-            "Managed Job member is not signaled: original={original}, pid={pid}, image={image:?}, creation_time={:?}, exit_time={:?}, exit_code={:?}",
+            "Managed Job process observation: original={original}, pid={pid}, job_member={belongs:?}, image={image:?}, first_wait={first_wait}, last_wait={last_wait}, creation_time={:?}, exit_time={:?}, exit_code={:?}",
             times.then_some(ticks(created)),
             times.then_some(ticks(exited)),
             readable.then_some(code),
@@ -696,6 +669,7 @@ mod tests {
         let ancestor = race_process(ancestor_pid);
         let mut late = None;
         let empty = windows::empty_after_snapshot(&scope, |ids| {
+            windows::trace_snapshot(&scope, ids);
             assert!(
                 ids.contains(&ancestor_pid),
                 "First snapshot must include live A"

@@ -11,6 +11,7 @@ pub unsafe extern "C" fn RunWinMain(
     _command_show: i32,
     sandbox_info: *mut u8,
 ) -> i32 {
+    crate::host_windows_guardian::run_if_requested();
     // SAFETY: this entry point is called synchronously by CEF's bootstrap host,
     // which supplies and retains the sandbox broker until this function returns.
     if unsafe { tauri_runtime_cef::set_windows_sandbox_info(sandbox_info) }.is_err() {
