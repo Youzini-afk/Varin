@@ -59,10 +59,13 @@ test('source persistence remains confirmed when subsequent MCP activation fails'
   const { authority, settings, directory } = await configuredFixture();
   const path = join(directory, 'mcp.json'), view = await settings.invoke('open', {}) as McpConfigurationSnapshot;
   const document = await settings.invoke('document/read', { view: view.view, path }) as McpConfigurationDocument;
-  vi.spyOn(authority, 'reload').mockRejectedValueOnce(new Error('Temporary activation failure'));
+  // File watches may reload while the committed save is still returning. Keep
+  // activation unavailable until the receipt is checked, regardless of caller order.
+  const reload = vi.spyOn(authority, 'reload').mockRejectedValue(new Error('Temporary activation failure'));
   const saved = await settings.invoke('document/patch', { view: view.view, path, expectedRevision: document.revision, name: 'test', set: { enabled: false } }) as McpDocumentWriteReceipt;
   expect(saved.activation).toMatchObject({ state: 'unavailable' });
   expect(JSON.parse(await readFile(path, 'utf8')).mcpServers.test.enabled).toBe(false);
+  reload.mockRestore();
   const observed = await settings.invoke('read', { view: view.view }) as McpConfigurationSnapshot;
   expect(observed.servers[0]?.enabled).toBe(false);
 });
