@@ -1,5 +1,6 @@
 //! Native surfaces only. Shared TypeScript owns artwork, scene chronology,
 //! gesture policy and settings; inert surfaces never acquire the desktop bridge.
+use crate::companion_registry::{OwnerId, Registry, WindowKey};
 use crate::geometry;
 use crate::{desktop, engine::offscreen, host::HostProcess};
 use geometry::{Display, Rect};
@@ -12,7 +13,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
 };
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -38,10 +39,47 @@ pub struct CompanionWindows {
     app: AppHandle,
     service: HostProcess,
     data_dir: PathBuf,
-    surfaces: Arc<Mutex<HashMap<u64, Surface>>>,
+    registry: CompanionRegistry,
+    owner_id: OwnerId,
     emit: Arc<dyn Fn(Value) + Send + Sync>,
     lifecycle: Arc<tokio::sync::RwLock<()>>,
-    stopping: Arc<AtomicBool>,
+}
+type CompanionRegistry = Arc<Registry<CompanionWindows, Surface>>;
+
+/// Before build succeeds, errors release only the reserved generation. After
+/// native dispatch, its close callback alone owns removal, including failures.
+struct Creation {
+    registry: CompanionRegistry,
+    key: WindowKey,
+    native_started: bool,
+}
+impl Drop for Creation {
+    fn drop(&mut self) {
+        if !self.native_started {
+            self.registry.remove_window(self.key);
+        }
+    }
+}
+
+fn registry(app: &AppHandle) -> Result<CompanionRegistry, String> {
+    app.try_state::<CompanionRegistry>()
+        .map(|state| state.inner().clone())
+        .ok_or("Companion registry unavailable".into())
+}
+
+/// Companion renderer commands stay with their original Node owner even while
+/// the workbench changes Host or a replacement service starts.
+pub(crate) async fn process_for_window(
+    app: &AppHandle,
+    label: &str,
+) -> Result<HostProcess, String> {
+    let lookup = registry(app)?.resolve(label)?;
+    let (owner, key, surface) = lookup.ready().await?;
+    owner.require_current(key)?;
+    if surface.role != "companion" || *surface.closed.borrow() {
+        return Err("This companion surface has no desktop authority".into());
+    }
+    Ok(owner.service)
 }
 fn required<'a>(v: &'a Value, key: &str) -> Result<&'a str, String> {
     v[key]
@@ -84,37 +122,34 @@ impl CompanionWindows {
         service: HostProcess,
         data_dir: PathBuf,
         emit: Arc<dyn Fn(Value) + Send + Sync>,
-    ) -> Self {
-        let owner = Self {
+    ) -> Result<Self, String> {
+        let registry = registry(&app)?;
+        registry.register(|owner_id| Self {
             app: app.clone(),
             service,
             data_dir,
-            surfaces: Arc::default(),
+            registry: registry.clone(),
+            owner_id,
             emit,
             lifecycle: Arc::default(),
-            stopping: Arc::default(),
-        };
-        app.manage(owner.clone());
-        owner
+        })
     }
     /// An exited Node owner cannot send its final window closes. Native lifetime
     /// remains here until CEF confirms each original browser is actually gone.
     pub async fn shutdown(&self) -> Result<(), String> {
         // A create that has begun owns its eventual CEF surface, even while
         // bootstrap/build is pending. Drain it before taking the close snapshot.
+        self.registry.begin_shutdown(self.owner_id)?;
         let _lifecycle = self.lifecycle.write().await;
-        self.stopping.store(true, Ordering::Release);
-        let ids: Vec<_> = self
-            .surfaces
-            .lock()
-            .map_err(|_| "Companion registry unavailable")?
-            .keys()
-            .copied()
-            .collect();
+        let surfaces = self.registry.snapshot(self.owner_id)?;
         let mut closing = tokio::task::JoinSet::new();
-        for id in ids {
+        for (key, surface) in surfaces {
             let owner = self.clone();
-            closing.spawn(async move { owner.request("companion.close", json!({"id":id})).await });
+            closing.spawn(async move {
+                Self::close_surface(&surface).await?;
+                owner.registry.remove_window(key);
+                Ok::<_, String>(())
+            });
         }
         let mut failed = false;
         while let Some(result) = closing.join_next().await {
@@ -128,28 +163,21 @@ impl CompanionWindows {
                     .into(),
             );
         }
-        let ours = self
-            .app
-            .try_state::<Self>()
-            .is_some_and(|current| Arc::ptr_eq(&current.surfaces, &self.surfaces));
-        if ours {
-            self.app.unmanage::<Self>();
-        }
-        Ok(())
+        self.registry.finish_shutdown(self.owner_id)
     }
     fn event(&self, value: Value) {
         (self.emit)(value);
     }
     pub(crate) fn benchmark_sessions(&self) -> Vec<(String, crate::cdp::Session)> {
-        self.surfaces
-            .lock()
+        self.registry
+            .snapshot(self.owner_id)
             .map(|surfaces| {
                 surfaces
                     .iter()
                     .filter(|(_, surface)| !*surface.closed.borrow())
-                    .map(|(id, surface)| {
+                    .map(|(key, surface)| {
                         (
-                            format!("companion:{}:{id}", surface.role),
+                            format!("companion:{}:{}", surface.role, key.label()),
                             crate::cdp::Session::from_owned(
                                 surface.window.as_ref().clone(),
                                 surface.pending.clone(),
@@ -162,12 +190,17 @@ impl CompanionWindows {
     }
 
     fn surface(&self, id: u64) -> Result<Surface, String> {
-        self.surfaces
-            .lock()
-            .map_err(|_| "Companion registry unavailable")?
-            .get(&id)
-            .cloned()
+        self.registry
+            .surface(self.owner_id, id)?
+            .map(|(_, surface)| surface)
             .ok_or("Companion window is closed".into())
+    }
+    fn require_current(&self, key: WindowKey) -> Result<(), String> {
+        if self.registry.current(key) {
+            Ok(())
+        } else {
+            Err("Companion window generation is no longer active".into())
+        }
     }
     fn displays(&self) -> Result<(Vec<Display>, u64), String> {
         let monitors = native(self.app.available_monitors())?;
@@ -255,11 +288,7 @@ impl CompanionWindows {
         Ok(())
     }
     fn snapshot(&self) -> Reply {
-        let surfaces = self
-            .surfaces
-            .lock()
-            .map_err(|_| "Companion registry unavailable")?
-            .clone();
+        let surfaces = self.registry.snapshot(self.owner_id)?;
         let (displays, primary) = self.displays()?;
         let cursor = native(self.app.cursor_position())?;
         let display = geometry::nearest(
@@ -283,13 +312,16 @@ impl CompanionWindows {
             .collect();
         let windows = surfaces
             .iter()
-            .map(|(id, s)| self.state(*id, s))
+            .map(|(key, s)| self.state(key.id, s))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(
             json!({"windows":windows,"displays":screens,"primaryId":primary,"cursor":{"x":x,"y":y},"platform":crate::manifest::platform()}),
         )
     }
     pub async fn request(&self, method: &str, args: Value) -> Reply {
+        if method != "companion.close" && !self.registry.active(self.owner_id) {
+            return Err("Companion native owner is stopping".into());
+        }
         if method == "companion.snapshot" {
             return self.snapshot();
         }
@@ -300,10 +332,17 @@ impl CompanionWindows {
         if method == "companion.create" {
             return self.create(id, args).await;
         }
-        let surface = match self.surface(id) {
-            Ok(s) => s,
-            Err(_) if method == "companion.close" => return Ok(Value::Null),
-            Err(e) => return Err(e),
+        // A pending create is not evidence that no native surface exists. Wait
+        // for its original build to settle before acknowledging a close.
+        let _creation = if method == "companion.close" {
+            Some(self.lifecycle.write().await)
+        } else {
+            None
+        };
+        let (key, surface) = match self.registry.surface(self.owner_id, id)? {
+            Some(s) => s,
+            None if method == "companion.close" => return Ok(Value::Null),
+            None => return Err("Companion window is closed".into()),
         };
         match method {
             "companion.update" => {
@@ -316,6 +355,7 @@ impl CompanionWindows {
                 if let Some(value) = args["passthrough"].as_bool() {
                     offscreen::set_passthrough(&surface.window, value).await?;
                 }
+                self.require_current(key)?;
                 if let Some(value) = args["visible"].as_bool() {
                     if value {
                         native(surface.window.show())?
@@ -327,10 +367,7 @@ impl CompanionWindows {
             }
             "companion.close" => {
                 Self::close_surface(&surface).await?;
-                self.surfaces
-                    .lock()
-                    .map_err(|_| "Companion registry unavailable")?
-                    .remove(&id);
+                self.registry.remove_window(key);
                 Ok(Value::Null)
             }
             "companion.ready" => {
@@ -347,6 +384,7 @@ impl CompanionWindows {
                     "new Promise((resolve,reject)=>{{if(document.documentElement.dataset.{attribute}==='true'){{resolve(true);return}} const ready=()=>{{clearTimeout(timer);resolve(true)}};const timer=setTimeout(()=>{{removeEventListener('{event}',ready);reject(new Error('Decorative mount timed out'))}},15000);addEventListener('{event}',ready,{{once:true}})}})"
                 );
                 Self::evaluate(&surface, &source).await?;
+                self.require_current(key)?;
                 Ok(Value::Null)
             }
             "companion.publish" => {
@@ -354,6 +392,7 @@ impl CompanionWindows {
                     return Err("Only a decorative scene receives scene facts".into());
                 }
                 Self::evaluate(&surface,&format!("window.dispatchEvent(new CustomEvent('varin-companion-scene',{{detail:{}}}))",serde_json::to_string(&args["payload"]).map_err(|_|"Scene facts are invalid")?)).await?;
+                self.require_current(key)?;
                 Ok(Value::Null)
             }
             "companion.stoolVisible" => {
@@ -366,6 +405,7 @@ impl CompanionWindows {
                     "window.dispatchEvent(new Event('varin-stool-visible'))",
                 )
                 .await?;
+                self.require_current(key)?;
                 Ok(Value::Null)
             }
             _ => Err("Unknown native companion operation".into()),
@@ -373,16 +413,8 @@ impl CompanionWindows {
     }
     async fn create(&self, id: u64, args: Value) -> Reply {
         let _lifecycle = self.lifecycle.read().await;
-        if self.stopping.load(Ordering::Acquire) {
+        if !self.registry.active(self.owner_id) {
             return Err("Companion native owner is stopping".into());
-        }
-        if self
-            .surfaces
-            .lock()
-            .map_err(|_| "Companion registry unavailable")?
-            .contains_key(&id)
-        {
-            return Err("Companion window identity is already in use".into());
         }
         let role = required(&args, "role")?.to_owned();
         if !matches!(role.as_str(), "companion" | "scene" | "stool") {
@@ -409,7 +441,13 @@ impl CompanionWindows {
             None
         };
         let (x, y, w, h) = rect(&args["bounds"])?;
-        let label = format!("companion-{id}");
+        let key = self.registry.reserve(self.owner_id, id)?;
+        let mut creation = Creation {
+            registry: self.registry.clone(),
+            key,
+            native_started: false,
+        };
+        let label = key.label();
         // CEF maps every registered scheme to HTTP on every desktop platform.
         let base = "http://varin-companion.localhost";
         let query = {
@@ -468,16 +506,16 @@ impl CompanionWindows {
         attrs.native_only = role != "companion";
         attrs.native_close_handler = Some(Arc::new(move || {
             desktop::unregister_application_window(&close_owner.app, &close_label);
-            close_send.send_replace(true);
+            let removed = close_owner.registry.remove_window(key);
             for (_, request) in close_pending.lock().unwrap().drain() {
                 let _ = request.send(Err(
                     "Companion closed before its response; outcome is unknown".into(),
                 ));
             }
-            if let Ok(mut surfaces) = close_owner.surfaces.lock() {
-                surfaces.remove(&id);
+            if removed {
+                close_owner.event(json!({"id":id,"kind":"closed"}));
             }
-            close_owner.event(json!({"id":id,"kind":"closed"}));
+            close_send.send_replace(true);
         }));
         let renderer_owner = self.clone();
         let renderer_pending = pending.clone();
@@ -487,7 +525,9 @@ impl CompanionWindows {
                     let _ =
                         request.send(Err("Companion renderer stopped; outcome is unknown".into()));
                 }
-                renderer_owner.event(json!({"id":id,"kind":"crashed"}));
+                if renderer_owner.registry.current(key) {
+                    renderer_owner.event(json!({"id":id,"kind":"crashed"}));
+                }
             }
         });
         builder = offscreen::transparent(builder, &label)?;
@@ -503,6 +543,7 @@ impl CompanionWindows {
                 return Err(error.to_string());
             }
         };
+        creation.native_started = true;
         let surface = Surface {
             window: window.clone(),
             role: role.clone(),
@@ -512,13 +553,13 @@ impl CompanionWindows {
             closed,
             revision: Arc::new(AtomicU64::new(0)),
         };
-        if *surface.closed.borrow() {
-            return Err("Companion closed during creation".into());
+        if let Err(error) = self.registry.publish(key, surface.clone()) {
+            // A failed publication is not a native close receipt. In the
+            // unavailable-registry case publish retained the original handle;
+            // an uncertain close must leave that ownership intact for cleanup.
+            Self::close_surface(&surface).await?;
+            return Err(error);
         }
-        self.surfaces
-            .lock()
-            .map_err(|_| "Companion registry unavailable")?
-            .insert(id, surface.clone());
         let initialize = (|| -> Result<(), String> {
             self.set_bounds(&window, &args["bounds"])?;
             native(window.on_dev_tools_protocol(move |message| {
@@ -556,10 +597,21 @@ impl CompanionWindows {
             return Err(error);
         }
         let observer = self.clone();
-        window.on_window_event(move|event|{match event{
-            WindowEvent::Moved(_)|WindowEvent::Resized(_)|WindowEvent::Focused(_)=>{if let Ok(surface)=observer.surface(id){if let Ok(state)=observer.state(id,&surface){observer.event(json!({"id":id,"kind":"state","state":state,"blur":matches!(event,WindowEvent::Focused(false))}));}}}
-            WindowEvent::ScaleFactorChanged{..}=>observer.event(json!({"kind":"displays"})),_=>{}
-        }});
+        window.on_window_event(move |event| {
+            if !observer.registry.current(key) { return; }
+            match event {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::Focused(_) => {
+                    if let Ok((_, _, surface)) = observer.registry.lookup(&key.label()) {
+                        if let Ok(state) = observer.state(id, &surface) {
+                            observer.event(json!({"id":id,"kind":"state","state":state,"blur":matches!(event,WindowEvent::Focused(false))}));
+                        }
+                    }
+                }
+                WindowEvent::ScaleFactorChanged { .. } => observer.event(json!({"kind":"displays"})),
+                _ => {}
+            }
+        });
+        self.require_current(key)?;
         self.state(id, &surface)
     }
     async fn close_surface(surface: &Surface) -> Result<(), String> {
@@ -576,6 +628,10 @@ impl CompanionWindows {
         Ok(())
     }
     async fn evaluate(surface: &Surface, source: &str) -> Reply {
+        let mut closed = surface.closed.clone();
+        if *closed.borrow() {
+            return Err("Companion renderer is closed".into());
+        }
         let id = allocate_devtools_message_id().map_err(|e| e.to_string())?;
         let (send, receive) = oneshot::channel();
         surface
@@ -594,9 +650,23 @@ impl CompanionWindows {
             surface.pending.lock().unwrap().remove(&id);
             return Err("Companion dispatch could not be observed; outcome is unknown".into());
         }
-        let result = receive
-            .await
-            .map_err(|_| "Companion renderer response was lost; outcome is unknown")??;
+        // Close may race the pending-map insertion, after the callback already
+        // drained it. The retained close receipt also settles that late waiter.
+        let result = tokio::select! {
+            biased;
+            _ = async {
+                while !*closed.borrow_and_update() {
+                    if closed.changed().await.is_err() { break; }
+                }
+            } => Err("Companion closed before its response; outcome is unknown".to_owned()),
+            result = receive => result.map_err(|_| "Companion renderer response was lost; outcome is unknown".to_owned())?,
+        };
+        surface
+            .pending
+            .lock()
+            .map_err(|_| "Companion renderer unavailable")?
+            .remove(&id);
+        let result = result?;
         if result["exceptionDetails"].is_object() {
             return Err("Companion decorative renderer is unavailable".into());
         }
@@ -604,17 +674,11 @@ impl CompanionWindows {
     }
     async fn asset(
         &self,
-        label: String,
+        key: WindowKey,
+        surface: Surface,
         request_path: String,
     ) -> Result<(Vec<u8>, String), String> {
-        let surface = self
-            .surfaces
-            .lock()
-            .map_err(|_| "Companion registry unavailable")?
-            .values()
-            .find(|s| s.window.label() == label)
-            .cloned()
-            .ok_or("No companion artwork authority")?;
+        self.require_current(key)?;
         let prefix = format!("/{}/{}/", surface.pack, surface.version);
         let name = request_path
             .strip_prefix(&prefix)
@@ -629,9 +693,10 @@ impl CompanionWindows {
                 json!({"path":format!("{}/{}/{}",surface.pack,surface.version,name)}),
             )
             .await?;
+        self.require_current(key)?;
         let file = PathBuf::from(required(&receipt, "file")?);
         let root = self.data_dir.join("companions/packs").join(&surface.pack);
-        tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || -> Result<(Vec<u8>, String), String> {
             let root = root
                 .canonicalize()
                 .map_err(|_| "Artwork cache unavailable")?;
@@ -672,45 +737,54 @@ impl CompanionWindows {
             Ok((bytes, mime.into()))
         })
         .await
-        .map_err(|_| "Artwork worker stopped")?
+        .map_err(|_| "Artwork worker stopped")??;
+        self.require_current(key)?;
+        Ok(result)
     }
 }
 /** Only a pinned companion surface can fetch its verified, catalog-owned files. */
 pub fn register_asset_protocol(builder: tauri::Builder) -> tauri::Builder {
-    builder.register_asynchronous_uri_scheme_protocol(
-        "varin-companion",
-        |context, request, responder| {
-            let app = context.app_handle().clone();
-            let label = context.webview_label().to_owned();
-            let path = request.uri().path().to_owned();
-            let origin = request
-                .headers()
-                .get("origin")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_owned();
-            tauri::async_runtime::spawn(async move {
-                let result = if let Some(owner) = app.try_state::<CompanionWindows>() {
-                    owner.asset(label, path).await
-                } else {
-                    Err("Companion service unavailable".into())
-                };
-                let response = match result {
-                    Ok((bytes, mime)) => tauri::http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", mime)
-                        .header("Access-Control-Allow-Origin", origin)
-                        .header("Cache-Control", "no-store")
-                        .header("X-Content-Type-Options", "nosniff")
-                        .body(bytes),
-                    Err(_) => tauri::http::Response::builder()
-                        .status(404)
-                        .body(Vec::new()),
-                };
-                if let Ok(response) = response {
-                    responder.respond(response);
-                }
-            });
-        },
-    )
+    // This container is permanent for the App lifetime. Shutdown removes only
+    // entries after CEF close, never Tauri State that another task may borrow.
+    builder
+        .manage(CompanionRegistry::default())
+        .register_asynchronous_uri_scheme_protocol(
+            "varin-companion",
+            |context, request, responder| {
+                let label = context.webview_label().to_owned();
+                let authority =
+                    registry(context.app_handle()).and_then(|registry| registry.resolve(&label));
+                let path = request.uri().path().to_owned();
+                let origin = request
+                    .headers()
+                    .get("origin")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_owned();
+                tauri::async_runtime::spawn(async move {
+                    let result = match authority {
+                        Ok(lookup) => match lookup.ready().await {
+                            Ok((owner, key, surface)) => owner.asset(key, surface, path).await,
+                            Err(error) => Err(error),
+                        },
+                        Err(error) => Err(error),
+                    };
+                    let response = match result {
+                        Ok((bytes, mime)) => tauri::http::Response::builder()
+                            .status(200)
+                            .header("Content-Type", mime)
+                            .header("Access-Control-Allow-Origin", origin)
+                            .header("Cache-Control", "no-store")
+                            .header("X-Content-Type-Options", "nosniff")
+                            .body(bytes),
+                        Err(_) => tauri::http::Response::builder()
+                            .status(404)
+                            .body(Vec::new()),
+                    };
+                    if let Ok(response) = response {
+                        responder.respond(response);
+                    }
+                });
+            },
+        )
 }

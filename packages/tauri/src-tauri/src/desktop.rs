@@ -1224,9 +1224,12 @@ async fn varin_invoke(
             if command.starts_with("desktop_companion_")
                 || matches!(command, "desktop_get_companion" | "desktop_set_companion") =>
         {
-            let service = browser_service(&app).await?;
-            service
-                .process
+            let process = if webview.label().starts_with("companion-") {
+                crate::companion::process_for_window(&app, webview.label()).await?
+            } else {
+                browser_service(&app).await?.process
+            };
+            process
                 .request(
                     "companionInvoke",
                     json!({"command":command,"args":args,"windowLabel":webview.label()}),

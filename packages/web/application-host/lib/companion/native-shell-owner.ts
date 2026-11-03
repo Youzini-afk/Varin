@@ -32,6 +32,7 @@ class NativeCompanionWindow extends EventEmitter {
     const result = this.pending.then(() => { if (this.failure) throw this.failure; if (this.closing) throw new Error('Companion window is closing'); return this.port.request(method, { id: this.id, ...args }); });
     this.pending = result; this.observe(result); return result;
   }
+  waitForCreation = () => this.created;
   async flush() { await this.pending; if (this.failure) throw this.failure; }
   isDestroyed = () => this.state.destroyed;
   isVisible = () => this.state.visible;
@@ -93,7 +94,7 @@ export function createNativeShellCompanionOwner(options: { port: DesktopNativePo
     const packId = selected(), pack = packId ? assets?.get(packId) : undefined;
     if (!pack) throw new Error('Download a companion in Settings → Desktop companion before waking it');
     const id = ++nextId;
-    const window = new NativeCompanionWindow(id, role, { id, revision: 0, label: `companion-${id}`, bounds: rect, contentBounds: rect, visible: false, minimized: false, alwaysOnTop: false, destroyed: false }, port,
+    const window = new NativeCompanionWindow(id, role, { id, revision: 0, label: '', bounds: rect, contentBounds: rect, visible: false, minimized: false, alwaysOnTop: false, destroyed: false }, port,
       port.request('companion.create', { id, role, bounds: rect, pack: { id: pack.id, version: pack.version }, ...(owner ? { ownerId: owner.id } : {}), ...(phase ? { phase } : {}) }));
     windows.set(id, window);
     window.once('closed', () => { windows.delete(id); if (role === 'companion') { movement.forget(id); origins.delete(id); scenes.clear(id); stools.clear(id); if (companion === window) companion = undefined; changed(); } });
@@ -121,7 +122,15 @@ export function createNativeShellCompanionOwner(options: { port: DesktopNativePo
     await presentation.wait(owner); await owner.flush();
   };
   const status = () => ({ enabled: store.readSync().desktopCompanionEnabled === true, visible: companion?.isVisible() === true && !companion.isDestroyed() });
-  const requireOwner = (label: unknown) => { if (!companion || companion.isDestroyed() || label !== companion.state.label) throw new Error('This command belongs only to the companion sender window'); return companion; };
+  const requireOwner = async (label: unknown) => {
+    const owner = companion;
+    if (!owner || owner.isDestroyed()) throw new Error('This command belongs only to the companion sender window');
+    // A fast native document can present before its create reply is consumed.
+    // Only that original receipt supplies the label; never infer it from Node ids.
+    await owner.waitForCreation();
+    if (stopping || !connected || companion !== owner || owner.isDestroyed() || label !== owner.state.label) throw new Error('This command belongs only to the companion sender window');
+    return owner;
+  };
   const unsubscribe = port.subscribe((event, raw) => {
     if (event === 'companion.native.disconnected') { connected = false; for (const window of windows.values()) window.webContents.emit('render-process-gone'); return; }
     if (event !== 'companion.native') return;
@@ -152,11 +161,11 @@ export function createNativeShellCompanionOwner(options: { port: DesktopNativePo
         return args.action === 'list' ? operation() : serialized(operation);
       }
       case 'desktop_set_companion': return serialized(async () => { if (typeof args.enabled !== 'boolean') throw new Error('Companion requires an explicit boolean'); if (args.enabled) { const library=await ensureAssets(); await library.ready(selected()); await wake(); } else await closeAll(); await store.update(root => {root.desktopCompanionEnabled=args.enabled;}); changed();return status(); });
-      case 'desktop_companion_presented': { const owner=requireOwner(request.windowLabel); if (args.status==='ready') presentation.presented(owner); else if (args.status==='failed' && typeof args.message==='string') presentation.fail(owner,args.message); else throw new Error('Invalid companion presentation result'); await owner.flush(); changed(); return null; }
-      case 'desktop_companion_scene': { const owner=requireOwner(request.windowLabel); const descriptor=readCompanionSceneDescriptor(args.descriptor); if (descriptor.drawing?.bundle==='review') throw new Error('Review drawing requires explicit developer review'); scenes.update(owner,descriptor,args.viewport as CompanionSceneViewport);scenes.block(owner.id,movement.isDragging(owner.id));return scenes.inspectionReceipt(owner.id); }
-      case 'desktop_companion_stool': { const owner=requireOwner(request.windowLabel); if (args.phase==='clear') {stools.clear(owner.id);return null;} if (args.phase!=='lift' && args.phase!=='landing') throw new Error('Invalid world stool phase'); const origin=args.phase==='lift' ? origins.get(owner.id) ?? owner.getContentBounds() : owner.getContentBounds();stools.show(owner,companionWorldRect(origin,args.viewport),args.phase); return null; }
-      case 'desktop_companion_drag': { const owner=requireOwner(request.windowLabel);await refresh();const origin=args.phase==='start' ? owner.getContentBounds() : null, wasDragging=movement.isDragging(owner.id);movement.drag(owner,{phase:args.phase,anchor:args.anchor,screenX:cursor.x,screenY:cursor.y}); if (origin) {origins.set(owner.id,origin);scenes.block(owner.id,true);} await owner.flush();if(args.phase==='end' && wasDragging) await persist(owner); return null; }
-      case 'desktop_companion_passthrough': { const owner=requireOwner(request.windowLabel);const result=applyCompanionPassthrough(owner,args.enabled,platform,movement.isDragging(owner.id));await owner.flush();return result; }
+      case 'desktop_companion_presented': { const owner=await requireOwner(request.windowLabel); if (args.status==='ready') presentation.presented(owner); else if (args.status==='failed' && typeof args.message==='string') presentation.fail(owner,args.message); else throw new Error('Invalid companion presentation result'); await owner.flush(); changed(); return null; }
+      case 'desktop_companion_scene': { const owner=await requireOwner(request.windowLabel); const descriptor=readCompanionSceneDescriptor(args.descriptor); if (descriptor.drawing?.bundle==='review') throw new Error('Review drawing requires explicit developer review'); scenes.update(owner,descriptor,args.viewport as CompanionSceneViewport);scenes.block(owner.id,movement.isDragging(owner.id));return scenes.inspectionReceipt(owner.id); }
+      case 'desktop_companion_stool': { const owner=await requireOwner(request.windowLabel); if (args.phase==='clear') {stools.clear(owner.id);return null;} if (args.phase!=='lift' && args.phase!=='landing') throw new Error('Invalid world stool phase'); const origin=args.phase==='lift' ? origins.get(owner.id) ?? owner.getContentBounds() : owner.getContentBounds();stools.show(owner,companionWorldRect(origin,args.viewport),args.phase); return null; }
+      case 'desktop_companion_drag': { const owner=await requireOwner(request.windowLabel);await refresh();const origin=args.phase==='start' ? owner.getContentBounds() : null, wasDragging=movement.isDragging(owner.id);movement.drag(owner,{phase:args.phase,anchor:args.anchor,screenX:cursor.x,screenY:cursor.y}); if (origin) {origins.set(owner.id,origin);scenes.block(owner.id,true);} await owner.flush();if(args.phase==='end' && wasDragging) await persist(owner); return null; }
+      case 'desktop_companion_passthrough': { const owner=await requireOwner(request.windowLabel);const result=applyCompanionPassthrough(owner,args.enabled,platform,movement.isDragging(owner.id));await owner.flush();return result; }
       default: throw new Error('Unknown desktop companion command');
     }
   };

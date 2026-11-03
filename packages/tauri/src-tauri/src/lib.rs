@@ -4,6 +4,8 @@ mod browser;
 mod cdp;
 #[cfg(feature = "desktop")]
 mod companion;
+#[cfg(any(feature = "desktop", test))]
+mod companion_registry;
 #[cfg(all(test, not(feature = "desktop")))]
 #[path = "engine/pixels.rs"]
 mod compositor_pixels_tests;

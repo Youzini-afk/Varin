@@ -122,12 +122,22 @@ impl NativeService {
             }
         };
         let companion_emit = event.clone();
-        let companion = crate::companion::CompanionWindows::new(
+        let companion = match crate::companion::CompanionWindows::new(
             app.clone(),
             process.clone(),
             data_dir.clone(),
             Arc::new(move |payload| companion_emit("companion.native", payload)),
-        );
+        ) {
+            Ok(companion) => companion,
+            Err(error) => {
+                process
+                    .disconnect("Companion service construction failed before ownership transfer")
+                    .await;
+                process.wait_for_scope_end().await?;
+                network.shutdown().await?;
+                return Err(error);
+            }
+        };
         let computer =
             crate::computer::ComputerPresentation::new(app.clone(), process.clone(), data_dir);
         let service = Self {
