@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import {
@@ -43,7 +44,7 @@ test('withdraws and restores built-in command contributions without a document r
     'editor.focusPreviousGroup',
     'editor.focusNextGroup',
   ];
-  expect(registrations.map((registration) => registration.meta.commandId)).toEqual(expectedCommandIds);
+  expect(registrations.filter(registration => !registration.meta.composer).map((registration) => registration.meta.commandId)).toEqual(expectedCommandIds);
   expect(registrations.find((registration) => registration.meta.commandId === 'editor.saveAll')?.contributionId)
     .toBe('varin.builtin.commands.editor.save-all');
   expect(registrations.find((registration) => registration.meta.commandId === 'toggle-sidebar')?.meta.mobileTitleKey)
@@ -54,7 +55,7 @@ test('withdraws and restores built-in command contributions without a document r
 
   await setBuiltinWorkbenchCommandsEnabled(true);
   expect(workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot()).length)
-    .toBe(expectedCommandIds.length);
+    .toBe(registrations.length);
 });
 
 test('a declarative command activates and executes the latest dynamic implementation', async () => {
@@ -122,4 +123,28 @@ test('a declarative command activates and executes the latest dynamic implementa
   );
   expect(activations).toBe(1);
   expect(executed).toEqual(['/workspace', '/workspace/next']);
+});
+
+
+test('legacy and public extension commands never receive native composer action closures', async () => {
+  const checked: unknown[] = [], executed: unknown[] = [];
+  const contribution = {
+    descriptor: { contractVersion: 1, data: { commandId: 'extension-action', titleKey: 'commandPalette.item.openSettings', icon: 'play', order: 1,
+      composer: { name: 'model', group: 'execution', interaction: 'action' } }, id: 'dev.example.command.action', kind: 'command', supports: ['web'] },
+    implementation: { isAvailable: (context: unknown) => { checked.push(context); return true; }, execute: (context: unknown) => { executed.push(context); } },
+    owner: { extensionId: 'dev.example.command' },
+  } as unknown as SurfaceContribution;
+  const snapshot: SurfaceRegistrySnapshot = { visibleContributions: [contribution], contributions: [contribution], actual: [], layoutReferences: [], replacementSelections: {}, revision: 1, services: [] };
+  const context = { currentDirectory: '/workspace', isMobile: false, composer: { host: getRuntimeEndpointGeneration(), identity: { runtime: 'agent' as const, threadId: 'thread:1', branchId: 'branch:1' }, actions: { model: { run: vi.fn() } } } };
+  const registration = workbenchCommandRegistrationsFromSnapshot(snapshot)[0]!;
+  expect(registration.implementation.isAvailable!(context)).toBe(true);
+  const trigger = vi.fn();
+  await executeSurfaceCommandContribution(contribution.descriptor.id, context, { getSnapshot: () => snapshot, trigger });
+  expect(checked).toHaveLength(2);
+  for (const value of [...checked, ...executed]) {
+    expect(value).toMatchObject({ composer: { host: context.composer.host, identity: context.composer.identity } });
+    expect((value as typeof context).composer).not.toHaveProperty('actions');
+  }
+  await expect(executeSurfaceCommandContribution(contribution.descriptor.id, { ...context, composer: { ...context.composer, host: -1 } }, { getSnapshot: () => snapshot, trigger })).rejects.toThrow('target changed');
+  expect(executed).toHaveLength(1); expect(trigger).not.toHaveBeenCalled();
 });

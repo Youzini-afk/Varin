@@ -483,6 +483,8 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       fileReceipt: (input, signal) => request('fileReceipt', input, signal),
       codeExchange: (input, signal) => request('codeExchange', input, signal),
       resolve: (input, signal) => request('resolve', input, signal),
+      files: (input, signal) => request('files', input, signal),
+      skills: (input, signal) => request('skills', input, signal),
       prepare: (input, signal) => request('prepare', input, signal),
       bind: (input, signal) => request('bind', input, signal),
       authorize: (input, signal) => request('authorize', input, signal),

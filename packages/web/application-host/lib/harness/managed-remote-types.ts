@@ -107,7 +107,7 @@ export type SourceServiceOperation =
   | { kind: 'user_integration'; request: import('../kernel/thread-integrations.js').UserIntegrationRequest }
   | { kind: 'schedule'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority }
   | { kind: 'mcp'; action: import('./managed-mcp-contract.js').ManagedMcpAction }
-  | {kind:'native_resource';context:{run_id:string;origin:import('../kernel/protocol.generated.js').ToolOrigin;operation_id:string};action:import('../kernel/protocol.generated.js').SourceResourceAction;authorizeOnly:boolean}
+  | {kind:'native_resource';context:{run_id:string;origin:import('../kernel/protocol.generated.js').ToolOrigin | null;operation_id:string};action:import('../kernel/protocol.generated.js').SourceResourceAction;authorizeOnly:boolean}
   | { kind: 'language'; query: Omit<import('../kernel/protocol.generated.js').LanguageQuery, 'runId' | 'threadId' | 'grantId' | 'source' | 'physicalRoot'> }
   | { kind: 'language_release' }
   | { kind: 'validate' }
@@ -131,6 +131,7 @@ export type SourceServiceOperation =
       identity: import('@varin/application-client').ThreadIdentity; snapshot: import('../kernel/protocol.generated.js').AgentResourceSnapshot; request?: import('../kernel/protocol.generated.js').AgentResourceRequest }
   | {kind:'structure_recipe';path:string;languageId:string|null}
   | {kind:'structure_units';path:string;languageId:string|null}
+  | { kind: 'files'; options: import('@varin/application-client').ThreadSourceFileOptions }
   | { kind: 'compute'; input: Omit<KernelComputeStartParams, 'workspaceId' | 'rootId' | 'branchId' | 'revision' | 'pinId' | 'objects'> }
   | { kind: 'original_source'; branchId: string }
   | { kind: 'child_prepare'; execution: DelegatedExecution }
@@ -191,6 +192,8 @@ export interface ManagedSourceService {
   codeExchange(principal: ManagedSourcePrincipal, input: ManagedSourceCodeExchangeRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadCodeExchange>;
   handoff(principal: ManagedSourcePrincipal, input: ManagedSourceHandoffRequest, signal?: AbortSignal): Promise<ChildSourceHandoff | null>;
   resolve(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest, signal?: AbortSignal): Promise<ManagedSourceResolveReceipt>;
+  files(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest & import('@varin/application-client').ThreadSourceFileOptions, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSourceFilePage>;
+  skills(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSkillCatalog>;
   prepare(principal: ManagedSourcePrincipal, input: ManagedSourcePrepareRequest, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   bind(principal: ManagedSourcePrincipal, input: ManagedSourceBindRequest, signal?: AbortSignal): Promise<ManagedSourceBinding>;
   authorize(principal: ManagedSourcePrincipal, input: ManagedSourceToolRequest, signal?: AbortSignal): Promise<unknown>;
@@ -238,6 +241,7 @@ export interface SourceServiceResults {
   resource_list: import('../agent-resources/source-reader.js').ResourceDirectoryResult;
   structure_recipe: {recipeId:string|null};
   structure_units: import('../structure/types.js').StructureUnitsResult;
+  files: import('@varin/application-client').ThreadSourceFilePage;
   compute: import('../kernel/compute-runner.js').KernelComputeResult;
   original_source: import('./working-state/types.js').WorkingOriginalSource | null;
   child_prepare: ManagedChildSourceReceipt;

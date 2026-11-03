@@ -305,3 +305,38 @@ describe('Thread source resource admission', () => {
   });
 
 });
+
+describe('pending source skill catalog', () => {
+  it('discovers exact project skill locators before a Thread or source branch exists and maps them after capture', async () => {
+    const f = await fixture({ '.varin/resources/skills/review/SKILL.md': skill('review', 'PROJECT INSTRUCTIONS'),
+      '.varin/resources/skills/review/support.txt': 'SUPPORT MUST NOT BE FROZEN DURING DISCOVERY' });
+    const catalog = await f.scope.draftSourceSkills!('workspace');
+    expect(catalog.skills).toHaveLength(1);
+    const candidate = catalog.skills[0]!;
+    expect(candidate.locator).toEqual({ resourceOwner: { kind: 'local' }, workspaceId: 'workspace',
+      domainId: 'workspace:workspace', path: '.varin/resources/skills/review/SKILL.md' });
+    expect((await f.scope.draftSourceSkills!('workspace')).skills).toEqual(catalog.skills);
+    expect(f.store.createBranch).not.toHaveBeenCalled();
+    expect(f.store.putObject).not.toHaveBeenCalled();
+    expect(f.sourceReads).not.toHaveBeenCalled();
+    expect(f.documents.readSnapshot).not.toHaveBeenCalledWith(expect.objectContaining({ resourceId: expect.stringContaining('support.txt') }), expect.anything());
+    await f.prepare();
+    const snapshot = await f.candidate();
+    const { createThreadSkillInputPreparer } = await import('./thread-skill-input.js');
+    const prepare = createThreadSkillInputPreparer(f.scope);
+    const selection = { resourceId: candidate.resourceId, version: candidate.version, ...(candidate.locator ? { locator: candidate.locator } : {}),
+      start: 7, end: 20 };
+    const resources = { snapshot, source: { resource_owner: f.source.resourceOwner, mode: 'fixed_branch' as const,
+      workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } };
+    const result = await prepare(identity, resources, 'Please /skill:review now', undefined, [selection]);
+    expect(result).toMatchObject({ status: 'ready', skills: [{ resourceId: snapshot.skills[0]!.id,
+      body: 'PROJECT INSTRUCTIONS', selection: { resourceId: candidate.resourceId, version: candidate.version } }] });
+    expect(snapshot.skills[0]!.id).not.toBe(candidate.resourceId);
+    expect(await prepare(identity, resources, 'Please /skill:review now', undefined,
+      [{ ...selection, version: 'changed' }])).toMatchObject({ status: 'stale' });
+    expect(await prepare(identity, { ...resources, source: { ...resources.source, workspace_id: 'other' } },
+      'Please /skill:review now', undefined, [selection])).toMatchObject({ status: 'stale' });
+    f.trust.value = false;
+    expect(await f.scope.draftSourceSkills!('workspace')).toMatchObject({ skills: [] });
+  });
+});

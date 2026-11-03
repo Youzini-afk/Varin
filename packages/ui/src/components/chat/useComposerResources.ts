@@ -1,27 +1,33 @@
 import React from 'react';
-import { createResourceManagementHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import { normalizePath } from '@/lib/pathNormalization';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadDraftSkillOptions, type ThreadSkillLocator, type ThreadIdentity, type ThreadSource, type ThreadsAPI } from '@varin/application-client';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 
-export interface ComposerSkill { name: string; invocation: string; scope: string; source: string; description?: string }
-export function useComposerResources({ cwd }: { cwd?: string | null; sessionId?: string | null; refreshOnMount?: boolean }) {
+export interface ComposerSkill { resourceId: string; version: string; name: string; invocation: string; scope: string; source: string; sourceLabel?: string; description?: string; locator?: ThreadSkillLocator }
+const EMPTY_SKILLS: ComposerSkill[] = [];
+export function useComposerResources({ api, identity, source, pendingSource, enabled = true }: { cwd?: string | null; sessionId?: string | null; refreshOnMount?: boolean; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source']; enabled?: boolean }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  const projectId = useProjectsStore(state => state.projects.find(project => normalizePath(project.path) === normalizePath(cwd))?.id);
-  const [skills, setSkills] = React.useState<ComposerSkill[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string>();
+  const scope = JSON.stringify([host, identity?.threadId, identity?.branchId, source, pendingSource]);
+  const [result, setResult] = React.useState<{ scope: string; skills: ComposerSkill[]; loading: boolean; error?: string }>();
   const [revision, refresh] = React.useReducer(value => value + 1, 0);
-  React.useEffect(() => subscribeVarinEvents(event => { if (event.type === 'settings-changed' && event.owner === 'agent-settings') refresh(); }), []);
   React.useEffect(() => {
-    const controller = new AbortController(); setLoading(true); setSkills([]); setError(undefined);
-    void createResourceManagementHttpAPI(host).list(projectId ? { projectId } : {}, controller.signal).then(result => {
-      if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setSkills(result.resources.filter(resource => resource.active && resource.valid)
-        .map(resource => ({ name: resource.name, invocation: `skill:${resource.name}`, scope: resource.sourceInfo.scope, source: resource.sourceInfo.source, description: resource.description })));
-    }, cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    if (!enabled) return;
+    return subscribeVarinEvents(event => { if (event.type === 'settings-changed' && event.owner === 'agent-settings') refresh(); });
+  }, [enabled]);
+  React.useEffect(() => {
+    if (!enabled || !api?.resources.skills) return;
+    const controller = new AbortController();
+    setResult(previous => ({ scope, skills: previous?.scope === scope ? previous.skills : [], loading: true }));
+    void (identity ? api.resources.skills(identity, source ? { source } : {}, controller.signal) : api.resources.draftSkills(pendingSource ? { source: pendingSource } : {}, controller.signal)).then(result => {
+      if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
+      setResult({ scope, loading: false, skills: result.skills.map(skill => ({
+        resourceId: skill.resourceId, version: skill.version, locator: skill.locator, name: skill.name, invocation: `skill:${skill.name}`,
+        scope: skill.origin === 'package' ? 'extension' : skill.origin, source: skill.origin, sourceLabel: skill.packageIdentity ?? (skill.origin === 'project' ? skill.path : undefined), description: skill.description,
+      })) });
+    }, cause => { if (!controller.signal.aborted) setResult(previous => ({ scope, skills: previous?.scope === scope ? previous.skills : [], loading: false, error: cause instanceof Error ? cause.message : String(cause) })); });
     return () => controller.abort();
-  }, [host, projectId, revision]);
+  }, [api, identity, source, pendingSource, scope, host, revision, enabled]);
+  const current = enabled && result?.scope === scope ? result : undefined;
+  const skills = current?.skills ?? EMPTY_SKILLS;
   const commands = React.useMemo(() => skills.map(skill => ({ name: skill.invocation, description: skill.description, source: 'skill' })), [skills]);
-  return { skills, commands, loading, error, refresh };
+  return { skills, commands, loading: current?.loading ?? false, error: current?.error, refresh };
 }

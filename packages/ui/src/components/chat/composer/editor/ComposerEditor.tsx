@@ -1,6 +1,7 @@
 import React from 'react';
-import { history, historyKeymap, standardKeymap } from '@codemirror/commands';
-import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
+import { composerReferences, referenceHistory, setComposerReferences, addComposerReference, type ComposerReference } from './references';
+import { history, isolateHistory, historyKeymap, standardKeymap } from '@codemirror/commands';
+import { Compartment, EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
 import {
   drawSelection,
   EditorView,
@@ -24,6 +25,7 @@ export interface ComposerChange {
   selection: ComposerSelection;
   fromPaste: boolean;
   insertedText: string;
+  references: readonly ComposerReference[];
 }
 
 export interface ComposerEditorHandle {
@@ -35,6 +37,7 @@ export interface ComposerEditorHandle {
   getSelection(): ComposerSelection;
   getValue(): string;
   insertText(text: string): void;
+  insertReference(from: number, to: number, text: string, reference: Omit<ComposerReference, 'from' | 'to' | 'text'>): void;
   isFocused(): boolean;
   replaceRange(from: number, to: number, text: string, caret?: number): void;
   selectAll(): void;
@@ -43,6 +46,8 @@ export interface ComposerEditorHandle {
 
 interface ComposerEditorProps {
   value: string;
+  references?: readonly ComposerReference[];
+  autocomplete?: { id: string; activeId?: string };
   onChange(change: ComposerChange): void;
   onSelectionChange?(selection: ComposerSelection): void;
   onKeyDown?(event: KeyboardEvent): boolean;
@@ -128,6 +133,8 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
           doc: handlersRef.current.value,
           extensions: [
             history(),
+            composerReferences.init(() => (handlersRef.current.references ?? []).filter(item => item.from >= 0 && item.to <= handlersRef.current.value.length && item.from < item.to && handlersRef.current.value.slice(item.from, item.to) === item.text)),
+            referenceHistory,
             drawSelection(),
             composerNativeSelectionExtension,
             EditorView.lineWrapping,
@@ -158,6 +165,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                   selection,
                   fromPaste: update.transactions.some((transaction) => transaction.isUserEvent('input.paste')),
                   insertedText: update.transactions.map(insertedTextOf).join(''),
+                  references: update.state.field(composerReferences),
                 });
               } else if (update.selectionSet) {
                 handlers.onSelectionChange?.(selection);
@@ -202,14 +210,23 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       if (!view) return;
       const current = view.state.doc.toString();
       if (current === value) return;
-      view.dispatch({
-        changes: { from: 0, to: current.length, insert: value },
-        selection: { anchor: value.length },
-      });
+      // External append/quote/dictation changes are still local edits: keep unrelated
+      // reference bindings, selection mapping and undo rather than replacing the document.
+      let from = 0;
+      while (from < current.length && from < value.length && current[from] === value[from]) from++;
+      let to = current.length, end = value.length;
+      while (to > from && end > from && current[to - 1] === value[end - 1]) { to--; end--; }
+      view.dispatch({ changes: { from, to, insert: value.slice(from, end) } });
       requestAnimationFrame(() => {
         if (viewRef.current === view) view.scrollDOM.scrollTop = view.scrollDOM.scrollHeight;
       });
     }, [value]);
+
+    React.useLayoutEffect(() => {
+      const view = viewRef.current;
+      if (!view || props.references === undefined || JSON.stringify(view.state.field(composerReferences)) === JSON.stringify(props.references)) return;
+      view.dispatch({ effects: setComposerReferences.of(props.references), annotations: Transaction.addToHistory.of(false) });
+    }, [props.references, value]);
 
     React.useEffect(() => {
       viewRef.current?.dispatch({ effects: setLanguageContext.of(languageContext) });
@@ -253,7 +270,25 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       if (content) content.setAttribute('spellcheck', String(spellCheck));
     }, [spellCheck]);
 
+    React.useEffect(() => {
+      const content = viewRef.current?.contentDOM;
+      if (!content) return;
+      content.setAttribute('role', 'combobox');
+      content.setAttribute('aria-autocomplete', 'list');
+      content.setAttribute('aria-expanded', String(Boolean(props.autocomplete)));
+      if (props.autocomplete) content.setAttribute('aria-controls', props.autocomplete.id);
+      else content.removeAttribute('aria-controls');
+      if (props.autocomplete?.activeId) content.setAttribute('aria-activedescendant', props.autocomplete.activeId);
+      else content.removeAttribute('aria-activedescendant');
+    }, [props.autocomplete]);
+
     React.useImperativeHandle(ref, (): ComposerEditorHandle => ({
+      insertReference(from, to, text, reference) {
+        const view = viewRef.current;
+        if (!view) return;
+        view.dispatch({ changes: { from, to, insert: `${text} ` }, selection: { anchor: from + text.length + 1 },
+          effects: addComposerReference.of({ ...reference, from, to: from + text.length, text }), annotations: isolateHistory.of('full'), userEvent: 'input.complete' });
+      },
       captureInsertion() {
         const view = viewRef.current;
         const range = view?.state.selection.main;

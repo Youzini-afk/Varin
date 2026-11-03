@@ -91,7 +91,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { prepareContext, submissionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { prepareContext, refreshPersonalization: () => adapter.refreshPersonalization(), submissionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
@@ -136,6 +136,10 @@ it('initial context preserves pinned AGENTS and request roles while current pers
   expect(await f.api.submit(request)).toEqual(receipt);
   expect(f.requests).toHaveLength(1);
   expect(JSON.stringify(system(f.requests[0]!.body))).toBe(prompt);
+  expect((await f.api.snapshot(identity)).context.checkpoint).toEqual(frozen);
+  // Production prompt edits call this owner through personalization.onChanged.
+  // Receipt replay must not depend on refreshing mutable profile configuration.
+  await f.refreshPersonalization();
   const updated = (await f.api.snapshot(identity)).context.checkpoint!;
   expect(updated.proposal.effective_system_prompt).toContain('CHANGED GLOBAL PROFILE');
   expect(updated.proposal.effective_system_prompt).not.toContain('NEW NOTE AFTER ACCEPTANCE');

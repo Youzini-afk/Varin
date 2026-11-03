@@ -6,6 +6,8 @@ import { referenceKey, resourceFailure, type ResourceResult } from './source-rea
 export interface ExplicitSkillCommand {
   name: string;
   arguments: string;
+  resourceId?: string;
+  version?: string;
 }
 
 /** Match one leading command and first ASCII-space delimiter.
@@ -25,10 +27,14 @@ export function selectExplicitSkill(snapshot: PreparedAgentResources, command: E
   const location = { domainId: 'agent-resources', viewId: snapshot.id };
   if (signal?.aborted) return resourceFailure(location, '', 'cancelled', 'Skill input preparation was cancelled');
   if (!command.name) return resourceFailure(location, '', 'invalid', 'Explicit skill command requires a name');
-  const selected = snapshot.skills.filter(skill => skill.name === command.name);
+  const selected = snapshot.skills.filter(skill => command.resourceId ? skill.id === command.resourceId : skill.name === command.name);
   if (!selected.length) return resourceFailure(location, command.name, 'missing', 'Skill is not selected in this resource snapshot');
   if (selected.length !== 1) return resourceFailure(location, command.name, 'invalid', 'Resource snapshot has no unique selected skill');
-  return { status: 'ready', descriptor: selected[0]! };
+  const descriptor = selected[0]!;
+  if (descriptor.name !== command.name || command.version !== undefined && descriptor.reference.version !== command.version) {
+    return resourceFailure(location, command.resourceId ?? command.name, 'stale', 'Selected skill changed; choose it again from the current resource catalog');
+  }
+  return { status: 'ready', descriptor };
 }
 
 /** Derive resource material from the original capture without opening a source reader.

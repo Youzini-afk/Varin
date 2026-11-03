@@ -64,7 +64,11 @@ export interface ThreadMemoryAPI {
 /** Canonical original UTF-16 text used by both selection presentation and source validation. */
 export function threadMemorySourceText(item: Pick<HistoryItem, 'source' | 'content'>): string {
   const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  if (item.source === 'user') return typeof item.content === 'string' ? item.content : typeof object(item.content).text === 'string' ? object(item.content).text as string : '';
+  if (item.source === 'user') {
+    const input = object(item.content);
+    return typeof item.content === 'string' ? item.content
+      : typeof input.userText === 'string' ? input.userText : typeof input.text === 'string' ? input.text : '';
+  }
   const content = object(object(item.content).content);
   if (content.kind === 'text' && typeof content.text === 'string') return content.text;
   const output = content.kind === 'output' ? object(content.output)

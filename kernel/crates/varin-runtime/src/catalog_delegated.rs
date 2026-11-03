@@ -24,8 +24,8 @@ pub struct ChildRelation {
     pub parent_run_id: String,
     pub parent_thread_id: String,
     pub parent_branch_id: String,
-    pub origin: crate::execution::ToolOrigin,
-    pub call_id: String,
+    pub origin: Option<crate::execution::ToolOrigin>,
+    pub call_id: Option<String>,
     pub child_thread_id: String,
     pub child_branch_id: String,
     pub project_id: Option<String>,
@@ -138,6 +138,9 @@ pub struct DelegatedExecution {
     pub child_operation_id: String,
     pub trigger: DelegatedTrigger,
     pub input_ref: Value,
+    /// User material is frozen when continuation is accepted, before source preparation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_input_ref: Option<Value>,
     pub configuration_ref: Value,
     pub launch: launch_content::LaunchSelectionMetadata,
     pub policy_target: policy_switch::PolicyTargetMetadata,
@@ -238,6 +241,7 @@ pub(super) fn write_execution(db: &Connection, execution: &DelegatedExecution) -
             encode(execution)?
         ],
     )?;
+    super::user_dispatch::settle_operation(db, execution)?;
     Ok(())
 }
 pub(super) fn write_child_task(db: &Connection, child: &ChildTask) -> Result<()> {
@@ -287,6 +291,7 @@ pub(super) fn insert_initial(db: &Connection, child: &ChildTask, model_selection
         child_operation_id: child.operation_id.clone(),
         trigger: DelegatedTrigger::Dispatch,
         input_ref: child.input_ref.clone(),
+        frozen_input_ref: None,
         configuration_ref: child.configuration_ref.clone(),
         launch: child.launch.clone(),
         policy_target: policy_switch::PolicyTargetMetadata::Default,
@@ -326,13 +331,14 @@ pub struct DelegatedExecutionView {
     pub parent_run_id: String,
     pub parent_thread_id: String,
     pub parent_branch_id: String,
-    pub origin: crate::execution::ToolOrigin,
-    pub call_id: String,
+    pub origin: Option<crate::execution::ToolOrigin>,
+    pub call_id: Option<String>,
     pub child_thread_id: String,
     pub child_branch_id: String,
     pub project_id: Option<String>,
     pub trigger: DelegatedTrigger,
     pub input: Value,
+    pub input_prepared: bool,
     pub configuration: Value,
     pub selected_profile: dispatch::ChildSelectedProfile,
     pub launch: launches::LaunchSelection,
@@ -395,6 +401,7 @@ impl DelegatedExecutionRead {
             child_branch_id: child.child_branch_id,
             project_id: child.project_id,
             state: execution.state().into(),
+            input_prepared: execution.frozen_input_ref.is_some(),
             input: if matches!(
                 execution.trigger,
                 DelegatedTrigger::MessageRequest { .. }
@@ -512,6 +519,8 @@ pub struct ChildContinuationCommand {
     pub input: Value,
 }
 pub struct ChildContinuationPreparation {
+    current: Option<context::CheckpointRead>,
+    input_preparation: Option<resources::InputResourcePreparation>,
     incoming: Option<dispatch::AgentSourceSelection>,
     ingress: Option<(inputs::QueuedInputMetadata, Value)>,
     command: ChildContinuationCommand,
@@ -529,6 +538,8 @@ pub struct PreparedChildContinuation {
     pub(super) ingress: Option<inputs::QueuedInputMetadata>,
     command: ChildContinuationCommand,
     input_ref: Value,
+    frozen_input_ref: Option<Value>,
+    checkpoint: Option<Option<String>>,
     configuration_ref: Option<Value>,
     selection: Option<launch_content::LaunchSelectionMetadata>,
     previous: Option<DelegatedExecution>,
@@ -540,6 +551,10 @@ pub struct PreparedChildContinuation {
     _publication: crate::content::ContentPublication,
 }
 impl ChildContinuationPreparation {
+    pub fn with_input_preparation(mut self, preparation: Option<resources::InputResourcePreparation>) -> Self {
+        self.input_preparation = preparation;
+        self
+    }
     pub fn load(self) -> Result<PreparedChildContinuation> {
         if self.command.key.trim().is_empty() {
             return Err(RuntimeError::Invalid("continuation key is required".into()));
@@ -561,6 +576,20 @@ impl ChildContinuationPreparation {
             }
             check_retry(existing, &self.command, &input_ref)?;
         }
+        let (frozen_input_ref, checkpoint) = if let Some(existing) = &self.existing {
+            (existing.frozen_input_ref.clone(), None)
+        } else if self.ingress.is_some() {
+            (None, None)
+        } else {
+            let current_id = self.current.as_ref().map(|checkpoint| checkpoint.id.clone());
+            if self.input_preparation.as_ref().is_some_and(|preparation|
+                preparation.expected_context_checkpoint != current_id) {
+                return Err(RuntimeError::Conflict("continuation skill context is based on another checkpoint".into()));
+            }
+            let current = self.current.map(context::CheckpointRead::load).transpose()?;
+            let material = resources::bind_input(&self.command.input, 1, self.input_preparation.as_ref(), current.as_ref())?;
+            (Some(self.content.save(&material)?), self.input_preparation.as_ref().map(|_| current_id))
+        };
         let provenance_ref = self
             .previous
             .as_ref()
@@ -628,6 +657,8 @@ impl ChildContinuationPreparation {
                 .transpose()?,
             command: self.command,
             input_ref,
+            frozen_input_ref,
+            checkpoint,
             previous: self.previous,
             run: self.run,
             launch: self.launch,
@@ -693,7 +724,10 @@ impl Catalog {
             };
             (Some(previous), Some(run), Some(launch), writers)
         };
+        let current = run.as_ref().map(|run| self.capture_active_checkpoint(&run.branch_id)).transpose()?.flatten();
         Ok(ChildContinuationPreparation {
+            current,
+            input_preparation: None,
             incoming: if existing.is_none() { command.source_agent.as_deref().map(|identity| self.agent_source(&command.previous_run_id, identity)).transpose()? } else { None },
             ingress: None,
             command,
@@ -918,6 +952,12 @@ impl Catalog {
                 "child head or execution owner changed".into(),
             ));
         }
+        if let Some(expected) = &prepared.checkpoint {
+            let current: Option<String> = tx.query_row("SELECT checkpoint_id FROM active_contexts WHERE branch_id=?1", [&child.child_branch_id], |row| row.get(0)).optional()?;
+            if &current != expected {
+                return Err(RuntimeError::Conflict("continuation skill context changed before acceptance".into()));
+            }
+        }
         let execution_id = id();
         if let Some(name) = &prepared.command.name { super::threads::name(&tx,&child.child_thread_id,name)?; }
         let selected = prepared.selection.expect("prepared continuation selection");
@@ -992,6 +1032,7 @@ impl Catalog {
                 }
             },
             input_ref: prepared.input_ref,
+            frozen_input_ref: prepared.frozen_input_ref,
             configuration_ref: prepared.configuration_ref.expect("captured configuration"),
             launch: selected,
             policy_target: launch.policy_target,
@@ -1122,6 +1163,9 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
                 "unsupported delegated execution body; user data was preserved".into(),
             )
         })?;
+        if execution.frozen_input_ref.is_some() && !matches!(execution.trigger, DelegatedTrigger::UserContinuation { .. }) {
+            return Err(RuntimeError::Invalid("non-user delegated execution contains User input material; user data was preserved".into()));
+        }
         let expected_key = match &execution.trigger {
             DelegatedTrigger::Dispatch => None,
             DelegatedTrigger::UserContinuation { key, .. } => Some(key.as_str()),

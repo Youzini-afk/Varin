@@ -156,7 +156,12 @@ fn bot_activity_pages_a_sessions_dispatch_and_its_report_newest_first() {
         .unwrap();
     let read = |before| {
         serde_json::to_value(
-            fixture.db.capture_bot_activity("bot", before, Some(1)).unwrap().load(&|| false).unwrap(),
+            fixture
+                .db
+                .capture_bot_activity("bot", before, Some(1))
+                .unwrap()
+                .load(&|| false)
+                .unwrap(),
         )
         .unwrap()
     };
@@ -168,7 +173,13 @@ fn bot_activity_pages_a_sessions_dispatch_and_its_report_newest_first() {
     assert_eq!(report["threadId"], json!(child.child_thread_id));
     assert_eq!(report["sessionThreadId"], "thread:parent");
     assert!(report["atMs"].as_u64().is_some());
-    assert!(newest["participants"].as_array().unwrap().iter().any(|p| p["threadId"] == json!(child.child_thread_id)));
+    assert!(
+        newest["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["threadId"] == json!(child.child_thread_id))
+    );
     let older = read(newest["before"].as_u64());
     let dispatch = &older["events"][0];
     assert_eq!(dispatch["kind"], "dispatch");
@@ -176,11 +187,109 @@ fn bot_activity_pages_a_sessions_dispatch_and_its_report_newest_first() {
     assert_eq!(dispatch["operationId"], json!(child.operation_id));
     assert!(dispatch["atMs"].as_u64().is_some());
     assert!(older["before"].is_null());
-    let whole = fixture.db.capture_bot_activity("bot", None, None).unwrap().load(&|| false).unwrap();
+    let whole = fixture
+        .db
+        .capture_bot_activity("bot", None, None)
+        .unwrap()
+        .load(&|| false)
+        .unwrap();
     assert_eq!(whole.events.len(), 2);
     assert!(whole.before.is_none());
-    assert!(fixture.db.capture_bot_activity("bot", None, None).unwrap().load(&|| true).is_err());
+    assert!(
+        fixture
+            .db
+            .capture_bot_activity("bot", None, None)
+            .unwrap()
+            .load(&|| true)
+            .is_err()
+    );
     let root = fixture.root.clone();
     drop(fixture);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn user_created_bot_child_reports_success_and_preparation_failure_once_as_agent_data() {
+    use super::super::user_dispatch_tests::{Fixture, start_child};
+    for success in [false, true] {
+        let mut f = Fixture::new_in_bot();
+        let child = f.accept();
+        let child = if success {
+            let child = start_child(&mut f.db, child);
+            let run = f.db.run(&child.receipt.as_ref().unwrap().run_id).unwrap();
+            f.db.transition_run(&run.id, f.db.epoch(), run.revision, RunState::Runnable)
+                .unwrap();
+            let head = f.db.head(&run.branch_id).unwrap();
+            f.db.append_history(
+                &run.id,
+                f.db.epoch(),
+                head.as_deref(),
+                HistorySource::Assistant,
+                serde_json::to_value(crate::execution::ConversationItem::<
+                    crate::output::ResolvedMedia,
+                > {
+                    id: "answer".into(),
+                    provenance: crate::execution::Provenance::Assistant,
+                    content: crate::execution::Content::Text {
+                        text: "Finished work".into(),
+                    },
+                    resource_activation: None,
+                    opaque: None,
+                })
+                .unwrap(),
+                None,
+            )
+            .unwrap();
+            let run = f.db.run(&run.id).unwrap();
+            f.db.transition_run(&run.id, f.db.epoch(), run.revision, RunState::Completed)
+                .unwrap();
+            for report in f.db.capture_child_reports().unwrap().load().unwrap() {
+                f.db.admit_child_report(report).unwrap();
+            }
+            child
+        } else {
+            f.db.fail_child_preparation(&child.execution_id, "source_unavailable")
+                .unwrap();
+            child
+        };
+        let candidates = f.db.pending_bot_reports().unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].report.as_ref().unwrap().outcome,
+            if success {
+                Outcome::Succeeded
+            } else {
+                Outcome::Failed
+            }
+        );
+        let prepared =
+            f.db.prepare_bot_report(candidates[0].clone())
+                .unwrap()
+                .load()
+                .unwrap();
+        let admitted = f.db.admit_message(prepared).unwrap();
+        assert!(admitted.accepted);
+        assert_eq!(
+            admitted.receipt.identity.actor,
+            messages::MessageActor::AgentReport {
+                execution_id: child.execution_id.clone(),
+                operation_id: child.operation_id.clone()
+            }
+        );
+        let queued: inputs::QueuedInputMetadata = record(
+            &f.db.db,
+            "input_queue",
+            &admitted.receipt.identity.message_id,
+        )
+        .unwrap();
+        assert_eq!(queued.origin.history_source(), HistorySource::Agent);
+        assert!(f.db.pending_bot_reports().unwrap().is_empty());
+        let retry =
+            f.db.prepare_bot_report(candidates[0].clone())
+                .unwrap()
+                .load()
+                .unwrap();
+        assert!(!f.db.admit_message(retry).unwrap().accepted);
+        assert!(f.db.capture_child_receipts().unwrap().is_empty());
+    }
 }

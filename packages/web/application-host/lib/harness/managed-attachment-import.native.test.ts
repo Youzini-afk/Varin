@@ -131,8 +131,11 @@ it('streams fixed bytes through authenticated Source routes into an independentl
   expect(retained.records.every(record => record.runId === 'actual-coordinator-run' && record.threadId === 'recipient')).toBe(true);
 
   const processId = 'original-consumer';
+  // The low-level process API takes a complete environment. Inherit the same
+  // platform environment as other native Node fixtures, without Vitest's IPC fd.
+  const env = Object.entries(process.env).flatMap(([name, value]) => value === undefined || name === 'NODE_CHANNEL_FD' ? [] : [{ name, value }]);
   await f.actor.processSpawn({ workspaceId: 'project', rootId: String(f.root.rootId), processId, cwd: '', command: process.execPath,
-    args: ['-e', `const fs = require('fs'); if (fs.readFileSync(process.argv[1])[0] !== 0x81) process.exit(2); console.log('attachment-readable'); setInterval(() => {}, 1000);`, result.path], env: [], mode: 'pipe' });
+    args: ['-e', `const fs = require('fs'); if (fs.readFileSync(process.argv[1])[0] !== 0x81) process.exit(2); console.log('attachment-readable'); setInterval(() => {}, 1000);`, result.path], env, mode: 'pipe' });
   try {
     await expect.poll(async () => (await f.actor.processRead({ workspaceId: 'project', rootId: String(f.root.rootId), processId, cursor: 0 })).chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64').toString()).join('')).toContain('attachment-readable');
     await expect(f.client.release({ ...f.request, mode: 'retire' })).rejects.toThrow(/retained|executing|active/i);

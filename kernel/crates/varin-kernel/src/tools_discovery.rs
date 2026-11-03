@@ -160,9 +160,9 @@ impl FileQueryArgs {
         Ok(())
     }
     fn recursive_scope(&self) -> bool { self.recursive.unwrap_or(self.search) }
-    pub fn params(&self, binding: &ToolBinding, context: &ToolExecutionContext) -> Value {
+    pub fn params(&self, binding: &ToolBinding, operation_id: &str) -> Value {
         let mut params = self.query_params(binding);
-        params["jobId"] = json!(context.operation_id);
+        params["jobId"] = json!(operation_id);
         params
     }
     fn query_params(&self, binding: &ToolBinding) -> Value {

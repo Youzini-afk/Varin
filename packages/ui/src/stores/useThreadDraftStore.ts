@@ -8,6 +8,7 @@ export type ThreadPendingInput = {
   fingerprint: string;
   editorText: string;
   fileIds?: readonly string[];
+  selectedAttachmentIds?: readonly string[];
   goalObjective?: string;
   goalBudget?: number;
   editorContext?: readonly EditorContextAttachment[];
@@ -45,7 +46,12 @@ export interface DraftSourceSelection {
   contentMode: ThreadPrepareSource['content']['mode'];
   captureScopes: string[];
 }
+export interface DraftSelectedAttachment { id: string; host: number; filename: string; selection: import('@varin/protocol').AttachmentSelection; sourceKey?: string; attachment?: Attachment }
 export interface ThreadFirstSend {
+  selectedAttachments?: readonly DraftSelectedAttachment[];
+  referenceScope?: string;
+  skills?: import('@varin/application-client').ThreadSkillSelection[];
+  references?: import('@varin/application-client').ThreadObjectReference[];
   key: string;
   text: string;
   editorText: string;
@@ -63,6 +69,9 @@ export interface ThreadFirstSend {
   error?: string;
 }
 export interface ThreadDraft {
+  selectedAttachments?: readonly DraftSelectedAttachment[];
+  composerWorkflow?: import('@/components/thread/composerWorkflowState').ComposerWorkflowState;
+  references?: readonly import('@/components/chat/composer/editor/references').ComposerReference[];
   harnessId?: string | null;
   externalConversationId?: string;
   /** Idempotent preparation identity, retained after uncertain create/connection results. */

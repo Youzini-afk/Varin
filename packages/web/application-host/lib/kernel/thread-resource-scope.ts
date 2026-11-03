@@ -5,9 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { lstat, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
+import { skillLocatorId, skillTextVersion } from './thread-skill-selection.js';
+import type { ThreadIdentity, ThreadSource, ThreadSkillCatalog } from '@varin/application-client';
 import type { InstalledAgentResourcePackage } from '../agent-resources/packages.js';
-import { canonicalBundleContains, createAgentResourceAuthority, type AdmittedAgentResourceScope, type PreparedAgentResources, type ResourceDomain } from '../agent-resources/authority.js';
+import { canonicalBundleContains, createAgentResourceAuthority, type AdmittedAgentResourceScope, type PreparedAgentResources, type ResourceCatalogScope, type ResourceDomain } from '../agent-resources/authority.js';
 import { isLocalPattern, parseResourceSettings, type ResourceSettings } from '../agent-resources/configuration.js';
 import { ancestorDirectories, CONTEXT_FILE_NAMES } from '../agent-resources/formats.js';
 import { contentVersion, createAdmittedDirectoryReader, createCapsuleResourceReader, createDocumentResourceReader, createPinnedResourceReader,
@@ -49,6 +50,9 @@ export interface ThreadResourceScopeOptions {
   snapshot?: PreparedAgentResources;
 }
 export interface ThreadResourceScope {
+  /** Same global selection owner for a draft with no execution source or Thread yet. */
+  userSkills?(signal?: AbortSignal): Promise<PreparedAgentResources['skills']>;
+  draftSourceSkills?(workspaceId: string, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
   prepare(identity: ThreadIdentity, source: ThreadSource | null, admitted: ResourceContextScope, options?: ThreadResourceScopeOptions): Promise<PreparedAgentResources>;
   withScope<T>(identity: ThreadIdentity, source: ThreadSource | null, admitted: ResourceContextScope,
     consume: (binding: { admittedScope: AdmittedAgentResourceScope; readers: ResourceReader[] }) => Promise<T>, options?: ThreadResourceScopeOptions): Promise<T>;
@@ -279,7 +283,7 @@ async function listSourceDirectory(store: WorkingStateRootStore, root: string, r
   return { status: 'ready', reference: { ...reader, path: relative, canonicalId: `document:${reader.domainId.slice('workspace:'.length)}/${relative}`, version: contentVersion(JSON.stringify(entries)) }, entries };
 }
 
-function domainReaders(scope: AdmittedAgentResourceScope): ResourceReader[] {
+function domainReaders(scope: ResourceCatalogScope): ResourceReader[] {
   const domains = [scope.project, scope.user, scope.userSettings, scope.userAgents, ...scope.ancestors ?? [],
     ...scope.configuredPaths?.map(item => item.target) ?? [], ...scope.installedPackages ?? []];
   return [...new Map(domains.filter((item): item is ResourceDomain => Boolean(item)).map(item => [referenceKey({ ...item.reader, path: '' }), item.reader])).values()];
@@ -304,7 +308,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     const previous = snapshot?.readers.find(reader => reader.domainId === id);
     return { reader: await resourceAssetReader(canonical, id, previous?.viewId ?? `resource-capture:${randomUUID()}`), displayRoot: canonical };
   };
-  const addUser = async (scope: AdmittedAgentResourceScope, options: ThreadResourceScopeOptions) => {
+  const addUser = async (scope: ResourceCatalogScope, options: ThreadResourceScopeOptions) => {
     scope.user = await freshDomain(resourceRoot, 'user-resources', options.snapshot);
     scope.userSettings = await freshDomain(dataDirectory, 'user-settings', options.snapshot);
     scope.userAgents = await freshDomain(path.join(home, '.agents'), 'home-agents', options.snapshot);
@@ -329,7 +333,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     }
   };
 
-  const prepareSourceCapture = async (input: Parameters<ThreadResourceScope['prepareSourceCapture']>[0], documents: Pick<DocumentAuthority, 'readSnapshot'> = owners.documents): Promise<SourceResourceCapturePlan> => {
+  const captureSourceResources = async (input: Omit<Parameters<ThreadResourceScope['prepareSourceCapture']>[0], 'branchId'> & { branchId?: string }, documents: Pick<DocumentAuthority, 'readSnapshot'> = owners.documents, metadataOnly = false): Promise<SourceResourceCapturePlan | ThreadSkillCatalog> => {
     const { store, workspaceId, signal } = input;
     const root = await canonicalizePathIdentity(input.directory);
     const trusted = await owners.projectTrusted(root);
@@ -419,8 +423,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       },
     };
     const observed = recordReader(source, root);
-    const scope: AdmittedAgentResourceScope = { threadId: input.branchId, branchId: input.branchId, mode: 'agent', threadRole: 'source', projectId: null,
-      sourceIdentity: sourceView, projectTrusted: trusted, project: { reader: observed.reader, cwd: '', skillAncestorBoundary: '', displayRoot: root },
+    const scope: ResourceCatalogScope = { projectTrusted: trusted, project: { reader: observed.reader, cwd: '', skillAncestorBoundary: '', displayRoot: root },
       ancestors: [], configuredPaths: [], installedPackages: [] };
     const capture: SourceResourceCapture = { root, cwd: '', skillAncestorBoundary: '', coverage: noCoverage(), ancestors: [], configuredPaths: [], installedPackages: [], sourceLinks: [], shadowedContextCanonicalIds: [] };
     let nearestGit: string | undefined;
@@ -438,13 +441,12 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       const admitted = await captureDomain(ancestor);
       if (admitted.target.kind !== 'capsule') throw new Error('External ancestor must use its original capsule');
       // Only exact context candidates and admitted nearest-Git-chain skills are ever visited.
-      for (const candidate of CONTEXT_FILE_NAMES) {
+      for (const candidate of metadataOnly ? [] : CONTEXT_FILE_NAMES) {
         const observed = await admitted.reader.read(candidate, signal);
         if (observed.status === 'invalid') await admitted.reader.list(candidate, signal);
       }
       if (includeSkills) {
-        const skills = await authority.prepare({ threadId: input.branchId, branchId: input.branchId, mode: 'agent', threadRole: 'source', projectId: null,
-          sourceIdentity: sourceView, projectTrusted: false, userAgents: { reader: admitted.reader, directory: '.agents', displayRoot: ancestor } }, signal);
+        const skills = await authority.inspect({ projectTrusted: false, userAgents: { reader: admitted.reader, directory: '.agents', displayRoot: ancestor } }, signal);
         if (skills.status !== 'ready') throw new ResourceScopeError(skills);
       }
       const capsule = captures.get(ancestor)!.capsule();
@@ -468,7 +470,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         }
       }
     }
-    scope.shadowedContextCanonicalIds = capture.shadowedContextCanonicalIds;
+
     if (trusted) {
       const config = await observed.reader.read('.varin/settings.json', signal);
       const resources = config.status === 'ready' ? capturedSettings(config) : { skills: [], packages: [] };
@@ -486,7 +488,25 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         capture.installedPackages.push({ identity: pkg.identity, source: pkg.source, target: admitted.target });
       }
     }
-    const prepared = await authority.prepare(scope, signal);
+    if (metadataOnly) {
+      await addUser(scope, { ...(signal ? { signal } : {}) });
+      const result = await authority.inspect(scope, signal);
+      if (result.status !== 'ready') throw new ResourceScopeError(result);
+      if (trusted && !await owners.projectTrusted(root)) throw new ResourceScopeError(resourceFailure(source, '', 'denied', 'Project resource trust changed during discovery'));
+      const skills = result.skills.map(skill => {
+        const file = result.candidates.find(candidate => referenceKey(candidate.file.reference) === referenceKey(skill.reference))?.file;
+        if (!file) throw new Error('Selected skill has no original capture');
+        const locator = { resourceOwner: { kind: 'local' as const }, workspaceId, domainId: skill.reference.domainId, path: skill.reference.path };
+        return { resourceId: skillLocatorId(locator), version: skillTextVersion(file.content), locator,
+          name: skill.name, description: skill.description, origin: skill.origin, path: skill.reference.path,
+          ...(skill.packageIdentity ? { packageIdentity: skill.packageIdentity } : {}) };
+      });
+      signal?.throwIfAborted();
+      return { snapshotId: `draft-source-skills:${contentVersion(JSON.stringify(skills))}`, skills };
+    }
+    if (!input.branchId) throw new Error('Resource capture requires its original source branch');
+    const prepared = await authority.prepare({ ...scope, threadId: input.branchId, branchId: input.branchId, mode: 'agent', threadRole: 'source',
+      projectId: null, sourceIdentity: sourceView, shadowedContextCanonicalIds: capture.shadowedContextCanonicalIds }, signal);
     if (prepared.status !== 'ready') throw new ResourceScopeError(prepared);
     // Whole source-local resource roots go into the existing source tree, including support files.
     // External capsules remain exact observations; capture support only within selected SKILL.md bundles.
@@ -539,6 +559,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
   };
 
 
+  const prepareSourceCapture = (input: Parameters<ThreadResourceScope['prepareSourceCapture']>[0], documents?: Pick<DocumentAuthority, 'readSnapshot'>) => captureSourceResources(input, documents) as Promise<SourceResourceCapturePlan>;
   const readSnapshotScope: ThreadResourceScope['withScope'] = async (identity, source, admitted, consume, options = {}) => {
     const snapshot = options.snapshot!;
     const signal = options.signal;
@@ -746,7 +767,22 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       return result.snapshot;
     }, options);
   };
-  return { withScope, prepareSourceCapture, prepare };
+  return { withScope, prepareSourceCapture, prepare, async draftSourceSkills(workspaceId, signal) {
+    const registration = await owners.documents.admitWorkspaceRegistration(workspaceId, signal);
+    const catalog = await owners.workingStates.withBranchStore(workspaceId, 'draft-skill-discovery', store =>
+      captureSourceResources({ store, workspaceId, captureWorkspaceId: workspaceId, directory: registration.canonicalPath, ...(signal ? { signal } : {}) }, owners.documents, true), 'shared');
+    const current = await owners.documents.admitWorkspaceRegistration(workspaceId, signal);
+    if (current.canonicalPath !== registration.canonicalPath) throw new Error('Draft source registration changed during discovery');
+    signal?.throwIfAborted();
+    return catalog as ThreadSkillCatalog;
+  }, async userSkills(signal) {
+    const scope: ResourceCatalogScope = { projectTrusted: false };
+    await addUser(scope, { ...(signal ? { signal } : {}) });
+    const result = await authority.inspect(scope, signal);
+    if (result.status !== 'ready') throw new ResourceScopeError(result);
+    signal?.throwIfAborted();
+    return result.skills;
+  } };
 }
 
 function applyCapture(scope: AdmittedAgentResourceScope, reader: ResourceReader, capture: SourceResourceCapture, captureOnly = false): void {

@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 79;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 80;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -213,6 +213,8 @@ pub(crate) const KERNEL_DEFERRED_RESPONSE_METHODS: &[&str] = &[
     "file.lease.wait",
 ];
 pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
+    ("runtime.child.user.receipt", "branchId"),
+    ("runtime.child.user.accept", "branchId"),
     ("runtime.thread.create", "branchId"),
     ("runtime.branch.fork", "branchId"),
     ("runtime.branch.navigate", "branchId"),
@@ -2911,7 +2913,40 @@ pub(crate) struct KernelComputeGrammarParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UserChildDispatchCatalogParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UserChildDispatchAcceptParams {
+    pub(crate) key: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) run_id: String,
+    pub(crate) expected_head: RequiredNullable<String>,
+    pub(crate) input: varin_runtime::catalog::dispatch::DispatchInput,
+    pub(crate) prepared_attachments: Option<Vec<varin_runtime::catalog::attachments::Attachment>>,
+    pub(crate) prepared_attachment_media: Option<Vec<varin_runtime::output::IncomingMedia>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UserChildDispatchCommand {
+    pub(crate) key: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) run_id: String,
+    pub(crate) expected_head: RequiredNullable<String>,
+    pub(crate) input: varin_runtime::catalog::dispatch::DispatchInput,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ChildContinuationAcceptParams {
+    pub(crate) input_preparation:
+        Option<varin_runtime::catalog::resources::InputResourcePreparation>,
     pub(crate) source_agent: Option<String>,
     pub(crate) name: Option<String>,
     pub(crate) key: String,
@@ -3267,6 +3302,26 @@ pub(crate) type SourceHandoffInspectParams = crate::source_resources::SourceHand
 pub(crate) type SourceHandoffClaimParams = crate::source_resources::SourceHandoffClaimParams;
 
 pub(crate) type SourceEffectReceiptParams = crate::source_resources::SourceEffectReceiptParams;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UserChildDispatchCatalog {
+    pub(crate) run_id: String,
+    pub(crate) head_id: RequiredNullable<String>,
+    pub(crate) projects: Vec<varin_runtime::catalog::dispatch::ChildProjectSource>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UserChildDispatchReceipt {
+    pub(crate) operation_id: String,
+    pub(crate) execution_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) actor: varin_runtime::catalog::messages::MessageActor,
+    pub(crate) accepted_cursor: i64,
+    pub(crate) accepted_at_ms: i64,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -5500,6 +5555,21 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "runtime.child.dependencies.release" => {
             serde_json::from_value::<OperationParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.child.user.catalog" => {
+            serde_json::from_value::<UserChildDispatchCatalogParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.child.user.accept" => {
+            serde_json::from_value::<UserChildDispatchAcceptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.child.user.receipt" => {
+            serde_json::from_value::<UserChildDispatchCommand>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

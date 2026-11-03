@@ -87,7 +87,7 @@ pub(super) fn execute(
                 },
             )
             .map_err(domain)?;
-        let prepared = preparation.load().map_err(domain)?;
+        let prepared = preparation.with_input_preparation(p.input_preparation).load().map_err(domain)?;
         if cancelled.load(Ordering::Acquire) {
             return Err(KernelError::Cancelled);
         }
@@ -305,9 +305,9 @@ pub(super) fn execute(
         runtime
             .quiesce_terminal(&binding.run_id)
             .map_err(|error| KernelError::Operation(error.to_string()))?;
-        let context = varin_runtime::execution::ToolExecutionContext {
+        let context = crate::tools::ResourceExecutionContext {
             run_id: binding.run_id.clone(),
-            origin: child.origin.clone(),
+            origin: None,
             operation_id: child.execution_id.clone(),
         };
         let cancel = varin_runtime::execution::CancellationToken::default();

@@ -366,6 +366,7 @@ impl ContentCollection {
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.responseRef') FROM events e WHERE kind='inference.settled' AND json_extract(data,'$.responseRef') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM operations w WHERE w.run_id=json_extract(e.data,'$.runId') AND json_extract(w.body,'$.intent.kind')='memory_work_v1' AND json_extract(w.body,'$.result.value.released')=1)");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.recipeRef') FROM operations WHERE json_extract(body,'$.intent.kind')='memory_work_v1' AND coalesce(json_extract(body,'$.result.value.released'),0)=0");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.recipeRef') FROM operations WHERE json_extract(body,'$.intent.kind')='delegation_model_selection_v1'");
+        roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.commandRef') FROM operations WHERE json_extract(body,'$.intent.kind')='user_child_dispatch_v1' UNION ALL SELECT json_extract(body,'$.intent.dependenciesRef') FROM operations WHERE json_extract(body,'$.intent.kind')='user_child_dispatch_v1' AND json_extract(body,'$.intent.dependenciesRef') IS NOT NULL");
         let live_inference = "json_extract(i.body,'$.intent.kind')='inference_request_v1' AND NOT EXISTS(SELECT 1 FROM operations w WHERE w.run_id=i.run_id AND json_extract(w.body,'$.intent.kind')='memory_work_v1' AND json_extract(w.body,'$.result.value.released')=1)";
         roots.push_str(&format!(" UNION ALL SELECT json_extract(i.body,'$.intent.requestRef') FROM operations i WHERE {live_inference} UNION ALL SELECT json_extract(i.body,'$.result.value.responseRef') FROM operations i WHERE {live_inference} AND json_extract(i.body,'$.result.value.responseRef') IS NOT NULL"));
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.requestRef') FROM mcp_interactions UNION ALL SELECT json_extract(body,'$.responseRef') FROM mcp_interactions WHERE json_extract(body,'$.responseRef') IS NOT NULL");
@@ -407,7 +408,8 @@ impl ContentCollection {
             UNION ALL SELECT json_extract(data,'$.result.value.permission.call_ref') FROM events WHERE kind='permission.opened'
             UNION ALL SELECT json_extract(data,'$.result.value.permission.scope_ref') FROM events WHERE kind='permission.opened'");
         roots.push_str(
-            " UNION ALL SELECT json_extract(body,'$.input_ref') FROM delegated_executions
+            " UNION ALL SELECT json_extract(body,'$.frozen_input_ref') FROM delegated_executions WHERE json_extract(body,'$.frozen_input_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(body,'$.input_ref') FROM delegated_executions
             UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM delegated_executions
             UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM delegated_executions
             UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM delegated_executions

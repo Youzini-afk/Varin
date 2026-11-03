@@ -10,7 +10,7 @@ const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): 
   if ((operation.intent as { kind?: string } | null)?.kind === 'inference_request_v1') return 'Stop inference request';
   if (operation.mcp_resource_subscription) return 'Stop resource observation';
   if (operation.host_job?.mcpTask) return 'Request remote task cancellation';
-  if (operation.executor === 'dispatch') return 'Cancel child task';
+  if ((operation.executor === 'dispatch' || operation.executor === 'user_dispatch')) return 'Cancel child task';
   if (operation.waiting_on?.startsWith('host-job-wait:')
     || (operation.execution_owner?.kind === 'kernel' && (operation.executor === 'wait_child'
       || operation.executor === 'wait_process' || (operation.executor === 'send' && operation.waiting_on !== null)))) {

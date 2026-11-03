@@ -986,7 +986,7 @@ export interface MessageGetParams {
   messageId: string;
 }
 
-export type MessageActor = {kind: 'user'} | {kind: 'agent'; runId: string; operationId: string; origin: ToolOrigin};
+export type MessageActor = {kind: 'user'} | {kind: 'agent'; runId: string; operationId: string; origin: ToolOrigin} | {kind: 'agent_report'; executionId: string; operationId: string};
 
 export interface MessageReceipt {
   messageId: string;
@@ -1034,6 +1034,7 @@ export interface MessageFeedEntry extends MessageView {
 }
 
 export interface MessageFeedDispatch {
+  actor?: 'user' | 'agent';
   operationId: string;
   executionId: string;
   senderThreadId: string;
@@ -1526,6 +1527,7 @@ export interface ResourceActivation {
 }
 
 export interface PreparedExplicitSkill {
+  selection?: { resourceId: string; version: string };
   snapshotId: string;
   resourceId: string;
   reference: AgentResourceReference;
@@ -1536,7 +1538,8 @@ export interface PreparedExplicitSkill {
 
 export interface InputResourcePreparation {
   expectedContextCheckpoint: string | null;
-  skill: PreparedExplicitSkill | null;
+  skill?: PreparedExplicitSkill | null;
+  skills?: PreparedExplicitSkill[];
 }
 
 export type AgentResourceRequest = { kind: 'skill'; resourceId: string; activationId?: string } | { kind: 'skill-resource'; resourceId: string; relativePath: string; activationId?: string } | { kind: 'instruction-scope'; targetPath: string; targetType?: 'file' | 'directory' } | { kind: 'ui'; ref: string; view?: 'summary' | 'source' | 'state' | 'screen' | 'structure'; file?: string; startLine?: number; endLine?: number; offset?: number; limit?: number } | {kind:'attachment';ref:string;view:'path'|'content';offset?:number;limit?:number};
@@ -1762,7 +1765,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 79; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 80; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3103,7 +3106,7 @@ export interface ChildTask {
   parent_thread_id: string;
   parent_branch_id: string;
   origin: unknown;
-  call_id: string;
+  call_id: string | null;
   child_thread_id: string;
   child_branch_id: string;
   project_id: string | null;
@@ -3123,6 +3126,7 @@ export interface ChildTask {
 }
 
 export interface ChildContinuationAcceptParams {
+  inputPreparation?: InputResourcePreparation;
   sourceAgent?: string;
   name?: string;
   key: string;
@@ -3152,6 +3156,7 @@ export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_con
 export type ChildSourceBasis = { kind: 'refreshed'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef | null; incoming: { run_id: string; source: LaunchSource } } | { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
 
 export interface DelegatedExecution {
+  input_prepared?: boolean;
   preparation?: ChildPreparationProgress;
   name?: string;
   agent_id?: string;
@@ -3160,8 +3165,8 @@ export interface DelegatedExecution {
   parent_run_id: string;
   parent_thread_id: string;
   parent_branch_id: string;
-  origin: ToolOrigin;
-  call_id: string;
+  origin: ToolOrigin | null;
+  call_id: string | null;
   child_thread_id: string;
   child_branch_id: string;
   project_id: string | null;

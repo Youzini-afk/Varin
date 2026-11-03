@@ -1,7 +1,7 @@
 import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
 import { flushSync } from 'react-dom';
-import type { ThreadModelInfo, ThreadThinkingLevel } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, type ThreadDraftSkillOptions, type ThreadsAPI, type ThreadIdentity, type ThreadSource, type ThreadModelInfo, type ThreadThinkingLevel } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { ComposerEditor, type ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
@@ -10,7 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { SwapIcon } from '@/components/motion/SwapIcon';
 import { SwapText } from '@/components/motion/SwapText';
@@ -19,9 +19,11 @@ import { useComposerHeightGlide } from './useComposerHeightGlide';
 import { useFileDropField } from '../conversation/useFileDropField';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
-import { SkillAutocomplete, type SkillAutocompleteHandle } from '@/components/chat/SkillAutocomplete';
-import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
-import { resolveAutocompleteTrigger, type FileMentionAutocompleteInputSource } from '@/components/chat/composer/language/triggers';
+import type { ComposerReference } from '@/components/chat/composer/editor/references';
+import { useWorkbenchCommandRegistrations } from '@/lib/commands/surface-command-registry';
+import type { ComposerCommandAction, ComposerCommandDraftContext, WorkbenchCommandExecutionContext } from '@/lib/commands/surface-command-types';
+import { FileMentionAutocomplete, type ComposerAttachmentCandidate, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
+import { resolveAutocompleteTrigger, type FileMentionAutocompleteInputSource, type AutocompleteTrigger } from '@/components/chat/composer/language/triggers';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -30,12 +32,17 @@ import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss,
-  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls }: {
-  editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string): void;
+  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity }: {
+  editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[]): void;
+  referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source'];
+  backendIdentity?: string; attachmentCandidates?: readonly ComposerAttachmentCandidate[];
+  backendCommands?: Array<{ name: string; description: string; inputHint?: string }>;
+  commandActions?: Record<string, ComposerCommandAction | undefined>;
+  onReferenceSelect?(reference: ComposerReference): void;
   suggestion?: string; suggestionError?: string; onSuggestionDismiss?(): void;
-  identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void; onOpenHistory?(): void;
+  identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void | Promise<void>; onOpenHistory?(): void;
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
-  onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void;
+  onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void | Promise<void>;
   modelDisabled: boolean; attachmentDisabled: boolean; imageDisabled: boolean; sendDisabled: boolean;
   pending: boolean; active: boolean; retrying: boolean;
   onFiles(files: File[]): void; onAttachImages(): void; onAttachPdfs(): void; onStop?(): void; onGoal?(): void;
@@ -69,19 +76,30 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
     inputRef.current = handle;
     if (typeof editorRef === 'function') editorRef(handle); else if (editorRef) editorRef.current = handle;
   }, [editorRef]);
-  const [autocomplete, setAutocomplete] = React.useState<{ kind: 'command' | 'mention' | 'skill'; query: string } | null>(null);
+  const [autocomplete, setAutocomplete] = React.useState<AutocompleteTrigger | null>(null);
   const [knownAgentNames, setKnownAgentNames] = React.useState<Set<string>>(() => new Set());
   const [confirmedMentions, setConfirmedMentions] = React.useState<Set<string>>(() => new Set());
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
-  const skillRef = React.useRef<SkillAutocompleteHandle>(null);
+  const registrations = useWorkbenchCommandRegistrations();
+  const [layer, setLayer] = React.useState<CommandInfo>();
+  const [commandError, setCommandError] = React.useState<string>();
+  const [commandBusy, setCommandBusy] = React.useState(false);
+  const commandPending = React.useRef(false);
+  const [activeOption, setActiveOption] = React.useState<string>();
+  const menuId = React.useId();
+  const dismissed = React.useRef<string | undefined>(undefined);
+  const scope = JSON.stringify([getRuntimeEndpointGeneration(), identityKey, source, pendingSource, workspacePath, referenceScope, backendIdentity]);
+  const currentIdentity = React.useRef(scope); currentIdentity.current = scope;
+  const latestDraft = React.useRef({ value, references }); latestDraft.current = { value, references };
+  const closeMenu = React.useCallback(() => { dismissed.current = inputRef.current?.getValue() ?? value; setAutocomplete(null); setLayer(undefined); setCommandError(undefined); }, [value]);
   const mentionRef = React.useRef<FileMentionHandle>(null);
   const pendingHistoryTextRef = React.useRef<string | null>(null);
   const messageHistory = useMessageHistory(sentMessageHistory);
   const resetHistory = messageHistory.reset;
-  React.useEffect(() => {
-    setAutocomplete(null); setKnownAgentNames(new Set()); setConfirmedMentions(new Set());
+  React.useLayoutEffect(() => {
+    setAutocomplete(null); setLayer(undefined); setCommandError(undefined); dismissed.current = undefined; setKnownAgentNames(new Set()); setConfirmedMentions(new Set());
     pendingHistoryTextRef.current = null; resetHistory();
-  }, [identityKey, resetHistory]);
+  }, [scope, resetHistory]);
   const sending = pending;
   const loading = false;
   const aborting = false;
@@ -105,18 +123,71 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
     setAutocomplete(null);
   };
   const submit = () => {
+    if (references?.some(reference => reference.target.kind === 'backend-command' && value.slice(reference.from, reference.to) === reference.text && (reference.target.backend !== backendIdentity || reference.host !== getRuntimeEndpointGeneration()))) { setCommandError(t('composer.scope.changed')); return; }
+    const backend = references?.some(reference => reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity && reference.host === getRuntimeEndpointGeneration() && value.slice(reference.from, reference.to) === reference.text && value.trim() === `/${reference.target.name}`);
+    const exact = !backend && knownCommands.find(command => value.trim() === `/${command.name}` && !command.isSkill && command.source !== 'backend');
+    if (exact) { void runCommand(exact, { kind: 'command', query: exact.name, from: value.indexOf('/'), to: value.trimEnd().length }); return; }
     if (sendDisabled) return;
     if (ghostSuggestion) flushSync(acceptSuggestion);
-    else {
-      if (value.trim() === '/tree' && onOpenHistory) { setAutocomplete(null); onOpenHistory(); onChange(''); return; }
-      if (value.trim() === '/compact' && onCompact) { setAutocomplete(null); onCompact(); onChange(''); return; }
-    }
     messageHistory.reset(); frameRef.current?.closest('form')?.requestSubmit();
   };
   const insertTranscript = (text: string) => { onChange([value.trimEnd(), text.trim()].filter(Boolean).join('\n')); requestAnimationFrame(() => inputRef.current?.focus()); };
   const submitText = (text: string) => { flushSync(() => insertTranscript(text)); frameRef.current?.closest('form')?.requestSubmit(); };
   const selected = models.find(model => model.providerId === providerId && model.modelId === modelId);
-  const varinCommands = React.useMemo<readonly CommandInfo[]>(() => [...(onCompact ? [{ id: 'compact', name: 'compact', source: 'varin' as const, description: t('chat.commandAutocomplete.command.compactDescription') }] : []), ...(onOpenHistory ? [{ id: 'tree', name: 'tree', source: 'varin' as const, description: t('chat.timeline.description') }] : [])], [onCompact, onOpenHistory, t]);
+  const settings = (section?: string) => { const ui = useUIStore.getState(); ui.setSettingsDialogOpen(true); if (section) ui.setSettingsPage(section as Parameters<typeof ui.setSettingsPage>[0]); };
+  const chooseModel = async (provider: string, model: string, thinking: ThreadThinkingLevel, complete = false) => {
+    const capturedScope = scope;
+    try { await onModelChange(provider, model, thinking); if (complete && capturedScope === currentIdentity.current) consumeFragment(); }
+    catch (cause) { if (capturedScope === currentIdentity.current) setCommandError(cause instanceof Error ? cause.message : String(cause)); }
+  };
+  const actions: Record<string, ComposerCommandAction | undefined> = {
+    settings: { run: () => settings() }, shortcuts: { run: () => settings('shortcuts') },
+    skills: backendControls === undefined ? { run: () => settings('skills') } : undefined,
+    ...(onCompact ? { compact: { run: onCompact } } : {}), ...(onOpenHistory ? { tree: { run: onOpenHistory } } : {}),
+    ...(onGoal && backendControls === undefined ? { goal: { run: onGoal } } : {}),
+    attachments: { content: <div>{children || <p>{t('composer.emptyAttachments')}</p>}</div> },
+    ...(backendControls === undefined ? {
+      model: { disabled: modelDisabled ? t('composer.menu.unavailable') : undefined, value: selected?.name ?? modelId,
+        content: <div className="space-y-2"><p className="typography-meta text-muted-foreground">{t('composer.model.scope')}</p>{models.map(model => <button type="button" key={`${model.providerId}:${model.modelId}`} className="flex w-full items-center justify-between rounded px-2 py-2 text-left hover:bg-interactive-hover" disabled={modelDisabled}
+          onClick={() => { const levels = model.thinkingLevels ?? ['off']; void chooseModel(model.providerId, model.modelId, levels.includes(thinkingLevel) ? thinkingLevel : levels[0] ?? 'off', true); }}><span>{model.name ?? model.modelId} · {model.providerId}</span>{model.providerId === providerId && model.modelId === modelId && '✓'}</button>)}</div> },
+      thinking: { disabled: modelDisabled ? t('composer.menu.unavailable') : undefined, value: t(`settings.agents.thinking.${thinkingLevel}`),
+        content: <div className="space-y-2"><p className="typography-meta text-muted-foreground">{t('composer.model.scope')}</p>{(selected?.thinkingLevels?.length ?? 0) > 1 ? selected!.thinkingLevels!.map(level => <button type="button" key={level} disabled={modelDisabled} className="flex w-full justify-between rounded px-2 py-2 hover:bg-interactive-hover" onClick={() => { void chooseModel(providerId, modelId, level, true); }}>{t(`settings.agents.thinking.${level}`)}{thinkingLevel === level && '✓'}</button>) : <p>{t('composer.model.noThinking')}</p>}</div> },
+      permissions: { content: <ThreadPermissionControl workspacePath={permissionWorkspacePath} embedded /> },
+    } : {}),
+    ...commandActions,
+  };
+  const commandContext: WorkbenchCommandExecutionContext = { currentDirectory: workspacePath ?? null, isMobile,
+    composer: { host: getRuntimeEndpointGeneration(), identity, source, actions } };
+  const knownCommands: CommandInfo[] = registrations.filter(item => item.meta.composer)
+    .map(item => { const meta = item.meta.composer!; const builtin = item.contributionId.startsWith('varin.builtin.'); const action = builtin ? actions[meta.name] : undefined; return { id: item.contributionId, name: builtin ? meta.name : `ext:${encodeURIComponent(item.contributionId)}:${meta.name}`, sourceLabel: builtin ? undefined : item.contributionId, label: item.meta.titleKey ? t(item.meta.titleKey) : item.meta.title,
+      searchAliases: [meta.name, ...item.meta.keywords], source: item.contributionId.startsWith('varin.builtin.') ? 'varin' : 'extension',
+      group: t(`composer.group.${meta.group}`), icon: item.meta.icon, next: Boolean(action?.content), disabled: action?.disabled ?? (item.implementation.isAvailable && !item.implementation.isAvailable(commandContext) ? t('composer.menu.unavailable') : undefined), value: action?.value }; });
+  const varinCommands = knownCommands.filter(command => actions[command.name] || command.source === 'extension');
+  for (const command of backendCommands ?? []) varinCommands.push({ id: `backend:${command.name}`, name: command.name.replace(/^\//, ''), label: `/${command.name.replace(/^\//, '')}`, description: command.description,
+    source: 'backend', group: t('composer.group.backend') });
+  function consumeFragment(fragment = autocomplete) {
+    if (!fragment) return;
+    if (inputRef.current?.getValue() === value) inputRef.current.replaceRange(fragment.from, fragment.to, '');
+    closeMenu(); inputRef.current?.focus();
+  }
+  async function runCommand(command: CommandInfo, fragment = autocomplete) {
+    if (scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || commandPending.current) return;
+    if (command.disabled) { setCommandError(command.disabled); return; }
+    const action = command.source === 'varin' ? actions[command.name] : undefined;
+    if (action?.content) { if (fragment) setAutocomplete(fragment); dismissed.current = undefined; setLayer(command); setCommandError(undefined); return; }
+    const registration = registrations.find(item => item.contributionId === command.id);
+    if (!registration) { setCommandError(t('composer.menu.unavailable')); return; }
+    const capturedScope = scope, host = getRuntimeEndpointGeneration(), originalText = value, originalReferences = references;
+    commandPending.current = true; setCommandBusy(true); setCommandError(undefined);
+    try {
+      await registration.implementation.execute(commandContext);
+      if (capturedScope === currentIdentity.current && host === getRuntimeEndpointGeneration()) {
+        if (inputRef.current) consumeFragment(fragment);
+        else if (fragment && latestDraft.current.value === originalText && JSON.stringify(latestDraft.current.references) === JSON.stringify(originalReferences)) onChange(originalText.slice(0, fragment.from) + originalText.slice(fragment.to), originalReferences?.filter(item => item.to <= fragment.from || item.from >= fragment.to).map(item => item.from >= fragment.to ? { ...item, from: item.from - (fragment.to - fragment.from), to: item.to - (fragment.to - fragment.from) } : item));
+      }
+    } catch (error) { if (capturedScope === currentIdentity.current && host === getRuntimeEndpointGeneration()) setCommandError(error instanceof Error ? error.message : String(error)); }
+    finally { commandPending.current = false; setCommandBusy(false); }
+  }
   const languageContext = React.useMemo(() => ({ inputMode: 'normal' as const, knownAgentNames, confirmedMentions,
     knownSlashNames: new Set([...skills.map(name => `skill:${name}`), ...varinCommands.map(command => command.name)]), attachmentFilenames: attachmentNames }), [knownAgentNames, confirmedMentions, skills, varinCommands, attachmentNames]);
   const modelControls = <div className="conversation-composer-configuration flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
@@ -126,7 +197,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             <Icon name="brain" className="size-3.5" /><SwapText text={t(`settings.agents.thinking.${thinkingLevel}`)} hold={0} resize />
           </button>
         </DropdownMenuTrigger><DropdownMenuContent side="top" align="end">
-          {selected!.thinkingLevels!.map(level => <DropdownMenuItem key={level} onSelect={() => onModelChange(providerId, modelId, level)}>{t(`settings.agents.thinking.${level}`)}{level === thinkingLevel && <Icon name="check" className="ml-auto size-3.5" />}</DropdownMenuItem>)}
+          {selected!.thinkingLevels!.map(level => <DropdownMenuItem key={level} onSelect={() => void chooseModel(providerId, modelId, level)}>{t(`settings.agents.thinking.${level}`)}{level === thinkingLevel && <Icon name="check" className="ml-auto size-3.5" />}</DropdownMenuItem>)}
         </DropdownMenuContent></DropdownMenu>}
         {selected?.thinkingLevels?.length === 1 && thinkingLevel !== 'off' ? <span className="flex items-center gap-1.5 px-2 typography-meta text-muted-foreground"><Icon name="brain" className="size-3.5" />{t(`settings.agents.thinking.${thinkingLevel}`)}</span> : null}
         <ModelSelector providerId={providerId} modelId={modelId} variant="composer" disabled={modelDisabled} allowNone={false}
@@ -134,93 +205,41 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
           placeholder={t('chat.modelControls.selectModel')} dropdownPortalToBody
           onChange={(provider, model) => {
             const levels = models.find(item => item.providerId === provider && item.modelId === model)?.thinkingLevels ?? ['off'];
-            onModelChange(provider, model, levels.includes(thinkingLevel) ? thinkingLevel : levels[0] ?? 'off');
+            void chooseModel(provider, model, levels.includes(thinkingLevel) ? thinkingLevel : levels[0] ?? 'off');
           }} />
         {agentControls}
         </>}
   </div>;
-  const updateAutocomplete = React.useCallback((
-    value: string,
-    cursorPosition: number,
-    inputSource: FileMentionAutocompleteInputSource = 'manual',
-    insertedText?: string,
-  ) => {
-    if (backendControls !== undefined) { setAutocomplete(null); return; }
-    const trigger = resolveAutocompleteTrigger(value, cursorPosition, {
-      inputMode: 'normal',
-      inputSource,
-      ...(insertedText === undefined ? {} : { insertedText }),
-    });
-    if (trigger && (trigger.kind !== 'skill' || value.slice(0, cursorPosition).trimStart().startsWith('/'))) {
-      setAutocomplete({ kind: trigger.kind, query: trigger.query });
-      return;
+  const updateAutocomplete = React.useCallback((next: string, cursorPosition: number, inputSource: FileMentionAutocompleteInputSource = 'manual', insertedText?: string) => {
+    if (dismissed.current === next) return;
+    const trigger = resolveAutocompleteTrigger(next, cursorPosition, { inputMode: 'normal', inputSource, insertedText, active: autocomplete });
+    setAutocomplete(trigger);
+    if (!trigger) setLayer(undefined);
+  }, [autocomplete]);
+  const handleCommandSelect = (command: CommandInfo, mode: 'confirm' | 'complete') => {
+    if (!autocomplete || commandBusy || scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || inputRef.current?.getValue() !== value) return;
+    if (command.source === 'backend') {
+      if (!backendIdentity) { setCommandError(t('composer.menu.unavailable')); return; }
+      inputRef.current?.insertReference(autocomplete.from, autocomplete.to, `/${command.name}`, { id: crypto.randomUUID(), host: commandContext.composer!.host, target: { kind: 'backend-command', name: command.name, backend: backendIdentity } }); closeMenu(); inputRef.current?.focus(); return;
     }
-    setAutocomplete(null);
-  }, [backendControls]);
-
-  const handleCommandSelect = React.useCallback((command: CommandInfo) => {
-    const value = `/${command.name} `;
-    onChange(value);
-    setAutocomplete(null);
-    requestAnimationFrame(() => {
-      const input = inputRef.current;
-      if (!input) return;
-      input.focus();
-      input.setSelection(value.length);
-    });
-  }, [onChange]);
-
-  const handleSkillSelect = React.useCallback((invocation: string) => {
-    const input = inputRef.current;
-    const cursorPosition = input?.getSelection().end ?? value.length;
-    const slashIndex = value.slice(0, cursorPosition).lastIndexOf('/');
-    const startIndex = slashIndex === -1 ? cursorPosition : slashIndex;
-    const inserted = `${value.slice(0, startIndex)}/${invocation} ${value.slice(cursorPosition)}`;
-    onChange(inserted);
-    setAutocomplete(null);
-    const nextCursor = startIndex + invocation.length + 2;
-    requestAnimationFrame(() => {
-      const editor = inputRef.current;
-      if (!editor) return;
-      editor.focus();
-      editor.setSelection(nextCursor);
-    });
-  }, [value, onChange]);
-
-  const applyMention = React.useCallback((mention: string, kind: 'agent' | 'file') => {
-    const cursor = inputRef.current?.getSelection().start ?? value.length;
-    const insertion = (() => {
-      const start = value.slice(0, cursor).lastIndexOf('@');
-      const insertion = `@${mention} `;
-      const from = start < 0 ? cursor : start;
-      return { text: value.slice(0, from) + insertion + value.slice(cursor), cursor: from + insertion.length };
-    })();
-    if (kind === 'agent') {
-      setKnownAgentNames((current) => new Set(current).add(mention.toLowerCase()));
-    } else {
-      setConfirmedMentions((current) => new Set(current).add(mention));
+    if (command.skill) {
+      inputRef.current?.insertReference(autocomplete.from, autocomplete.to, `/${command.skill.invocation}`, {
+        id: crypto.randomUUID(), host: commandContext.composer!.host, target: { kind: 'skill', resourceId: command.skill.resourceId, version: command.skill.version, locator: command.skill.locator },
+      }); closeMenu(); inputRef.current?.focus(); return;
     }
-    onChange(insertion.text);
-    setAutocomplete(null);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelection(insertion.cursor);
-    });
-  }, [value, onChange]);
-
-  const handleFileSelect = React.useCallback((file: {
-    name: string;
-    path: string;
-    relativePath?: string;
-  }) => {
-    const mention = file.relativePath?.trim() || file.path.replace(/\\/g, '/') || file.name;
-    applyMention(mention, 'file');
-  }, [applyMention]);
-
-  const handleAgentSelect = React.useCallback((agentName: string) => {
-    applyMention(agentName, 'agent');
-  }, [applyMention]);
-
+    if (mode === 'complete') { inputRef.current?.replaceRange(autocomplete.from, autocomplete.to, `/${command.name} `); closeMenu(); inputRef.current?.focus(); return; }
+    void runCommand(command);
+  };
+  const applyReference = (text: string, target: ComposerReference['target']) => {
+    if (!autocomplete || scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || inputRef.current?.getValue() !== value) return;
+    const reference = { id: crypto.randomUUID(), host: commandContext.composer!.host, target, from: autocomplete.from, to: autocomplete.from + text.length, text };
+    onReferenceSelect?.(reference);
+    inputRef.current?.insertReference(autocomplete.from, autocomplete.to, text, reference);
+    closeMenu(); inputRef.current?.focus();
+  };
+  const handleFileSelect = (file: { name: string; path: string; relativePath?: string; directory?: boolean }) => {
+    applyReference(`@${file.relativePath || file.name}`, { kind: file.directory ? 'directory' : 'file', path: file.path, workspacePath: workspacePath ?? '', sourceKey: referenceScope ?? scope });
+  };
   const applyHistoryText = React.useCallback((value: string) => {
     pendingHistoryTextRef.current = value;
     onChange(value);
@@ -232,28 +251,13 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
 
   const handleEditorKeyDown = (event: KeyboardEvent): boolean => {
     // IME confirmation belongs to the editor, including while suggestions are open.
-    if (isIMECompositionEvent(event)) return false;
-    if (autocomplete?.kind === 'command'
-      && event.key === 'Enter'
-      && !event.shiftKey
-      && !isIMECompositionEvent(event)
-      && value.trim() === '/compact') {
-      setAutocomplete(null);
-      if (canSend && !sending && !loading) void submit();
-      return true;
-    }
-    if (
-      autocomplete !== null
-      && (event.key === 'Enter'
-        || event.key === 'ArrowUp'
-        || event.key === 'ArrowDown'
-        || event.key === 'Escape'
-        || event.key === 'Tab')
-    ) {
-      if (autocomplete.kind === 'command') commandRef.current?.handleKeyDown(event.key);
-      else if (autocomplete.kind === 'skill') skillRef.current?.handleKeyDown(event.key);
-      else mentionRef.current?.handleKeyDown(event.key);
-      return true;
+    if (isIMECompositionEvent(event) || (event.shiftKey && (event.key === 'Enter' || event.key === 'Tab'))) return false;
+    if (autocomplete !== null && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+      && ['Enter', 'ArrowUp', 'ArrowDown', 'Escape', 'Tab'].includes(event.key)) {
+      const controller = autocomplete.kind === 'command' ? commandRef.current : mentionRef.current;
+      if (controller?.handleKeyDown(event.key)) return true;
+      // An empty menu never inserts the unrelated next-step suggestion.
+      if (event.key === 'Tab') return false;
     }
     if (
       !event.altKey
@@ -334,14 +338,17 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             key={identityKey}
             ref={bindEditor}
             value={value}
+            references={references}
+            autocomplete={autocomplete && !layer ? { id: menuId, activeId: activeOption } : undefined}
             onChange={(change) => {
+              latestDraft.current = { value: change.value, references: change.references };
               if (pendingHistoryTextRef.current === change.value) {
                 pendingHistoryTextRef.current = null;
                 return;
               }
               pendingHistoryTextRef.current = null;
               if (messageHistory.isBrowsing) messageHistory.reset();
-              onChange(change.value);
+              onChange(change.value, change.references);
               updateAutocomplete(
                 change.value,
                 change.selection.end,
@@ -388,40 +395,21 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             </div>
           </div>
 
-          {autocomplete?.kind === 'command' ? (
-            <CommandAutocomplete
-              ref={commandRef}
-              additionalCommands={varinCommands}
-              cwd={workspacePath}
-              sessionId={identityKey}
-              searchQuery={autocomplete.query}
-              onCommandSelect={handleCommandSelect}
-              onClose={() => setAutocomplete(null)}
-            />
-          ) : null}
-
-          {autocomplete?.kind === 'mention' ? (
-            <FileMentionAutocomplete
-              ref={mentionRef}
-              searchQuery={autocomplete.query}
-              onAgentSelect={handleAgentSelect}
-              workspacePath={workspacePath}
-              onFileSelect={handleFileSelect}
-              onClose={() => setAutocomplete(null)}
-            />
-          ) : null}
-
-          {autocomplete?.kind === 'skill' ? (
-            <SkillAutocomplete
-              ref={skillRef}
-              cwd={workspacePath}
-              sessionId={identityKey}
-              searchQuery={autocomplete.query}
-              onSkillSelect={handleSkillSelect}
-              onClose={() => setAutocomplete(null)}
-            />
-          ) : null}
-
+          {commandError && <p role="alert" className="px-3 py-2 typography-meta text-destructive">{commandError}</p>}
+          <AnimatePresence initial={false}>
+          {autocomplete?.kind === 'command' ? <CommandAutocomplete key="command" ref={commandRef} additionalCommands={varinCommands}
+            api={api} identity={identity} source={source} pendingSource={pendingSource} native={backendControls === undefined}
+            cwd={workspacePath} sessionId={identityKey} searchQuery={autocomplete.query} menuId={menuId} onActive={setActiveOption}
+            onCommandSelect={handleCommandSelect} onClose={closeMenu} title={layer?.label} onBack={() => { setLayer(undefined); setCommandError(undefined); inputRef.current?.focus(); }}>
+              {layer ? typeof actions[layer.name]?.content === 'function' ? (actions[layer.name]!.content as (complete: () => void, context?: ComposerCommandDraftContext) => React.ReactNode)(() => { if (scope === currentIdentity.current) consumeFragment(); }, { text: value.slice(0, autocomplete.from) + value.slice(autocomplete.to), selectedText: (() => { const selection = inputRef.current?.getSelection(); return selection ? value.slice(selection.start, selection.end) : ''; })() }) : actions[layer.name]?.content as React.ReactNode : undefined}
+            </CommandAutocomplete> : null}
+          {autocomplete?.kind === 'mention' ? <FileMentionAutocomplete key="mention" ref={mentionRef} searchQuery={autocomplete.query}
+            api={backendControls === undefined ? api : undefined} identity={identity} source={source} pendingSource={pendingSource} menuId={menuId} onActive={setActiveOption} workspacePath={workspacePath}
+            attachments={attachmentCandidates} fileSelectionDisabled={backendControls === undefined ? undefined : t('external.attachments')}
+            onAttachmentSelect={candidate => { if (candidate.attachment) applyReference(`@${candidate.name}`, { kind: 'attachment', attachment: candidate.attachment }); else if (candidate.fileId) applyReference(`@${candidate.name}`, { kind: 'draft-file', fileId: candidate.fileId }); }}
+            onThreadSelect={(target, name) => applyReference(`@${name}`, { kind: 'thread', identity: target })}
+            onFileSelect={handleFileSelect} onClose={closeMenu} /> : null}
+          </AnimatePresence>
 
           <div data-chat-input-footer="true" className="conversation-composer-footer px-2 pb-2 pt-0.5">
             <div className="conversation-composer-options">

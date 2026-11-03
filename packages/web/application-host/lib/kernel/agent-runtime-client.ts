@@ -692,6 +692,15 @@ export class AgentRuntimeClient {
   reconcileHostTool(input: HostToolReconcileParams, signal?: AbortSignal): Promise<RunReconcileResult> {
     return this.kernel.agentRuntimeRequest('runtime.host_tool.reconcile', input, signal);
   }
+  userChildDispatchCatalog(input: import('./protocol.generated.js').UserChildDispatchCatalogParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').UserChildDispatchCatalog> {
+    return this.kernel.agentRuntimeRequest('runtime.child.user.catalog', input, signal);
+  }
+  userChildDispatchReceipt(input: import('./protocol.generated.js').UserChildDispatchCommand, signal?: AbortSignal): Promise<import('./protocol.generated.js').UserChildDispatchReceipt | null> {
+    return this.kernel.agentRuntimeRequest('runtime.child.user.receipt', input, signal);
+  }
+  acceptUserChildDispatch(input: import('./protocol.generated.js').UserChildDispatchAcceptParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').UserChildDispatchReceipt> {
+    return this.kernel.agentRuntimeRequest('runtime.child.user.accept', input, signal);
+  }
   acceptChildContinuation(input: ChildContinuationAcceptParams, signal?: AbortSignal): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest('runtime.child.continuation.accept', input, signal);
   }

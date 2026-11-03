@@ -27,7 +27,7 @@ pub struct PreparedChildAdmission {
     pub(super) inherited_context: Option<crate::context_retention::RetainedContext>,
     pub(super) avatar: Option<String>,
     pub(super) source_agent: Option<String>,
-    pub(super) context: ToolExecutionContext,
+    pub(super) origin: ChildAdmissionOrigin,
     pub(super) input_ref: Value,
     pub(super) title: Option<String>,
     pub(super) configuration_ref: Value,
@@ -38,9 +38,19 @@ pub struct PreparedChildAdmission {
     pub(super) frozen_reference: Value,
     pub(super) parent_tools_ref: Value,
     pub(super) operation_revision: u64,
-    pub(super) call_id: String,
+    pub(super) call_id: Option<String>,
     pub(super) internal_retrieval: bool,
-    _publication: crate::content::ContentPublication,
+    pub(super) _publication: crate::content::ContentPublication,
+}
+
+pub(super) enum ChildAdmissionOrigin {
+    Tool(ToolExecutionContext),
+    User(super::user_dispatch::UserDispatchAdmission),
+}
+impl ChildAdmissionOrigin {
+    pub(super) fn run_id(&self) -> &str { match self { Self::Tool(context) => &context.run_id, Self::User(user) => &user.command.run_id } }
+    pub(super) fn operation_id(&self) -> &str { match self { Self::Tool(context) => &context.operation_id, Self::User(user) => &user.operation_id } }
+    pub(super) fn tool_origin(&self) -> Option<&crate::execution::ToolOrigin> { match self { Self::Tool(context) => Some(&context.origin), Self::User(_) => None } }
 }
 impl ChildAdmissionPreparation {
     pub fn with_attachments(mut self, attachments: Vec<super::attachments::Attachment>) -> Self { self.attachments=attachments; self }
@@ -156,11 +166,11 @@ impl ChildAdmissionPreparation {
             internal_retrieval: admitted.call.name == "code_retrieval",
             avatar: self.launch.selected_profile.avatar.clone(),
             source_agent:self.input.source_agent.clone(),
-            context: self.context,
+            origin: ChildAdmissionOrigin::Tool(self.context),
             input_ref,
             title: self.input.name.as_deref().map(str::trim).map(str::to_owned).or_else(|| self.input.task.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_owned)),
             operation_revision: operation.revision,
-            call_id: admitted.call.call_id,
+            call_id: Some(admitted.call.call_id),
             configuration_ref: self.content.save(&self.launch.configuration)?,
             launch: launch_content::LaunchSelectionMetadata::stage_child_intent(
                 &self.content,
@@ -188,8 +198,8 @@ pub struct ChildTaskView {
     pub parent_run_id: String,
     pub parent_thread_id: String,
     pub parent_branch_id: String,
-    pub origin: crate::execution::ToolOrigin,
-    pub call_id: String,
+    pub origin: Option<crate::execution::ToolOrigin>,
+    pub call_id: Option<String>,
     pub child_thread_id: String,
     pub child_branch_id: String,
     pub project_id: Option<String>,

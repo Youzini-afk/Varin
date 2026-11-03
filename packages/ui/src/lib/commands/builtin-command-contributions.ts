@@ -13,6 +13,7 @@ import {
   splitActiveEditor,
 } from '@/lib/workbench/editors/session';
 import type { WorkbenchCommandImplementation, WorkbenchCommandMeta } from './surface-command-types';
+import { COMPOSER_COMMAND_DEFINITIONS } from './composer-command-contributions';
 import { requestIdeSearch } from '@/lib/workbench/ide-search-events';
 import {
   executeActiveFileEditorCommand,
@@ -138,7 +139,7 @@ const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
 ];
 
 export const registerBuiltinWorkbenchCommands = (context: SurfaceActivationContext): void => {
-  for (const definition of BUILTIN_WORKBENCH_COMMANDS) {
+  for (const definition of [...BUILTIN_WORKBENCH_COMMANDS, ...COMPOSER_COMMAND_DEFINITIONS]) {
     context.contribute({
       // Command IDs are execution contracts and may use Monaco-style camelCase. Surface
       // contribution IDs are separate identities whose contract requires lowercase segments.
@@ -154,6 +155,7 @@ export const registerBuiltinWorkbenchCommands = (context: SurfaceActivationConte
         icon: definition.meta.icon,
         keywords: definition.meta.keywords,
         order: definition.meta.order,
+        ...(definition.meta.composer ? { composer: { ...definition.meta.composer } } : {}),
         ...(definition.meta.shortcutId ? { shortcutId: definition.meta.shortcutId } : {}),
       },
     }, definition.implementation);

@@ -136,7 +136,7 @@ export class HistoryPresentation {
       if (!entry) {
         const base = { id: item.id, parentId: item.parent, timestamp: '', runId: item.run_id };
         if (item.source === 'user') {
-          const text = typeof item.content === 'string' ? item.content : typeof envelope.text === 'string' ? envelope.text : '';
+          const text = typeof item.content === 'string' ? item.content : typeof envelope.userText === 'string' ? envelope.userText : typeof envelope.text === 'string' ? envelope.text : '';
           entry = typeof object(envelope.questionAnswer).operationId === 'string'
             ? { ...base, type: 'custom_message', customType: 'question-answer', display: true, content: text, details: json(envelope.questionAnswer) }
             : { ...base, type: 'message', message: { role: 'user', content: text, timestamp: 0 } };
@@ -190,7 +190,7 @@ export class HistoryPresentation {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: 'media', content: '', display: true, timestamp: 0 } };
         } else {
           entry = { ...base, type: 'custom_message', customType: item.source, display: true,
-            content: typeof item.content === 'string' ? item.content : typeof envelope.text === 'string' ? envelope.text : '',
+            content: typeof item.content === 'string' ? item.content : typeof envelope.userText === 'string' ? envelope.userText : typeof envelope.text === 'string' ? envelope.text : '',
             ...(typeof item.content === 'string' || typeof envelope.text === 'string' ? {} : { details: json(item.content) }) };
         }
         if (entry.type === 'message' && entry.message.role === 'assistant' && thinking && content.kind !== 'provider_only' && content.kind !== 'reasoning_summary') {

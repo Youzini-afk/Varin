@@ -851,8 +851,10 @@ fn explicit_preparation(
     let snapshot = &checkpoint.resources.as_ref().unwrap().snapshot;
     let descriptor = &snapshot.skills[0];
     InputResourcePreparation {
+        skills: Vec::new(),
         expected_context_checkpoint: Some(checkpoint.id.clone()),
         skill: Some(PreparedExplicitSkill {
+            selection: None,
             snapshot_id: snapshot.id.clone(),
             resource_id: descriptor.id.clone(),
             reference: descriptor.reference.clone(),
@@ -1683,4 +1685,353 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
         varin_runtime::catalog::resources::retained_activations(&projected.history),
         vec![activation]
     );
+}
+
+#[test]
+fn selected_skill_ranges_bind_multiple_same_named_resources_and_survive_replay_and_edits() {
+    use varin_runtime::catalog::{inputs::EnqueueInput, resources::{CapturedResource, InputResourcePreparation, PreparedExplicitSkill}};
+    use varin_runtime::InputMode;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let mut selected = resources("first selected body", None);
+    let mut other = selected.snapshot.skills[0].clone();
+    other.id = "other-resource".into();
+    other.reference.path = "other/SKILL.md".into();
+    other.reference.canonical_id = "resource-domain/other/SKILL.md".into();
+    other.reference.version = "other-v1".into();
+    other.base_path = "other".into();
+    other.base_canonical_id = "resource-domain/other".into();
+    selected.snapshot.captured_files.push(CapturedResource { reference: other.reference.clone(), content: "second selected body".into() });
+    selected.snapshot.skills.push(other);
+    let text = "🦊 before /skill:skill between /skill:skill after /skill:skill";
+    let ranges: Vec<_> = text.match_indices("/skill:skill").map(|(offset, token)| {
+        let start = text[..offset].encode_utf16().count();
+        (start, start + token.encode_utf16().count())
+    }).collect();
+    let selector = |index: usize, resource: usize| json!({"resourceId":selected.snapshot.skills[resource].id,
+        "version":selected.snapshot.skills[resource].reference.version,"start":ranges[index].0,"end":ranges[index].1});
+    // Selectors may arrive out of order, but activations follow text order. The third
+    // occurrence retains its intent without loading the same effective skill twice.
+    let raw = json!({"text":text,"skills":[selector(2, 0),selector(0, 0),selector(1, 1)]});
+    let prepared_skills: Vec<_> = selected.snapshot.skills.iter().enumerate().map(|(index, descriptor)| PreparedExplicitSkill {
+            selection: None,
+        snapshot_id: selected.snapshot.id.clone(), resource_id: descriptor.id.clone(), reference: descriptor.reference.clone(),
+        name: descriptor.name.clone(), arguments: String::new(), body: selected.snapshot.captured_files[index].content.clone(),
+    }).collect();
+    let preparation = InputResourcePreparation { expected_context_checkpoint: None, skill: None, skills: prepared_skills.clone() };
+    let mut input = command(&db, "multiple-selected", "main");
+    input.input = raw.clone();
+    let mut invalid = preparation.clone();
+    invalid.skills[1].resource_id = invalid.skills[0].resource_id.clone();
+    assert!(db.prepare_submission(input.clone(), Some(proposal("first selected body")), Some(basis("first selected body"))).unwrap()
+        .with_resources(Some(selected.clone())).with_input_preparation(Some(invalid)).load(Some(launch(None)), false).is_err());
+    let mut reversed = preparation.clone();
+    reversed.skills.reverse();
+    assert!(db.prepare_submission(input.clone(), Some(proposal("first selected body")), Some(basis("first selected body"))).unwrap()
+        .with_resources(Some(selected.clone())).with_input_preparation(Some(reversed)).load(Some(launch(None)), false).is_err());
+    let prepared = db.prepare_submission(input.clone(), Some(proposal("first selected body")), Some(basis("first selected body"))).unwrap()
+        .with_resources(Some(selected)).with_input_preparation(Some(preparation.clone())).load(Some(launch(None)), false).unwrap();
+    let receipt = db.admit_submission(prepared).unwrap();
+    let checkpoint = db.active_context("main").unwrap().unwrap();
+    let record = db.history("main").unwrap().into_iter().find(|item| item.id == receipt.input_id).unwrap();
+    assert_eq!(record.content["text"], raw["text"]);
+    assert_eq!(record.content["skills"], raw["skills"]);
+    let invocations = record.content["skillInvocations"].as_array().unwrap();
+    assert_eq!(invocations.len(), 2);
+    assert_eq!(invocations[0]["resourceId"], "skill");
+    assert_eq!(invocations[1]["resourceId"], "other-resource");
+    assert_eq!(invocations[1]["ordinal"], 1);
+    let activations = varin_runtime::catalog::resources::retained_activations(&db.execution_history("main").unwrap());
+    assert_eq!(activations.len(), 2);
+    assert_eq!(activations[1].resource_id, "other-resource");
+
+    let queue = EnqueueInput { key: "selected-queue".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        mode: InputMode::Boundary, input: raw.clone(), configuration: None };
+    let mut preparation = preparation;
+    preparation.expected_context_checkpoint = Some(checkpoint.id.clone());
+    let queued = db.prepare_enqueue(queue.clone()).unwrap().with_input_preparation(Some(preparation.clone())).load().unwrap();
+    let queued = db.admit_queued_input(queued).unwrap().receipt;
+    let mut changed = raw.clone();
+    changed["skills"] = json!([raw["skills"][2].clone()]);
+    assert!(db.prepare_input_edit(&queued.input_id, 1, changed.clone()).unwrap().load().is_err());
+    preparation.skills = vec![prepared_skills[1].clone()];
+    let edited = db.prepare_input_edit(&queued.input_id, 1, changed.clone()).unwrap()
+        .with_input_preparation(Some(preparation)).load().unwrap();
+    let edited = db.admit_input_edit(edited).unwrap().load().unwrap();
+    assert_eq!(edited.content["skillInvocations"].as_array().unwrap().len(), 1);
+    assert_eq!(edited.content["skillInvocations"][0]["resourceId"], "other-resource");
+    assert_eq!(edited.content["skillInvocations"][0]["contentRevision"], 2);
+    let mut different = queue.clone();
+    different.input = changed;
+    assert!(db.prepare_enqueue(different).unwrap().existing_receipt().is_err());
+    assert_eq!(db.prepare_enqueue(queue).unwrap().existing_receipt().unwrap().unwrap(), queued);
+    db.cancel_input(&queued.input_id, edited.revision).unwrap();
+    finish(&mut db, &receipt);
+    refresh(&mut db, "later resources");
+    let retry = db.prepare_submission(input.clone(), None, None).unwrap().load(Some(launch(None)), false).unwrap();
+    assert_eq!(db.admit_submission(retry).unwrap(), receipt);
+    input.input["skills"][0]["version"] = json!("changed-version");
+    assert!(db.prepare_submission(input, None, None).unwrap().existing_receipt(&Some(launch(None)), false).is_err());
+    content_collection::collect(|| db.prepare_content_collection(Default::default())).unwrap();
+    drop(db);
+    let db = f.open();
+    let activations = varin_runtime::catalog::resources::retained_activations(&db.execution_history("main").unwrap());
+    assert_eq!(activations.len(), 2);
+    assert_eq!(activations[0].reference.version, "version-first selected body");
+    assert_eq!(activations[1].reference.version, "other-v1");
+}
+
+#[test]
+fn augmented_input_keeps_legacy_skill_arguments_bound_to_original_user_text() {
+    use varin_runtime::catalog::inputs::EnqueueInput;
+    use varin_runtime::InputMode;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let owner = admit(&mut db, "augmentation-owner", "frozen skill body", None);
+    let original = db.active_context("main").unwrap().unwrap();
+    let input = json!({"text":"/skill:skill exact args @notes\n\nAttached object context", "userText":"/skill:skill exact args @notes","references":[{"kind":"directory","path":"notes","start":24,"end":30}]});
+    let command = EnqueueInput { key: "augmented-skill".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        mode: InputMode::Boundary, input: input.clone(), configuration: None };
+    let prepared = db.prepare_enqueue(command.clone()).unwrap().with_input_preparation(Some(explicit_preparation(&original, "exact args @notes"))).load().unwrap();
+    let receipt = db.admit_queued_input(prepared).unwrap().receipt;
+    let queued = db.capture_queued_input(&receipt.input_id).unwrap().load().unwrap();
+    let mut forged_retry = command.clone();
+    forged_retry.input["userText"] = json!("/skill:unrelated");
+    assert!(db.prepare_enqueue(forged_retry).unwrap().existing_receipt().is_err());
+    let mut legacy_retry = command.clone();
+    legacy_retry.input.as_object_mut().unwrap().remove("userText");
+    assert_eq!(db.prepare_enqueue(legacy_retry).unwrap().existing_receipt().unwrap().unwrap(), receipt);
+    let mut changed_reference = command.clone();
+    changed_reference.input["references"][0]["path"] = json!("another-directory");
+    assert!(db.prepare_enqueue(changed_reference).unwrap().existing_receipt().is_err());
+    let mut different = command;
+    different.input["skills"] = json!([{"resourceId":"skill","version":"version-frozen skill body","start":0,"end":12}]);
+    assert!(db.prepare_enqueue(different).unwrap().existing_receipt().is_err());
+    assert_eq!(queued.content["text"], input["text"]);
+    assert_eq!(queued.content["userText"], input["userText"]);
+    assert_eq!(queued.content["references"], input["references"]);
+    assert_eq!(queued.content["skillInvocations"][0]["arguments"], "exact args @notes");
+    let mut changed = input;
+    changed["userText"] = json!("/skill:skill changed args");
+    assert!(db.prepare_input_edit(&receipt.input_id, 1, changed).unwrap().load().is_err());
+    db.cancel_input(&receipt.input_id, 1).unwrap();
+    finish(&mut db, &owner);
+}
+
+#[test]
+fn object_reference_retry_uses_raw_intent_without_rebuilding_accepted_context() {
+    use varin_runtime::catalog::inputs::EnqueueInput;
+    use varin_runtime::InputMode;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let owner = admit(&mut db, "reference-intent-owner", "selected reference skill", None);
+    let checkpoint = db.active_context("main").unwrap().unwrap();
+    let text = "/skill:skill inspect @notes";
+    let raw = json!({"text":text,
+        "references":[{"kind":"directory","path":"notes","start":21,"end":27}],
+        "skills":[{"resourceId":"skill","version":"version-selected reference skill","start":0,"end":12}],
+        "referenceIntent":{"text":text,"materials":[{"snapshotId":"original-document"}]},
+        "attachments":[{"media_type":"image/png","data_base64":"b3JpZ2luYWwtaW1hZ2U="}]});
+    let mut prepared_input = raw.clone();
+    prepared_input["userText"] = json!(text);
+    prepared_input["text"] = json!(format!("{text}\n\nOriginal directory locator and retained original-document description"));
+    let command = EnqueueInput { key: "reference-intent".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        mode: InputMode::Boundary, input: prepared_input.clone(), configuration: None };
+    let preparation = explicit_preparation(&checkpoint, "");
+    let prepared = db.prepare_enqueue(command.clone()).unwrap().with_input_preparation(Some(preparation)).load().unwrap();
+    let receipt = db.admit_queued_input(prepared).unwrap().receipt;
+    let mut retry = command.clone();
+    retry.input = raw.clone();
+    // Refresh removes the original resource version. Receipt lookup must not prepare again.
+    refresh(&mut db, "later reference resources");
+    let captured = db.prepare_enqueue(retry.clone()).unwrap();
+    assert_eq!(captured.existing_receipt().unwrap(), Some(receipt.clone()));
+    let replay = db.admit_queued_input(captured.load().unwrap()).unwrap();
+    assert!(!replay.accepted);
+    assert_eq!(replay.receipt, receipt);
+    let stored = db.capture_queued_input(&receipt.input_id).unwrap().load().unwrap();
+    assert_eq!(stored.content["text"], prepared_input["text"]);
+    assert_eq!(stored.content["referenceIntent"], raw["referenceIntent"]);
+    assert_eq!(stored.content["skillInvocations"][0]["body"], "selected reference skill");
+    let media: varin_runtime::output::StoredMedia = serde_json::from_value(stored.content["attachments"][0].clone()).unwrap();
+    let read = varin_runtime::output::MediaReadParams { thread_id: "thread".into(), branch_id: "main".into(),
+        holder: varin_runtime::output::OutputMediaHolder::Input { input_id: receipt.input_id.clone(), expected_revision: stored.revision },
+        part_index: 0, chunk_index: 0, expected_content_ref: media.content_ref.content_object };
+    assert_eq!(db.capture_media_read(&read).unwrap().chunk(&|| false).unwrap().bytes_base64,
+        raw["attachments"][0]["data_base64"].as_str().unwrap());
+
+    for pointer in ["/references/0/path", "/referenceIntent/materials/0/snapshotId", "/skills/0/version", "/attachments/0/data_base64"] {
+        let mut different = retry.clone();
+        *different.input.pointer_mut(pointer).unwrap() = json!("Y2hhbmdlZA==");
+        assert!(db.prepare_enqueue(different).unwrap().existing_receipt().is_err(), "changed {pointer} must conflict");
+    }
+    let mut different_text = retry.clone();
+    different_text.input["text"] = json!(format!("{text}!"));
+    different_text.input["referenceIntent"]["text"] = different_text.input["text"].clone();
+    assert!(db.prepare_enqueue(different_text).unwrap().existing_receipt().is_err());
+    for invalid_marker in [
+        json!({"text":"unrelated"}),
+        json!({"text":text,"materials":null}),
+        json!({"text":text,"materials":[{"snapshotId":" "}]}),
+        json!({"text":text,"materials":[{"snapshotId":"original-document","grant":"read"}]}),
+        json!({"text":text,"extra":true}),
+    ] {
+        let mut invalid = retry.clone();
+        invalid.input["referenceIntent"] = invalid_marker;
+        assert!(db.prepare_enqueue(invalid).unwrap().existing_receipt().is_err());
+    }
+    let mut missing_references = retry;
+    missing_references.input["references"] = json!([]);
+    assert!(db.prepare_enqueue(missing_references).unwrap().existing_receipt().is_err());
+    // Historical, unmarked input still treats the entire submitted text as intent.
+    let unmarked = EnqueueInput { key: "unmarked-reference-intent".into(), input: json!({"text":"original locator text"}), ..command };
+    let prepared = db.prepare_enqueue(unmarked.clone()).unwrap().load().unwrap();
+    let unmarked_receipt = db.admit_queued_input(prepared).unwrap().receipt;
+    let mut changed = unmarked;
+    changed.input["text"] = json!("changed locator text");
+    assert!(db.prepare_enqueue(changed).unwrap().existing_receipt().is_err());
+    db.cancel_input(&receipt.input_id, 1).unwrap();
+    db.cancel_input(&unmarked_receipt.input_id, 1).unwrap();
+    finish(&mut db, &owner);
+}
+
+#[test]
+fn pending_skill_locator_binds_exact_frozen_descriptor_and_retries_without_current_resource() {
+    use sha2::{Digest, Sha256};
+    use varin_runtime::catalog::{inputs::EnqueueInput, launches::SourceResourceOwner, resources::ExplicitSkillSelectionIdentity};
+    use varin_runtime::InputMode;
+    let locator_id = |locator: &Value| {
+        let owner: SourceResourceOwner = serde_json::from_value(locator["resourceOwner"].clone()).unwrap();
+        let tuple = (&owner, locator["workspaceId"].as_str().unwrap(), locator["domainId"].as_str().unwrap(), locator["path"].as_str().unwrap());
+        format!("draft-skill:{}", hex::encode(Sha256::digest(serde_json::to_vec(&tuple).unwrap())))
+    };
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let captured = "\u{feff}---\nname: skill\n---\nOriginal selected body";
+    let owner = admit(&mut db, "pending-skill-owner", captured, Some(source("fixed_branch", "pending-source")));
+    let checkpoint = db.active_context("main").unwrap().unwrap();
+    let locator = json!({"resourceOwner":{"kind":"local"},"workspaceId":"workspace","domainId":"resource-domain","path":"skill/SKILL.md"});
+    let draft_id = locator_id(&locator);
+    let version = hex::encode(Sha256::digest(captured.strip_prefix('\u{feff}').unwrap().as_bytes()));
+    let selector = |start, end| json!({"resourceId":draft_id,"version":version,"start":start,"end":end,"locator":locator});
+    let raw = json!({"text":"Use /skill:skill /skill:skill","skills":[selector(4,16),selector(17,29)]});
+    let mut preparation = explicit_preparation(&checkpoint, "");
+    let skill = preparation.skill.as_mut().unwrap();
+    skill.body = "Original selected body".into();
+    skill.selection = Some(ExplicitSkillSelectionIdentity { resource_id: draft_id.clone(), version: version.clone() });
+    let command = EnqueueInput { key: "pending-skill".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        mode: InputMode::Boundary, input: raw.clone(), configuration: None };
+
+    // The Host's resolved selection cannot substitute a different workspace, owner,
+    // domain, path or captured version even when its raw locator identity is recomputed.
+    for (field, value) in [
+        ("workspaceId", json!("other-workspace")), ("domainId", json!("other-domain")),
+        ("path", json!("other/SKILL.md")),
+        ("resourceOwner", json!({"kind":"managed_host","hostId":"remote","connectionId":"connection","endpointIdentity":"endpoint"})),
+    ] {
+        let mut different = command.clone();
+        let mut changed_locator = locator.clone();
+        changed_locator[field] = value;
+        let changed_id = locator_id(&changed_locator);
+        for selection in different.input["skills"].as_array_mut().unwrap() {
+            selection["locator"] = changed_locator.clone();
+            selection["resourceId"] = json!(changed_id);
+        }
+        let mut changed_preparation = preparation.clone();
+        changed_preparation.skill.as_mut().unwrap().selection.as_mut().unwrap().resource_id = changed_id;
+        assert!(db.prepare_enqueue(different).unwrap().with_input_preparation(Some(changed_preparation)).load().is_err(), "{field} must match frozen source");
+    }
+    let mut wrong_version = command.clone();
+    for selection in wrong_version.input["skills"].as_array_mut().unwrap() { selection["version"] = json!("changed-version"); }
+    let mut changed_preparation = preparation.clone();
+    changed_preparation.skill.as_mut().unwrap().selection.as_mut().unwrap().version = "changed-version".into();
+    assert!(db.prepare_enqueue(wrong_version).unwrap().with_input_preparation(Some(changed_preparation)).load().is_err());
+    let mut aliases = command.clone();
+    let mut direct = preparation.skill.as_ref().unwrap().clone();
+    direct.selection = None;
+    aliases.input["skills"][1] = json!({"resourceId":direct.resource_id,"version":direct.reference.version,"start":17,"end":29});
+    let mut alias_preparation = preparation.clone();
+    alias_preparation.skills = vec![alias_preparation.skill.take().unwrap(), direct];
+    assert!(db.prepare_enqueue(aliases).unwrap().with_input_preparation(Some(alias_preparation)).load().is_err());
+
+    let prepared = db.prepare_enqueue(command.clone()).unwrap().with_input_preparation(Some(preparation)).load().unwrap();
+    let receipt = db.admit_queued_input(prepared).unwrap().receipt;
+    let stored = db.capture_queued_input(&receipt.input_id).unwrap().load().unwrap();
+    assert_eq!(stored.content["skillInvocations"].as_array().unwrap().len(), 1);
+    assert_eq!(stored.content["skillInvocations"][0]["resourceId"], "skill");
+    assert_eq!(stored.content["skillInvocations"][0]["selection"]["resourceId"], draft_id);
+    assert_eq!(stored.content["skills"], raw["skills"]);
+    let mut unavailable = checkpoint.resources.as_ref().unwrap().clone();
+    unavailable.snapshot.id = "currently-unavailable".into();
+    unavailable.snapshot.skills.clear();
+    unavailable.snapshot.captured_files.clear();
+    let refresh = db.prepare_resource_refresh("main", checkpoint.revision, checkpoint.proposal.effective_system_prompt.clone(),
+        checkpoint.proposal.instruction_sources.clone(), checkpoint.proposal.memory_checkpoint.clone(), checkpoint.personalization.clone().unwrap(), unavailable).unwrap().load().unwrap();
+    db.publish_resource_refresh(refresh).unwrap();
+    let replay = db.prepare_enqueue(command.clone()).unwrap();
+    assert_eq!(replay.existing_receipt().unwrap(), Some(receipt.clone()));
+    assert_eq!(db.admit_queued_input(replay.load().unwrap()).unwrap().receipt, receipt);
+    for pointer in ["/skills/0/locator/path", "/skills/0/version"] {
+        let mut different = command.clone();
+        *different.input.pointer_mut(pointer).unwrap() = json!("changed");
+        assert!(db.prepare_enqueue(different).unwrap().existing_receipt().is_err());
+    }
+    db.cancel_input(&receipt.input_id, 1).unwrap();
+    finish(&mut db, &owner);
+}
+
+#[test]
+fn queued_object_reference_edits_retain_original_images_before_partial_validation() {
+    use varin_runtime::catalog::inputs::EnqueueInput;
+    use varin_runtime::output::{MediaReadParams, OutputMediaHolder, StoredMedia};
+    use varin_runtime::InputMode;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let owner = admit(&mut db, "edit-reference-owner", "edit selected skill", None);
+    let checkpoint = db.active_context("main").unwrap().unwrap();
+    let text = "Read @task /skill:skill";
+    let input = json!({"text":text,"references":[{"kind":"thread","threadId":"other","branchId":"branch","start":5,"end":10}],
+        "referenceIntent":{"text":text,"attachmentSelections":[{"ref":"attachment:original"}],"originalImageCount":1},
+        "fileAttachments":[{"ref":"attachment:original","filename":"notes.pdf","mimeType":"application/pdf","byteLength":4}],
+        "attachments":[{"media_type":"image/png","data_base64":"b3JpZ2luYWw="}],"imageReferences":[3]});
+    let prepared = db.prepare_enqueue(EnqueueInput { key:"reference-edit".into(),thread_id:"thread".into(),branch_id:"main".into(),
+        mode:InputMode::Boundary,input:input.clone(),configuration:None }).unwrap().load().unwrap();
+    let receipt = db.admit_queued_input(prepared).unwrap().receipt;
+    let original = db.capture_queued_input(&receipt.input_id).unwrap().load().unwrap();
+    let media: StoredMedia = serde_json::from_value(original.content["attachments"][0].clone()).unwrap();
+    let mut edit = input.clone();
+    for field in ["attachments","imageReferences","fileAttachments"] { edit.as_object_mut().unwrap().remove(field); }
+    let prepared = db.prepare_input_edit(&receipt.input_id, original.revision, edit.clone()).unwrap().load().unwrap();
+    let unchanged = db.admit_input_edit(prepared).unwrap().load().unwrap();
+    assert_eq!(unchanged.content["attachments"], original.content["attachments"]);
+    assert_eq!(unchanged.content["imageReferences"], original.content["imageReferences"]);
+    assert_eq!(unchanged.content["fileAttachments"], original.content["fileAttachments"]);
+    assert_eq!(unchanged.content["referenceIntent"], original.content["referenceIntent"]);
+    edit["skills"] = json!([{"resourceId":"skill","version":"version-edit selected skill","start":11,"end":23}]);
+    let prepared = db.prepare_input_edit(&receipt.input_id, unchanged.revision, edit.clone()).unwrap()
+        .with_input_preparation(Some(explicit_preparation(&checkpoint, ""))).load().unwrap();
+    let selected = db.admit_input_edit(prepared).unwrap().load().unwrap();
+    assert_eq!(selected.content["skillInvocations"][0]["body"], "edit selected skill");
+    assert_eq!(selected.content["attachments"], original.content["attachments"]);
+    assert_eq!(selected.content["fileAttachments"], original.content["fileAttachments"]);
+    let read = MediaReadParams { thread_id:"thread".into(),branch_id:"main".into(),
+        holder:OutputMediaHolder::Input { input_id:receipt.input_id.clone(),expected_revision:selected.revision },
+        part_index:0,chunk_index:0,expected_content_ref:media.content_ref.content_object.clone() };
+    assert_eq!(db.capture_media_read(&read).unwrap().chunk(&|| false).unwrap().bytes_base64,"b3JpZ2luYWw=");
+    let old_read = MediaReadParams { holder:OutputMediaHolder::Input { input_id:receipt.input_id.clone(),expected_revision:original.revision },..read };
+    assert!(db.capture_media_read(&old_read).is_err());
+    let mut forged = edit.clone();
+    forged["attachments"] = original.content["attachments"].clone();
+    assert!(db.prepare_input_edit(&receipt.input_id, selected.revision, forged).unwrap().load().is_err(), "stored refs cannot enter through user media");
+    edit["referenceIntent"]["originalImageCount"] = json!(2);
+    assert!(db.prepare_input_edit(&receipt.input_id, selected.revision, edit.clone()).unwrap().load().is_err(), "retained media count is exact");
+    edit["referenceIntent"]["originalImageCount"] = json!(1);
+    assert!(db.prepare_enqueue(EnqueueInput { key:"fresh-with-missing-image".into(),thread_id:"thread".into(),branch_id:"main".into(),
+        mode:InputMode::Boundary,input:edit,configuration:None }).unwrap().load().is_err(), "fresh input cannot claim retained images");
+    db.run(&owner.run_id).unwrap();
 }

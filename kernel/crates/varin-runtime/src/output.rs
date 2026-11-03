@@ -470,11 +470,104 @@ pub(crate) fn image_references(input: &Value) -> Result<Option<Vec<u64>>, crate:
     Ok(Some(references))
 }
 
-/// Admission validates only the explicitly typed user attachment field.
+/// These locators are input metadata only. The Host resolves visibility and sources;
+/// neither a Thread ID nor a path here authorizes a resource read or delegation.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
+enum InputObjectReference {
+    Thread { thread_id: String, branch_id: String, start: usize, end: usize },
+    Directory { path: String, start: usize, end: usize },
+}
+
+/// Durable User intent for a message whose current object locators are prepared by the Host.
+/// Keep material selectors here rather than rebuilding an accepted message from current readers.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InputReferenceIntent {
+    text: String,
+    #[serde(default)]
+    materials: Vec<InputReferenceMaterial>,
+    #[serde(default)]
+    attachment_selections: Vec<crate::catalog::attachments::AttachmentSelection>,
+    #[serde(default)]
+    original_image_count: Option<usize>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InputReferenceMaterial {
+    snapshot_id: String,
+}
+
+/// A Host-added marker identifies the original visible prefix before appended context.
+/// It cannot supply an alternative hidden command or replace the submitted text.
+pub(crate) fn validate_user_metadata(input: &Value) -> Result<(), crate::catalog::RuntimeError> {
+    validate_user_metadata_with_retained_media(input, None)
+}
+
+// Only the native queued-input edit owner may supply its previously accepted content.
+// This changes count validation, never accepts stored media references as fresh input.
+pub(crate) fn validate_user_metadata_with_retained_media(input: &Value, previous: Option<&Value>) -> Result<(), crate::catalog::RuntimeError> {
+    if let Some(value) = input.get("userText") {
+        let valid = value.as_str().zip(input.get("text").and_then(Value::as_str))
+            .is_some_and(|(original, text)| text.starts_with(original));
+        if !valid {
+            return Err(crate::catalog::RuntimeError::Invalid("original user text must be an exact prefix of input text".into()));
+        }
+    }
+    if let Some(value) = input.get("referenceIntent") {
+        let intent: InputReferenceIntent = serde_json::from_value(value.clone())?;
+        let original = input.get("userText").or_else(|| input.get("text")).and_then(Value::as_str);
+        for selection in &intent.attachment_selections { selection.validate()?; }
+        let image_count = input.get("attachments").or_else(|| previous.and_then(|value| value.get("attachments")))
+            .and_then(Value::as_array).map_or(0, Vec::len);
+        if original != Some(intent.text.as_str())
+            || !input.get("references").and_then(Value::as_array).is_some_and(|references| !references.is_empty())
+            || intent.materials.iter().any(|material| material.snapshot_id.trim().is_empty())
+            || intent.attachment_selections.is_empty() != intent.original_image_count.is_none()
+            || intent.original_image_count.is_some_and(|count| count > image_count) {
+            return Err(crate::catalog::RuntimeError::Invalid("reference intent must identify original text, references and material selectors".into()));
+        }
+    }
+    if let Some(value) = input.get("references") {
+        let references: Vec<InputObjectReference> = serde_json::from_value(value.clone())?;
+        if !references.is_empty() {
+            let text = input.get("userText").or_else(|| input.get("text")).and_then(Value::as_str)
+                .ok_or_else(|| crate::catalog::RuntimeError::Invalid("object references require original user text".into()))?;
+            let text: Vec<u16> = text.encode_utf16().collect();
+            let mut ranges = Vec::new();
+            for reference in references {
+                let (valid, start, end) = match reference {
+                    InputObjectReference::Thread { thread_id, branch_id, start, end } => (!thread_id.trim().is_empty() && !branch_id.trim().is_empty(), start, end),
+                    InputObjectReference::Directory { path, start, end } => (!path.trim().is_empty(), start, end),
+                };
+                if !valid || start >= end || end > text.len() || String::from_utf16(&text[start..end]).is_err() {
+                    return Err(crate::catalog::RuntimeError::Invalid("object reference has an invalid identity or text range".into()));
+                }
+                ranges.push((start, end));
+            }
+            ranges.sort_unstable();
+            if ranges.windows(2).any(|pair| pair[0].1 > pair[1].0) {
+                return Err(crate::catalog::RuntimeError::Invalid("object reference text ranges overlap".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Admission validates explicitly typed user metadata and attachments.
 pub(crate) fn admit_user_input(
     input_id: &str,
     input: &Value,
 ) -> Result<Value, crate::catalog::RuntimeError> {
+    admit_user_input_with_retained_media(input_id, input, None)
+}
+
+pub(crate) fn admit_user_input_with_retained_media(
+    input_id: &str,
+    input: &Value,
+    previous: Option<&Value>,
+) -> Result<Value, crate::catalog::RuntimeError> {
+    validate_user_metadata_with_retained_media(input, previous)?;
     image_references(input)?;
     let mut value = input.clone();
     if let Some(attachments) = value.get_mut("attachments") {
@@ -531,7 +624,27 @@ impl crate::content::ContentStore {
         let mut value = admit_user_input(input_id, input)?;
         // The first admitted clock observation is retained with history. A retry's
         // new observation or changed time-display preference is not a new user intent.
-        if let Some(object) = value.as_object_mut() { object.remove("sentTime"); }
+        if let Some(object) = value.as_object_mut() {
+            object.remove("sentTime");
+            // Marked object-reference input has an explicit raw intent. Current locator text
+            // and material descriptions must not rewrite an already accepted retry.
+            if let Some(text) = object.get("referenceIntent").and_then(|intent| intent.get("text")).cloned() {
+                object.insert("text".into(), text);
+                if let Some(count) = object.get("referenceIntent").and_then(|intent| intent.get("originalImageCount")).and_then(Value::as_u64) {
+                    // File descriptors and their automatically rendered vision media are frozen
+                    // material, not a second identity for the same original attachment selectors.
+                    object.remove("fileAttachments");
+                    if count == 0 { object.remove("attachments"); object.remove("imageReferences"); }
+                    else {
+                        if let Some(images) = object.get_mut("attachments").and_then(Value::as_array_mut) { images.truncate(count as usize); }
+                        if let Some(references) = object.get_mut("imageReferences").and_then(Value::as_array_mut) { references.truncate(count as usize); }
+                    }
+                }
+            }
+            // Unmarked inputs retain their actual submitted text for historical compatibility.
+            // The original-prefix marker itself is derived presentation metadata.
+            object.remove("userText");
+        }
         if let Some(attachments) = value.get_mut("attachments") {
             let media: Vec<ResolvedMedia> = serde_json::from_value(attachments.take())?;
             *attachments = serde_json::to_value(
@@ -557,7 +670,17 @@ impl crate::content::ContentStore {
         input_id: &str,
         input: &Value,
     ) -> Result<Value, crate::catalog::RuntimeError> {
-        let mut value = admit_user_input(input_id, input)?;
+        self.store_admitted_user_input(admit_user_input(input_id, input)?)
+    }
+    pub(crate) fn store_edited_user_input(
+        &self,
+        input_id: &str,
+        input: &Value,
+        previous: &Value,
+    ) -> Result<Value, crate::catalog::RuntimeError> {
+        self.store_admitted_user_input(admit_user_input_with_retained_media(input_id, input, Some(previous))?)
+    }
+    fn store_admitted_user_input(&self, mut value: Value) -> Result<Value, crate::catalog::RuntimeError> {
         if let Some(attachments) = value.get_mut("attachments") {
             let media: Vec<ResolvedMedia> = serde_json::from_value(attachments.take())?;
             *attachments = serde_json::to_value(
@@ -612,5 +735,36 @@ impl crate::content::ContentStore {
             .into_iter()
             .map(|item| item.map_media(|media| self.resolve_media_cancellable(media, cancelled)).map(std::sync::Arc::new))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod reference_attachment_intent_tests {
+    use super::*;
+
+    #[test]
+    fn raw_reference_retry_retains_selected_files_and_only_original_images() {
+        let raw = serde_json::json!({
+            "text": "Read @task", "references": [{"kind":"thread","threadId":"other","branchId":"branch","start":5,"end":10}],
+            "referenceIntent": {"text":"Read @task","attachmentSelections":[{"ref":"attachment:original"}],"originalImageCount":1},
+            "attachments": [{"media_type":"image/png","data_base64":"dXNlcg=="}], "imageReferences":[3]
+        });
+        let mut prepared = raw.clone();
+        prepared["text"] = serde_json::json!("Read @task\nFrozen context");
+        prepared["userText"] = serde_json::json!("Read @task");
+        prepared["fileAttachments"] = serde_json::json!([{"ref":"attachment:frozen","filename":"image.png","mimeType":"image/png","byteLength":4}]);
+        prepared["attachments"].as_array_mut().unwrap().push(serde_json::json!({"media_type":"image/png","data_base64":"ZmlsZQ=="}));
+        prepared["imageReferences"] = serde_json::json!([3,4]);
+        let normalized = crate::content::ContentStore::normalized_user_input("input", &raw).unwrap();
+        assert_eq!(normalized, crate::content::ContentStore::normalized_user_input("input", &prepared).unwrap());
+        let mut changed = raw.clone();
+        changed["referenceIntent"]["attachmentSelections"][0]["ref"] = serde_json::json!("attachment:other");
+        assert_ne!(normalized, crate::content::ContentStore::normalized_user_input("input", &changed).unwrap());
+        changed["referenceIntent"]["originalImageCount"] = serde_json::json!(2);
+        assert!(crate::content::ContentStore::normalized_user_input("input", &changed).is_err());
+        changed["referenceIntent"]["originalImageCount"] = serde_json::json!(0);
+        changed.as_object_mut().unwrap().remove("attachments");
+        changed.as_object_mut().unwrap().remove("imageReferences");
+        assert!(crate::content::ContentStore::normalized_user_input("input", &changed).is_ok());
     }
 }

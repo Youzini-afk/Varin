@@ -205,8 +205,10 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                 let resources = resources("old");
                 let skill = &resources.snapshot.skills[0];
                 varin_runtime::catalog::resources::InputResourcePreparation {
+                    skills: Vec::new(),
                     expected_context_checkpoint: None,
                     skill: Some(varin_runtime::catalog::resources::PreparedExplicitSkill {
+            selection: None,
                         snapshot_id: resources.snapshot.id.clone(),
                         resource_id: skill.id.clone(),
                         reference: skill.reference.clone(),

@@ -134,7 +134,7 @@ it('passes authoritative fixed provenance into native submit and all three enque
     await f.api.enqueue({ ...identity, key: `pdf-${mode}`, text: '', mode, materials });
     const queued = f.runtime.enqueue.mock.calls.at(-1)![0];
     expect(queued.mode).toBe(mode);
-    expect(queued.input).toEqual({ text: submitted.text.replace('Read this original.\n\n', '') });
+    expect(queued.input).toEqual({ text: submitted.text.replace('Read this original.\n\n', ''), userText: '' });
   }
 });
 
@@ -144,7 +144,7 @@ it('continues only the original child with PDF references readable by that child
   await f.api.collaboration!.continueChild({ ...child, key: 'child-pdf', previousRunId: 'run:child', expectedHead: null,
     text: '', materials: [{ snapshotId: snapshot.snapshotId }] });
   expect(f.runtime.acceptChildContinuation).toHaveBeenCalledWith(expect.objectContaining({ childOperationId: 'operation:child',
-    input: { text: expect.stringContaining(snapshot.snapshotId) } }), expect.any(AbortSignal));
+    input: { text: expect.stringContaining(snapshot.snapshotId), userText: '' } }), expect.any(AbortSignal));
   expect(await f.api.materials.read(child, { snapshotId: snapshot.snapshotId, view: 'text' })).toMatchObject({ status: 'ok', markdown: expect.stringContaining('LEFT') });
   await expect(f.api.submit({ ...identity, key: 'foreign-child-pdf', expectedHead: null, text: 'Read', model,
     materials: [{ snapshotId: snapshot.snapshotId }] })).rejects.toMatchObject({ admission: 'not_started' });

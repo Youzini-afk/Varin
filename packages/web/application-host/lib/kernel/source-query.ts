@@ -112,7 +112,14 @@ export function createSourceQueryOwner(options: {
       } else {
         const handshake = kernel.handshake;
         if (source.mode !== 'materialized' || !handshake || root && root.hostId !== handshake.hostId) throw new Error('The original materialized source root is unavailable');
-        const location = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, source.environment_run_id ?? query.runId ?? '');
+        const environmentRunId = source.environment_run_id ?? query.runId;
+        // A prepared materialized Source has only its fixed baseline until the first Run.
+        // Metadata discovery must neither create an execution view nor require a fake Run.
+        if (!environmentRunId) {
+          if (root) throw new Error('A prelaunch source cannot have an execution root');
+          signal.throwIfAborted(); sourceGrant(query); return;
+        }
+        const location = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, environmentRunId);
         if (root) {
           const canonical = await admitMaterializedRoot(location.targetPath, signal);
           if (normalizePathIdentity(canonical) !== normalizePathIdentity(root.canonicalRoot)) throw new Error('The original materialized source location changed');
