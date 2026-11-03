@@ -167,26 +167,53 @@ test('a long verified source read yields control and cancellation closes its act
   const h = await fixture({ large: '𠮷'.repeat(2 * 1024 * 1024) });
   const controller = new AbortController();
   const original = fs.createReadStream;
-  let streamClosed: Promise<void> | undefined, observed = false, closed = false;
+  let enterRead!: () => void;
+  const readEntered = new Promise<void>(resolve => { enterRead = resolve; });
+  let releaseRead: (() => void) | undefined;
+  let pending: Promise<VarinRuntimeSourceResult> | undefined;
+  let streamClosed: Promise<void> | undefined, closed = false, settled = false;
   try {
     fs.createReadStream = ((...args: Parameters<typeof fs.createReadStream>) => {
-      const stream = original(...args);
-      if (String(args[0]).replaceAll('\\', '/').endsWith('/package/large')) {
-        observed = true;
-        streamClosed = new Promise(resolve => stream.once('close', () => { closed = true; resolve(); }));
-        stream.once('data', () => {
-          void h.runtime.queryContracts({ action: 'list', kind: 'service' }).then(() => controller.abort(new Error('source cancelled')));
-        });
-      }
+      if (!String(args[0]).replaceAll('\\', '/').endsWith('/package/large')) return original(...args);
+      assert.ok(args[1] && typeof args[1] === 'object');
+      assert.equal(args[1].signal, controller.signal);
+      let reads = 0;
+      const stream = original(args[0], { ...args[1], fs: {
+        open: fs.open,
+        close: fs.close,
+        read(fd: number, buffer: Buffer, offset: number, length: number, position: number | null,
+          callback: (error: NodeJS.ErrnoException | null, bytesRead: number, buffer: Buffer) => void) {
+          fs.read(fd, buffer, offset, length, position, (error, bytesRead, bytes) => {
+            // Keep the real file stream inside its second read until metadata has responded.
+            // File size alone cannot order cancellation before EOF on every platform.
+            if (++reads !== 2 || error) { callback(error, bytesRead, bytes); return; }
+            releaseRead = () => { releaseRead = undefined; callback(error, bytesRead, bytes); };
+            enterRead();
+          });
+        },
+      } });
+      streamClosed = new Promise(resolve => stream.once('close', () => { closed = true; resolve(); }));
       return stream;
     }) as typeof fs.createReadStream;
     syncBuiltinESMExports();
-    await assert.rejects(h.read({ path: 'large', maxBytes: 1 }, controller.signal), /source cancelled/);
-    assert.equal(observed, true);
+    pending = h.read({ path: 'large', maxBytes: 1 }, controller.signal);
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    await Promise.race([readEntered, pending.then(() => assert.fail('source read completed before its read barrier'))]);
+    const metadata = await h.runtime.queryContracts({ action: 'list', kind: 'service' });
+    assert.equal(metadata.kind, 'service');
+    assert.equal(settled, false, 'metadata responds while the original source read is still active');
+    controller.abort(new Error('source cancelled'));
+    assert.equal(closed, false, 'cancellation does not pretend the in-flight file read has closed');
+    assert.ok(releaseRead);
+    releaseRead();
+    await assert.rejects(pending, /source cancelled/);
     assert.equal(closed, true, 'read cancellation settles after actual file stream close');
     await streamClosed;
     assert.equal((await h.read()).status, 'found');
   } finally {
+    controller.abort(new Error('source test cleanup'));
+    releaseRead?.();
+    await pending?.catch(() => undefined);
     fs.createReadStream = original; syncBuiltinESMExports(); await h.close();
   }
 });
