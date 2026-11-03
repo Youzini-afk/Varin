@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { parseVarinCommandContributionData, type JsonValue } from '@varin/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import {
@@ -58,6 +59,8 @@ export const executeSurfaceCommandContribution = async (
   context: Parameters<WorkbenchCommandImplementation['execute']>[0],
   dependencies: SurfaceCommandExecutionDependencies = surfaceCommandExecutionDependencies,
 ): Promise<void> => {
+  const assertTarget = () => { if (context.composer && context.composer.host !== getRuntimeEndpointGeneration()) throw new Error('Conversation target changed'); };
+  assertTarget();
   const contribution = dependencies.getSnapshot().visibleContributions.find((candidate) => (
     candidate.descriptor.id === contributionId && candidate.descriptor.kind === 'command'
   ));
@@ -65,6 +68,7 @@ export const executeSurfaceCommandContribution = async (
   if (isDeclarativeImplementation(contribution.implementation)) {
     await dependencies.trigger(contribution);
   }
+  assertTarget();
   const latest = dependencies.getSnapshot().visibleContributions.find((candidate) => (
     candidate.descriptor.id === contributionId && candidate.descriptor.kind === 'command'
   ));
@@ -72,7 +76,9 @@ export const executeSurfaceCommandContribution = async (
   if (!implementation || typeof implementation.execute !== 'function') {
     throw new Error(`Surface command did not provide an executable implementation: ${contributionId}`);
   }
-  await implementation.execute(context);
+  if (implementation.isAvailable && !implementation.isAvailable(context)) throw new Error('Command is no longer available in this conversation');
+  const publicContext = context.composer ? { ...context, composer: { host: context.composer.host, identity: context.composer.identity, source: context.composer.source } } : context;
+  await implementation.execute((contribution.owner.extensionId === BUILTIN_COMMANDS_EXTENSION_ID ? context : publicContext) as Parameters<WorkbenchCommandImplementation['execute']>[0]);
 };
 
 const commandRegistration = (contribution: SurfaceContribution): WorkbenchCommandRegistration | null => {
@@ -95,7 +101,8 @@ const commandRegistration = (contribution: SurfaceContribution): WorkbenchComman
     : [];
   const providedImplementation = contribution.implementation as Partial<WorkbenchCommandImplementation>;
   const implementation: WorkbenchCommandImplementation | null = typeof providedImplementation?.execute === 'function'
-    ? providedImplementation as WorkbenchCommandImplementation
+    ? publicData ? { execute: context => executeSurfaceCommandContribution(contribution.descriptor.id, context),
+      ...(providedImplementation.isAvailable ? { isAvailable: providedImplementation.isAvailable } : {}) } : providedImplementation as WorkbenchCommandImplementation
     : isDeclarativeImplementation(contribution.implementation)
       ? { execute: (context) => executeSurfaceCommandContribution(contribution.descriptor.id, context) }
       : null;
@@ -107,6 +114,11 @@ const commandRegistration = (contribution: SurfaceContribution): WorkbenchComman
     implementation,
     meta: {
       commandId,
+      ...(data.composer && typeof data.composer === 'object' && !Array.isArray(data.composer)
+        && typeof data.composer.name === 'string' && typeof data.composer.group === 'string'
+        && ['conversation', 'execution', 'context', 'collaboration', 'resources', 'application', 'management', 'skills'].includes(data.composer.group)
+        && ['action', 'select'].includes(String(data.composer.interaction))
+        ? { composer: data.composer as unknown as NonNullable<WorkbenchCommandMeta['composer']> } : {}),
       ...(titleKey ? { titleKey: titleKey as WorkbenchCommandMeta['titleKey'] } : {}),
       ...(publicData ? { title: publicData.title } : {}),
       icon: icon as WorkbenchCommandMeta['icon'],

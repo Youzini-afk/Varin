@@ -411,7 +411,7 @@ function artifactConversationFixture() {
     contextInspection: async (_identity, { headId }) => ({ head: headId, counts: { total: 0, user: 0, assistant: 0, tool: 0 }, latestRequest: null, contextRequest: null }),
     computer: { state: async work => ({ state: { work, rootWork: work, currentExecution: null, currentRootExecution: null,
       active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] }), stop: unused, decide: unused },
-    goals: { start: unused, update: unused, control: unused, list: async () => [] }, resources: { refresh: unused },
+    goals: { start: unused, update: unused, control: unused, list: async () => [] }, resources: { refresh: unused, skills: unused, draftSkills: unused },
     followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused,
       control: unused, pendingRegistrations: async () => [], cancelRegistration: unused },
     listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model', acceptsImages: true }],

@@ -406,7 +406,8 @@ impl ContentCollection {
             UNION ALL SELECT json_extract(data,'$.result.value.permission.call_ref') FROM events WHERE kind='permission.opened'
             UNION ALL SELECT json_extract(data,'$.result.value.permission.scope_ref') FROM events WHERE kind='permission.opened'");
         roots.push_str(
-            " UNION ALL SELECT json_extract(body,'$.input_ref') FROM delegated_executions
+            " UNION ALL SELECT json_extract(body,'$.frozen_input_ref') FROM delegated_executions WHERE json_extract(body,'$.frozen_input_ref') IS NOT NULL
+            UNION ALL SELECT json_extract(body,'$.input_ref') FROM delegated_executions
             UNION ALL SELECT json_extract(body,'$.configuration_ref') FROM delegated_executions
             UNION ALL SELECT json_extract(body,'$.launch.tools_ref') FROM delegated_executions
             UNION ALL SELECT json_extract(body,'$.launch.base_tools_ref') FROM delegated_executions

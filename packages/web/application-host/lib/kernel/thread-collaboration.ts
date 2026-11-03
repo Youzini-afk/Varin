@@ -668,7 +668,7 @@ export class ThreadCollaboration {
           ? prepareContext.forSource!(checkpoint, source, signal)
           : prepareContext(identity, source, { mode: (await runtime.thread(child.child_thread_id, signal)).bot_id ? 'bot' : 'agent', threadRole: 'worker', projectId: child.project_id, childProfile: child.selected_profile }, signal), signal);
         let inputPreparation: InputResourcePreparation | undefined;
-        if (child.trigger.kind === 'user_continuation') {
+        if (child.trigger.kind === 'user_continuation' && !child.input_prepared) {
           const input = child.input as { text?: unknown } | string;
           const text = typeof input === 'string' ? input : typeof input?.text === 'string' ? input.text : '';
           if (parseExplicitSkillCommand(text)) {

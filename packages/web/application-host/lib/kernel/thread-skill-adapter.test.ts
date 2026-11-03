@@ -26,6 +26,8 @@ async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'varin-skill-adapter-')); roots.push(root);
   const skillPath = path.join(root, 'skills/review/SKILL.md');
   await mkdir(path.dirname(skillPath), { recursive: true });
+  await mkdir(path.join(root, 'skills/zplan'), { recursive: true });
+  await writeFile(path.join(root, 'skills/zplan/SKILL.md'), '---\nname: zplan\ndescription: Plan skill\n---\nPLAN BODY');
   const reader = await createAdmittedDirectoryReader({ domainId: 'user', viewId: 'admitted-user', root });
   const capture = async (body: string): Promise<ContextResources> => {
     await writeFile(skillPath, `---\nname: review\ndescription: Review skill\ndisable-model-invocation: true\n---\n${body}`);
@@ -52,6 +54,10 @@ async function fixture() {
   const submitReceipt = { thread_id: identity.threadId, branch_id: identity.branchId, run_id: run.id, input_id: 'input:initial', cursor: 2 };
   const enqueueReceipt = { input_id: queued.id, run_id: run.id, mode: 'next_run' as const, cursor: 3 };
   const runtime = {
+    familyList: vi.fn<AgentRuntimeClient['familyList']>(async () => ({ rootThreadId: identity.threadId, members: [{ threadId: 'thread:target', parentThreadId: identity.threadId, task: 'Target', state: 'completed', branches: [{ branchId: 'branch:target', headId: null, activeRunId: null, latestRun: null }] }] })),
+    childForThread: vi.fn<AgentRuntimeClient['childForThread']>(async () => ({ operation_id: 'dispatch', child_branch_id: identity.branchId } as NonNullable<Awaited<ReturnType<AgentRuntimeClient['childForThread']>>>)),
+    childExecutions: vi.fn<AgentRuntimeClient['childExecutions']>(async () => []),
+    acceptChildContinuation: vi.fn<AgentRuntimeClient['acceptChildContinuation']>(async () => ({ input_prepared: true } as Awaited<ReturnType<AgentRuntimeClient['acceptChildContinuation']>>)),
     admitCalendar: vi.fn<AgentRuntimeClient['admitCalendar']>(async input => ({ id: input.occurrenceId, run_id: run.id } as import('./protocol.generated.js').CalendarOccurrence)),
     thread: vi.fn<AgentRuntimeClient['thread']>(async () => ({ bot_id: null, thread_id: identity.threadId, parent_thread_id: null, observer_project_ids: [],
       main_branch_id: identity.branchId, title: 'Skills', revision: 1, created_at_ms: 0, updated_at_ms: 0,
@@ -211,4 +217,135 @@ it('cold calendar admission preserves explicit skill input and transfers a succe
   expect(f.prepareSkill.mock.calls[0]?.[2]).toBe(rawText);
   expect(f.runtime.submit).not.toHaveBeenCalled();
   expect(f.continueLaunch).toHaveBeenCalledWith(f.run.id, expect.not.objectContaining({ signal: expect.anything() }));
+});
+
+
+it('carries precise multiple selections through submit/enqueue and reuses accepted receipt before resource refresh', async () => {
+  const f = await fixture();
+  const text = '正文 /skill:zplan 然后 /skill:review';
+  const skills = ['zplan', 'review'].map(name => {
+    const skill = f.a.snapshot.skills.find(skill => skill.name === name)!;
+    const start = text.indexOf(`/skill:${name}`);
+    return { resourceId: skill.id, version: skill.reference.version, start, end: start + `/skill:${name}`.length };
+  });
+  const request = { ...identity, key: 'multi', expectedHead: null, text, skills, images, model };
+  await f.adapter.submit(request);
+  await f.adapter.enqueue({ ...identity, key: 'queue-multi', text, skills, mode: 'boundary' });
+  for (const command of [f.runtime.submit.mock.calls[0]?.[0], f.runtime.enqueue.mock.calls[0]?.[0]]) {
+    expect(command).toMatchObject({ input: { text, skills }, inputPreparation: {
+      expectedContextCheckpoint: 'checkpoint:1', skills: [{ name: 'zplan', body: 'PLAN BODY' }, { name: 'review', body: 'ORIGINAL A' }],
+    } });
+  }
+  const corrupt = structuredClone(f.checkpoint(f.b, 2)); corrupt.resources!.snapshot.capturedFiles = [];
+  f.runtime.context.mockResolvedValue(corrupt); f.runtime.inputReceipt.mockResolvedValue(f.submitReceipt);
+  f.prepareSkill.mockClear();
+  await f.adapter.submit(request);
+  expect(f.prepareSkill).not.toHaveBeenCalled();
+  expect(f.runtime.inputReceipt.mock.calls.at(-1)?.[0]).toMatchObject({ input: { text, skills } });
+  expect(f.runtime.submit).toHaveBeenCalledOnce();
+});
+
+it('resolves menu candidates against current checkpoint and an explicitly admitted replacement source', async () => {
+  const f = await fixture();
+  const current = await f.adapter.skills(identity);
+  expect(current.snapshotId).toBe(f.a.snapshot.id);
+  expect(current.skills.find(skill => skill.name === 'review')).toMatchObject({
+    resourceId: f.a.snapshot.skills[0]!.id, version: f.a.snapshot.skills[0]!.reference.version,
+  });
+  expect(current.skills.every(skill => !('body' in skill) && !('content' in skill))).toBe(true);
+  expect(f.prepareContext.main).not.toHaveBeenCalled();
+  const source: ThreadSource = { mode: 'fixed_branch', resourceOwner: { kind: 'local' }, workspaceId: 'new', executionWorkspaceId: 'new', branchId: 'source', revision: 2, tools: [] };
+  const replacement = await f.adapter.skills(identity, { source });
+  expect(replacement.snapshotId).toBe(f.b.snapshot.id);
+  expect(f.admitSource).toHaveBeenCalledWith(source, identity, undefined, undefined);
+  expect(f.prepareContext.forSource).toHaveBeenCalledWith(f.checkpoint(f.a), source, undefined);
+});
+
+
+it('freezes child continuation selection at acceptance and bypasses later corrupt resources for the same receipt', async () => {
+  const f = await fixture();
+  const text = '继续 /skill:review';
+  const descriptor = f.a.snapshot.skills.find(skill => skill.name === 'review')!;
+  const skills = [{ resourceId: descriptor.id, version: descriptor.reference.version, start: 3, end: text.length }];
+  const command = { ...identity, key: 'continue-skill', previousRunId: 'previous-run', expectedHead: 'previous-head', text, skills };
+  await f.adapter.continueChild(command);
+  expect(f.runtime.acceptChildContinuation.mock.calls[0]?.[0]).toMatchObject({ input: { text, skills }, inputPreparation: {
+    expectedContextCheckpoint: 'checkpoint:1', skills: [{ resourceId: descriptor.id, body: 'ORIGINAL A' }],
+  } });
+  f.runtime.childExecutions.mockResolvedValue([{ trigger: { kind: 'user_continuation', key: command.key } } as Awaited<ReturnType<AgentRuntimeClient['childExecutions']>>[number]]);
+  f.runtime.context.mockRejectedValue(new Error('Current resources unavailable'));
+  f.prepareSkill.mockClear();
+  await f.adapter.continueChild(command);
+  expect(f.runtime.acceptChildContinuation.mock.calls[1]?.[0]).toEqual({ key: command.key, childOperationId: 'dispatch',
+    previousRunId: command.previousRunId, expectedHead: command.expectedHead, input: { text, skills } });
+  expect(f.prepareSkill).not.toHaveBeenCalled();
+});
+
+
+it('retains the original user text and selected object identity alongside model context, including image-only queue edits', async () => {
+  const f = await fixture();
+  const text = '/skill:review use @target';
+  const references = [{ kind: 'thread' as const, threadId: 'thread:target', branchId: 'branch:target', start: text.indexOf('@'), end: text.length }];
+  await f.adapter.enqueue({ ...identity, key: 'reference-skill', text, references, mode: 'boundary' });
+  const command = f.runtime.enqueue.mock.calls[0]![0];
+  expect(command).toMatchObject({ input: { userText: text, references, referenceIntent: { text } }, inputPreparation: { skill: { arguments: 'use @target' } } });
+  expect((command.input as { text: string }).text.startsWith(text)).toBe(true);
+  expect((command.input as { text: string }).text).toContain('"threadId":"thread:target","branchId":"branch:target"');
+  f.queued.content = command.input;
+  f.prepareSkill.mockClear();
+  await f.adapter.editInput(f.queued.id, 1, text, images);
+  expect(f.runtime.editInput.mock.calls[0]?.[0]).toMatchObject({ content: { userText: text, references, referenceIntent: { text },
+    text: (command.input as { text: string }).text } });
+  expect(f.prepareSkill).not.toHaveBeenCalled();
+  await f.adapter.editInput(f.queued.id, 1, 'ordinary replacement');
+  expect(f.runtime.editInput.mock.calls[1]?.[0]).toEqual({ inputId: f.queued.id, expectedRevision: 1, content: { text: 'ordinary replacement' } });
+});
+
+describe('accepted object reference retries', () => {
+  it('recovers a concurrently accepted reference input when current reference preparation fails', async () => {
+    const f = await fixture();
+    const text = 'Read @task';
+    const references = [{ kind: 'thread' as const, threadId: 'thread:target', branchId: 'branch:target', start: 5, end: 10 }];
+    f.runtime.familyList.mockRejectedValue(new Error('Family changed after receipt lookup'));
+    f.runtime.inputReceipt.mockResolvedValueOnce(null).mockResolvedValue(f.submitReceipt);
+    expect(await f.adapter.submit({ ...identity, key: 'raced-submit', expectedHead: null, text, references, model })).toEqual(f.submitReceipt);
+    expect(f.runtime.inputReceipt.mock.calls.at(-1)![0].input).toMatchObject({ text, referenceIntent: { text } });
+    f.runtime.enqueueReceipt.mockResolvedValueOnce(null).mockResolvedValue(f.enqueueReceipt);
+    expect(await f.adapter.enqueue({ ...identity, key: 'raced-queue', mode: 'next_run', text, references })).toEqual(f.enqueueReceipt);
+    f.runtime.childExecutions.mockResolvedValueOnce([]).mockResolvedValue([{ trigger: { kind: 'user_continuation', key: 'raced-child' } }] as Awaited<ReturnType<AgentRuntimeClient['childExecutions']>>);
+    await f.adapter.continueChild({ ...identity, key: 'raced-child', previousRunId: 'previous', expectedHead: null, text, references });
+    expect(f.runtime.acceptChildContinuation.mock.calls[0]![0].input).toMatchObject({ text, referenceIntent: { text } });
+    expect(f.runtime.submit).not.toHaveBeenCalled();
+    expect(f.runtime.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('checks exact submit and enqueue receipts before current family/source/material admission', async () => {
+    const f = await fixture();
+    const text = 'Read @task';
+    const references = [{ kind: 'thread' as const, threadId: 'thread:target', branchId: 'branch:target', start: 5, end: 10 }];
+    f.runtime.familyList.mockRejectedValue(new Error('Current family is unavailable'));
+    f.runtime.context.mockRejectedValue(new Error('Current source is unavailable'));
+    const materials = vi.fn(async () => { throw new Error('Current materials are unavailable'); });
+    f.adapter.bindMaterials(materials);
+    const receipt = { thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'run:skills', input_id: 'accepted', cursor: 2 };
+    f.runtime.inputReceipt.mockResolvedValue(receipt);
+    expect(await f.adapter.submit({ ...identity, key: 'same', expectedHead: null, text, references, materials: [{ snapshotId: 'original' }], model })).toEqual(receipt);
+    expect(f.runtime.inputReceipt.mock.calls[0]![0].input).toMatchObject({ text, references,
+      referenceIntent: { text, materials: [{ snapshotId: 'original' }] } });
+    f.runtime.enqueueReceipt.mockResolvedValue({ input_id: 'accepted', run_id: 'run:skills', mode: 'next_run', cursor: 3 });
+    expect(await f.adapter.enqueue({ ...identity, key: 'queued', mode: 'next_run', text, references })).toMatchObject({ input_id: 'accepted' });
+    expect(f.runtime.familyList).not.toHaveBeenCalled();
+    expect(materials).not.toHaveBeenCalled();
+    expect(f.prepareSkill).not.toHaveBeenCalled();
+  });
+  it('replays an accepted child continuation from raw object intent without rebuilding context', async () => {
+    const f = await fixture();
+    const text = 'Read @task';
+    const references = [{ kind: 'thread' as const, threadId: 'thread:target', branchId: 'branch:target', start: 5, end: 10 }];
+    f.runtime.childExecutions.mockResolvedValue([{ trigger: { kind: 'user_continuation', key: 'child-ref' } }] as Awaited<ReturnType<AgentRuntimeClient['childExecutions']>>);
+    f.runtime.familyList.mockRejectedValue(new Error('No longer visible'));
+    await f.adapter.continueChild({ ...identity, key: 'child-ref', previousRunId: 'previous', expectedHead: null, text, references });
+    expect(f.runtime.acceptChildContinuation.mock.calls[0]![0].input).toMatchObject({ text, references, referenceIntent: { text } });
+    expect(f.runtime.familyList).not.toHaveBeenCalled();
+  });
 });

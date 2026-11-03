@@ -100,7 +100,7 @@ export type SourceServiceOperation =
   | { kind: 'user_integration'; request: import('../kernel/thread-integrations.js').UserIntegrationRequest }
   | { kind: 'schedule'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority }
   | { kind: 'mcp'; action: import('./managed-mcp-contract.js').ManagedMcpAction }
-  | {kind:'native_resource';context:{run_id:string;origin:import('../kernel/protocol.generated.js').ToolOrigin;operation_id:string};action:import('../kernel/protocol.generated.js').SourceResourceAction;authorizeOnly:boolean}
+  | {kind:'native_resource';context:{run_id:string;origin:import('../kernel/protocol.generated.js').ToolOrigin | null;operation_id:string};action:import('../kernel/protocol.generated.js').SourceResourceAction;authorizeOnly:boolean}
   | { kind: 'language'; query: Omit<import('../kernel/protocol.generated.js').LanguageQuery, 'runId' | 'threadId' | 'grantId' | 'source' | 'physicalRoot'> }
   | { kind: 'language_release' }
   | { kind: 'validate' }
@@ -181,6 +181,7 @@ export interface ManagedSourceService {
   codeExchange(principal: ManagedSourcePrincipal, input: ManagedSourceCodeExchangeRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadCodeExchange>;
   handoff(principal: ManagedSourcePrincipal, input: ManagedSourceHandoffRequest, signal?: AbortSignal): Promise<ChildSourceHandoff | null>;
   resolve(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest, signal?: AbortSignal): Promise<ManagedSourceResolveReceipt>;
+  skills(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSkillCatalog>;
   prepare(principal: ManagedSourcePrincipal, input: ManagedSourcePrepareRequest, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   bind(principal: ManagedSourcePrincipal, input: ManagedSourceBindRequest, signal?: AbortSignal): Promise<ManagedSourceBinding>;
   authorize(principal: ManagedSourcePrincipal, input: ManagedSourceToolRequest, signal?: AbortSignal): Promise<unknown>;

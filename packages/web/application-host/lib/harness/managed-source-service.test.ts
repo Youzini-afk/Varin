@@ -484,3 +484,24 @@ describe('managed Source target admission orchestration', () => {
   });
 
 });
+
+describe('managed pending skill discovery', () => {
+  it('uses target registration and read principal without opening a Thread/source grant', async () => {
+    const f = fixture();
+    const draftSourceSkills = vi.fn(async () => ({ snapshotId: 'draft', skills: [] }));
+    const resolveWorkspace = vi.fn(async () => ({ workspaceId: 'workspace', hostId: 'target' }));
+    const admitWorkspaceRegistration = vi.fn(async () => ({ workspaceId: 'workspace', hostId: 'target', canonicalPath: '/target/project' }));
+    const service = createManagedSourceService({ kernel: f.kernel, hostId: 'target',
+      documents: { resolveWorkspace, admitWorkspaceRegistration } as never,
+      validateLiveSource: async () => {}, prepareSource: f.prepareSource, draftSourceSkills });
+    expect(await service.skills(principal, { coordinatorHostId: 'coordinator', path: '/target/project' })).toEqual({ snapshotId: 'draft', skills: [] });
+    expect(draftSourceSkills).toHaveBeenCalledWith('workspace', undefined);
+    expect(f.issueGrant).not.toHaveBeenCalled();
+    expect(f.sourceRequest).not.toHaveBeenCalled();
+    await expect(service.skills({ principalId: 'verified', capabilities: [] }, { coordinatorHostId: 'coordinator', path: '/target/project' })).rejects.toThrow();
+    expect(resolveWorkspace).toHaveBeenCalledTimes(1);
+    admitWorkspaceRegistration.mockResolvedValueOnce({ workspaceId: 'workspace', hostId: 'other', canonicalPath: '/target/project' });
+    await expect(service.skills(principal, { coordinatorHostId: 'coordinator', path: '/target/project' })).rejects.toThrow();
+    expect(draftSourceSkills).toHaveBeenCalledTimes(1);
+  });
+});

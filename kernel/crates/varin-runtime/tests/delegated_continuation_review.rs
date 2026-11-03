@@ -626,28 +626,75 @@ fn active_user_input_uses_original_execution_but_idle_and_next_run_cannot_clone_
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
+fn first_with_selected_resources(f: &mut Fixture) -> (ChildTask, varin_runtime::catalog::resources::ContextResources) {
+    use varin_runtime::catalog::resources::ContextResources;
+    let child = f.accept();
+    f.settle_exchange();
+    let root = child.source.pin().unwrap().root.clone();
+    let mut source = child.source.pin().unwrap().source.clone();
+    source.branch_id = Some(format!("child-source:{}", child.execution_id));
+    source.revision = Some(0);
+    if matches!(child.code_result, ChildCodeResult::Pending) { source.mode = SourceMode::Materialized; }
+    let mut pin_source = source.clone();
+    pin_source.mode = SourceMode::FixedBranch;
+    let source_preparation = f.db.prepare_child_source(&child.execution_id,
+        ChildSourcePin { pin_id: format!("child-source-pin:{}", child.execution_id), root: root.clone(), source: pin_source },
+        source.clone(), ChildSourceProvenance::FixedRoot { root, selection: None, resources: None }).unwrap().load().unwrap();
+    f.db.attach_child_source(source_preparation).unwrap();
+    let reference = json!({"domainId":"domain","viewId":"fixed-view","path":"review/SKILL.md","canonicalId":"domain/review/SKILL.md","version":"retained-v1"});
+    let resources:ContextResources=serde_json::from_value(json!({"source":source,"snapshot":{"id":"original-source-resources","scope":{"threadId":child.child_thread_id,"branchId":child.child_branch_id,"mode":"agent","threadRole":"worker","projectId":child.project_id,"sourceIdentity":"exact-next-source","cwd":"","projectTrusted":true,"projectRoot":null},"readers":[{"domainId":"domain","viewId":"fixed-view","consistency":"immutable"}],"project":null,"configurationDigest":"resources-v1","shadowedContextCanonicalIds":[],"system":null,"appendSystem":null,"instructions":[],"instructionScopes":[],"skills":[{"id":"review","name":"review","description":"review resource","disableModelInvocation":false,"requiresProjectTrust":false,"origin":"user","reference":reference,"basePath":"review","baseCanonicalId":"domain/review","priority":0}],"diagnostics":[],"capturedFiles":[{"reference":reference,"content":"Use this exact resource"}],"observations":[]}})).unwrap();
+    let (proposal, basis) = context(&child, "first-context");
+    let prepared = f.db.capture_child_preparation(&child.execution_id, Some(source), proposal, basis).unwrap()
+        .with_resources(Some(resources.clone())).load().unwrap();
+    (f.db.admit_child(prepared).unwrap(), resources)
+}
+
 #[test]
 fn continuation_resource_cas_preserves_summary_memory_and_binds_explicit_skill_to_the_new_input() {
-    use varin_runtime::catalog::resources::{ContextResources, InputResourcePreparation};
+    use varin_runtime::catalog::resources::InputResourcePreparation;
     let mut f = Fixture::new();
-    let first = first(&mut f);
+    let (first, mut resources) = first_with_selected_resources(&mut f);
     let mut summary = context(&first, "summary-context").0;
     summary.expected_revision = 1;
     summary.through_id = Some(first.receipt.as_ref().unwrap().input_id.clone());
     summary.summary = "Retain the verified summary".into();
-    let old = f.db.publish_context(summary).unwrap();
+    let mut old = f.db.publish_context(summary).unwrap();
     finish(&mut f.db, &first, Some("ready"));
     let command = continuation_command(
         &f.db,
         &first,
         "skill-next",
-        json!({"text":"/skill:review exact scope","attachments":[{"media_type":"image/png","data_base64":"aW1hZ2U6cmV0YWluZWQ="}]}),
+        json!({"text":"Please /skill:review exact scope","skills":[{"resourceId":"review","version":"retained-v1","start":7,"end":20}],"attachments":[{"media_type":"image/png","data_base64":"aW1hZ2U6cmV0YWluZWQ="}]}),
     );
-    let next = accept(&mut f.db, command);
+    let mut skill: InputResourcePreparation = serde_json::from_value(json!({"expectedContextCheckpoint":old.id,"skills":[{
+        "snapshotId":"original-source-resources","resourceId":"review","reference":resources.snapshot.skills[0].reference,
+        "name":"review","arguments":"","body":"Use this exact resource"}]})).unwrap();
+    let stale = f.db.capture_child_continuation(command.clone()).unwrap().with_input_preparation(Some(skill.clone())).load().unwrap();
+    let mut later = old.proposal.clone();
+    later.key = "later-summary-context".into();
+    later.expected_revision = old.revision;
+    old = f.db.publish_context(later).unwrap();
+    assert!(f.db.accept_child_continuation(stale).is_err());
+    skill.expected_context_checkpoint = Some(old.id.clone());
+    let prepared = f.db.capture_child_continuation(command.clone()).unwrap().with_input_preparation(Some(skill.clone())).load().unwrap();
+    let next = f.db.accept_child_continuation(prepared).unwrap();
+    assert!(f.db.capture_delegated_execution(next.clone()).unwrap().load().unwrap().input_prepared);
+    let mut changed = command.clone();
+    changed.input["skills"][0]["version"] = json!("other-version");
+    assert!(f.db.capture_child_continuation(changed).unwrap().load().is_err());
+    assert_eq!(accept(&mut f.db, command.clone()).execution_id, next.execution_id);
+    content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
+    // Reopen between acceptance and Run preparation: the derived material is its own retained root.
+    drop(f.db);
+    f.db = Catalog::open(&f.root).unwrap();
+    assert_eq!(accept(&mut f.db, command).execution_id, next.execution_id);
     let source = ready_source(&mut f.db, &next);
-    let reference = json!({"domainId":"domain","viewId":"fixed-view","path":"review/SKILL.md","canonicalId":"domain/review/SKILL.md","version":"retained-v1"});
-    let resources:ContextResources=serde_json::from_value(json!({"source":source,"snapshot":{"id":"new-source-resources","scope":{"threadId":first.child_thread_id,"branchId":first.child_branch_id,"mode":"agent","threadRole":"worker","projectId":first.project_id,"sourceIdentity":"exact-next-source","cwd":"","projectTrusted":true,"projectRoot":null},"readers":[{"domainId":"domain","viewId":"fixed-view","consistency":"immutable"}],"project":null,"configurationDigest":"resources-v1","shadowedContextCanonicalIds":[],"system":null,"appendSystem":null,"instructions":[],"instructionScopes":[],"skills":[{"id":"review","name":"review","description":"review resource","disableModelInvocation":false,"requiresProjectTrust":false,"origin":"user","reference":reference,"basePath":"review","baseCanonicalId":"domain/review","priority":0}],"diagnostics":[],"capturedFiles":[{"reference":reference,"content":"Use this exact resource"}],"observations":[]}})).unwrap();
-    let skill:InputResourcePreparation=serde_json::from_value(json!({"expectedContextCheckpoint":null,"skill":{"snapshotId":"new-source-resources","resourceId":"review","reference":reference,"name":"review","arguments":"exact scope","body":"Use this exact resource"}})).unwrap();
+    resources.source = Some(source.clone());
+    resources.snapshot.id = "new-source-resources".into();
+    resources.snapshot.skills[0].reference.version = "changed-v2".into();
+    resources.snapshot.captured_files[0].reference.version = "changed-v2".into();
+    resources.snapshot.captured_files[0].content = "Changed after acceptance".into();
+    skill.skills[0].body = "Changed preparation must not replace accepted material".into();
     let (proposal, basis) = context(&first, "new-context");
     let stale =
         f.db.capture_child_preparation(
@@ -709,10 +756,12 @@ fn continuation_resource_cas_preserves_summary_memory_and_binds_explicit_skill_t
         .find(|item| item.id == child.receipt.as_ref().unwrap().input_id)
         .unwrap();
     assert_eq!(item.source, HistorySource::User);
-    assert_eq!(item.content["text"], "/skill:review exact scope");
+    assert_eq!(item.content["text"], "Please /skill:review exact scope");
+    assert_eq!(item.content["skillInvocations"][0]["body"], "Use this exact resource");
+    assert_eq!(item.content["skillInvocations"][0]["reference"]["version"], "retained-v1");
     assert_eq!(
         item.content["skillInvocations"][0]["resourceCheckpointId"],
-        current.id
+        old.id
     );
     assert_eq!(
         item.content["attachments"][0]["data_base64"],

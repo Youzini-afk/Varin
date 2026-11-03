@@ -128,6 +128,9 @@ import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
 import { createThreadProcesses } from './lib/kernel/thread-processes.js';
 import { createResearchRuntime, createResearchSourceAuthority, RESEARCH_CAPABILITY } from './lib/kernel/research-runtime.js';
 import { ThreadAdapter } from './lib/kernel/thread-adapter.js';
+import { registerThreadExportRoutes } from './lib/kernel/thread-export-routes.js';
+import { createThreadRemember } from './lib/memory/thread-remember.js';
+import { registerThreadRememberRoutes } from './lib/memory/thread-remember-routes.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
 import { ExternalAgentsService } from './lib/external-agents/service.js';
 import { createExternalSourceOwner } from './lib/external-agents/source.js';
@@ -2269,6 +2272,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
     executionEnvironment: () => executionEnvironment.snapshot(),
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
+    draftSourceSkills: (workspaceId, signal) => threadResources.draftSourceSkills!(workspaceId, signal),
     recovery: targetRecovery.handle,
     readCodeExchange: targetExchangeReader,
     releaseMcpView: (scope, action) => targetMcpService.releaseView(scope, action),
@@ -2464,6 +2468,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const promptToolCatalog = createPromptToolCatalog({ runtime: agentRuntime, extensions: extensionRuntime, mcp: mcpAuthority, mcpScope: resolveMcpSettingsScope });
   registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()), resourceManagement.prompt, resourceManagement.toolCatalog);
+  registerThreadExportRoutes(app, { runtime: agentRuntime }, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  registerThreadRememberRoutes(app, createThreadRemember({ runtime: agentRuntime, memory: memoryService, personalization: agentPersonalization }), uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerThreadMemoryRoutes(app, createThreadMemory({ history: botHistory, memory: memoryService,
     narrate: (scopeId, system, prompt, signal, selection) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal, selection) }),
     uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));

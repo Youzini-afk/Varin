@@ -233,3 +233,16 @@ GC is claimed; the memory owner does not release those operation records prematu
 Native memory delivery suites exercise request facts and checkpoint publication; UI behavior tests
 cover editing and scope selection. These local checks do not establish live-provider or installed-product
 acceptance. Use the [development guide](../../../../../docs/development.md) for current commands.
+
+## Composer quick save
+
+`thread-remember.ts` exposes destinations from the current Catalog Thread/branch. Bot conversations
+choose their bound Bot or shared user memory; ordinary conversations choose their own Thread,
+configured project or global notes. Save keeps the edited text as an explicit user statement, with
+the selected owner's observed revision and stable mutation identity. It neither extracts all history
+nor copies attachments. KnowledgeStore and personalization return their original committed receipt,
+so a lost response can be retried after unrelated revisions without creating another memory.
+Known CAS rejection permits an explicit reload/edit; an uncertain save keeps its exact intent.
+The UI shows the saved record identity and content and can open the existing memory view.
+Optional model organization creates a separately confirmed normal drafting task. Its text remains
+reviewable and editable; producing a draft does not authorize a memory write.

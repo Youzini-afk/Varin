@@ -516,7 +516,7 @@ pub(crate) enum SourceResourceAction {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SourceServiceOperation {
     NativeResource {
-        context: varin_runtime::execution::ToolExecutionContext,
+        context: crate::tools::ResourceExecutionContext,
         action: SourceResourceAction,
         #[serde(rename = "authorizeOnly")]
         authorize_only: bool,
@@ -706,7 +706,7 @@ pub(crate) enum SourceDispatch {
         record: AuthorityRecord,
         address: SourceAuthorityAddress,
         request_id: String,
-        context: varin_runtime::execution::ToolExecutionContext,
+        context: crate::tools::ResourceExecutionContext,
         action: SourceResourceAction,
         authorize: bool,
     },

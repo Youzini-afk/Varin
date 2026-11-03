@@ -489,7 +489,7 @@ grant_id: "parent".into(),
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
     let child = db.lock().unwrap().child_task(&operation).unwrap();
-    assert!(matches!(child.origin, ToolOrigin::PolicyAction { .. }));
+    assert!(matches!(child.origin, Some(ToolOrigin::PolicyAction { .. })));
     assert_eq!(child.source.pin().unwrap().pin_id, format!("child-pin:{operation}"));
     assert!(child.receipt.is_none());
     setup_call(

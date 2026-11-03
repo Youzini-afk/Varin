@@ -90,7 +90,7 @@ impl QueuePreparation {
             }
             let current = if input_preparation
                 .as_ref()
-                .is_some_and(|prepared| prepared.skill.is_some())
+                .is_some_and(|prepared| prepared.has_skills())
             {
                 current.map(context::CheckpointRead::load).transpose()?
             } else {
@@ -184,7 +184,7 @@ impl InputEditPreparation {
             .ok_or_else(|| RuntimeError::Invalid("input revision exhausted".into()))?;
         let previous = self.previous.load()?;
         let (material, checkpoint) =
-            if resources::input_text(&self.value) == resources::input_text(&previous.content) {
+            if resources::same_skill_intent(&self.value, &previous.content) {
                 (
                     resources::preserve(&self.value, &previous.content, revision)?,
                     None,
@@ -206,7 +206,7 @@ impl InputEditPreparation {
                 let current = if self
                     .input_preparation
                     .as_ref()
-                    .is_some_and(|prepared| prepared.skill.is_some())
+                    .is_some_and(|prepared| prepared.has_skills())
                 {
                     self.current
                         .map(context::CheckpointRead::load)

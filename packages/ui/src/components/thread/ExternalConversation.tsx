@@ -1,4 +1,6 @@
 import React from 'react';
+import { ComposerActionForm } from './ComposerActionForm';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import {
   createExternalAgentsHttpAPI,
   ExternalAgentError,
@@ -738,6 +740,15 @@ function ExternalConversationSession({ id, host, readOnly }: { id: string; host:
                   thinkingLevel="off"
                   onModelChange={() => {}}
                   backendControls={controls}
+                  backendCommands={snapshot.capabilities?.commands}
+                  commandActions={{ model: { content: controls }, thinking: { content: controls }, tree: { run: () => setDetails(true) },
+                    new: { run: async () => { const next = await startThreadFromNavigation({ directory: c.cwd }); if (host === getRuntimeEndpointGeneration()) useThreadDraftStore.getState().patch(next, { harnessId: c.configurationId }); } },
+                    rename: { content: complete => <ComposerActionForm initial={c.title} label={t('composer.name')} confirm={async title => { if (host !== getRuntimeEndpointGeneration()) throw new Error(t('composer.scope.changed')); await useExternalAgentStore.getState().update(id, { title }); }} onDone={complete} /> },
+                    pin: { run: () => useExternalAgentStore.getState().update(id, { pinned: !c.pinned }), value: t(c.pinned ? 'sessions.sidebar.session.menu.unpin' : 'sessions.sidebar.session.menu.pin') },
+                    archive: { run: () => useExternalAgentStore.getState().update(id, { archived: !c.archived }) },
+                    delete: { content: complete => <ComposerActionForm danger description={t('sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: c.title })} confirm={() => useExternalAgentStore.getState().update(id, { deleted: true })} onDone={complete} /> },
+                    terminal: { run: () => useUIStore.getState().openContextSurface(c.cwd, 'terminal') },
+                  }}
                   modelDisabled={pending}
                   attachmentDisabled={pending}
                   imageDisabled={snapshot.capabilities?.images === false}

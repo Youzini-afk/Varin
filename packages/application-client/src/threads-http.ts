@@ -6,7 +6,7 @@ import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from
 export class ThreadRequestError extends Error {
   constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started', detail?: string) {
     super(code === 'extension-host-unavailable' ? 'The local extension process is unavailable. Restart Varin; if it persists, reinstall the application.'
-      : code === 'workspace_backend_unavailable' && detail ? detail : threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
+      : (code === 'workspace_backend_unavailable' || code.startsWith('resource-')) && detail ? detail : threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
     this.name = 'ThreadRequestError';
   }
 }
@@ -38,6 +38,30 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     return result;
   };
   return {
+    workflows: {
+      memoryScopes: (identity, signal) => post('memory/scopes', identity, signal),
+      remember: input => post('memory/remember', input),
+      export: async (selection, destination, signal) => {
+        signal?.throwIfAborted();
+        const generation = getRuntimeEndpointGeneration();
+        const controller = new AbortController();
+        const changed = subscribeRuntimeEndpointWillChange(() => controller.abort(new Error('Application Host changed during export')));
+        const abort = () => controller.abort(signal?.reason);
+        signal?.addEventListener('abort', abort, { once: true });
+        try {
+          const response = await runtimeFetch('/api/threads/export', { method: 'POST', signal: controller.signal,
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(selection) });
+          if (!response.ok) {
+            const failure = await response.json().catch(() => ({})) as { error?: string };
+            throw new Error(failure.error ?? `Conversation export failed (${response.status})`);
+          }
+          if (!response.body) throw new Error('The Host did not provide an export stream');
+          await response.body.pipeTo(destination, { signal: controller.signal });
+          if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during export');
+        } catch (error) { await destination.abort(error).catch(() => {}); throw error; }
+        finally { changed(); signal?.removeEventListener('abort', abort); }
+      },
+    },
     nextStep: (identity, cut, signal) => post('next-step', { ...identity, ...cut }, signal),
     materials: {
       collection: (identity, request, signal) => post('materials/collection', { ...identity, request }, signal),
@@ -84,6 +108,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     processes: { openTerminal: input => post('process/terminal', input) },
     plan: { read: identity => post('plan/read', identity), update: input => post('plan/update', input) },
     collaboration: {
+      dispatchCatalog: (identity, signal) => post('child/dispatch/catalog', identity, signal),
+      dispatch: (input, signal) => post('child/dispatch', input, signal),
       exchange: (identity, request, signal) => post('messages/exchange', { ...identity, request }, signal),
       integration: (input, signal) => post('child/integration', input, signal),
       continueChild: (input, signal) => post('child/continue', withClientTime(input), signal),
@@ -96,7 +122,9 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       cancelWait: (identity, waitId) => post('child/wait/cancel', { ...identity, waitId }),
       cancelTree: identity => post('tree/cancel', identity),
     },
-    resources: { refresh: input => post('resources/refresh', input) },
+    resources: { refresh: input => post('resources/refresh', input),
+      draftSkills: (options, signal) => post('resources/draft-skills', options ?? {}, signal),
+      skills: (identity, options, signal) => post('resources/skills', { ...identity, ...options }, signal) },
     followups: {
       jobSources: (identity, runId, signal) => post('followup/jobs', { ...identity, runId }, signal),
       register: input => post('followup/register', input),
@@ -132,7 +160,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     contextHistory: (identity, runId, cursor) => post('context/history', { ...identity, runId, ...cursor }),
     cancelContext: (identity, runId) => post('context/cancel', { ...identity, runId }),
     async resumeContext(identity, runId) { await post('context/resume', { ...identity, runId }); },
-    editInput: (inputId, expectedRevision, text, images) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images }) }),
+    editInput: (inputId, expectedRevision, text, images, skills) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images }), ...(skills === undefined ? {} : { skills }) }),
     cancelInput: (inputId, expectedRevision) => post('input/cancel', { inputId, expectedRevision }),
     sendInputNow: (inputId, expectedRevision, expectedRunId) => post('input/send-now', { inputId, expectedRevision, expectedRunId }),
     mediaRead: (input, signal) => post('media/read', input, signal),

@@ -612,7 +612,7 @@ impl ResourceOperation {
     fn params(
         &self,
         binding: &ToolBinding,
-        context: &ToolExecutionContext,
+        context: &ResourceExecutionContext,
     ) -> (&'static str, Value) {
         match self {
             Self::ChildSourceHandoff { .. }
@@ -678,7 +678,7 @@ impl ResourceOperation {
                 }
             }
             Self::FileReadBatch(_) => unreachable!("batch reads are expanded by the tool owner"),
-            Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
+            Self::FileQuery(args) => ("compute.start", args.params(binding, &context.operation_id)),
             Self::ObserveCompute { job_id, .. } => (
                 "compute.read",
                 json!({
@@ -809,10 +809,30 @@ impl Drop for ResourceReply {
         }
     }
 }
+/// A source resource operation may belong to a real tool invocation or the original
+/// child lifecycle. Settlement is not a model call and must not invent one.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ResourceExecutionContext {
+    pub run_id: String,
+    pub operation_id: String,
+    pub origin: Option<ToolOrigin>,
+}
+impl From<&ToolExecutionContext> for ResourceExecutionContext {
+    fn from(context: &ToolExecutionContext) -> Self {
+        Self { run_id:context.run_id.clone(),operation_id:context.operation_id.clone(),origin:Some(context.origin.clone()) }
+    }
+}
+impl ResourceExecutionContext {
+    fn tool_context(&self) -> Result<ToolExecutionContext,KernelError> {
+        Ok(ToolExecutionContext { run_id:self.run_id.clone(),operation_id:self.operation_id.clone(),
+            origin:self.origin.clone().ok_or_else(||KernelError::Authorization("A child lifecycle is not a tool invocation".into()))? })
+    }
+}
 pub(crate) struct ResourceCall {
     pub admission_key: Option<String>,
     pub binding: ToolBinding,
-    pub context: ToolExecutionContext,
+    pub context: ResourceExecutionContext,
     journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
     operation: ResourceOperation,
     authorize_only: bool,
@@ -858,12 +878,12 @@ pub(crate) fn fixed_read_fixture(
         ResourceCall {
             admission_key: Some("fixture-read-admission".into()),
             journal: None,
-            context: ToolExecutionContext {
+            context: ResourceExecutionContext {
                 run_id: binding.run_id.clone(),
                 operation_id: "fixture-read".into(),
-                origin: ToolOrigin::ModelStep {
+                origin: Some(ToolOrigin::ModelStep {
                     request_id: "fixture-model".into(),
-                },
+                }),
             },
             binding,
             operation: ResourceOperation::FileRead(FileReadArgs {
@@ -1107,12 +1127,12 @@ impl KernelResourceClient {
     pub(crate) fn child_storage_receipt(
         &self,
         binding: &ToolBinding,
-        context: &ToolExecutionContext,
+        context: &ResourceExecutionContext,
         operation_id: &str,
         kind: &str,
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
-        self.call(
+        self.call_resource(
             binding,
             context,
             ResourceOperation::ChildStorageReceipt {
@@ -1127,10 +1147,10 @@ impl KernelResourceClient {
     pub(crate) fn require_child_root_idle(
         &self,
         binding: &ToolBinding,
-        context: &ToolExecutionContext,
+        context: &ResourceExecutionContext,
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
-        self.call(
+        self.call_resource(
             binding,
             context,
             ResourceOperation::ChildRootIdle,
@@ -1528,6 +1548,28 @@ impl KernelResourceClient {
         invocation_call_id: Option<&str>,
         cancellation: &CancellationToken,
     ) -> Result<Value, ResourceFailure> {
+        self.call_resource_checked(binding, &context.into(), operation, authorize_only,
+            expected_resource_key, invocation_call_id, cancellation)
+    }
+    fn call_resource(
+        &self, binding:&ToolBinding, context:&ResourceExecutionContext, operation:ResourceOperation,
+        authorize_only:bool, cancellation:&CancellationToken,
+    )->Result<Value,ResourceFailure> {
+        self.call_resource_checked(binding,context,operation,authorize_only,None,None,cancellation)
+    }
+    fn call_resource_checked(
+        &self,
+        binding: &ToolBinding,
+        context: &ResourceExecutionContext,
+        operation: ResourceOperation,
+        authorize_only: bool,
+        expected_resource_key: Option<String>,
+        invocation_call_id: Option<&str>,
+        cancellation: &CancellationToken,
+    ) -> Result<Value, ResourceFailure> {
+        if context.origin.is_none() && !matches!(operation,ResourceOperation::ChildStorageReceipt{..}|ResourceOperation::ChildRootIdle) {
+            return Err(ResourceFailure { error:KernelError::Authorization("Child lifecycle context cannot invoke source tools".into()),dispatched:false });
+        }
         if cancellation.is_cancelled() {
             return Err(ResourceFailure {
                 error: KernelError::Cancelled,
@@ -1565,8 +1607,8 @@ impl KernelResourceClient {
                                     KernelError::Storage("journal owner unavailable".into())
                                 })?;
                             let read = match invocation_call_id {
-                                Some(call_id) => owner.capture_invocation_journal(context, call_id),
-                                None => owner.capture_journal_anchor(context),
+                                Some(call_id) => owner.capture_invocation_journal(&context.tool_context()?, call_id),
+                                None => owner.capture_journal_anchor(&context.tool_context()?),
                             }
                                 .map_err(|error| KernelError::Operation(error.to_string()))?;
                             drop(owner);
@@ -2822,7 +2864,7 @@ fn tool_schema(kind: ToolKind) -> Value {
 fn validate_binding(
     grant: &Grant,
     binding: &ToolBinding,
-    context: &ToolExecutionContext,
+    context: &ResourceExecutionContext,
 ) -> Result<(), KernelError> {
     if context.run_id != binding.run_id
         || grant.run_id.as_deref() != Some(binding.run_id.as_str())
@@ -2950,7 +2992,7 @@ pub(crate) fn prepare_resource(
                     crate::workspace_backend::require_isolation(host_id)?;
                 }
                 if request.authorize_only{return Ok(ResourceWork::Ready(Value::Null));}
-                Ok(ResourceWork::NativeHandoff(crate::workspace_handoffs::Task{binding:request.binding.clone(),context:request.context.clone(),
+                Ok(ResourceWork::NativeHandoff(crate::workspace_handoffs::Task{binding:request.binding.clone(),context:request.context.tool_context()?,
                     delegation:delegation.clone(),source,grant,cancellation:request.cancellation.shared_flag()}))
             })();return result.map_err(|error|ResourceFailure{error,dispatched:false});
         }
@@ -3272,7 +3314,7 @@ fn serve_resource_immediate(
             ResourceOperation::ChildSourceHandoff { delegation } => {
                 return storage.child_source_handoff(
                     &request.binding,
-                    &request.context,
+                    &request.context.tool_context()?,
                     delegation,
                     &grant,
                     host_id,
@@ -3715,7 +3757,7 @@ pub(crate) fn execute_source_resource(
     resources: KernelResourceClient,
     record: crate::source_resources::AuthorityRecord,
     address: crate::source_resources::SourceAuthorityAddress,
-    context: ToolExecutionContext,
+    context: ResourceExecutionContext,
     action: crate::source_resources::SourceResourceAction,
     authorize_only: bool,
     cancel: CancellationToken,
@@ -3736,7 +3778,7 @@ pub(crate) fn execute_source_resource(
         .transpose()
         .map_err(|e| KernelError::Authorization(e.to_string()))?;
     resources
-        .call(
+        .call_resource(
             &binding,
             &context,
             ResourceOperation::from_source_action(action),

@@ -77,7 +77,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         const input: ThreadPendingInput = { kind: 'submit', status: 'sending', fingerprint: request.key,
           editorText: request.editorText, editorContext: request.editorContext, inlineContext: request.inlineContext,
           preparedSource, goalObjective: request.goalObjective, goalBudget: request.goalBudget,
-          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, materials,
+          input: { ...identity, key: request.key, expectedHead: null, text: request.text, images: request.images, materials, skills: request.skills, references: request.references,
             model: request.model, ...(request.agent ? { agent: request.agent } : {}), ...(preparedSource ? { source: preparedSource.source } : {}) } };
         patch({ pendingInput: input });
       }
@@ -90,7 +90,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         firstMessageReceipt: acceptedInputId ? { key: request.key, text: original.input.text, images: request.images, inputId: acceptedInputId } : undefined,
         ...(original.goalObjective ? { goalArmed: false } : {}),
         text: current.text === original.editorText ? '' : current.text,
-        ...(current.text === original.editorText ? { imageReferenceSequence: 0 } : {}),
+        ...(current.text === original.editorText ? { imageReferenceSequence: 0, references: [] } : {}),
         images: current.images.filter(image => !request.images.includes(image)),
         materials: current.materials.filter(material => !original.input.materials?.some(item => item.snapshotId === material.snapshotId)),
       }));

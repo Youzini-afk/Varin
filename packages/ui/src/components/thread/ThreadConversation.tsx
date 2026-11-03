@@ -1,3 +1,6 @@
+import { useThreadComposerWorkflows } from './useThreadComposerWorkflows';
+import { useThreadComposerCommands } from './ThreadComposerCommands';
+import { composerInputReferences } from '@/components/chat/composer/submit/references';
 import { canRespondToQuestion } from './threadOperations';
 import { THINKING_LEVELS, documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
 import { openThreadContext } from '@/lib/openThreadContext';
@@ -295,7 +298,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     }).catch(failure => { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(failure instanceof Error ? failure.message : String(failure)); });
     return () => controller.abort();
   }, [needsDefaultModel, host, draftKey, draft.workspacePath, workspacePath, initialWorkspacePath, botSurface, defaultsVersion]);
-  const act = async (work: () => Promise<unknown>, interrupt = false) => {
+  const act = async (work: () => Promise<unknown>, interrupt = false, propagate = false) => {
     if (readOnly || currentViewScope.current !== viewScope || pendingAction.current && !interrupt) return;
     const action = {}; pendingAction.current = action;
     const generation = identityGeneration.current;
@@ -314,6 +317,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         ? 'These images exceed the current transport request size. Remove or resize an image and retry; your attachments are still here.'
         : value instanceof ThreadRequestError && value.code === 'model-images-unsupported' ? 'The selected model does not accept images. Choose an image-capable model or remove the images.'
         : value instanceof Error ? value.message : 'Thread request failed'));
+      if (propagate) throw value;
     }
     finally { if (current()) { pendingAction.current = null; setPending(false); } }
   };
@@ -363,7 +367,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   };
   const selectModel = (provider: string, model: string, thinking: ThreadThinkingLevel) => {
     if (active && run) {
-      void act(()=>api.selectModel({...identity,runId:run.id,key:crypto.randomUUID(),model:{providerId:provider,modelId:model,thinkingLevel:thinking}}));
+      return act(()=>api.selectModel({...identity,runId:run.id,key:crypto.randomUUID(),model:{providerId:provider,modelId:model,thinkingLevel:thinking}}), false, true);
     } else {setProviderId(provider);setModelId(model);setThinkingLevel(thinking);}
   };
   const returnToLatest = () => {
@@ -380,14 +384,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const nextStep = useThreadNextStep(api, identity, { owner: `${host}:${draftKey}`, runId: run?.id, headId: branch?.head,
     eligible: Boolean(!readOnly && snapshot && !active && !snapshot.thread.parent_thread_id && !snapshot.thread.bot_id
       && run && ['completed', 'failed', 'cancelled'].includes(run.state) && !pending && !draft.pendingInput && !draft.firstSend) });
-  const forkFrom = async (headId: string) => {
+  const forkFrom = async (headId: string, propagate = false) => {
     const generation = identityGeneration.current;
     let key = forkKeys.current.get(headId);
     if (!key) { key = crypto.randomUUID(); forkKeys.current.set(headId, key); }
     await act(async () => {
       const created = await api.fork({ ...identity, key, headId });
       if (generation === identityGeneration.current) { forkKeys.current.delete(headId); onBranchCreated?.(created); }
-    });
+    }, false, propagate);
   };
   const compactThrough = async (throughId: string) => {
     if (!snapshot) return;
@@ -399,12 +403,13 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     try {
       await api.compact({ ...identity, key, throughId, expectedRevision, model: { providerId, modelId, thinkingLevel } });
       if (generation === identityGeneration.current) compactionKeys.current.delete(fingerprint);
-    } catch (error) { if (generation === identityGeneration.current) toast.error(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { if (generation === identityGeneration.current) toast.error(error instanceof Error ? error.message : String(error)); throw error; }
   };
   const visibleHistory = history.items;
   const firstMessage = useFirstMessagePreview(draftKey, Boolean(snapshot?.historyPage.head), handoff);
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
-  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, preparedSource?.source, agent]);
+  const referenceScope = JSON.stringify([host, draftKey, preparedSource?.source ?? launch?.selection.source ?? workspacePath]);
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, draft.references, requestImages, materials, providerId, modelId, thinkingLevel, preparedSource?.source, agent]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
   const sendBlocked = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
     || (images.length > 0 && acceptsImages === false)
@@ -438,6 +443,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   // The empty home animates away only when this view is sending; arriving history or a switch replaces it at once.
   const sendDeparts = Boolean(snapshot && (pending || draft.pendingInput || draft.firstSend || firstMessage.message));
   const emptyWorkspacePath = preparedSource?.path ?? workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
+  const localWorkspacePath = preparedSource?.source.resourceOwner.kind === 'local' ? preparedSource.path
+    : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot
+    : !launch?.selection.source ? workspacePath : undefined;
+  const composerCommands = useThreadComposerCommands({ api, identity, snapshot, sourcePath: localWorkspacePath,
+    disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined, onHistory: () => setHistoryOpen(true), onFork: head => forkFrom(head, true),
+    refresh: async () => { await projection.current?.refresh(); }, onSources: () => showOverview('sources') });
+  const workflows = useThreadComposerWorkflows({ api, identity, snapshot, draftKey, draftText: text, onMemoryOpen: () => showOverview('memory'),
+    refresh: () => { void projection.current?.refresh(); }, disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined });
   const overview = !botSurface && <ThreadOverview key={contentOwner} api={api} identity={identity} sessionKey={overviewKey} snapshot={snapshot}
     request={focusedOverview?.owner === contentOwner ? focusedOverview : undefined} pending={pending} readOnly={readOnly}
     workspacePath={emptyWorkspacePath} hasComputer={hasComputer} error={error}
@@ -531,14 +544,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         return saved;
       }} onCancel={input => act(() => api.cancelInput(input.id, input.revision), true)}
       onSendNow={active && run ? input => act(() => api.sendInputNow(input.id, input.revision, run.id)) : undefined} />}</div>
-    <form className="space-y-2" onSubmit={event => {
+    {workflows.directed ?? <form className="space-y-2" onSubmit={event => {
       event.preventDefault();
       if (draft.firstSend || !botSurface && draft.identity && !run && (draft.sourceSelection || draft.pdfs?.length)) {
         if (pending || !draft.firstSend && sendDisabled) return;
         const settings = useUIStore.getState();
         const request = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending' as const, editorText: text, text: projectedText,
           images: requestImages, pdfs: draft.pdfs ?? [], model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!botSurface && !snapshot?.thread.bot_id && !delegated ? { agent } : {}), workspacePath,
-          sourceSelection: draft.sourceSelection, editorContext, inlineContext,
+          sourceSelection: draft.sourceSelection, editorContext, inlineContext, ...composerInputReferences(text, draft.references, referenceScope),
           ...(draft.goalArmed && text.trim() ? { goalObjective: text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}) };
         tapHaptic();
         handoff.submit(request.key, draftKey, handoff.captureDraft());
@@ -567,9 +580,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           }
           const key = crypto.randomUUID();
           const attachments = materials.length ? { materials: materials.map(({ snapshotId }) => ({ snapshotId })) } : {};
-          const submit = { ...identity, key, text: projectedText, images: requestImages, ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!botSurface && !snapshot?.thread.bot_id && !delegated ? { agent } : {}), ...(sourceForInput ? { source: sourceForInput.source } : {}) };
-          const queued = { ...identity, key, text: projectedText, images: requestImages, ...attachments, mode: inputMode };
-          const continuation = { ...identity, key, text: projectedText, images: requestImages, ...attachments, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
+          const submit = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, expectedHead: branch?.head ?? null, model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!botSurface && !snapshot?.thread.bot_id && !delegated ? { agent } : {}), ...(sourceForInput ? { source: sourceForInput.source } : {}) };
+          const queued = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, mode: inputMode };
+          const continuation = { ...identity, key, text: projectedText, images: requestImages, ...composerInputReferences(text, draft.references, referenceScope), ...attachments, previousRunId: run?.id ?? '', expectedHead: branch?.head ?? null };
           if (!active && delegated && (!api.collaboration || !run)) throw new Error('Child continuation is unavailable');
           const goalSettings = useUIStore.getState();
           const goal = !botSurface && draft.goalArmed && !active && !delegated && text.trim() ? { goalObjective: text.trim(),
@@ -588,7 +601,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           pendingInput: undefined, preparedSource: current.preparedSource === original.preparedSource ? null : current.preparedSource,
           ...(original.goalObjective ? { goalArmed: false } : {}),
           text: current.text === original.editorText ? '' : current.text,
-          ...(current.text === original.editorText ? { imageReferenceSequence: 0 } : {}),
+          ...(current.text === original.editorText ? { imageReferenceSequence: 0, references: [] } : {}),
           images: current.images.filter(image => !(original.input.images ?? []).includes(image)),
           materials: current.materials.filter(material => !(original.input.materials ?? []).some(item => item.snapshotId === material.snapshotId)),
         } : {});
@@ -621,15 +634,15 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
       {!botSurface && <AutoReviewBanner identity={identity} />}
       {!botSurface && draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
-      <ThreadComposer onOpenHistory={() => setHistoryOpen(true)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
+      <ThreadComposer referenceScope={referenceScope} commandActions={{ ...composerCommands, ...workflows.actions }} onOpenHistory={() => setHistoryOpen(true)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
         permissionWorkspacePath={active || !preparedSource ? (launch?.selection.source
           ? launch.selection.source.resource_owner.kind === 'local' ? launch.selection.source.live_root?.canonicalRoot : undefined
           : workspacePath) : preparedSource.source.resourceOwner.kind === 'local' ? preparedSource.path : undefined}
         agentControls={!botSurface && !snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls workFocus={workFocus} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
           onWorkFocusChange={workFocus => useThreadDraftStore.getState().patch(draftKey, { workFocus })} /> : undefined}
-        messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
-        onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('context'); void compactThrough(branch.head!); } : undefined}
-        editorRef={messageInput} value={text} onChange={setText} models={models}
+        messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { userText?: unknown })?.userText === 'string' ? (item.content as { userText: string }).userText : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
+        onCompact={branch?.head && !active && providerId && modelId ? async () => { showOverview('context'); await compactThrough(branch.head!); } : undefined}
+        editorRef={messageInput} value={text} onChange={(text, references) => useThreadDraftStore.getState().patch(draftKey, { text, references })} references={draft.references} api={api} identity={identity} source={preparedSource?.source} models={models}
         suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionDismiss={nextStep.dismiss}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
         modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput) || readingFiles}
@@ -642,9 +655,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename)]}
         hasInput={hasComposerInput}
         onWorkspace={botSurface ? undefined : () => showOverview('sources')} workspaceLabel={preparedSource ? formatDirectoryName(preparedSource.path) : launch?.selection.source?.live_root ? formatDirectoryName(launch.selection.source.live_root.canonicalRoot) : launch?.selection.source ? t('harness.overview.sources') : workspacePath ? formatDirectoryName(workspacePath) : t('thread.composer.chatOnly')}
-        workspacePath={preparedSource?.source.resourceOwner.kind === 'local' ? preparedSource.path
-          : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot
-          : !launch?.selection.source ? workspacePath : undefined}
+        workspacePath={localWorkspacePath}
         skills={snapshot?.context.checkpoint?.resources?.snapshot.skills.map(skill => skill.name) ?? []}>
         <div className="space-y-2 px-3 empty:hidden">{!botSurface && emptyWorkspacePath && <ActiveEditorSuggestion threadKey={draftKey} />}      <EditorContextAttachmentChips threadKey={draftKey} />
       {inlineContext.length > 0 && <div className="flex flex-wrap gap-1" aria-label="Attached context">
@@ -670,7 +681,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         {active && run && policyUpdate && policyUpdatePending && <Button type="button" variant="ghost" disabled={pending || run.cancel_requested} onClick={() => void act(() => api.cancelPolicyUpdate(identity, run.id, policyUpdate.selection_id))}>Cancel strategy update</Button>}
         {run && launch?.startable && launch.requires_rebind && launch.preparation_failure && !pause && <Button type="button" variant="ghost" disabled={pending} onClick={() => void act(() => api.retryPreparation(run.id))}>{t('chat.run.retryPreparation')}</Button>}
       </div>
-    </form>
+    </form>}
     {!botSurface && <Departure present={empty} animated={sendDeparts} exit="sink" stagger=".varin-draft-starters > *" className="conversation-starters"><DraftPresetChips cwd={workspacePath ?? initialWorkspacePath} sessionId={identity.threadId} className="varin-draft-starters"
       onSubmit={starter => {
         if (starter.ref.type === 'command' && starter.ref.name === 'craft-goal') { useThreadDraftStore.getState().patch(draftKey, { goalArmed: true }); messageInput.current?.focus(); return; }

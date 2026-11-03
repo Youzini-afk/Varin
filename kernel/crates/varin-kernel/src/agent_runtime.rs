@@ -62,6 +62,8 @@ mod bot_work_commands;
 #[path = "agent_inputs.rs"]
 mod input_commands;
 
+#[path = "agent_user_dispatch.rs"]
+mod user_dispatch_commands;
 #[path = "agent_children.rs"]
 mod child_commands;
 #[path = "agent_controls.rs"]
@@ -1270,6 +1272,20 @@ pub(crate) fn spawn(
                             });
                             deferred = true;
                             return Ok(Value::Null);
+                        }
+                        if method.starts_with("runtime.child.user.") {
+                            let runtime=runtime.clone(); let method=method.to_owned(); let response_id=id.clone();
+                            let response_sender=responses.clone(); let done=finished.clone(); let cancelled=cancellation.clone();
+                            let host=mcp_bridge.clone(); let order=input_order; let cancel=wake_cancel.unwrap_or_default();
+                            thread::spawn(move || {
+                                let result=(|| { let _order=input_commands::await_input_order(order)?;
+                                    user_dispatch_commands::execute(runtime,host,&method,params,&cancelled,&cancel) })();
+                                let response=match result {
+                                    Ok(value)=>response_ok(&response_id,value), Err(error)=>response_error(&response_id,&error),
+                                };
+                                done(&response_id); let _=response_sender.send(response);
+                            });
+                            deferred=true; return Ok(Value::Null);
                         }
                         if matches!(
                             method,

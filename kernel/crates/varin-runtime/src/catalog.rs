@@ -554,7 +554,7 @@ impl Catalog {
             parent: head,
             source: if let submissions::SubmissionOrigin::Ingress { input, .. } = origin {
                 input.origin.history_source()
-            } else if matches!(origin, submissions::SubmissionOrigin::Child { .. }) {
+            } else if matches!(origin, submissions::SubmissionOrigin::Child { user: false, .. }) {
                 HistorySource::Agent
             } else {
                 HistorySource::User
@@ -1790,6 +1790,8 @@ pub mod launch_content;
 
 #[path = "catalog_delegation_model.rs"]
 pub mod delegation_model;
+#[path = "catalog_user_dispatch.rs"]
+pub mod user_dispatch;
 #[path = "catalog_delegated.rs"]
 pub mod delegated;
 

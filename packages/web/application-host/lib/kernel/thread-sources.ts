@@ -19,6 +19,7 @@ import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/t
 export interface SourceDirectory {
   list(signal?: AbortSignal): ReturnType<ThreadSourcesAPI['list']>;
   resolve(request: Parameters<ThreadSourcesAPI['resolve']>[1], signal?: AbortSignal): ReturnType<ThreadSourcesAPI['resolve']>;
+  draftSkills?(request: Parameters<ThreadSourcesAPI['resolve']>[1], signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSkillCatalog>;
 }
 export interface ThreadSourceRemoteOwner extends SourceDirectory {
   prepare(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
@@ -39,7 +40,7 @@ export function parseSourceResourceOwner(value: unknown): SourceResourceOwner {
 
 export function createThreadSourceDirectory(options: {
   documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration'>;
-  remote?: Pick<ThreadSourceRemoteOwner, 'list' | 'resolve'>;
+  remote?: Pick<ThreadSourceRemoteOwner, 'list' | 'resolve' | 'draftSkills'>;
 }): SourceDirectory {
   return {
     async list(signal) {
@@ -47,6 +48,10 @@ export function createThreadSourceDirectory(options: {
       const remote = await options.remote?.list(signal);
       return { targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }, ...(remote?.targets ?? [])],
         unavailable: remote?.unavailable ?? [] };
+    },
+    async draftSkills(request, signal) {
+      if (parseSourceResourceOwner(request.resourceOwner).kind !== 'managed_host' || !options.remote?.draftSkills) throw new SourceAdmissionError('source_unavailable');
+      return options.remote.draftSkills(request, signal);
     },
     async resolve(request, signal) {
       const resourceOwner = parseSourceResourceOwner(request.resourceOwner);

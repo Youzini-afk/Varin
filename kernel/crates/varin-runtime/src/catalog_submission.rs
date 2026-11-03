@@ -32,6 +32,7 @@ pub(super) enum SubmissionOrigin {
         checkpoint: Option<String>,
     },
     Child {
+        user: bool,
         operation_id: String,
         parent_thread_id: String,
         checkpoint: Option<String>,
@@ -39,6 +40,7 @@ pub(super) enum SubmissionOrigin {
     ChildContinuation {
         execution_id: String,
         checkpoint: Option<String>,
+        frozen_input: Option<Value>,
     },
     Ingress {
         input: inputs::QueuedInputMetadata,
@@ -425,7 +427,13 @@ impl PreparedSubmission {
                 }
             }
         }
-        let mut input_material = None;
+        let mut input_material = if let SubmissionOrigin::ChildContinuation { frozen_input: Some(input), .. } = &origin {
+            if !resources::same_skill_intent(&command.input, input) {
+                return Err(RuntimeError::Conflict("frozen continuation material differs from its original input".into()));
+            }
+            resources::invocations(input)?;
+            Some(input.clone())
+        } else { None };
         let initial = initial
             .map(|mut proposal| -> Result<_> {
                 if proposal.branch_id != command.branch_id
@@ -507,7 +515,7 @@ impl PreparedSubmission {
                         .map(|active| active.resource_activations.clone())
                         .unwrap_or_default(),
                 };
-                if matches!(
+                if input_material.is_none() && matches!(
                     origin,
                     SubmissionOrigin::User { .. } | SubmissionOrigin::ChildContinuation { .. }
                 ) {
@@ -541,6 +549,7 @@ impl PreparedSubmission {
         };
         let history = match &origin {
             SubmissionOrigin::Ingress { history, .. } => history.clone(),
+            SubmissionOrigin::Child { user: true, .. } => content.save_user_history(&input_id, &input_material)?,
             SubmissionOrigin::Child {
                 operation_id,
                 parent_thread_id,

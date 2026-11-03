@@ -1,3 +1,4 @@
+import { skillLocatorId } from './thread-skill-selection.js';
 /** Coordinator adapters retain the selected endpoint and borrow only its original resource authority. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -58,6 +59,16 @@ export function createManagedSourceConsumers(options: ManagedSourceConsumerOptio
       const resolved = await client.resolve({ coordinatorHostId: options.coordinatorHostId(), path: request.path }, signal);
       if (resolved.hostId !== request.resourceOwner.hostId) throw new Error('Managed source resolution changed Host');
       return { resourceOwner: request.resourceOwner, workspaceId: resolved.workspaceId, path: resolved.canonicalRoot };
+    },
+    async draftSkills(request, signal) {
+      if (request.resourceOwner.kind !== 'managed_host') throw new Error('Managed source requires its exact target owner');
+      const client = await options.registry.source(request.resourceOwner, signal);
+      const catalog = await client.skills({ coordinatorHostId: options.coordinatorHostId(), path: request.path }, signal);
+      return { ...catalog, skills: catalog.skills.map(skill => {
+        if (!skill.locator || skill.locator.resourceOwner.kind !== 'local') throw new Error('Managed skill discovery omitted its original locator');
+        const locator = { ...skill.locator, resourceOwner: request.resourceOwner };
+        return { ...skill, locator, resourceId: skillLocatorId(locator) };
+      }) };
     },
     async prepare(input, signal) {
       if (input.resourceOwner.kind !== 'managed_host') throw new Error('Managed source requires its exact target owner');

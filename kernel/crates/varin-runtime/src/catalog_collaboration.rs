@@ -289,8 +289,8 @@ pub struct ChildTask {
     pub parent_run_id: String,
     pub parent_thread_id: String,
     pub parent_branch_id: String,
-    pub origin: ToolOrigin,
-    pub call_id: String,
+    pub origin: Option<ToolOrigin>,
+    pub call_id: Option<String>,
     pub child_thread_id: String,
     pub child_branch_id: String,
     pub project_id: Option<String>,
@@ -447,20 +447,26 @@ impl Catalog {
         &mut self,
         prepared: child_content::PreparedChildAdmission,
     ) -> Result<ChildTask> {
-        let context = &prepared.context;
+        let origin = &prepared.origin;
+        let user_dispatch = matches!(origin, child_content::ChildAdmissionOrigin::User(_));
         let child_launch = &prepared.launch;
         let handoff = &prepared.handoff;
-        super::background::authorize(&self.db, &self.run(&context.run_id)?.thread_id, &prepared.background)?;
+        if let child_content::ChildAdmissionOrigin::User(user) = origin {
+            if super::user_dispatch::existing(&self.db, &user.command)?.is_some() {
+                return self.child_task(&user.operation_id);
+            }
+        }
+        super::background::authorize(&self.db, &self.run(origin.run_id())?.thread_id, &prepared.background)?;
         if let Some(old) = optional_record::<delegated::ChildRelation>(
             &self.db,
             "child_tasks",
-            &context.operation_id,
+            origin.operation_id(),
         )?
-        .map(|_| self.child_task(&context.operation_id))
+        .map(|_| self.child_task(origin.operation_id()))
         .transpose()?
         {
-            if old.parent_run_id == context.run_id
-                && old.origin == context.origin
+            if old.parent_run_id == origin.run_id()
+                && old.origin == origin.tool_origin().cloned()
                 && old.input_ref == prepared.input_ref
                 && old.source.handoff() == handoff.as_ref()
                 && &old.launch == child_launch
@@ -471,25 +477,29 @@ impl Catalog {
                 "dispatch origin has different input or source".into(),
             ));
         }
-        let project_id = prepared.project.as_ref().map(|p|p.id.clone()).or(self.run_project_id(&context.run_id)?);
+        let project_id = prepared.project.as_ref().map(|p|p.id.clone())
+            .or(if user_dispatch { None } else { self.run_project_id(origin.run_id())? });
         let tx = self.db.transaction()?;
-        let run: Run = record(&tx, "runs", &context.run_id)?;
-        fence(&run, self.epoch)?;
-        let mut op: Operation = record(&tx, "operations", &context.operation_id)?;
-        let admitted = super::tool_content::require_job_invocation(&tx, &run, &op, context,
-            if prepared.internal_retrieval { "code_retrieval" } else { DISPATCH_TOOL })?;
-        if admitted.call().call_id != prepared.call_id
-            || op.revision != prepared.operation_revision
-            || op.phase != OperationPhase::Running
-            || op.cancel_requested
-            || run.cancel_requested
-        {
-            return Err(RuntimeError::Conflict(
-                "dispatch is not an admitted parent tool call".into(),
-            ));
-        }
+        let run: Run = record(&tx, "runs", origin.run_id())?;
+        let (mut op, admitted) = match origin {
+            child_content::ChildAdmissionOrigin::Tool(context) => {
+                fence(&run, self.epoch)?;
+                let op: Operation = record(&tx, "operations", origin.operation_id())?;
+                let admitted = super::tool_content::require_job_invocation(&tx, &run, &op, context,
+                    if prepared.internal_retrieval { "code_retrieval" } else { DISPATCH_TOOL })?;
+                if Some(&admitted.call().call_id) != prepared.call_id.as_ref()
+                    || op.revision != prepared.operation_revision || op.phase != OperationPhase::Running
+                    || op.cancel_requested || run.cancel_requested {
+                    return Err(RuntimeError::Conflict("dispatch is not an admitted parent tool call".into()));
+                }
+                (op, Some(admitted))
+            }
+            child_content::ChildAdmissionOrigin::User(user) => {
+                (super::user_dispatch::admit_operation(&tx, user, self.epoch)?, None)
+            }
+        };
         let parent: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
-        if prepared.project.is_none(){super::dispatch::validate_agent_source(&tx,&run,prepared.source_agent.as_deref(),handoff.as_ref())?;}
+        if !user_dispatch && prepared.project.is_none(){super::dispatch::validate_agent_source(&tx,&run,prepared.source_agent.as_deref(),handoff.as_ref())?;}
         if parent.selection.tool_schema_generation != child_launch.tool_schema_generation
             || parent.selection.tools_ref != prepared.parent_tools_ref
         {
@@ -507,6 +517,7 @@ impl Catalog {
         )?;
         let shared_physical=prepared.handoff.as_ref().is_some_and(|handoff| handoff.source.mode == SourceMode::Materialized
             || matches!(handoff.root,ChildSourceRoot::Physical{..} | ChildSourceRoot::Derived{..}));
+        let source_absent = prepared.handoff.is_none() && prepared.project.is_none();
         let mut child =
             ChildTask {
                 inherited_context: prepared.inherited_context,
@@ -521,7 +532,7 @@ impl Catalog {
                 parent_run_id: run.id.clone(),
                 parent_thread_id: run.thread_id.clone(),
                 parent_branch_id: run.branch_id.clone(),
-                origin: context.origin.clone(),
+                origin: origin.tool_origin().cloned(),
                 call_id: prepared.call_id.clone(),
                 child_thread_id,
                 child_branch_id,
@@ -556,7 +567,7 @@ impl Catalog {
                         ChildSource::Pending { handoff }
                     }
                 }),
-                code_result: if project_id.is_none() && parent.selection.source.is_none() {
+                code_result: if source_absent {
                     ChildCodeResult::NotApplicable
                 } else if prepared.work_mode == super::dispatch::ChildWorkMode::Shared && (shared_physical || project_id.is_some() || prepared.internal_retrieval) {
                     ChildCodeResult::SharedSource
@@ -575,6 +586,7 @@ impl Catalog {
         // The original invocation completes at acceptance. A fast child may independently
         // finish before the model exchange or policy graph consumes this immutable fact.
         let accepted_at_ms = observations::wall_time_ms()?;
+        if let Some(admitted) = &admitted {
         let acceptance=super::result_content::ToolCompletionMetadata::write(&self.content,&crate::execution::ToolCompletion::JobAccepted{
             operation_id:op.id.clone(),phase:"preparing_child".into(),effect:Effect::None,lifetime:Lifetime::Thread,
             content:Some(if prepared.internal_retrieval {
@@ -584,7 +596,8 @@ impl Catalog {
             } else { json!({"agentId":child.agent_id,"name":child.name,"threadId":child.child_thread_id,"branchId":child.child_branch_id,"operationId":child.operation_id}) }.into()),
         })?;
         let content_ref=match acceptance {super::result_content::ToolCompletionMetadata::JobAccepted{content_ref,..}=>content_ref,_=>unreachable!()};
-        super::result_content::publish_job_acceptance_content(&tx, &mut op, &admitted, "preparing_child",content_ref)?;
+        super::result_content::publish_job_acceptance_content(&tx, &mut op, admitted, "preparing_child",content_ref)?;
+        }
         op.handed_off = true;
         op.phase = OperationPhase::Preparing;
         op.effect = Effect::None;
@@ -598,7 +611,9 @@ impl Catalog {
             json!({"child_thread_id":child.child_thread_id,"parent_run_id":run.id,"acceptedAtMs":accepted_at_ms}),
         )?;
         delegated::insert_initial(&tx, &child, prepared.model_selection_required)?;
-        super::goals::bind_child(&tx, &op.id, &run.id)?;
+        if let child_content::ChildAdmissionOrigin::User(user) = origin {
+            super::user_dispatch::publish_receipt(&tx, user, &child, accepted_at_ms)?;
+        } else { super::goals::bind_child(&tx, &op.id, &run.id)?; }
         tx.commit()?;
         Ok(child)
     }
@@ -759,6 +774,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
         let child: delegated::ChildRelation = serde_json::from_str(&body).map_err(|_| {
             RuntimeError::Invalid("unsupported collaboration body; user data was preserved".into())
         })?;
+        super::user_dispatch::validate_relation(db, &child)?;
         if child.operation_id != id || child.child_thread_id != thread {
             return Err(RuntimeError::Invalid(
                 "malformed collaboration identity; user data was preserved".into(),
@@ -949,6 +965,9 @@ impl ChildPreparation {
             ));
         }
         let continuing = !matches!(execution.trigger, delegated::DelegatedTrigger::Dispatch);
+        // A new continuation already captured its User material during acceptance.
+        // Later source preparation cannot reselect resources or change that body.
+        let input_preparation = if execution.frozen_input_ref.is_some() { None } else { input_preparation };
         if ingress.is_some() && input_preparation.is_some() {
             return Err(RuntimeError::Invalid(
                 "message requests cannot acquire User skill input".into(),
@@ -1029,6 +1048,7 @@ impl ChildPreparation {
                 submission: None,
             });
         }
+        let frozen_input = execution.frozen_input_ref.as_ref().map(|reference| content.load(reference)).transpose()?;
         let raw_input = if ingress.is_some() {
             Value::Null
         } else {
@@ -1092,9 +1112,11 @@ impl ChildPreparation {
                 submissions::SubmissionOrigin::ChildContinuation {
                     execution_id: operation_id.clone(),
                     checkpoint,
+                    frozen_input,
                 }
             } else {
                 submissions::SubmissionOrigin::Child {
+                    user: child.origin.is_none(),
                     operation_id: operation_id.clone(),
                     checkpoint,
                     parent_thread_id: child.parent_thread_id,

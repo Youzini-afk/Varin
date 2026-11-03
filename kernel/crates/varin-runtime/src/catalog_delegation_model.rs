@@ -215,7 +215,8 @@ pub(super) fn parent_live(
     Ok(())
 }
 fn preparation_permitted(db: &Connection, relation: &delegated::ChildRelation) -> Result<()> {
-    let goal = goals::origin_goal(db, &relation.origin)?;
+    if relation.origin.is_none() { return Ok(()); }
+    let goal = goals::origin_goal(db, relation.origin.as_ref().expect("tool origin"))?;
     goals::check_delegated_dispatch(db, &relation.parent_run_id, goal.as_ref())
         .map(|_| ())
         .map_err(|error| match error {
@@ -339,15 +340,15 @@ impl Preparation {
         catalog
             .candidates
             .retain(|candidate| choices.iter().any(|choice| choice.model == candidate.id));
-        let messages = if choices.len() == 1 {
+        let messages = if choices.len() == 1 || self.relation.origin.is_none() {
             Vec::new()
         } else {
             recent_messages(
                 &self.database,
                 &self.content,
                 self.relation.model_selection_head.as_deref(),
-                &self.relation.origin,
-                &self.relation.call_id,
+                self.relation.origin.as_ref().expect("tool origin"),
+                self.relation.call_id.as_deref().ok_or_else(|| RuntimeError::Invalid("dispatch tool call identity missing".into()))?,
             )?
         };
         let profile: dispatch::ChildSelectedProfile =

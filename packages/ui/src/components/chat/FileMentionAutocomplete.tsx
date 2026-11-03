@@ -1,638 +1,110 @@
 import React from 'react';
-import { RiCodeLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiFolder3Fill, RiRefreshLine } from '@remixicon/react';
-import { cn, truncatePathMiddle } from '@/lib/utils';
-import { useFileSearchStore, type VarinFileSearchHit } from '@/stores/useFileSearchStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
+import type { FamilyMember } from '@varin/protocol';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { getResolvedWorkbenchWorkspaceId, subscribeWorkbenchWorkspace } from '@/lib/extensions/workbench-workspace';
 import { useEditorWorkbench } from '@/lib/workbench/editors/hooks';
 import { activeEditorTab, listOpenResourceIds } from '@/lib/workbench/editors/groups';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
-import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
-import { useAgentProfiles } from '@/components/sections/agents/useAgentProfiles';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
-import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { Icon } from '@/components/icon/Icon';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
+import { useFileSearchStore, type VarinFileSearchHit } from '@/stores/useFileSearchStore';
 import { useI18n } from '@/lib/i18n';
-import { useUIStore } from '@/stores/useUIStore';
-import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { ComposerMenu, type ComposerMenuHandle, type ComposerMenuItem } from './composer/ComposerMenu';
 
-type FileInfo = VarinFileSearchHit;
-type AgentInfo = {
-  name: string;
-  description?: string;
-  mode?: string | null;
-};
-
-export interface FileMentionHandle {
-  handleKeyDown: (key: string) => void;
-}
-
-interface FileMentionAutocompleteProps {
-  searchQuery: string;
-  onFileSelect: (file: FileInfo) => void;
-  onAgentSelect?: (agentName: string) => void;
-  onClose: () => void;
-  style?: React.CSSProperties;
-  workspacePath?: string;
-}
-
-export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileMentionAutocompleteProps>(({
-  searchQuery,
-  onFileSelect,
-  onAgentSelect,
-  onClose,
-  style, workspacePath,
-}, ref) => {
+export type FileMentionHandle = ComposerMenuHandle;
+type FileInfo = VarinFileSearchHit & { directory?: boolean };
+export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, {
+  searchQuery: string; workspacePath?: string; api?: ThreadsAPI; identity?: ThreadIdentity;
+  attachments?: Array<{ id: string; name: string; snapshotId?: string }>;
+  onFileSelect(file: FileInfo): void; onThreadSelect?(identity: ThreadIdentity, name: string): void;
+  onAttachmentSelect?(snapshotId: string, name: string): void;
+  onClose(): void; menuId?: string; onActive?(id?: string): void;
+}>(({ searchQuery, workspacePath, api, identity, attachments = [], onFileSelect, onThreadSelect, onAttachmentSelect, onClose, menuId = 'composer-references', onActive }, ref) => {
   const { t } = useI18n();
-  const fallbackDirectory = useChatSearchDirectory();
-  const currentDirectory = workspacePath ?? fallbackDirectory ?? '';
-  const { snapshot: profiles } = useAgentProfiles();
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const activeProjectPath = useProjectsStore(
-    React.useCallback(
-      (state) => state.projects.find((project) => project.id === activeProjectId)?.path ?? null,
-      [activeProjectId],
-    ),
-  );
-  const projectRoot = React.useMemo(() => {
-    const candidate = activeProjectPath || currentDirectory;
-    return candidate ? candidate.replace(/\\/g, '/').replace(/\/+$/, '') : null;
-  }, [activeProjectPath, currentDirectory]);
-  const workspaceId = useWorkbenchWorkspaceId();
-  const editorWorkbench = useEditorWorkbench(workspaceId);
-  const projectTabs = React.useMemo(() => {
-    if (!projectRoot || !editorWorkbench) return undefined;
-    const active = activeEditorTab(editorWorkbench);
-    return {
-      selectedPath: active ? workspacePathFromResourceId(projectRoot, active.resourceId) : null,
-      openPaths: listOpenResourceIds(editorWorkbench.tree).map((resourceId) => (
-        workspacePathFromResourceId(projectRoot, resourceId)
-      )),
-    };
-  }, [editorWorkbench, projectRoot]);
-  const searchFiles = useFileSearchStore((state) => state.searchFiles);
-  const debouncedQuery = useDebouncedValue(searchQuery, 180);
-  const showHidden = useDirectoryShowHidden();
-  const showGitignored = useFilesViewShowGitignored();
-  const [files, setFiles] = React.useState<FileInfo[]>([]);
-  const [directories, setDirectories] = React.useState<FileInfo[]>([]);
-  const [agents, setAgents] = React.useState<AgentInfo[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const pendingSearchRef = React.useRef(0);
-  const [selectedIndex, setSelectedIndex] = React.useState(0);
-  const selectedIndexRef = React.useRef(0);
-  const [marqueeWidth, setMarqueeWidth] = React.useState(360);
-  const [overflowMap, setOverflowMap] = React.useState<Record<number, boolean>>({});
-  const [marqueeDurations, setMarqueeDurations] = React.useState<Record<number, number>>({});
-  const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const labelRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
-  const measureRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
-  const isMobile = useUIStore((state) => state.isMobile);
-  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, isMobile);
-  const normalizedSearchQuery = (searchQuery ?? '').trim();
-  const recentFiles = React.useMemo(() => {
-    if (!projectRoot || !projectTabs) {
-      return [] as FileInfo[];
-    }
-
-    const ordered = [
-      projectTabs.selectedPath,
-      ...projectTabs.openPaths.slice().reverse(),
-    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-
-    const seen = new Set<string>();
-    const queryLower = normalizedSearchQuery.toLowerCase();
-    const mapped = ordered
-      .filter((filePath) => {
-        if (seen.has(filePath)) return false;
-        seen.add(filePath);
-        const relative = filePath.startsWith(`${projectRoot}/`) ? filePath.slice(projectRoot.length + 1) : filePath;
-        if (!queryLower) return true;
-        return relative.toLowerCase().includes(queryLower);
-      })
-      .slice(0, 6)
-      .map((filePath) => {
-        const normalizedPath = filePath.replace(/\\/g, '/');
-        const name = normalizedPath.split('/').filter(Boolean).pop() || normalizedPath;
-        const relativePath = normalizedPath.startsWith(`${projectRoot}/`)
-          ? normalizedPath.slice(projectRoot.length + 1)
-          : normalizedPath;
-        return {
-          name,
-          path: normalizedPath,
-          relativePath,
-          extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
-        } satisfies FileInfo;
-      });
-
-    return mapped;
-  }, [normalizedSearchQuery, projectRoot, projectTabs]);
-  const visibleAgents = React.useMemo(
-    () => normalizedSearchQuery.length > 0 ? agents : agents.slice(0, 2),
-    [agents, normalizedSearchQuery.length],
-  );
-  const visibleDirectories = directories;
-  const visibleRecentFiles = recentFiles;
-  const visibleFiles = files;
-
-  React.useEffect(() => {
-    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node | null;
-      if (!target || !containerRef.current) {
-        return;
-      }
-      if (containerRef.current.contains(target)) {
-        return;
-      }
-      onClose();
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown, true);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true);
-    };
-  }, [onClose]);
-
-  React.useEffect(() => {
-    if (!currentDirectory) {
-      setFiles([]);
-      return;
-    }
-
-    const normalizedQuery = (debouncedQuery ?? '').trim();
-    const normalizedQueryLower = normalizedQuery
-      .replace(/^\.\//, '')
-      .replace(/^\/+/, '')
-      .toLowerCase();
-
-    if (!normalizedQueryLower) {
-      setFiles([]);
-      return;
-    }
-
-    let cancelled = false;
-    pendingSearchRef.current++;
-    setLoading(true);
-
-    searchFiles(currentDirectory, normalizedQueryLower, 80, {
-      includeHidden: showHidden,
-      respectGitignore: !showGitignored,
-      type: 'file',
-    })
-      .then((hits) => {
-        if (cancelled) {
-          return;
-        }
-
-        const recentSet = new Set(recentFiles.map((file) => file.path));
-        setFiles(hits.filter((hit) => !recentSet.has(hit.path)).slice(0, 15));
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFiles([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          pendingSearchRef.current--;
-          if (pendingSearchRef.current <= 0) {
-            pendingSearchRef.current = 0;
-            setLoading(false);
-          }
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      pendingSearchRef.current = Math.max(0, pendingSearchRef.current - 1);
-      if (pendingSearchRef.current <= 0) {
-        setLoading(false);
-      }
-    };
-  }, [currentDirectory, debouncedQuery, recentFiles, searchFiles, showHidden, showGitignored]);
-
-  React.useEffect(() => {
-    if (!currentDirectory) {
-      setDirectories([]);
-      return;
-    }
-
-    const normalizedQuery = (debouncedQuery ?? '').trim();
-    const normalizedQueryLower = normalizedQuery
-      .replace(/^\.\//, '')
-      .replace(/^\/+/, '')
-      .toLowerCase();
-
-    if (!normalizedQueryLower) {
-      setDirectories([]);
-      return;
-    }
-
-    let cancelled = false;
-    pendingSearchRef.current++;
-    setLoading(true);
-
-    searchFiles(currentDirectory, normalizedQueryLower, 20, {
-      includeHidden: showHidden,
-      respectGitignore: !showGitignored,
-      type: 'directory',
-    })
-      .then((hits) => {
-        if (!cancelled) {
-          setDirectories(hits.slice(0, 10));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setDirectories([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          pendingSearchRef.current--;
-          if (pendingSearchRef.current <= 0) {
-            pendingSearchRef.current = 0;
-            setLoading(false);
-          }
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      pendingSearchRef.current = Math.max(0, pendingSearchRef.current - 1);
-      if (pendingSearchRef.current <= 0) {
-        setLoading(false);
-      }
-    };
-  }, [currentDirectory, debouncedQuery, searchFiles, showHidden, showGitignored]);
-
-  React.useEffect(() => {
-    if (!onAgentSelect) {
-      setAgents([]);
-      return;
-    }
-    const query = searchQuery.trim().toLowerCase();
-    setAgents((profiles?.profiles ?? []).filter(profile => !profile.automation && profile.effective.enabled
-      && `${profile.effective.name} ${profile.effective.description}`.toLowerCase().includes(query))
-      .map(profile => ({ name: profile.id, description: profile.effective.description, mode: profile.kind })));
-  }, [profiles, onAgentSelect, searchQuery]);
-
-  React.useEffect(() => {
-    setSelectedIndex(0);
-    setOverflowMap({});
-    setMarqueeDurations({});
-  }, [visibleFiles, visibleDirectories, visibleRecentFiles.length, visibleAgents.length]);
-
-  React.useEffect(() => {
-    selectedIndexRef.current = selectedIndex;
-  }, [selectedIndex]);
-
-  React.useEffect(() => {
-    itemRefs.current[selectedIndex]?.scrollIntoView({
-      block: 'nearest'
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  const scope = JSON.stringify([host, identity?.threadId, identity?.branchId, workspacePath]);
+  const workspaceId = React.useSyncExternalStore(subscribeWorkbenchWorkspace, () => workspacePath ? getResolvedWorkbenchWorkspaceId(workspacePath) : undefined, () => undefined);
+  const workbench = useEditorWorkbench(workspaceId);
+  const recentFiles: FileInfo[] = React.useMemo(() => {
+    if (!workspacePath || !workbench) return [];
+    const active = activeEditorTab(workbench);
+    const ids = [...new Set([...(active ? [active.resourceId] : []), ...listOpenResourceIds(workbench.tree).slice().reverse()])];
+    return ids.flatMap(id => {
+      const filePath = workspacePathFromResourceId(workspacePath, id);
+      if (!filePath) return [];
+      const relativePath = filePath.slice(workspacePath.replace(/[\\/]+$/, '').length + 1);
+      if (!relativePath.toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase())) return [];
+      return [{ path: filePath, name: filePath.split(/[\\/]/).at(-1) ?? filePath, relativePath }];
     });
-  }, [selectedIndex]);
-
+  }, [workspacePath, workbench, searchQuery]);
+  const query = useDebouncedValue(searchQuery, 150);
+  const search = useFileSearchStore(state => state.searchFiles);
+  const [limit, setLimit] = React.useState(60);
+  const [retry, refresh] = React.useReducer(value => value + 1, 0);
+  const [files, setFiles] = React.useState<{ scope: string; query: string; rows: FileInfo[]; pending: Array<'file' | 'directory'>; errors: Partial<Record<'file' | 'directory', string>> }>();
+  const [threads, setThreads] = React.useState<{ scope: string; query: string; rows: FamilyMember[]; loading: boolean; error?: string; cursor?: string | null }>();
+  const [cursor, setCursor] = React.useState<string>();
+  React.useEffect(() => { setLimit(60); setCursor(undefined); }, [searchQuery, scope]);
   React.useEffect(() => {
-    let frameId: number | null = null;
-
-    const updateOverflow = () => {
-      if (frameId !== null) {
-        cancelAnimationFrame(frameId);
-      }
-      frameId = requestAnimationFrame(() => {
-        const next: Record<number, boolean> = {};
-        const durations: Record<number, number> = {};
-        labelRefs.current.forEach((node, index) => {
-          if (!node) {
-            return;
-          }
-          const measureNode = measureRefs.current[index];
-          const fullWidth = measureNode?.offsetWidth ?? node.scrollWidth;
-          const overflowPx = Math.max(0, fullWidth - node.clientWidth);
-          const isOverflowing = overflowPx > 8;
-          next[index] = isOverflowing;
-          if (isOverflowing) {
-            const duration = Math.max(0.6, overflowPx / 110);
-            durations[index] = duration;
-          }
-        });
-        setOverflowMap(next);
-        setMarqueeDurations(durations);
-      });
-    };
-
-    updateOverflow();
-    window.addEventListener('resize', updateOverflow);
-
-    return () => {
-      if (frameId !== null) {
-        cancelAnimationFrame(frameId);
-      }
-      window.removeEventListener('resize', updateOverflow);
-    };
-  }, [visibleFiles, visibleDirectories]);
-
+    if (!workspacePath || query !== searchQuery) return;
+    let cancelled = false;
+    setFiles(previous => ({ scope, query, rows: previous?.scope === scope && previous.query === query ? previous.rows : [], pending: ['file', 'directory'], errors: {} }));
+    for (const type of ['file', 'directory'] as const) void search(workspacePath, query, limit, { type }).then(rows => {
+      if (cancelled || host !== getRuntimeEndpointGeneration()) return;
+      setFiles(previous => previous?.scope !== scope || previous.query !== query ? previous : { ...previous,
+        rows: [...previous.rows.filter(item => Boolean(item.directory) !== (type === 'directory')), ...rows.map(item => ({ ...item, directory: type === 'directory' }))],
+        pending: previous.pending.filter(item => item !== type) });
+    }, cause => {
+      if (cancelled || host !== getRuntimeEndpointGeneration()) return;
+      setFiles(previous => previous?.scope !== scope || previous.query !== query ? previous : { ...previous,
+        pending: previous.pending.filter(item => item !== type), errors: { ...previous.errors, [type]: cause instanceof Error ? cause.message : String(cause) } });
+    });
+    return () => { cancelled = true; };
+  }, [workspacePath, query, searchQuery, limit, retry, scope, search, host]);
   React.useEffect(() => {
-    const labelNode = labelRefs.current[selectedIndex];
-    if (!labelNode) {
-      return;
-    }
-
-    const updateWidth = () => {
-      const width = labelNode.clientWidth;
-      if (width > 0) {
-        setMarqueeWidth(width);
-      }
-    };
-
-    updateWidth();
-
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(labelNode);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [selectedIndex]);
-
-  const handleFileSelect = React.useCallback((file: FileInfo) => {
-    onFileSelect(file);
-  }, [onFileSelect]);
-
-  const handleAgentPick = React.useCallback((agentName: string) => {
-    onAgentSelect?.(agentName);
-  }, [onAgentSelect]);
-
-  React.useImperativeHandle(ref, () => ({
-    handleKeyDown: (key: string) => {
-      if (key === 'Escape') {
-        onClose();
-        return;
-      }
-
-      const total = visibleAgents.length + visibleDirectories.length + visibleRecentFiles.length + visibleFiles.length;
-      if (total === 0) {
-        return;
-      }
-
-      if (key === 'ArrowDown') {
-        setSelectedIndex((prev) => (prev + 1) % total);
-        return;
-      }
-
-      if (key === 'ArrowUp') {
-        setSelectedIndex((prev) => (prev - 1 + total) % total);
-        return;
-      }
-
-      if (key === 'Enter' || key === 'Tab') {
-        const safeIndex = ((selectedIndexRef.current % total) + total) % total;
-        if (safeIndex < visibleAgents.length) {
-          const agent = visibleAgents[safeIndex];
-          if (agent) {
-            handleAgentPick(agent.name);
-          }
-          return;
-        }
-        const dirIndex = safeIndex - visibleAgents.length;
-        if (dirIndex < visibleDirectories.length) {
-          const dir = visibleDirectories[dirIndex];
-          if (dir) {
-            handleFileSelect(dir);
-          }
-          return;
-        }
-        const fileIndex = dirIndex - visibleDirectories.length;
-        const selectedFile = fileIndex < visibleRecentFiles.length
-          ? visibleRecentFiles[fileIndex]
-          : visibleFiles[fileIndex - visibleRecentFiles.length];
-        if (selectedFile) {
-          handleFileSelect(selectedFile);
-        }
-      }
-    }
-  }), [visibleFiles, visibleDirectories, visibleRecentFiles, visibleAgents, onClose, handleFileSelect, handleAgentPick]);
-
-  const getFileIcon = (file: FileInfo) => {
-    const ext = file.extension?.toLowerCase();
-    switch (ext) {
-      case 'ts':
-      case 'tsx':
-      case 'js':
-      case 'jsx':
-        return <RiCodeLine className="h-3.5 w-3.5 text-[var(--status-info)]" />;
-      case 'json':
-        return <RiCodeLine className="h-3.5 w-3.5 text-[var(--status-warning)]" />;
-      case 'md':
-      case 'mdx':
-        return <RiFileLine className="h-3.5 w-3.5 text-muted-foreground" />;
-      case 'png':
-      case 'jpg':
-      case 'jpeg':
-      case 'gif':
-      case 'svg':
-        return <RiFileImageLine className="h-3.5 w-3.5 text-[var(--status-success)]" />;
-      default:
-        return <RiFilePdfLine className="h-3.5 w-3.5 text-muted-foreground" />;
-    }
-  };
-
-  return (
-      <div
-        ref={containerRef}
-        className="absolute z-[100] min-w-0 w-full max-w-[640px] max-h-64 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
-        style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
-      >
-        <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0">
-        {loading ? (
-          <div className="flex items-center justify-center py-4">
-            <RiRefreshLine className="h-4 w-4 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="pb-2">
-            {visibleAgents.map((agent, index) => {
-              const isSelected = selectedIndex === index;
-              return (
-                <div
-                  key={`agent-${agent.name}`}
-                  ref={(el) => { itemRefs.current[index] = el; }}
-                  className={cn(
-                    'flex items-start gap-2 px-3 py-1.5 cursor-pointer typography-ui-label rounded-lg',
-                    isSelected && 'bg-interactive-selection',
-                  )}
-                  onClick={() => handleAgentPick(agent.name)}
-                  onMouseMove={() => setSelectedIndex(index)}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold truncate">@{agent.name}</div>
-                    {agent.description && !isMobile ? (
-                      <div className="typography-meta text-muted-foreground truncate">{agent.description}</div>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-            {visibleAgents.length === 2 && normalizedSearchQuery.length === 0 && agents.length > 2 && (
-              <div className="px-3 py-1 typography-meta text-muted-foreground">
-                {t('chat.fileMentionAutocomplete.searchMoreAgents')}
-              </div>
-            )}
-            {visibleAgents.length > 0 && (visibleDirectories.length > 0 || visibleRecentFiles.length > 0 || visibleFiles.length > 0) && (
-              <div className="my-1 border-t border-border/60" />
-            )}
-            {visibleDirectories.map((dir, index) => {
-              const rowIndex = visibleAgents.length + index;
-              const relativePath = dir.relativePath || dir.name;
-              const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
-              const isSelected = selectedIndex === rowIndex;
-
-              return (
-                <div
-                  key={`dir-${dir.path}`}
-                  ref={(el) => { itemRefs.current[rowIndex] = el; }}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer typography-ui-label rounded-lg",
-                    isSelected && "bg-interactive-selection"
-                  )}
-                  onClick={() => handleFileSelect(dir)}
-                  onMouseMove={() => setSelectedIndex(rowIndex)}
-                >
-                  <RiFolder3Fill className="h-3.5 w-3.5 text-primary/60" />
-                  <span className="flex-1 min-w-0 truncate" aria-label={relativePath}>
-                    {displayPath}
-                  </span>
-                </div>
-              );
-            })}
-            {visibleDirectories.length > 0 && (visibleRecentFiles.length > 0 || visibleFiles.length > 0) && (
-              <div className="my-1 border-t border-border/60" />
-            )}
-            {visibleRecentFiles.map((file, index) => {
-              const rowIndex = visibleAgents.length + visibleDirectories.length + index;
-              const relativePath = file.relativePath || file.name;
-              const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
-              const isSelected = selectedIndex === rowIndex;
-              const isOverflowing = overflowMap[rowIndex] ?? false;
-              const marqueeDuration = marqueeDurations[rowIndex] ?? 2.6;
-
-              return (
-                <div
-                  key={`recent-${file.path}`}
-                  ref={(el) => { itemRefs.current[rowIndex] = el; }}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer typography-ui-label rounded-lg",
-                    isSelected && "bg-interactive-selection"
-                  )}
-                  onClick={() => handleFileSelect(file)}
-                  onMouseMove={() => setSelectedIndex(rowIndex)}
-                >
-                  {getFileIcon(file)}
-                  <span
-                    ref={(el) => { labelRefs.current[rowIndex] = el; }}
-                    className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
-                    style={isSelected ? {
-                      ['--file-mention-marquee-width' as string]: `${marqueeWidth}px`,
-                      ['--file-mention-marquee-duration' as string]: `${marqueeDuration}s`
-                    } : undefined}
-                    aria-label={relativePath}
-                  >
-                    <span
-                      ref={(el) => { measureRefs.current[rowIndex] = el; }}
-                      className="absolute invisible whitespace-nowrap pointer-events-none"
-                      aria-hidden
-                    >
-                      {relativePath}
-                    </span>
-                    {isOverflowing && isSelected ? (
-                      <span className="inline-block whitespace-nowrap file-mention-marquee">
-                        {relativePath}
-                      </span>
-                    ) : (
-                      <span className="block truncate">
-                        {displayPath}
-                      </span>
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-            {visibleRecentFiles.length > 0 && visibleFiles.length > 0 && (
-              <div className="my-1 border-t border-border/60" />
-            )}
-            {visibleFiles.map((file, index) => {
-              const rowIndex = visibleAgents.length + visibleDirectories.length + visibleRecentFiles.length + index;
-              const relativePath = file.relativePath || file.name;
-              const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
-              const isSelected = selectedIndex === rowIndex;
-              const isOverflowing = overflowMap[rowIndex] ?? false;
-              const marqueeDuration = marqueeDurations[rowIndex] ?? 2.6;
-
-              const item = (
-                <div
-                  ref={(el) => { itemRefs.current[rowIndex] = el; }}
-                    className={cn(
-                      "flex items-center gap-2 px-3 py-1.5 cursor-pointer typography-ui-label rounded-lg",
-                      isSelected && "bg-interactive-selection"
-                  )}
-                  onClick={() => handleFileSelect(file)}
-                  onMouseMove={() => setSelectedIndex(rowIndex)}
-                >
-                  {getFileIcon(file)}
-                  <span
-                    ref={(el) => { labelRefs.current[rowIndex] = el; }}
-                    className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
-                    style={isSelected ? {
-                      ['--file-mention-marquee-width' as string]: `${marqueeWidth}px`,
-                      ['--file-mention-marquee-duration' as string]: `${marqueeDuration}s`
-                    } : undefined}
-                    aria-label={relativePath}
-                  >
-                    <span
-                      ref={(el) => { measureRefs.current[rowIndex] = el; }}
-                      className="absolute invisible whitespace-nowrap pointer-events-none"
-                      aria-hidden
-                    >
-                      {relativePath}
-                    </span>
-                    {isOverflowing && isSelected ? (
-                      <span className="inline-block whitespace-nowrap file-mention-marquee">
-                        {relativePath}
-                      </span>
-                    ) : (
-                      <span className="block truncate">
-                        {displayPath}
-                      </span>
-                    )}
-                  </span>
-                </div>
-              );
-
-              return (
-                <React.Fragment key={file.path}>
-                  {item}
-                </React.Fragment>
-              );
-            })}
-            {visibleFiles.length === 0 && visibleDirectories.length === 0 && visibleRecentFiles.length === 0 && visibleAgents.length === 0 && (
-              <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-                {t('chat.fileMentionAutocomplete.empty')}
-              </div>
-            )}
-          </div>
-        )}
-        </ScrollableOverlay>
-        {!isMobile && (
-          <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-            {t('chat.autocomplete.keyboardHint')}
-          </div>
-        )}
-    </div>
-  );
+    if (!api?.family || !identity || query !== searchQuery) return;
+    const controller = new AbortController();
+    setThreads(previous => ({ scope, query, rows: previous?.scope === scope && previous.query === query ? previous.rows : [], loading: true }));
+    void api.family.list(identity, { query, includeSelf: true, limit: 50, ...(cursor ? { cursor } : {}) }, controller.signal).then(page => {
+      if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
+      setThreads(previous => ({ scope, query, loading: false, cursor: page.nextCursor,
+        rows: [...new Map([...(cursor && previous?.scope === scope && previous.query === query ? previous.rows : []), ...page.members].map(item => [item.threadId, item])).values()] }));
+    }, cause => { if (!controller.signal.aborted) setThreads(previous => ({ scope, query, rows: previous?.scope === scope && previous.query === query ? previous.rows : [], loading: false, error: cause instanceof Error ? cause.message : String(cause) })); });
+    return () => controller.abort();
+  }, [api, identity, scope, query, searchQuery, cursor, retry, host]);
+  const visibleFiles = files?.scope === scope && files.query === searchQuery ? files : undefined;
+  const visibleThreads = threads?.scope === scope && threads.query === searchQuery ? threads : undefined;
+  const choices = new Map<string, () => void>();
+  const items: ComposerMenuItem[] = [];
+  for (const attachment of attachments.filter(item => item.snapshotId && item.name.toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase()))) {
+    const id = `attachment:${attachment.id}`;
+    choices.set(id, () => onAttachmentSelect?.(attachment.snapshotId!, attachment.name));
+    items.push({ id, group: t('composer.group.attachments'), label: attachment.name, icon: <Icon name="attachment-2" className="size-4" /> });
+  }
+  const rank = (name: string) => name.toLocaleLowerCase() === searchQuery.toLocaleLowerCase() ? 0 : name.toLocaleLowerCase().startsWith(searchQuery.toLocaleLowerCase()) ? 1 : 2;
+  const fileRows = [...new Map([...recentFiles, ...(visibleFiles?.rows ?? [])].map(file => [`${Boolean(file.directory)}:${file.path}`, file])).values()].sort((a, b) => rank(a.name) - rank(b.name));
+  for (const directory of [false, true]) for (const file of fileRows.filter(item => Boolean(item.directory) === directory)) {
+    const id = `${directory ? 'directory' : 'file'}:${file.path}`;
+    choices.set(id, () => onFileSelect(file));
+    items.push({ id, group: t(directory ? 'composer.group.directories' : 'composer.group.files'), label: file.name, description: file.relativePath,
+      source: workspacePath, icon: directory ? <Icon name="folder" className="size-4" /> : <FileTypeIcon filePath={file.path} className="size-4" /> });
+  }
+  for (const member of visibleThreads?.rows ?? []) for (const branch of member.branches) {
+    const id = `thread:${member.threadId}:${branch.branchId}`;
+    const name = member.name || member.agentId || member.threadId;
+    choices.set(id, () => onThreadSelect?.({ runtime: 'agent', threadId: member.threadId, branchId: branch.branchId }, name));
+    items.push({ id, group: t('composer.group.threads'), label: name, description: `${member.task ?? ''} · ${branch.branchId}${member.parentThreadId ? ` · ${member.parentThreadId}` : ''}`,
+      value: member.state, icon: <AgentAvatar identity={member.threadId} avatar={member.avatar} size={18} /> });
+  }
+  const loading = (query !== searchQuery && Boolean(workspacePath || identity)) || Boolean(visibleFiles?.pending.length) || visibleThreads?.loading;
+  const moreFiles = Boolean(visibleFiles && (['file', 'directory'] as const).some(type => visibleFiles.rows.filter(item => Boolean(item.directory) === (type === 'directory')).length >= limit));
+  const status = <>
+    {loading && <p role="status" className="px-2 py-2 typography-micro text-muted-foreground">{t('composer.menu.loading')}</p>}
+    {[...Object.values(visibleFiles?.errors ?? {}), visibleThreads?.error].filter(Boolean).map((error, index) => <p role="alert" key={index} className="px-2 py-2 typography-meta text-destructive">{error} <button type="button" onClick={refresh}>{t('composer.menu.retry')}</button></p>)}
+    {(moreFiles || visibleThreads?.cursor) && <button type="button" className="w-full px-2 py-2 text-left typography-meta" onClick={() => { if (moreFiles) setLimit(value => value + 60); if (visibleThreads?.cursor) setCursor(visibleThreads.cursor); }}>{t('composer.menu.more')}</button>}
+    {!items.length && !loading && <p className="px-2 py-3 typography-meta text-muted-foreground">{t('chat.fileMentionAutocomplete.empty')}</p>}
+  </>;
+  return <ComposerMenu ref={ref} id={menuId} scope={scope} query={searchQuery} items={items} onChoose={id => choices.get(id)?.()} onClose={onClose} onActive={onActive} status={status} />;
 });

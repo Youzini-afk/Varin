@@ -1,3 +1,4 @@
+import { composerInputReferences } from '@/components/chat/composer/submit/references';
 import React from 'react';
 import { createExternalAgentsHttpAPI, ExternalAgentError } from '@varin/application-client';
 import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
@@ -64,6 +65,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const [readingFiles, setReadingFiles] = React.useState(false);
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const sourcePath = draft.sourceSelection?.path ?? draft.workspacePath;
+  const referenceScope = JSON.stringify([generation, draftKey, draft.sourceSelection ?? draft.workspacePath]);
   const preparation = useExternalDraftPreparation({ draftKey, host: generation, configurationId: draft.harnessId, cwd: sourcePath, name: external?.name });
   const capabilities = preparation.snapshot?.capabilities;
   const externalReady = Boolean(preparation.snapshot?.connected && capabilities && !preparation.snapshot.conversation.needsReview);
@@ -201,7 +203,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         }
         const settings = useUIStore.getState();
         const request: ThreadFirstSend = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending',
-          editorText: draft.text, text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
+          ...composerInputReferences(draft.text, draft.references, referenceScope), editorText: draft.text, text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
           images: draft.images, pdfs: draft.pdfs ?? [], model: model!, agent: { profileId: null, workFocus }, workspacePath: draft.workspacePath, sourceSelection: draft.sourceSelection,
           editorContext, inlineContext,
           ...(draft.goalArmed && draft.text.trim() ? { goalObjective: draft.text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}),
@@ -240,8 +242,9 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments" onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         <input ref={pdfInput} type="file" accept={DOCUMENT_FILE_ACCEPT} multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         {!draft.harnessId && draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
-        <ThreadComposer editorRef={editor} value={draft.text} onChange={text => patch({ text })} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
+        <ThreadComposer pendingSource={draft.sourceSelection ? { resourceOwner: draft.sourceSelection.resourceOwner, path: draft.sourceSelection.path } : sourcePath ? { resourceOwner: { kind: 'local' }, path: sourcePath } : undefined} referenceScope={referenceScope} editorRef={editor} value={draft.text} onChange={(text, references) => patch({ text, references })} references={draft.references} api={api} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
           agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} onHarnessChange={changeHarness} />}
+          backendCommands={capabilities?.commands}
           backendControls={draft.harnessId ? <HarnessSelector value={draft.harnessId} disabled={locked} onChange={changeHarness} /> : undefined}
           models={models} providerId={model?.providerId ?? ''} modelId={model?.modelId ?? ''} thinkingLevel={model?.thinkingLevel ?? 'off'}
           onModelChange={(providerId, modelId, thinkingLevel) => patch({ model: { providerId, modelId, thinkingLevel } })}

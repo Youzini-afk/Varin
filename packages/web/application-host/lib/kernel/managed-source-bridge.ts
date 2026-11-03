@@ -16,7 +16,7 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 interface Query {
   kind: 'tool' | 'resource' | 'control'; phase?: 'authorize' | 'execute' | 'observe' | 'cancel' | 'release'; binding: SourceToolBinding;
-  context: { run_id: string; operation_id: string; origin: ToolOrigin };
+  context: { run_id: string; operation_id: string; origin: ToolOrigin | null };
   call?: { call_id: string; name: string; schema_version: string; arguments: unknown };
   journal?: ManagedSourceToolRequest['journal'] | null;
   action?: SourceResourceAction; authorizeOnly?: boolean; watchProcess?: boolean;
@@ -137,7 +137,7 @@ export class ManagedSourceBridge {
         const address = { coordinatorHostId: this.coordinator(), authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch };
         let reply: unknown;
         if (query.kind === 'tool') {
-          if (!query.call || query.context.run_id !== query.binding.runId) throw new Error('Managed invocation scope changed');
+          if (!query.call || !query.context.origin || query.context.run_id !== query.binding.runId) throw new Error('Managed invocation scope changed');
           const input: ManagedSourceToolRequest = { ...address, ...(query.binding.executionEnvironment ? { executionEnvironment: query.binding.executionEnvironment } : {}), call: { runId: query.context.run_id, operationId: query.context.operation_id,
             origin: query.context.origin, callId: query.call.call_id, name: query.call.name, schemaVersion: query.call.schema_version, arguments: query.call.arguments }, ...(query.journal ? { journal: query.journal } : {}) };
           if (query.phase === 'authorize') reply = await client.authorize(input);

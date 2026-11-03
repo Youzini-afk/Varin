@@ -34,6 +34,8 @@ export interface DraftSourceSelection {
   captureScopes: string[];
 }
 export interface ThreadFirstSend {
+  skills?: import('@varin/application-client').ThreadSkillSelection[];
+  references?: import('@varin/application-client').ThreadObjectReference[];
   key: string;
   text: string;
   editorText: string;
@@ -51,6 +53,8 @@ export interface ThreadFirstSend {
   error?: string;
 }
 export interface ThreadDraft {
+  composerWorkflow?: import('@/components/thread/composerWorkflowState').ComposerWorkflowState;
+  references?: readonly import('@/components/chat/composer/editor/references').ComposerReference[];
   harnessId?: string | null;
   externalConversationId?: string;
   /** Idempotent preparation identity, retained after uncertain create/connection results. */

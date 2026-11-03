@@ -30,6 +30,7 @@ export interface ManagedSourceServiceOptions {
   validateLiveSource: LiveSourceResolver;
   /** The target's local original preparer, never the coordinator's remote dispatcher. */
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
+  draftSourceSkills?(workspaceId: string, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSkillCatalog>;
   serviceOperation?: ManagedSourceServiceHandler;
   readCodeExchange?(input: import('./managed-remote-types.js').ManagedSourceCodeExchangeRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadCodeExchange>;
   recovery?(principal: ManagedSourcePrincipal, input: ManagedRecoveryRequest, signal?: AbortSignal): Promise<ManagedRecoveryReply>;
@@ -320,6 +321,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       const registration = await documents.admitWorkspaceRegistration(resolved.workspaceId, signal);
       if (resolved.hostId !== options.hostId || registration.hostId !== options.hostId) throw new SourceAdmissionError('source_changed');
       return { workspaceId: resolved.workspaceId, canonicalRoot: registration.canonicalPath, hostId: options.hostId };
+    },
+    async skills(principal, input, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (typeof input.path !== 'string' || !input.path.trim()) throw new SourceAdmissionError('source_changed');
+      if (!options.draftSourceSkills) throw new SourceAdmissionError('source_unavailable');
+      const resolved = await documents.resolveWorkspace({ path: input.path });
+      const registration = await documents.admitWorkspaceRegistration(resolved.workspaceId, signal);
+      if (resolved.hostId !== options.hostId || registration.hostId !== options.hostId) throw new SourceAdmissionError('source_changed');
+      return options.draftSourceSkills(resolved.workspaceId, signal);
     },
     async prepare(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);

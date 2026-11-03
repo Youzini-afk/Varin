@@ -252,3 +252,30 @@ Use `bun run test:kernel` for the real Host/release-kernel suites and the Web pa
 for adapters. Rust review modules exercise original native owners and deterministic bridges; a fixture
 name containing “review” does not prove a real network, desktop or paid-model run. The
 [development guide](../../../../../docs/development.md) explains prepared outputs and test selection.
+
+## Composer workflows
+
+`thread-export.ts` walks the selected immutable history cut through the original Catalog history
+reader. It validates the inclusive range before starting the response, spools only reference pages to
+private temporary storage, and reads public message bodies in chronological order under stream
+backpressure. JSON and Markdown share a named public-semantic projection. Provider originals,
+opaque continuations, compaction/checkpoint state and unrelated outer fields are never exported.
+Tool details are opt-in. Original attachments and media retain their message association and filename;
+bytes come from their original authorized readers, with chunk identity and length checks. Cancellation
+closes the stream and removes its temporary metadata. The renderer writes to local disk-backed browser
+storage instead of collecting an entire history/attachment Blob in memory. No share link is created.
+
+`thread-remember.ts` resolves the actual Thread binding before exposing a save destination. Bot/user
+memories use `MemoryService` and the existing KnowledgeStore CAS and atomic mutation receipt;
+ordinary global/project/Thread notes use the original personalization typed record. The original save
+key, content and observed revision survive a lost response. A subsequent unrelated write does not
+prevent reading that original receipt. This path has no implicit inference and no command-specific
+memory store. Model-assisted drafting is a separately confirmed normal User dispatch, whose original
+execution report is reviewed before applying its text.
+
+Focused export tests cover pinned pagination, inclusive range rejection, public/private boundaries,
+media streaming and abort. Remember tests use the real KnowledgeStore for CAS and receipt replay.
+UI workflow tests cover independently retained recipient drafts and unknown-send retries, explicit
+model invocation, report review and no-model direct saves. These tests do not establish native
+kernel dispatch, physical remote-source admission or installed mobile/browser download support;
+those remain with their original native and product smoke suites.

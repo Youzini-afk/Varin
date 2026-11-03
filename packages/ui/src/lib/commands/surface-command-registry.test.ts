@@ -43,7 +43,7 @@ test('withdraws and restores built-in command contributions without a document r
     'editor.focusPreviousGroup',
     'editor.focusNextGroup',
   ];
-  expect(registrations.map((registration) => registration.meta.commandId)).toEqual(expectedCommandIds);
+  expect(registrations.filter(registration => !registration.meta.composer).map((registration) => registration.meta.commandId)).toEqual(expectedCommandIds);
   expect(registrations.find((registration) => registration.meta.commandId === 'editor.saveAll')?.contributionId)
     .toBe('varin.builtin.commands.editor.save-all');
   expect(registrations.find((registration) => registration.meta.commandId === 'toggle-sidebar')?.meta.mobileTitleKey)
@@ -54,7 +54,7 @@ test('withdraws and restores built-in command contributions without a document r
 
   await setBuiltinWorkbenchCommandsEnabled(true);
   expect(workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot()).length)
-    .toBe(expectedCommandIds.length);
+    .toBe(registrations.length);
 });
 
 test('a declarative command activates and executes the latest dynamic implementation', async () => {
