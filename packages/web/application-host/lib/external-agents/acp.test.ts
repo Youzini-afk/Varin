@@ -961,17 +961,19 @@ it('discovers target-model thinking options before validating the combined selec
 });
 
 it('delivers original generic files as baseline resource links without requiring image support', async () => {
+  const path = process.platform === 'win32' ? 'C:\retained\data #1.csv' : '/retained/data #1.csv';
+  const uri = process.platform === 'win32' ? 'file:///C:/retained/data%20%231.csv' : 'file:///retained/data%20%231.csv';
   const f = fixture({ init: { protocolVersion: 1, agentCapabilities: {} } });
   const connection = await connectAcp(f.peer, '/workspace');
   const target = sink();
   const pending = connection.prompt({ text: '', files: [{
     attachment: { ref: 'attachment:stable', filename: 'data #1.csv', mimeType: 'text/csv', byteLength: 4 },
-    path: '/retained/data #1.csv',
+    path,
   }] }, target);
   await vi.waitFor(() => expect(f.latest('session/prompt')).toBeTruthy());
   expect(record(f.latest('session/prompt').params).prompt).toEqual([
     { type: 'text', text: '' },
-    { type: 'resource_link', uri: 'file:///retained/data%20%231.csv', name: 'data #1.csv', mimeType: 'text/csv', size: 4 },
+    { type: 'resource_link', uri, name: 'data #1.csv', mimeType: 'text/csv', size: 4 },
   ]);
   f.reply(f.latest('session/prompt'), { stopReason: 'end_turn' });
   await expect(pending).resolves.toMatchObject({ status: 'completed' });
