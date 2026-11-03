@@ -100,7 +100,7 @@
     "ignore": "7.0.14",
     "jose": "^6.2.14",
     "jsonc-parser": "^3.3.1",
-    "linkedom": "0.18.14",
+    "linkedom": "0.18.15",
     "luxon": "^3.5.0",
     "multer": "^2.5.0",
     "openai": "^7.47.0",
