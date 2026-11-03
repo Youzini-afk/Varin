@@ -193,6 +193,19 @@ Run it immediately after building the same job's candidate, **before** any plain
 native smoke that could create the original OS profile. It runs the full native
 suite twice, so it can replace that target's plain native-smoke step.
 
+Linux first runs `installer-smoke.mjs --preflight --output NEW-DIRECTORY
+--disposable-runner` under the same D-Bus/Xvfb environment, after the explicit
+`ensure-electron.mjs` preparation. This inexpensive check creates a separate
+synthetic profile under isolated HOME/XDG directories before native compilation.
+It does not touch the original OS Varin profile or replace the installed-product
+handoff. Failures report only fixed startup classifications and read-only Linux
+sandbox state, never raw child stderr or fixture values. No sandbox flag, sysctl,
+AppArmor policy or permission is changed. A successful fixture preflight does not
+prove that the CEF candidate or its installation works. Even successful preflight
+profiles remain in their isolated private directory until the disposable runner
+is discarded: fixture completion alone does not prove the entire process scope
+has drained. The report explicitly retains `cleanupUncertain: true`.
+
 ```sh
 # Explicit preparation using the existing official pinned Electron owner.
 # The acceptance command never downloads an engine implicitly.
@@ -276,10 +289,11 @@ native OS config directory **before** the old reader can run. Reopening the targ
 requires the previous nonce-bound native migration and successful drain report.
 The original Electron owner reopens its unchanged source records after uninstall.
 
-Upload only `artifacts/tauri-installer-smoke/*.json`, not private profiles, the
+Upload only observation JSON (including `tauri-fixture-preflight/*.json`), not private profiles, the
 runner's AppData or retained temporary roots. Any unverified process/native exit
 retains its private data with `cleanupUncertain: true`; a timeout kill does not
-permit deletion or another installation attempt. Successful runs remove only the
+permit deletion or another installation attempt. Successful installed-product
+runs with confirmed native drain remove only the
 private target test directory, leaving the synthetic original OS profile to show
 uninstall retention until the ephemeral runner is discarded.
 

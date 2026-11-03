@@ -147,6 +147,12 @@ jobs:
       - name: Verify native macOS installation observations
         if: matrix.platform == 'darwin'
         run: node --test packages/tauri/scripts/macos-installer-smoke.test.mjs
+      - name: Prepare the explicit Linux fixture engine
+        if: matrix.platform == 'linux'
+        run: node packages/electron/scripts/ensure-electron.mjs
+      - name: Verify isolated Linux fixture startup before the native build
+        if: matrix.platform == 'linux'
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs --preflight --output artifacts/tauri-fixture-preflight --disposable-runner
       - uses: actions/download-artifact@v8
         with:
           name: tauri-shared-frontend
@@ -171,6 +177,7 @@ jobs:
         id: candidate
         run: node packages/tauri/scripts/build-candidate.mjs --runtime artifacts/tauri-runtime --output artifacts/tauri-candidate
       - name: Prepare the explicit pinned old-engine fixture executor
+        if: matrix.platform != 'linux'
         run: node packages/electron/scripts/ensure-electron.mjs
       # This must precede a bare native smoke: only a known fresh OS profile may
       # be admitted for the synthetic old-engine fixture. The lifecycle driver
@@ -224,6 +231,19 @@ jobs:
         with:
           path: artifacts/tauri-input/cef
           key: ${{ steps.cef-inputs.outputs.cache-primary-key }}
+      # Keep small failure/termination receipts independently downloadable. A
+      # diagnostic must not require fetching a complete multi-engine installer.
+      - name: Preserve native observation receipts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tauri-observations-${{ matrix.platform }}-${{ matrix.architecture }}
+          path: |
+            artifacts/tauri-native-smoke.json
+            artifacts/tauri-installer-smoke/*.json
+            artifacts/tauri-fixture-preflight/*.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Preserve exact candidate and observed evidence (not release qualification)
         if: always()
         uses: actions/upload-artifact@v7

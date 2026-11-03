@@ -11,6 +11,7 @@ import {sha256,relativePath,verifyRuntimeManifest} from './runtime-manifest.mjs'
 import {createSmokeSession,smokeNative} from './smoke-native.mjs';
 import {verifyProtocolRegistration} from './protocol-smoke.mjs';
 import {isComplete,resolveElectronPackageDir,platformPath} from '../../electron/scripts/ensure-electron.mjs';
+import {createStartupClassifier,readLinuxStartupState} from './linux-startup-diagnostics.mjs';
 
 const repository=path.resolve(import.meta.dirname,'../../..');
 const exists=async file=>fs.lstat(file).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
@@ -26,12 +27,16 @@ export function nsisArguments(directory,{uninstall=false}={}){
   // windowsVerbatimArguments below prevents Node from quoting paths with spaces.
   return uninstall?['/S','/currentuser','/KEEP_APP_DATA',`_?=${directory}`]:['/S','/currentuser',`/D=${directory}`];
 }
-export async function runObserved(file,args,{env=process.env,cwd,timeoutMs=180_000,windowsVerbatimArguments=false}={}){
+export async function runObserved(file,args,{env=process.env,cwd,timeoutMs=180_000,windowsVerbatimArguments=false,startupDiagnostics=false}={}){
   return new Promise((resolve,reject)=>{
     let timer,timedOut=false;
-    const child=spawn(file,args,{env,cwd,stdio:'ignore',windowsHide:true,detached:process.platform!=='win32',windowsVerbatimArguments});
-    child.once('error',error=>{clearTimeout(timer);reject(new Error(`Process launch failed (${error.code??'unknown'})`));});
-    child.once('exit',(code,signal)=>{clearTimeout(timer);const observed={code,signal,timedOut};if(code===0&&!timedOut)resolve(observed);else reject(Object.assign(new Error(timedOut?'Process observation timed out; cleanup is unconfirmed':`Process failed (${signal??code})`),{observed}));});
+    const classifier=startupDiagnostics?createStartupClassifier():null;
+    const child=spawn(file,args,{env,cwd,stdio:['ignore','ignore',classifier?'pipe':'ignore'],windowsHide:true,detached:process.platform!=='win32',windowsVerbatimArguments});
+    if(classifier)child.stderr.on('data',chunk=>classifier.write(chunk));
+    child.once('error',error=>{clearTimeout(timer);const observed={spawnFailed:true,code:error.code??'unknown',timedOut,...(classifier?{startupSignatures:classifier.finish()}:{})};reject(Object.assign(new Error(`Process launch failed (${observed.code})`),{observed}));});
+    // 'exit' can precede the last stderr chunk. Only closed streams provide a
+    // complete signature observation; raw output is never returned or written.
+    child.once('close',(code,signal)=>{clearTimeout(timer);const observed={code,signal,timedOut,...(classifier?{startupSignatures:classifier.finish()}:{})};if(code===0&&!timedOut)resolve(observed);else reject(Object.assign(new Error(timedOut?'Process observation timed out; cleanup is unconfirmed':`Process failed (${signal??code})`),{observed}));});
     timer=setTimeout(()=>{
       timedOut=true;
       if(process.platform==='win32'){try{execFileSync('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore'});}catch{child.kill();}}
@@ -137,14 +142,51 @@ export function preparedFixtureEngine(){
   if(!directory||!isComplete(directory,process.arch))throw new Error('Run node packages/electron/scripts/ensure-electron.mjs explicitly before installer smoke');
   return path.join(directory,'dist',platformPath());
 }
-export async function seedOrVerify(mode,session,nonce,profile,output,fixtureExecutable){
+export async function seedOrVerify(mode,session,nonce,profile,output,fixtureExecutable,{isolatedPreflight=false}={}){
   const require=createRequire(path.join(repository,'packages/electron/package.json'));
   const env={...process.env};for(const key of ['ELECTRON_RUN_AS_NODE','NODE_OPTIONS','NODE_PATH','VARIN_ELECTRON_DEV','VARIN_ELECTRON_PROFILE'])delete env[key];
+  if(isolatedPreflight){
+    if(process.platform!=='linux'||profile!==path.join(session.root,'preflight-profile'))throw new Error('Preflight requires its own Linux synthetic profile');
+    Object.assign(env,{HOME:session.home,XDG_CONFIG_HOME:path.join(session.home,'.config'),XDG_CACHE_HOME:path.join(session.home,'.cache'),XDG_DATA_HOME:path.join(session.home,'.local/share'),XDG_STATE_HOME:path.join(session.home,'.local/state')});
+    for(const key of ['XDG_CONFIG_HOME','XDG_CACHE_HOME','XDG_DATA_HOME','XDG_STATE_HOME'])await fs.mkdir(env[key],{recursive:true,mode:0o700});
+  }
   await fs.rm(path.join(session.root,`legacy-${mode}.json`),{force:true});
-  await runObserved(fixtureExecutable,[path.join(import.meta.dirname,'legacy-profile-smoke.cjs'),'--varin-installer-fixture',mode,session.root,nonce,profile],{env,timeoutMs:90_000});
+  await runObserved(fixtureExecutable,[path.join(import.meta.dirname,'legacy-profile-smoke.cjs'),'--varin-installer-fixture',mode,session.root,nonce,profile,...(isolatedPreflight?['--isolated-preflight']:[])],{env,timeoutMs:90_000,startupDiagnostics:process.platform==='linux'});
   const evidence=JSON.parse(await fs.readFile(path.join(session.root,`legacy-${mode}.json`),'utf8'));
-  if(evidence.schema!==1||evidence.product!=='varin-legacy-profile-smoke'||evidence.mode!==mode||evidence.nonce!==nonce||evidence.complete!==true||evidence.frontendVerified!==true||evidence.credentialSlotsVerified!==6||evidence.browserCookieVerified!==true||evidence.browserLocalStorageVerified!==true||evidence.valuesDisclosed!==false||evidence.electronVersion!==require('electron/package.json').version)throw new Error('Original Electron did not verify its synthetic profile');
+  if(evidence.schema!==1||evidence.product!=='varin-legacy-profile-smoke'||evidence.profileScope!==(isolatedPreflight?'isolated-preflight':'original-os-profile')||evidence.mode!==mode||evidence.nonce!==nonce||evidence.complete!==true||evidence.frontendVerified!==true||evidence.credentialSlotsVerified!==6||evidence.browserCookieVerified!==true||evidence.browserLocalStorageVerified!==true||evidence.valuesDisclosed!==false||evidence.electronVersion!==require('electron/package.json').version)throw new Error('Original Electron did not verify its synthetic profile');
   await fs.writeFile(output,JSON.stringify(evidence,null,2)+'\n');return evidence;
+}
+export async function preflightFixture({output,disposableRunner=false}={}){
+  requireDisposableRunner({acknowledged:disposableRunner});
+  if(process.platform!=='linux')throw new Error('Isolated fixture preflight supports Linux only');
+  if(!output)throw new Error('An observation output directory is required');
+  output=path.resolve(output);await fs.mkdir(output,{recursive:false});
+  const session=await createSmokeSession(),nonce=randomUUID(),profile=path.join(session.root,'preflight-profile');
+  const evidence={schema:1,product:'varin-legacy-fixture-preflight',target:`${process.platform}-${process.arch}`,
+    fixture:'isolated-synthetic-original-electron-profile',complete:false,steps:[],
+    notProven:['installed-product','original-os-profile-handoff','native-cef-sandbox','signed-release'],
+    linuxStartupState:await readLinuxStartupState()};
+  let phase='verify-prepared-fixture-engine';
+  try{
+    const fixtureExecutable=preparedFixtureEngine();
+    evidence.steps.push({name:phase,status:'passed',source:'repository-pinned-original-electron'});
+    for(const mode of ['seed','verify']){
+      phase=`${mode}-isolated-original-electron-profile`;
+      const observation=await seedOrVerify(mode,session,nonce,profile,path.join(output,`legacy-${mode}.json`),fixtureExecutable,{isolatedPreflight:true});
+      evidence.steps.push({name:phase,status:'passed',observation});
+    }
+    // Successful synthetic readback is not proof that the original native
+    // process scope drained. Leave this private session for runner disposal.
+    evidence.complete=true;evidence.cleanupUncertain=true;
+    evidence.privateSessionRetained=true;evidence.retainedPrivateDirectory=session.root;
+    await fs.writeFile(path.join(output,'fixture-preflight.json'),JSON.stringify(evidence,null,2)+'\n');
+    return evidence;
+  }catch(error){
+    evidence.failedStep=phase;evidence.failure=error.message;evidence.cleanupUncertain=true;evidence.retainedPrivateDirectory=session.root;
+    if(error.observed)evidence.process=error.observed;
+    await fs.writeFile(path.join(output,'fixture-preflight.json'),JSON.stringify(evidence,null,2)+'\n');
+    throw new Error(`Original Electron fixture preflight failed at ${phase}; inspect fixture-preflight.json. Private data was retained.`);
+  }
 }
 export async function smokeInstaller(candidateFile,{output,disposableRunner=false}={}){
   requireDisposableRunner({acknowledged:disposableRunner});
@@ -165,6 +207,7 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
   const record=(name,detail={})=>evidence.steps.push({name,status:'passed',...detail});
   const observe=async(name,operation)=>{phase=name;const value=await operation();record(name,value);return value;};
   try{
+    if(!windows)evidence.linuxStartupState=await readLinuxStartupState();
     if(windows){const state=await readWindowsState();assertCleanWindowsState(state);profile=path.join(state.appData,'Varin');}
     else profile=path.join(process.env.XDG_CONFIG_HOME||path.join(process.env.HOME,'.config'),'Varin');
     if(await exists(profile))throw new Error('Refusing an existing legacy profile; synthetic fixtures never adopt or remove original user data');
@@ -231,6 +274,7 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const args=process.argv.slice(2),index=args.indexOf('--output');
-  if(!args[0]||index<0||!args[index+1])throw new Error('Usage: installer-smoke.mjs candidate.json --output NEW-DIRECTORY --disposable-runner');
-  await smokeInstaller(args[0],{output:args[index+1],disposableRunner:args.includes('--disposable-runner')});
+  if(!args[0]||index<0||!args[index+1])throw new Error('Usage: installer-smoke.mjs candidate.json|--preflight --output NEW-DIRECTORY --disposable-runner');
+  const options={output:args[index+1],disposableRunner:args.includes('--disposable-runner')};
+  if(args[0]==='--preflight')await preflightFixture(options);else await smokeInstaller(args[0],options);
 }

@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {sha256} from './runtime-manifest.mjs';
-import {admitCandidate,assertCleanWindowsState,assertInstalledWindowsState,nsisArguments,requireDisposableRunner,runObserved,verifyInstalledFiles,verifyRecord} from './installer-smoke.mjs';
+import {admitCandidate,assertCleanWindowsState,assertInstalledWindowsState,nsisArguments,requireDisposableRunner,runObserved,verifyInstalledFiles,verifyRecord,preflightFixture} from './installer-smoke.mjs';
+import {createStartupClassifier,readLinuxStartupState} from './linux-startup-diagnostics.mjs';
 
 async function temporary(t){const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-installer-tooling-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));return root;}
 async function artifact(root,name,bytes){await fs.writeFile(path.join(root,name),bytes);return{name,size:Buffer.byteLength(bytes),sha256:await sha256(path.join(root,name))};}
@@ -28,6 +29,50 @@ test('process observation executes actual subprocess effects and fails on exit e
   assert.equal(result.code,0);assert.equal(await fs.readFile(file,'utf8'),'actual-child-effect');
   await assert.rejects(runObserved(process.execPath,['-e','process.exit(3)']),/Process failed \(3\)/);
   await assert.rejects(runObserved(process.execPath,['-e','setInterval(()=>{},1000)'],{timeoutMs:100}),error=>error.observed?.timedOut===true);
+});
+test('startup observation exports fixed signatures, never raw stderr, stdout, argv or environment',async()=>{
+  const privateValue='private-page-credential-and-path';
+  const script=`process.stdout.write(${JSON.stringify(privateValue)});process.stderr.write(${JSON.stringify(privateValue+'\nNo usable sandbox!\nFailed to move to new namespace: Operation not permitted\n')});process.exitCode=7;`;
+  await assert.rejects(runObserved(process.execPath,['-e',script,privateValue],{startupDiagnostics:true,env:{...process.env,PRIVATE_FIXTURE:privateValue}}),error=>{
+    assert.equal(error.message,'Process failed (7)');
+    assert.deepEqual(error.observed,{code:7,signal:null,timedOut:false,startupSignatures:['no-usable-sandbox','namespace-denied']});
+    assert.equal(JSON.stringify(error).includes(privateValue),false);return true;
+  });
+  const unknown=await runObserved(process.execPath,['-e',`process.stderr.write(${JSON.stringify(privateValue)})`],{startupDiagnostics:true});
+  assert.deepEqual(unknown.startupSignatures,[]);
+  const ignored=await runObserved(process.execPath,['-e','process.stderr.write("No usable sandbox!")']);
+  assert.equal('startupSignatures' in ignored,false);
+});
+test('startup classifier handles split signatures and large unrelated output without exposing text',()=>{
+  const classifier=createStartupClassifier();
+  classifier.write('unrelated-secret'.repeat(100_000));
+  for(const character of 'The SUID sandbox helper binary was found, but is not configured correctly.\nMissing X server or $DISPLAY\n/private/electron: error while loading shared libraries: private.so: cannot open shared object file: No such file or directory\n')classifier.write(character);
+  assert.deepEqual(classifier.finish(),['suid-sandbox-helper','missing-display','missing-shared-library']);
+  const unknown=createStartupClassifier();unknown.write('namespace sandbox display library private secret');
+  assert.deepEqual(unknown.finish(),[]);
+});
+test('Linux startup state accepts only fixed values and distinguishes missing, denied and unrecognized',async()=>{
+  const read=async file=>{
+    if(file.endsWith('/unprivileged_userns_clone'))return '1';
+    if(file.endsWith('/max_user_namespaces'))return '12345';
+    if(file.endsWith('/apparmor_restrict_unprivileged_userns'))throw Object.assign(new Error('private-error'),{code:'ENOENT'});
+    if(file.endsWith('/apparmor_restrict_unprivileged_unconfined'))throw Object.assign(new Error('private-error'),{code:'EACCES'});
+    if(file.endsWith('/enabled'))return 'private-value';
+    if(file.endsWith('/current'))return 'private-container-label (enforce)';
+    throw new Error('Unexpected state read');
+  };
+  const state=await readLinuxStartupState({read});
+  assert.deepEqual(state,{
+    unprivilegedUsernsClone:{status:'observed',value:1},maxUserNamespaces:{status:'observed',value:12345},
+    apparmorRestrictUnprivilegedUserns:{status:'missing'},apparmorRestrictUnprivilegedUnconfined:{status:'denied'},
+    apparmorEnabled:{status:'unrecognized'},apparmorConfinement:{status:'observed',value:'enforce'},
+  });
+  assert.equal(JSON.stringify(state).includes('private'),false);
+});
+test('fixture preflight requires explicit disposable-runner admission before output mutation',async t=>{
+  const root=await temporary(t),output=path.join(root,'must-not-exist');
+  await assert.rejects(preflightFixture({output}),/ephemeral/);
+  await assert.rejects(fs.lstat(output),{code:'ENOENT'});
 });
 test('same-source admission reads real artifact bytes and refuses another target, generation or installer',async t=>{
   const root=await temporary(t),assets=path.join(root,'assets');await fs.mkdir(assets);
