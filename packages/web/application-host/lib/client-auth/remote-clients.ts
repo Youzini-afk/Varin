@@ -399,27 +399,45 @@ export const createRemoteClientAuthRuntime = ({
     });
   };
 
-  /** Private desktop provisioning repair, never request-authentication promotion.
-   * Only the saved, active desktop token can upgrade the historical unrestricted
-   * default identity. Explicitly restricted/custom clients keep their policy. */
-  const ensureDesktopLocalClientAccess = async (token: string): Promise<void> => {
-    if (!token.startsWith(TOKEN_PREFIX)) throw new Error('Desktop local credential is invalid');
-    await mutateStore(async (store) => {
-      const hash = hashToken(token);
-      const client = store.clients.find(entry => constantTimeEqual(entry.tokenHash, hash, crypto));
-      if (!client || client.clientKind !== 'desktop-local' || client.revokedAt
-        || (client.expiresAt && Date.parse(client.expiresAt) <= Date.now())) {
-        throw new Error('Desktop local credential is unavailable');
-      }
-      const legacyDefault = client.profile === REMOTE_CLIENT_PROFILE.CLIENT
-        && client.allowedDirectories.length === 0
-        && client.capabilities.length === 1 && client.capabilities[0] === 'ui:access';
-      if (!legacyDefault) return { result: undefined, write: false };
-      client.profile = REMOTE_CLIENT_PROFILE.FULL_CONTROL;
-      client.capabilities = [...FULL_CONTROL_CAPABILITIES];
-      return { result: undefined };
-    });
-  };
+  /** Private desktop owner only. Public issuers must use createClient instead.
+   * Retrieval and renewal preserve existing policy, including ambiguous legacy
+   * defaults. A saved token identifies its original subject even after expiry
+   * or revocation; it must never fall back to a more privileged dedupe record. */
+  const issueDesktopLocalClient = async (savedToken?: string) => mutateStore(async (store) => {
+    const stored = normalizeOptionalString(savedToken);
+    const tokenHash = stored ? hashToken(stored) : null;
+    const previous = tokenHash
+      ? store.clients.find(client => constantTimeEqual(client.tokenHash, tokenHash, crypto))
+      : store.clients.find(client => client.dedupeKey === 'desktop-local');
+    if ((stored && !previous) || (previous && previous.clientKind !== 'desktop-local')
+      || (!previous && store.clients.some(client => client.clientKind === 'desktop-local'))) {
+      throw new Error('Existing desktop local identity could not be verified');
+    }
+    if (stored && previous && !previous.revokedAt
+      && (!previous.expiresAt || Date.parse(previous.expiresAt) > Date.now())) {
+      return { result: { client: publicClient(previous), token: stored }, write: false };
+    }
+    const token = generateToken();
+    if (previous) {
+      // Retain the established private renewal contract, but never change the
+      // subject, policy, dedupe key or issuance metadata during token rotation.
+      previous.tokenHash = hashToken(token);
+      previous.revokedAt = null;
+      previous.expiresAt = null;
+      previous.lastUsedAt = null;
+      return { result: { client: publicClient(previous), token } };
+    }
+    const client: RemoteClientRecord = {
+      id: generateId(), tokenHash: hashToken(token), createdAt: nowIso(),
+      label: 'Varin Desktop', clientKind: 'desktop-local', dedupeKey: 'desktop-local',
+      profile: REMOTE_CLIENT_PROFILE.FULL_CONTROL, capabilities: [...FULL_CONTROL_CAPABILITIES],
+      allowedDirectories: [], expiresAt: null, revokedAt: null, lastUsedAt: null,
+      authMethod: null, pairingId: null, deviceName: null, devicePlatform: null,
+      deviceModel: null, appVersion: null, usesRelay: false, lastTransport: null,
+    };
+    store.clients.push(client);
+    return { result: { client: publicClient(client), token } };
+  });
 
   const revokeClient = async (id: unknown) => {
     if (typeof id !== 'string' || id.trim().length === 0) {
@@ -533,7 +551,7 @@ export const createRemoteClientAuthRuntime = ({
   return {
     authenticateBearerToken,
     createClient,
-    ensureDesktopLocalClientAccess,
+    issueDesktopLocalClient,
     getCapabilitiesForProfile,
     listAuditEvents,
     listClients,

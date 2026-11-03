@@ -26,6 +26,7 @@ import { attachObservations } from '../observations.js';
 import { attachDesktopMedia } from '../computer/desktop-media.js';
 import { HostSshManager } from '../connections/ssh-manager.js';
 import { registerConnectionRoutes } from '../connections/connection-routes.js';
+import { writeHostConnections } from '../connections/hosts.js';
 import { registerStorageRoutes } from '../storage/routes.js';
 import type { StartWebUiServerOptions } from '../../public-contract.js';
 
@@ -122,6 +123,31 @@ for (const apiOnly of [false, true]) {
     await f.http.post('/auth/url-token').set('Cookie', cookie).expect(200);
   });
 }
+
+it.each(['custom-local-key', 'desktop-local'])('private retrieval preserves explicit API-issued policy for %s', async dedupeKey => {
+  const f = await fixture();
+  const policy = { profile: 'client', capabilities: ['ui:access'], allowedDirectories: [] };
+  const issued = await f.http.post('/api/client-auth/clients').set('Authorization', `Bearer ${f.clientToken}`)
+    .send({ label: 'Explicitly restricted local client', clientKind: 'desktop-local', dedupeKey, ...policy }).expect(201);
+  await writeHostConnections(f.settings, { hosts: [], defaultHostId: null, localClientToken: issued.body.token });
+  expect(await f.credentials()).toEqual({ clientToken: issued.body.token });
+  const current = await f.clients.authenticateBearerToken(issued.body.token);
+  expect(current?.client).toMatchObject({ id: issued.body.client.id, createdAt: issued.body.client.createdAt, ...policy });
+  expect((await f.settings.read()).desktopLocalClientToken).toBe(issued.body.token);
+});
+
+it('ordinary password reissuance still applies the requested policy while preserving its deduped subject', async () => {
+  const f = await fixture({ password: 'synthetic-test-password' });
+  const login = { password: 'synthetic-test-password', issueClientToken: true, clientKind: 'desktop', dedupeKey: 'ordinary-password-device' };
+  const first = await f.http.post('/auth/session').send({ ...login, clientProfile: 'readonly' }).expect(200);
+  const second = await f.http.post('/auth/session').send({ ...login, clientProfile: 'full-control' }).expect(200);
+  expect(first.body.client.profile).toBe('readonly');
+  expect(second.body.client).toMatchObject({ id: first.body.client.id, profile: 'full-control', authMethod: 'password' });
+  expect(second.body.client.capabilities).toContain('filesystem:delete');
+  expect(await f.clients.authenticateBearerToken(first.body.clientToken)).toBeNull();
+  expect((await f.clients.authenticateBearerToken(second.body.clientToken))?.clientId).toBe(first.body.client.id);
+  expect((await f.clients.authenticateBearerToken(f.clientToken))?.client.clientKind).toBe('desktop-local');
+});
 
 it('the actual private desktop token manages clients, pairing, connections and storage; paired clients do not gain operator authority', async () => {
   const f = await fixture();

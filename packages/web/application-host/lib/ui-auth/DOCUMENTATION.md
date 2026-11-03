@@ -6,7 +6,7 @@ This module owns Varin UI authentication for browser access, including password 
 Trusted-device access has one durable credential model: a remote client bearer token stored by `packages/web/application-host/lib/client-auth/remote-clients.ts`. Password, passkey, and Pairing v2 are issuance methods for that credential, not separate credential systems. Issued client tokens are returned once, stored server-side only as hashes, and are later authenticated via `Authorization: Bearer varin_client_...`.
 
 Pairing v2 is implemented by `packages/web/application-host/lib/client-auth/pairing.ts`.
-Public redemption rejects the reserved `desktop-local` dedupe key after trimming; normal device keys and re-pair replacement behavior remain unchanged. Only private desktop provisioning owns that identity. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
+Public redemption rejects the reserved `desktop-local` dedupe key after trimming; normal device keys and re-pair replacement behavior remain unchanged. Public pairing cannot replace the local desktop identity. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
 
 Browser-owned URLs are a separate presentation of the same authenticated authority. Elements such as
 iframes, downloads, SSE, and WebSocket upgrades cannot attach the normal `Authorization` header, so
@@ -24,6 +24,14 @@ cookies are not trusted and missing credentials cannot mint a session.
 The managed desktop Host opts into this policy explicitly through `requireClientAuth`;
 ordinary Web and the Electron transition entry retain their existing passwordless behavior.
 The private desktop credential is delivered over the embedding pipe, never a public HTTP route.
+Private retrieval preserves existing subjects and their profiles, capabilities and directory limits.
+Historical `client`/`ui:access` defaults cannot be distinguished from an explicitly restricted policy;
+they remain restricted and require explicit local authorization for additional access. Private retrieval
+does not implement that grant flow or any automatic permission migration. The original auth owner renews expired or revoked private
+tokens under the existing local renewal contract while preserving their original policy and subject,
+including saved identities with a custom dedupe key. Unverifiable saved identities fail closed instead
+of falling back to a more privileged identity. Only genuinely new private identities receive full control.
+Public client issuance, browser login and pairing keep their separate existing semantics.
 `enabled` reports whether a password is configured; `authenticationRequired` controls
 security gates for both password sessions and managed client authentication.
 

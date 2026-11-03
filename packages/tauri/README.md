@@ -7,6 +7,7 @@
 - 本地模式启动随包 Node 的原 Application Host；远端模式不启动 Catalog、Knowledge 或本地工作区。需要本机 Browser、桌宠或后台连接时，才启动轻量原 owner 协调入口。
 - UI 继续使用 `application-client` 的 HTTP、观察与 desktop 合同。只有 `src/native.ts` 导入 Tauri renderer API。每个工作台、Mini Chat 保留自己的 Host 与凭据。
 - 主界面、Browser Use、匿名网页渲染使用不同 CEF context。任意网站不接收 Tauri IPC、Host token 或桌面命令；桌宠装饰层也没有业务桥。
+- 私有受管 Host 显式要求客户端身份；凭据只经原生启动管道交给受信窗口。允许打包页面的精确 Origin 不授予认证，普通网页不能据此获取本机 URL grant。Host 重启会作废本机旧 grant，不改变已选远端的身份；普通 Web／Electron 入口及公开健康／版本发现保持原有语义。见 [Host 鉴权](../web/application-host/lib/ui-auth/DOCUMENTATION.md)。
 - Browser Use 的自动化与用户介入是同一个原生页面，不通过截图或 iframe 冒充嵌入。页面关闭、下载取消、网络取消、更新退出都等待原操作或进程的真实回执。
 - 统一 CEF 为 `156.0.15` / Chromium `156.0.8078.80`，Rust binding `156.3.0+156.0.15`；Tauri `3.0.0-alpha.5`、CEF runtime `3.0.0-alpha.6`。补丁来源和范围在 `src-tauri/vendor/tauri-runtime-cef/VARIN-PATCH.md`。固定 SDK 摘要在 `scripts/cef-runtime.lock.json`。
 - 沙箱必须开启，远程调试端口关闭，系统 secret storage 不降级。Windows 使用官方 CEF sandbox bootstrap 与真实 broker；Linux 不添加 `--no-sandbox`，不全局改变 user namespace 或 AppArmor 策略。

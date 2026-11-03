@@ -6,22 +6,20 @@ import type { createRemoteClientAuthRuntime } from '../client-auth/remote-client
 export function createDesktopLocalCredentials(options: {
   read: SettingsFileStore['read'];
   update: SettingsFileStore['update'];
-  auth: Pick<ReturnType<typeof createRemoteClientAuthRuntime>, 'authenticateBearerToken' | 'createClient' | 'ensureDesktopLocalClientAccess'>;
+  auth: Pick<ReturnType<typeof createRemoteClientAuthRuntime>, 'issueDesktopLocalClient'>;
 }) {
   let pending: Promise<{ clientToken: string }> | undefined;
   return () => pending ??= (async () => {
     const settings = await options.read();
-    const stored = typeof settings.desktopLocalClientToken === 'string' ? settings.desktopLocalClientToken.trim() : '';
-    const authenticated = stored ? await options.auth.authenticateBearerToken(stored) : null;
-    if (authenticated?.client.clientKind === 'desktop-local') {
-      await options.auth.ensureDesktopLocalClientAccess(stored);
-      return { clientToken: stored };
+    if (settings.desktopLocalClientToken !== undefined && settings.desktopLocalClientToken !== null
+      && typeof settings.desktopLocalClientToken !== 'string') {
+      throw new Error('Existing desktop local credential is invalid');
     }
-    const created = await options.auth.createClient({
-      profile: 'full-control',
-      label: 'Varin Desktop', clientKind: 'desktop-local', dedupeKey: 'desktop-local', reuseDedupeIdentity: true,
-    });
-    await options.update(current => { current.desktopLocalClientToken = created.token; });
+    const stored = typeof settings.desktopLocalClientToken === 'string' ? settings.desktopLocalClientToken.trim() : '';
+    const created = await options.auth.issueDesktopLocalClient(stored);
+    if (created.token !== stored) {
+      await options.update(current => { current.desktopLocalClientToken = created.token; });
+    }
     return { clientToken: created.token };
   })().finally(() => { pending = undefined; });
 }

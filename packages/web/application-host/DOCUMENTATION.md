@@ -24,8 +24,13 @@ settings store. LAN access without a password remains loopback-only.
 
 Readiness is emitted only after the original Host reports ready and its local
 credentials are prepared. Existing valid `desktopLocalClientToken` credentials
-are reused. A missing/expired credential is minted by the original auth owner,
-reusing the desktop-local dedupe identity; the shell never edits remote-clients.
+are reused with their existing policy. The original auth owner renews expired or
+revoked saved credentials without changing their subject, capabilities or directory
+limits, including custom dedupe identities. Missing saved tokens can reuse the reserved
+desktop identity without broadening its policy; an unverifiable saved identity fails
+closed. Only a genuinely new private identity receives full control. Ambiguous historical
+defaults remain restricted and may require explicit local authorization for additional
+access; no automatic permission migration is inferred. The shell never edits remote-clients.
 Malformed settings or original stores fail instead of creating an empty profile.
 
 Stop waits for `controller.stop({ exitProcess: false })`. It sends success and
