@@ -39,14 +39,18 @@ const startHost = async (route: (req: express.Request, res: express.Response) =>
     isRequestOriginAllowed: security.isRequestOriginAllowed,
     rejectWebSocketUpgrade: security.rejectWebSocketUpgrade,
   });
-  await new Promise<void>((resolve) => server.listen(0, bindAddress, resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
-  const origin = `http://${bindAddress}:${address.port}`;
   cleanup.push(async () => {
     runtime.stop(); auth.dispose?.(); server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, bindAddress, () => { server.off('error', reject); resolve(); });
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
+  const hostname = address.family === 'IPv6' ? `[${address.address}]` : address.address;
+  const origin = `http://${hostname}:${address.port}`;
   return { origin, runtime };
 };
 
@@ -94,9 +98,9 @@ const connect = async (origin: string, headers: Record<string, string> = {}, que
 describe('same-Host observation transport', () => {
   it('uses a specifically bound listener address instead of assuming the default loopback address', async () => {
     const host = await startHost((req, res) => {
-      expect(req.socket.localAddress).toBe('127.0.0.2');
+      expect(req.socket.localAddress).toBe('::1');
       res.end('same listener');
-    }, '127.0.0.2');
+    }, '::1');
     const client = await connect(host.origin);
     client.open(1);
     expect(await client.next(1, 'headers')).toMatchObject({ status: 200 });
