@@ -99,7 +99,12 @@ it('streams fixed bytes through authenticated Source routes into an independentl
   const result = await prepare();
   expect(await fs.readFile(result.path)).toEqual(bytes);
   expect(result.readOnly).toBe(true);
-  expect(result.path.startsWith(path.join(f.directory, 'storage'))).toBe(true);
+  // Native Windows paths can carry an extended-length prefix. Compare their
+  // actual filesystem identities rather than the spelling of the temporary root.
+  const retainedPath = path.relative(await fs.realpath(path.join(f.directory, 'storage')), await fs.realpath(result.path));
+  expect(retainedPath).not.toBe('');
+  expect(path.isAbsolute(retainedPath)).toBe(false);
+  expect(retainedPath.split(path.sep)).not.toContain('..');
   expect(await fs.readFile(path.join(f.workspace, 'untouched'), 'utf8')).toBe('original execution source');
   expect(await fs.readdir(f.workspace)).toEqual(['untouched']);
   if (process.platform !== 'win32') expect((await fs.stat(result.path)).mode & 0o222).toBe(0);
