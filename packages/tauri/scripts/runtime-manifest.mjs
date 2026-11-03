@@ -46,13 +46,98 @@ export async function sha256(file) {
   return hash.digest('hex');
 }
 
-export async function inventory(directory) {
+// Only versioned framework aliases in the controlled macOS reader may be links.
+// Keep them separate from regular-file receipts so no process/Host entry can use
+// this exception. Paths are relative to legacy-electron, not to arbitrary roots.
+const frameworkPrefix = 'Varin.app/Contents/Frameworks/';
+export function legacyFrameworkLink(record) {
+  relativePath(record.path); relativePath(record.target);
+  if (!record.path.startsWith(frameworkPrefix)) throw new Error('Invalid legacy framework symbolic link');
+  const [bundle, ...parts] = record.path.slice(frameworkPrefix.length).split('/');
+  const name = bundle.endsWith('.framework') ? bundle.slice(0, -10) : '';
+  const version = value => /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value) && value !== 'Current';
+  const current = parts.length === 2 && parts[0] === 'Versions' && parts[1] === 'Current';
+  const alias = parts.length === 1 && [name, 'Resources', 'Libraries', 'Helpers', 'Headers', 'Modules'].includes(parts[0]);
+  const target = record.target.split('/');
+  if (!name || !(current ? target.length === 1 && version(target[0])
+    : alias && target.length === 3 && target[0] === 'Versions' && (target[1] === 'Current' || version(target[1])) && target[2] === parts[0])) {
+    throw new Error(`Invalid legacy framework symbolic link: ${record.path}`);
+  }
+  return { framework: `${frameworkPrefix}${bundle}`, directory: current || parts[0] !== name };
+}
+
+export async function verifyLegacyFrameworkLinks(directory, links, platform) {
+  if (!Array.isArray(links) || links.length && platform !== 'darwin') throw new Error('Invalid legacy framework link inventory');
+  const expected = new Map();
+  for (const link of links) {
+    legacyFrameworkLink(link);
+    if (expected.has(link.path.toLowerCase())) throw new Error('Duplicate legacy framework symbolic link');
+    expected.set(link.path.toLowerCase(), link);
+  }
+  if (!links.length) return;
+  if (!(await fs.lstat(directory)).isDirectory()) throw new Error('Legacy engine must be an ordinary directory');
+  // Resolve only inventoried aliases, checking each component before following
+  // it. No absolute target, parent traversal, external intermediate link, cycle
+  // or unlisted alias can be used even when its final realpath would be inside.
+  const resolve = async (relative, visited = new Set()) => {
+    let prefix = '';
+    const parts = relative.split('/');
+    for (let index = 0; index < parts.length; index++) {
+      prefix = prefix ? `${prefix}/${parts[index]}` : parts[index];
+      const file = path.join(directory, prefix), stat = await fs.lstat(file);
+      if (stat.isSymbolicLink()) {
+        const link = expected.get(prefix.toLowerCase());
+        if (!link || link.path !== prefix || visited.has(prefix) || await fs.readlink(file) !== link.target) throw new Error(`Legacy framework symbolic link changed or is unlisted: ${prefix}`);
+        const target = path.posix.join(path.posix.dirname(prefix), link.target, ...parts.slice(index + 1));
+        return resolve(target, new Set(visited).add(prefix));
+      }
+      if (index < parts.length - 1 && !stat.isDirectory()) throw new Error('Legacy framework link parent is not a directory');
+      if (index === parts.length - 1) return { path: prefix, stat };
+    }
+  };
+  for (const link of links) {
+    const info = legacyFrameworkLink(link);
+    const file = path.join(directory, link.path);
+    // Parents themselves must be physical directories, never other aliases.
+    let parent = directory;
+    for (const part of link.path.split('/').slice(0, -1)) {
+      parent = path.join(parent, part);
+      if (!(await fs.lstat(parent)).isDirectory()) throw new Error('Legacy framework link parent must be an ordinary directory');
+    }
+    if (!(await fs.lstat(file)).isSymbolicLink() || await fs.readlink(file) !== link.target) throw new Error(`Legacy framework symbolic link changed: ${link.path}`);
+    const resolved = await resolve(link.path);
+    if (!resolved.path.startsWith(`${info.framework}/Versions/`) || !(info.directory ? resolved.stat.isDirectory() : resolved.stat.isFile())) throw new Error('Legacy framework symbolic link has an invalid target');
+  }
+}
+
+export async function collectLegacyFrameworkLinks(directory, platform) {
+  const links = [];
+  const visit = async relative => {
+    const file = path.join(directory, relative), stat = await fs.lstat(file);
+    if (stat.isSymbolicLink()) {
+      const link = { path: relative, target: await fs.readlink(file) };
+      if (platform !== 'darwin') throw new Error('Legacy engine contains an unsupported symbolic link');
+      legacyFrameworkLink(link); links.push(link);
+    } else if (stat.isDirectory()) {
+      for (const name of (await fs.readdir(file)).sort()) await visit(relative ? `${relative}/${name}` : name);
+    } else if (!stat.isFile()) throw new Error('Legacy engine contains a special file');
+  };
+  await visit('');
+  await verifyLegacyFrameworkLinks(directory, links, platform);
+  return links;
+}
+
+export async function inventory(directory, { platform, legacyElectron } = {}) {
+  const links = legacyElectron?.links ?? [];
+  await verifyLegacyFrameworkLinks(path.join(directory, 'legacy-electron'), links, platform);
+  const remainingLinks = new Set(links.map(link => `legacy-electron/${link.path}`));
   const files = [];
   const visit = async relative => {
     const absolute = path.join(directory, relative);
     const stat = await fs.lstat(absolute);
-    if (stat.isSymbolicLink()) throw new Error(`Runtime cannot contain a symbolic link: ${relative}`);
-    if (stat.isDirectory()) {
+    if (stat.isSymbolicLink()) {
+      if (!remainingLinks.delete(relative)) throw new Error(`Runtime cannot contain an unlisted symbolic link: ${relative}`);
+    } else if (stat.isDirectory()) {
       for (const entry of (await fs.readdir(absolute)).sort()) await visit(relative ? `${relative}/${entry}` : entry);
     } else if (stat.isFile()) {
       relativePath(relative);
@@ -60,6 +145,7 @@ export async function inventory(directory) {
     } else throw new Error(`Runtime cannot contain a special file: ${relative}`);
   };
   await visit('');
+  if (remainingLinks.size) throw new Error('Runtime framework link inventory has missing assets');
   return files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 }
 
@@ -99,7 +185,7 @@ export async function writeRuntimeManifest(directory, { platform, architecture, 
     tools: { ripgrep: `tools/rg${executable}` },
     browser,
     ...(legacyElectron ? { legacyElectron } : {}),
-    legal: [...legalPaths], sources, files: await inventory(directory),
+    legal: [...legalPaths], sources, files: await inventory(directory, { platform, legacyElectron }),
   };
   await fs.writeFile(path.join(directory, manifestName), JSON.stringify(manifest, null, 2) + '\n');
   await verifyRuntimeManifest(directory);
@@ -143,7 +229,7 @@ export async function verifyRuntimeManifest(directory, { platform, architecture,
     manifest.kernel.manifest, manifest.frontend.entry, `${hostPackage}/server/index.js`, `${hostPackage}/server/public-contract.js`,
     `${hostPackage}/server/production-boundary.json`, ...requiredHostAssets, ...legalPaths];
   for (const file of required) if (!seen.has(file) || !manifest.files.find(entry => entry.path === file).size) throw new Error(`Missing runtime entry or legal asset: ${file}`);
-  const actual = await inventory(directory);
+  const actual = await inventory(directory, manifest);
   if (actual.length !== manifest.files.length) throw new Error('Runtime file inventory has missing or unlisted assets');
   const expected = new Map(manifest.files.map(entry => [entry.path, entry]));
   for (const entry of actual) {

@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {spawnSync} from 'node:child_process';
+import {stageLegacyElectron} from './legacy-runtime.mjs';
+import {frameworkPath,macFrameworkFixture} from './test-fixtures/mac-framework.mjs';
 
 function installedSigner(){
   const electronRequire=createRequire(new URL('../../electron/package.json',import.meta.url));
@@ -56,4 +58,20 @@ test('the installed macOS signer fails on unreadable discovery instead of omitti
     await fs.symlink('missing-native-binary',path.join(root,'broken.node'));
     await assert.rejects(walkAsync(root),{code:'ENOENT'});
   }
+});
+
+test('the staged legacy framework remains canonical through actual signer discovery', {skip:process.platform==='win32'}, async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-macos-framework-sign-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const source=path.join(root,'source'),destination=path.join(root,'legacy-electron');
+  const links=await macFrameworkFixture(source);
+  await stageLegacyElectron({source,destination,platform:'darwin',architecture:'arm64',version:'1.2.3',sourceSha:'a'.repeat(40)});
+  const require=createRequire(import.meta.url),{walkAsync}=require(installedSigner());
+  const discovered=await walkAsync(path.join(destination,'Varin.app/Contents'));
+  const framework=path.join(destination,frameworkPath);
+  for(const name of ['Electron Framework','Helpers/crash-handler','Libraries/helper.dylib']){
+    assert.ok(discovered.includes(path.join(framework,'Versions/A',name)),`signer must retain physical nested code: ${name}`);
+  }
+  assert.ok(discovered.includes(framework),'framework bundle itself is signed after its children');
+  for(const link of links)assert.equal(await fs.readlink(path.join(destination,link.path)),link.target);
 });

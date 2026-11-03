@@ -7,6 +7,7 @@ import identity from '../../../scripts/kernel-binary-identity.cjs';
 import { hostPackage, hostEntry, hostSettingsEntry, hostBrowserEntry, requiredHostAssets, inventory, legalPaths, manifestName, relativePath, sha256, targets, verifyRuntimeManifest, writeRuntimeManifest, kernelProtocolVersion } from './runtime-manifest.mjs';
 import { nodeLock, nodeTarget } from './node-runtime.mjs';
 import { publishRuntime } from './publish-runtime.mjs';
+import { frameworkPath, macFrameworkFixture } from './test-fixtures/mac-framework.mjs';
 
 export function binaryFixture(platform, architecture) {
   const bytes = Buffer.alloc(128);
@@ -88,6 +89,40 @@ test('symlinks are never accepted as bundled assets or as the manifest', { skip:
   await fs.rename(path.join(directory, manifestName), path.join(directory, 'saved-manifest.json'));
   await fs.symlink('saved-manifest.json', path.join(directory, manifestName));
   await assert.rejects(verifyRuntimeManifest(directory), /regular file/);
+});
+
+test('the macOS manifest seals framework alias text separately from physical file bytes', { skip: process.platform === 'win32' }, async t => {
+  const { directory, options } = await fixture(t, 'darwin', 'arm64');
+  const legacyRoot = path.join(directory, 'legacy-electron');
+  const links = await macFrameworkFixture(legacyRoot);
+  const legacyElectron = { schema: 1, protocol: 1, version: '1.2.3', sourceSha: 'a'.repeat(40), directory: 'legacy-electron',
+    executable: 'legacy-electron/Varin.app/Contents/MacOS/Varin', links };
+  const manifest = await writeRuntimeManifest(directory, { ...options, legacyElectron });
+  assert.deepEqual(manifest.legacyElectron.links, links);
+  await verifyRuntimeManifest(directory);
+  const manifestFile = path.join(directory, manifestName), current = path.join(legacyRoot, frameworkPath, 'Versions/Current');
+  const rewrite = value => fs.writeFile(manifestFile, JSON.stringify(value));
+  const replace = async target => { await fs.rm(current); await fs.symlink(target, current); };
+  await fs.cp(path.join(legacyRoot, frameworkPath, 'Versions/A'), path.join(legacyRoot, frameworkPath, 'Versions/B'), { recursive: true });
+  await replace('B');
+  await assert.rejects(verifyRuntimeManifest(directory), /symbolic link changed/);
+  await replace('A'); await fs.rm(path.join(legacyRoot, frameworkPath, 'Versions/B'), { recursive: true });
+  await rewrite({ ...manifest, legacyElectron: { ...legacyElectron, links: links.slice(1) } });
+  await assert.rejects(verifyRuntimeManifest(directory), /unlisted symbolic link/);
+  await rewrite({ ...manifest, legacyElectron: { ...legacyElectron, links: [...links, links[0]] } });
+  await assert.rejects(verifyRuntimeManifest(directory), /Duplicate/);
+  await rewrite(manifest);
+  await fs.rm(current); await fs.cp(path.join(legacyRoot, frameworkPath, 'Versions/A'), current, { recursive: true });
+  await assert.rejects(verifyRuntimeManifest(directory), /symbolic link changed/);
+  await fs.rm(current, { recursive: true }); await fs.symlink('A', current);
+  const binaryAlias = path.join(legacyRoot, frameworkPath, 'Electron Framework');
+  for (const target of ['Versions//Current/Electron Framework', 'Versions/Current/Electron Framework/']) {
+    await fs.rm(binaryAlias); await fs.symlink(target, binaryAlias);
+    await assert.rejects(verifyRuntimeManifest(directory), /symbolic link changed/);
+  }
+  await fs.rm(binaryAlias); await fs.symlink('Versions/Current/Electron Framework', binaryAlias);
+  await fs.writeFile(path.join(legacyRoot, frameworkPath, 'Versions/A/Resources/Info.plist'), 'tampered');
+  await assert.rejects(verifyRuntimeManifest(directory), /integrity mismatch/);
 });
 
 test('wrong kernel identity and wrong Node provenance fail even when the byte inventory is recomputed', async t => {

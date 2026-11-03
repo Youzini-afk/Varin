@@ -3,12 +3,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { sha256, relativePath } from './runtime-manifest.mjs';
+import { createHash } from 'node:crypto';
+import { sha256, relativePath, readBinaryIdentity } from './runtime-manifest.mjs';
 import { pinnedCefLicense } from './cef-license.mjs';
 const locks=JSON.parse(await fs.readFile(new URL('./linux-sandbox.lock.json',import.meta.url),'utf8'));
-export const cefDebianFiles=['libcef.so','icudtl.dat','v8_context_snapshot.bin','chrome_100_percent.pak','chrome_200_percent.pak','resources.pak','libEGL.so','libGLESv2.so','libvk_swiftshader.so','vk_swiftshader_icd.json','libvulkan.so.1','chrome-sandbox'];
+export const cefDebianFiles=['libcef.so','icudtl.dat','v8_context_snapshot.bin','chrome_100_percent.pak','chrome_200_percent.pak','resources.pak','libvk_swiftshader.so','vk_swiftshader_icd.json','libvulkan.so.1','chrome-sandbox'];
 export const cefRequiredLocales=['en-US.pak','en-US_FEMININE.pak','en-US_MASCULINE.pak','en-US_NEUTER.pak'];
 export const debianDesktopFile='usr/share/applications/Varin.desktop';
+export const debianLauncher='#!/bin/sh\nexec /usr/share/Varin/varin "$@"\n';
+export const debianLauncherSha256=createHash('sha256').update(debianLauncher).digest('hex');
 export const debianDependencies=[
   'libc6 (>= 2.39)', 'libgcc-s1', 'libstdc++6', 'libgtk-4-1 (>= 4.14)',
   'libgtk-3-0t64 | libgtk-3-0', 'libnss3', 'libnspr4', 'libasound2t64 | libasound2',
@@ -23,12 +26,20 @@ export function sandboxHelpers(architecture,{transition=true}={}) {
   const pin=locks.targets[architecture];if(!pin)throw new Error('Unsupported Debian architecture');
   return {'usr/share/Varin/chrome-sandbox':pin.cef,...(transition?{'usr/lib/Varin/runtime/legacy-electron/chrome-sandbox':pin.electron}:{})};
 }
-export async function debianConfiguration(sdk) {
-  // The pinned bundler copies CEF itself and stamps its binary as Deb. Supply
-  // only its omitted license/credits/locales, not a second copy of the engine.
-  return {bundle:{linux:{deb:{depends:debianDependencies,section:'devel',
+export async function debianConfiguration(sdk,{executable}={}) {
+  if(!executable||!path.isAbsolute(executable))throw new Error('Debian packaging requires the built native executable');
+  // CLI 3.0.0-alpha.5's built-in CEF list still requires libEGL/libGLESv2,
+  // removed from the pinned upstream SDK. Disable only its automatic bundle
+  // copy, not the already-built CEF runtime. Explicit resources retain every
+  // current SDK byte (no strip) and the CLI still stamps the native binary Deb.
+  // https://github.com/tauri-apps/tauri/blob/tauri-cli-v3.0.0-alpha.5/crates/tauri-cli/src/runtime/mod.rs
+  // https://github.com/chromiumembedded/cef/blob/cf671c072925b27823a61181152f4f288e8e4306/tools/make_distrib.py
+  return {bundle:{cef:{embed:false},linux:{deb:{depends:debianDependencies,section:'devel',
     desktopTemplate:path.join(import.meta.dirname,'linux-varin.desktop'),
-    files:{'/usr/share/Varin/LICENSE.txt':await pinnedCefLicense(sdk),
+    files:{'/usr/bin/varin':path.join(import.meta.dirname,'linux-varin-launcher'),
+      '/usr/share/Varin/varin':executable,
+      ...Object.fromEntries(cefDebianFiles.map(name=>[`/usr/share/Varin/${name}`,path.join(sdk,name)])),
+      '/usr/share/Varin/LICENSE.txt':await pinnedCefLicense(sdk),
       '/usr/share/Varin/CREDITS.html':path.join(sdk,'CREDITS.html'),
       '/usr/share/Varin/locales':path.join(sdk,'locales')},
     preInstallScript:null,postInstallScript:null,preRemoveScript:null,postRemoveScript:null}}}};
@@ -52,13 +63,11 @@ export function validateDebianInventory(document,{architecture,version,sourceSha
       ||/^usr\/share\/icons\/hicolor\/\d+x\d+(?:@\d+)?(?:\/apps)?$/u.test(entry.path));
     if((!owned&&!directory)||entries.has(entry.path))throw new Error('Unexpected or duplicate Debian installation path');
     if(!Number.isInteger(entry.mode)||entry.mode<0||entry.mode>0o7777||entry.uid!==0||entry.gid!==0)throw new Error('Debian entries must be owned by root');
-    if((entry.mode&0o3000)||(entry.type!=='symlink'&&(entry.mode&0o022)))throw new Error('Debian entries cannot be writable or have unexpected privileged mode');
+    if((entry.mode&0o3000)||(entry.mode&0o022))throw new Error('Debian entries cannot be writable or have unexpected privileged mode');
     // The setuid bit is considered separately from setgid/sticky/write bits.
     if((entry.mode&0o4000)&&!helpers[entry.path])throw new Error('Unexpected privileged Debian helper');
     if(entry.type==='file'){
       if(!Number.isSafeInteger(entry.size)||entry.size<0||!/^[a-f0-9]{64}$/u.test(entry.sha256))throw new Error('Debian file identity is absent');
-    }else if(entry.type==='symlink'){
-      if(entry.path!=='usr/bin/varin'||entry.link!=='../share/Varin/varin')throw new Error('Unexpected Debian symbolic link');
     }else if(entry.type!=='directory')throw new Error('Unexpected Debian entry type');
     entries.set(entry.path,entry);
   }
@@ -73,7 +82,9 @@ export function validateDebianInventory(document,{architecture,version,sourceSha
   const executable=entries.get('usr/share/Varin/varin');
   if(executable?.type!=='file'||!(executable.mode&0o111)||executable.elfMachine!==(architecture==='x64'?62:183)
     ||JSON.stringify(executable.bundleMarkers)!=='["DEB"]')throw new Error('Debian native binary lacks the exact format stamp');
-  if(entries.get('usr/bin/varin')?.type!=='symlink')throw new Error('Debian executable registration is missing');
+  const launcher=entries.get('usr/bin/varin');
+  if(launcher?.type!=='file'||launcher.mode!==0o755||launcher.size!==Buffer.byteLength(debianLauncher)
+    ||launcher.sha256!==debianLauncherSha256)throw new Error('Debian executable registration differs from the fixed launcher');
   for(const name of [...cefDebianFiles,'LICENSE.txt','CREDITS.html',...cefRequiredLocales.map(name=>`locales/${name}`)])if(entries.get(`usr/share/Varin/${name}`)?.type!=='file')throw new Error('Debian CEF runtime or license is missing');
   if(entries.get('usr/lib/Varin/runtime/runtime-manifest.json')?.sha256!==runtimeManifestSha256)throw new Error('Debian runtime differs from its candidate');
   if(entries.get(debianDesktopFile)?.type!=='file'||document.desktop?.Exec!=='/usr/bin/varin %U'
@@ -103,15 +114,29 @@ export async function inspectDebian(file,{architecture,version,sourceSha,runtime
   return validateDebianInventory(document,{architecture,version,sourceSha,runtimeManifestSha256,artifactSha256:document.artifactSha256,transition});
 }
 
-/** The final archive must retain every locale and unmodified non-stripped CEF
- * asset from the already verified SDK. Tauri strips only files ending in .so. */
+/** Bind final archive bytes to the verified SDK. Explicit Debian resources
+ * bypass the pinned bundler's outdated CEF list and implicit library stripping. */
 export async function verifyDebianCefFiles(document,sdk) {
+  const architecture=document.architecture;
+  if(!['x64','arm64'].includes(architecture))throw new Error('Debian CEF architecture is missing or unsupported');
   const entries=new Map(document.entries.map(entry=>[entry.path,entry]));
   const locales=(await fs.readdir(path.join(sdk,'locales'))).sort();
   const observed=document.entries.filter(entry=>entry.type==='file'&&entry.path.startsWith('usr/share/Varin/locales/')).map(entry=>entry.path.slice('usr/share/Varin/locales/'.length)).sort();
   if(JSON.stringify(locales)!==JSON.stringify(observed))throw new Error('Debian CEF locale inventory differs from the pinned SDK');
-  for(const name of [...cefDebianFiles.filter(name=>!name.endsWith('.so')),'CREDITS.html',...locales.map(name=>`locales/${name}`)]){
+  const isLibrary=name=>name.endsWith('.so')||name.endsWith('.so.1');
+  for(const name of [...cefDebianFiles.filter(name=>!isLibrary(name)),'CREDITS.html',...locales.map(name=>`locales/${name}`)]){
     if(entries.get(`usr/share/Varin/${name}`)?.sha256!==await sha256(path.join(sdk,name)))throw new Error('Debian CEF asset differs from the pinned SDK');
   }
   if(entries.get('usr/share/Varin/LICENSE.txt')?.sha256!==await sha256(await pinnedCefLicense(sdk)))throw new Error('Debian CEF license changed');
+  for(const name of cefDebianFiles.filter(isLibrary)){
+    const entry=entries.get(`usr/share/Varin/${name}`),source=path.join(sdk,name),stat=await fs.lstat(source);
+    if(entry?.type!=='file'||!Number.isSafeInteger(entry.size)||entry.size<=0
+      ||entry.elfMachine!==(architecture==='x64'?62:183)||!/^[a-f0-9]{64}$/u.test(entry.sha256??''))throw new Error('Debian CEF library is empty or has the wrong native ELF architecture');
+    // Reject redirected or privileged source files without changing any SDK
+    // bytes or permissions on the build machine.
+    if(!stat.isFile()||stat.size<=0||(stat.mode&0o7000))throw new Error('CEF SDK library must be a regular unprivileged file');
+    const binary=await readBinaryIdentity(source);
+    if(binary.platform!=='linux'||binary.arch!==architecture)throw new Error('CEF SDK library has the wrong native ELF architecture');
+    if(entry.size!==stat.size||entry.sha256!==await sha256(source))throw new Error('Debian CEF library differs from the pinned SDK');
+  }
 }

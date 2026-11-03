@@ -28,7 +28,9 @@ export async function signMacPayload(app,{identity=process.env.APPLE_SIGNING_IDE
   const kernelFile=path.join(runtime,manifest.kernel.manifest),kernel=JSON.parse(await fs.readFile(kernelFile,'utf8'));
   kernel.sha256=await sha256(path.join(runtime,manifest.kernel.executable));
   await fs.writeFile(kernelFile,JSON.stringify(kernel,null,2)+'\n');
-  manifest.files=await inventory(runtime);
+  // Rehash signed physical files, retaining and revalidating the original
+  // framework alias identities rather than blessing any signer layout change.
+  manifest.files=await inventory(runtime,manifest);
   await fs.writeFile(path.join(runtime,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   await verifyRuntimeManifest(runtime,{platform:'darwin',architecture:process.arch});
   run('codesign',['--force','--sign',identity,...(keychain?['--keychain',keychain]:[]),'--options','runtime',...(development?[]:['--timestamp']),'--entitlements',entitlements,app]);

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { candidateConfiguration, discoverCef, engineInventory } from './build-candidate.mjs';
+import { candidateConfiguration, copyMacosRuntime, discoverCef, engineInventory } from './build-candidate.mjs';
 import { pinnedCefLicense } from './cef-license.mjs';
 
 test('the pinned Tauri CLI prepares release builds without rewriting committed manifests', async t => {
@@ -46,11 +46,31 @@ test('the pinned Tauri CLI prepares release builds without rewriting committed m
   });
   const prepared = JSON.parse(runner);
   assert.ok(prepared.args.includes('--release'));
-  assert.deepEqual(prepared.config.bundle.resources, { [runtime + path.sep]: 'runtime/' });
+  assert.deepEqual(prepared.config.bundle.resources, process.platform==='darwin'?[]:{ [runtime + path.sep]: 'runtime/' });
   assert.equal(prepared.config.build.frontendDist, path.join(runtime, 'frontend'));
   for (const [name, original] of originals) {
     assert.deepEqual(await fs.readFile(path.join(native, name)), original, `${name} changed during CLI preparation`);
   }
+});
+
+test('macOS copies the original runtime with canonical framework aliases instead of the generic resource walker', {skip:process.platform==='win32'}, async t => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-macos-runtime-copy-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const runtime=path.join(root,'runtime'),app=path.join(root,'Varin.app');
+  const framework=path.join(runtime,'legacy-electron/Electron.app/Contents/Frameworks/Electron Framework.framework');
+  await fs.mkdir(path.join(framework,'Versions/A/Resources'),{recursive:true});
+  await fs.mkdir(path.join(app,'Contents/Resources'),{recursive:true});
+  await fs.writeFile(path.join(framework,'Versions/A/Electron Framework'),'sealed native framework fixture');
+  await fs.writeFile(path.join(framework,'Versions/A/Resources/Info.plist'),'sealed framework metadata');
+  await fs.symlink('A',path.join(framework,'Versions/Current'));
+  await fs.symlink('Versions/Current/Resources',path.join(framework,'Resources'));
+  await fs.symlink('Versions/Current/Electron Framework',path.join(framework,'Electron Framework'));
+  assert.deepEqual(candidateConfiguration(runtime,'darwin').bundle.resources,[]);
+  for(const platform of ['linux','win32'])assert.deepEqual(candidateConfiguration(runtime,platform).bundle.resources,{[runtime+path.sep]:'runtime/'});
+  const before=await engineInventory(runtime);
+  await copyMacosRuntime(runtime,app);
+  assert.deepEqual(await engineInventory(path.join(app,'Contents/Resources/runtime')),before);
+  assert.deepEqual(await engineInventory(runtime),before,'Source framework bytes and links must remain unchanged');
+  await assert.rejects(copyMacosRuntime(runtime,app),{code:'ERR_FS_CP_EEXIST'});
 });
 
 test('the pinned CLI bundles only the prepared runtime after merging the checked-in configuration', async t => {

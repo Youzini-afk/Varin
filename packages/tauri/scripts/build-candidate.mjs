@@ -15,13 +15,20 @@ const repository=path.resolve(import.meta.dirname,'../../..'),packageRoot=path.r
 const lock=JSON.parse(await fs.readFile(new URL('./cef-runtime.lock.json',import.meta.url),'utf8'));
 const require=createRequire(path.join(packageRoot,'package.json'));
 function run(command,args,options={}){return execFileSync(command,args,{cwd:packageRoot,env:process.env,stdio:'inherit',windowsHide:true,...options});}
-export function candidateConfiguration(runtime){
+export function candidateConfiguration(runtime,platform=process.platform){
   runtime=path.resolve(runtime);
   // The CLI first folds --config overlays together, then merges the result
   // into the checked-in configuration. An array reset in an earlier overlay
   // therefore cannot remove old map entries. The base owns no runtime path;
   // this one overlay supplies the exact immutable candidate generation.
-  return{build:{frontendDist:path.join(runtime,'frontend')},bundle:{active:true,resources:{[runtime+path.sep]:'runtime/'},macOS:{minimumSystemVersion:'13.0',infoPlist:path.join(packageRoot,'installer/Info.plist'),entitlements:path.join(repository,'packages/electron/resources/entitlements.mac.plist')}}};
+  // macOS framework aliases are directory symlinks, which the pinned CLI's
+  // generic resource walker omits. Copy the sealed runtime after app bundling.
+  return{build:{frontendDist:path.join(runtime,'frontend')},bundle:{active:true,resources:platform==='darwin'?[]:{[runtime+path.sep]:'runtime/'},macOS:{minimumSystemVersion:'13.0',infoPlist:path.join(packageRoot,'installer/Info.plist'),entitlements:path.join(repository,'packages/electron/resources/entitlements.mac.plist')}}};
+}
+export async function copyMacosRuntime(runtime,app){
+  const destination=path.join(app,'Contents/Resources/runtime');
+  // Refuse an existing, possibly lossy runtime rather than merging into it.
+  await fs.cp(runtime,destination,{recursive:true,verbatimSymlinks:true,errorOnExist:true,force:false});
 }
 export async function discoverCef(root,platform,architecture){
   const pin=lock.targets[`${platform}-${architecture}`];if(!pin)throw new Error('Unsupported CEF target');
@@ -79,6 +86,7 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
   }else if(process.platform==='darwin'){
     run(process.execPath,[cli,'bundle','--ci','--no-sign','--bundles','app','--features','desktop',...configs],{env:nativeEnvironment});
     payload=path.join(output,'Varin.app');await fs.cp(path.join(cargo,'bundle/macos/Varin.app'),payload,{recursive:true,verbatimSymlinks:true});
+    await copyMacosRuntime(runtime,payload);
     await fs.copyFile(await pinnedCefLicense(sdk),path.join(payload,'Contents/Resources/CEF-LICENSE.txt'));
     await fs.copyFile(path.join(sdk,'CREDITS.html'),path.join(payload,'Contents/Resources/CEF-CREDITS.html'));
   }else throw new Error('Unsupported native target');
@@ -90,10 +98,11 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
   let packaged=null;if(packageInstallers)packaged=await packageTransition({directory:payload,output:assets,signed,engineDirectory,mode});
   if(packageInstallers&&process.platform==='linux'){
     // AppImage remains an independent compatibility artifact. The official
-    // Debian bundler owns installed layout, format stamp and archive modes;
-    // it does not grant any host file privileges while constructing the tar.
+    // Debian bundler owns format stamp and archive modes; explicit resources
+    // retain the verified current CEF SDK without its outdated built-in list.
+    // It does not grant any host file privileges while constructing the tar.
     const debConfigs=['--config',JSON.stringify(candidateConfiguration(runtimeDirectory)),
-      '--config',JSON.stringify(await debianConfiguration(sdk))];
+      '--config',JSON.stringify(await debianConfiguration(sdk,{executable:path.join(cargo,'varin')}))];
     run(process.execPath,[cli,'bundle','--ci','--no-sign','--bundles','deb','--features','desktop',...debConfigs],{env:{...nativeEnvironment,CEF_PATH:sdk}});
     const packageArchitecture=process.arch==='x64'?'amd64':'arm64';
     const deb=path.join(assets,`Varin-${manifest.version}-linux-${process.arch}.deb`);

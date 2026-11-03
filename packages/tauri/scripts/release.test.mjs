@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { canonicalJson, metadataBytes, verifyMinisign, verifySignedMetadata } from '../../../scripts/desktop-update-signatures.mjs';
 import { acceptanceDomains,releaseTargets,recordArtifact,verifyCandidate,assembleRelease,verifyQualification } from './release.mjs';
-import { sandboxHelpers, debianDependencies, debianDesktopFile } from './linux-debian.mjs';
+import { sandboxHelpers, debianDependencies, debianDesktopFile, debianLauncher, debianLauncherSha256 } from './linux-debian.mjs';
 import { publicKey,signFixture } from './test-fixtures/signing.mjs';
 
 test('real minisign signatures verify payload, authenticated comment, and exact version',()=>{
@@ -51,8 +51,8 @@ async function fixture(t,version='1.2.3',mode='electron-to-tauri'){
       };
       for(const [name,sha256] of Object.entries(helpers)) addFile(name,{sha256,mode:0o4755,elfMachine:architecture==='x64'?62:183});
       addFile('usr/share/Varin/varin',{mode:0o755,elfMachine:architecture==='x64'?62:183,bundleMarkers:['DEB']});
-      addFile('usr/bin/varin',{type:'symlink',mode:0o777,link:'../share/Varin/varin'});
-      for(const name of ['libcef.so','icudtl.dat','v8_context_snapshot.bin','chrome_100_percent.pak','chrome_200_percent.pak','resources.pak','libEGL.so','libGLESv2.so','libvk_swiftshader.so','vk_swiftshader_icd.json','libvulkan.so.1','LICENSE.txt','CREDITS.html',...['en-US.pak','en-US_FEMININE.pak','en-US_MASCULINE.pak','en-US_NEUTER.pak'].map(name=>`locales/${name}`)]) addFile(`usr/share/Varin/${name}`);
+      addFile('usr/bin/varin',{mode:0o755,size:Buffer.byteLength(debianLauncher),sha256:debianLauncherSha256});
+      for(const name of ['libcef.so','icudtl.dat','v8_context_snapshot.bin','chrome_100_percent.pak','chrome_200_percent.pak','resources.pak','libvk_swiftshader.so','vk_swiftshader_icd.json','libvulkan.so.1','LICENSE.txt','CREDITS.html',...['en-US.pak','en-US_FEMININE.pak','en-US_MASCULINE.pak','en-US_NEUTER.pak'].map(name=>`locales/${name}`)]) addFile(`usr/share/Varin/${name}`);
       addFile('usr/lib/Varin/runtime/runtime-manifest.json',{sha256:runtimeManifest.sha256});
       addFile(debianDesktopFile);
       const inventory = await write(`${target}.deb-inventory.json`, JSON.stringify({ schema:1, product:'varin-debian-inventory',packageName:'varin',
@@ -191,6 +191,12 @@ test('Debian installation identity and policy cannot substitute an AppImage upda
   wrongStamp.entries.find(entry=>entry.path==='usr/share/Varin/varin').bundleMarkers=['APP'];
   unstamped.targets[target].installed.inventory=await write(`${target}.wrong-stamp.json`,JSON.stringify(wrongStamp));
   await assert.rejects(verifyCandidate(root,unstamped,{publicKey}),/exact format stamp/);
+  for(const patch of [{sha256:'0'.repeat(64)},{size:1},{mode:0o744},{type:'symlink',link:'../share/Varin/varin'}]){
+    const changed=structuredClone(candidate),document=structuredClone(inventory);
+    Object.assign(document.entries.find(entry=>entry.path==='usr/bin/varin'),patch);
+    changed.targets[target].installed.inventory=await write(`${target}.wrong-launcher.json`,JSON.stringify(document));
+    await assert.rejects(verifyCandidate(root,changed,{publicKey}),/fixed launcher|entry type/);
+  }
   for(const path of ['usr/bin/bash','usr/lib/systemd/system/foreign.service','usr/share/applications/foreign.desktop']){
     const changed=structuredClone(candidate), document=structuredClone(inventory);
     document.entries.push({path,type:'file',uid:0,gid:0,mode:0o755,size:1,sha256:'a'.repeat(64)});

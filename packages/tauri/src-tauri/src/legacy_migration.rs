@@ -394,18 +394,10 @@ pub async fn prepare(
         return Err("Legacy exporter manifest identity is incompatible".into());
     }
     let verify = runtime.clone();
-    let executable_receipt = legacy.executable.clone();
     tokio::task::spawn_blocking(move || {
         verify
-            .verify_file(&executable_receipt)
-            .map_err(|_| "Legacy exporter entry integrity check failed")?;
-        for file in &verify.manifest.files {
-            if file.path.starts_with("legacy-electron/") {
-                verify
-                    .verify_file(&file.path)
-                    .map_err(|_| "Legacy exporter bundle integrity check failed")?;
-            }
-        }
+            .verify_legacy()
+            .map_err(|_| "Legacy exporter bundle integrity check failed")?;
         Ok::<_, String>(())
     })
     .await
