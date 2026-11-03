@@ -591,3 +591,243 @@ fn cancellation_and_author_failure_have_one_actual_final_state() {
     );
     assert_eq!(report.failure.unwrap().code, "author_failure");
 }
+
+/// A real process exit after both dispatch owners commit, not a fabricated unknown row.
+/// The read/write fixture performs its effect and exits before returning any completion.
+struct ExitAfterDispatch {
+    tools: Arc<Tools>,
+    provider: Arc<Provider>,
+    proof: std::path::PathBuf,
+}
+impl ToolExecutor for ExitAfterDispatch {
+    fn plan(
+        &self,
+        call: &ToolCall,
+        frozen: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<ToolPreparation, ExecutionError> {
+        self.prepare(call, frozen, cancel)
+            .map(ToolPreparation::Ready)
+    }
+    fn authorize(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        self.tools.authorize(context, call, contract, cancel)
+    }
+    fn prepare(
+        &self,
+        call: &ToolCall,
+        frozen: &FrozenToolContext,
+        cancel: &CancellationToken,
+    ) -> Result<ToolContract, ExecutionError> {
+        let mut contract = self.tools.prepare(call, frozen, cancel)?;
+        contract.read_only = false;
+        contract.resources[0].access = Access::Write;
+        Ok(contract)
+    }
+    fn execute(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> ToolCompletion {
+        let _ = self.tools.execute(context, call, contract, cancel);
+        std::fs::write(
+            &self.proof,
+            serde_json::to_vec(&json!({
+                "models": self.provider.calls.load(Ordering::SeqCst),
+                "tools": self.tools.calls.load(Ordering::SeqCst),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::process::exit(41);
+    }
+}
+
+#[test]
+fn crashed_dispatch_reopens_original_unknown_model_and_tool_without_redispatch() {
+    const CHILD: &str = "VARIN_DRIVER_DISPATCH_CRASH_REVIEW";
+    if let Some(proof_root) = std::env::var_os(CHILD).map(std::path::PathBuf::from) {
+        let (_hold_model, gate) = mpsc::channel();
+        let f = Fixture::new(
+            DriverRecovery::Checkpoint,
+            HashMap::from([("paid".into(), gate)]),
+        );
+        let mut start = f.context.start.clone();
+        start.tools = Arc::new(ExitAfterDispatch {
+            tools: f.tools.clone(),
+            provider: f.provider.clone(),
+            proof: proof_root.join("dispatch.json"),
+        });
+        let context = Arc::new(DriverContext::new(
+            f.context.catalog.clone(),
+            f.context.run_id.clone(),
+            f.context.epoch,
+            start,
+            CancellationToken::default(),
+        ));
+        let input = context.prepare_custom().unwrap();
+        context
+            .checkpoint(DriverCheckpointInput {
+                expected_revision: 0,
+                schema: "state-1".into(),
+                state: json!({"phase":"dispatching"}),
+                operations: vec![],
+            })
+            .unwrap();
+        let model = f.request("paid", input.history);
+        let tool = DriverToolInput {
+            id: "effect".into(),
+            name: "inspect".into(),
+            arguments: json!({"original":true}),
+        };
+        std::fs::write(
+            proof_root.join("original.json"),
+            serde_json::to_vec(&json!({
+                "root": f.root, "run": context.run_id, "epoch": context.epoch,
+                "binding": context.start.binding, "model": model, "tool": tool,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let active = context.clone();
+        std::thread::spawn(move || active.model(model));
+        assert_eq!(
+            f.models.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "paid"
+        );
+        // Model remains in its actual provider while the separate original tool dispatches.
+        let _ = context.tool(tool);
+        panic!("the effect owner must terminate this subprocess before returning a receipt");
+    }
+    let proof_root = std::env::temp_dir().join(format!(
+        "varin-driver-dispatch-crash-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&proof_root).unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "crashed_dispatch_reopens_original_unknown_model_and_tool_without_redispatch",
+            "--nocapture",
+        ])
+        .env(CHILD, &proof_root)
+        .status()
+        .unwrap();
+    assert_eq!(
+        status.code(),
+        Some(41),
+        "the original executor exited at its actual dispatch boundary"
+    );
+    let proof: Value =
+        serde_json::from_slice(&std::fs::read(proof_root.join("dispatch.json")).unwrap()).unwrap();
+    assert_eq!(proof, json!({"models":1,"tools":1}));
+    let original: Value =
+        serde_json::from_slice(&std::fs::read(proof_root.join("original.json")).unwrap()).unwrap();
+    let root = std::path::PathBuf::from(original["root"].as_str().unwrap());
+    let run = original["run"].as_str().unwrap().to_owned();
+    let model: DriverModelInput = serde_json::from_value(original["model"].clone()).unwrap();
+    let tool: DriverToolInput = serde_json::from_value(original["tool"].clone()).unwrap();
+    let f = Fixture::new(DriverRecovery::Checkpoint, HashMap::new());
+    let mut start = f.context.start.clone();
+    start.binding = serde_json::from_value(original["binding"].clone()).unwrap();
+    let db = Catalog::open(&root).unwrap();
+    let epoch = db.epoch();
+    assert!(epoch > original["epoch"].as_u64().unwrap());
+    let context = DriverContext::new(
+        Arc::new(Mutex::new(db)),
+        run,
+        epoch,
+        start,
+        CancellationToken::default(),
+    );
+    let resumed = context.prepare_custom().unwrap();
+    assert_eq!(resumed.mode, "resume");
+    assert_eq!(
+        resumed.checkpoint.unwrap().state,
+        json!({"phase":"dispatching"})
+    );
+    assert!(matches!(
+        resumed
+            .receipts
+            .iter()
+            .find(|receipt| matches!(receipt, DriverReceipt::Model { id, .. } if id == "paid")),
+        Some(DriverReceipt::Model {
+            state: ModelStepState::Interrupted,
+            receipt: None,
+            ..
+        })
+    ));
+    assert!(matches!(
+        resumed
+            .receipts
+            .iter()
+            .find(|receipt| matches!(receipt, DriverReceipt::Tool { id, .. } if id == "effect")),
+        Some(DriverReceipt::Tool {
+            phase: Some(OperationPhase::Terminal),
+            receipt: None,
+            ..
+        })
+    ));
+    let operation_id = resumed
+        .receipts
+        .iter()
+        .find_map(|receipt| match receipt {
+            DriverReceipt::Tool {
+                id, operation_id, ..
+            } if id == "effect" => Some(operation_id),
+            _ => None,
+        })
+        .unwrap();
+    let unknown = context
+        .catalog
+        .lock()
+        .unwrap()
+        .operation(operation_id)
+        .unwrap();
+    assert_eq!(unknown.effect, Effect::Unknown);
+    assert_eq!(unknown.outcome, Some(Outcome::Indeterminate));
+    let model_error = context.model(model).unwrap_err();
+    assert!(
+        model_error
+            .message
+            .contains("inspect it instead of redispatching"),
+        "{model_error:?}"
+    );
+    let tool_error = context.tool(tool).unwrap_err();
+    assert!(
+        tool_error
+            .message
+            .contains("inspect it instead of redispatching"),
+        "{tool_error:?}"
+    );
+    assert_eq!(
+        f.provider.calls.load(Ordering::SeqCst),
+        0,
+        "unknown paid request never calls a fresh provider"
+    );
+    assert_eq!(
+        f.tools.calls.load(Ordering::SeqCst),
+        0,
+        "unknown effect never redispatches its executor"
+    );
+    assert_eq!(
+        context
+            .catalog
+            .lock()
+            .unwrap()
+            .operation(operation_id)
+            .unwrap(),
+        unknown
+    );
+    context.close_and_drain();
+    drop(context);
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(proof_root).unwrap();
+}

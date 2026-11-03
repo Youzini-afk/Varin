@@ -46,7 +46,8 @@ Host 只为原 callback 建立 Run/内核 epoch/instance 的临时调用 scope�
 - `model` 自由接收上下文、补充指令和原目录工具子集，创建真实 ModelStep；不同稳定 ID 可以并行。
   默认循环仍保留自己的单活模型约束。driver 内部模型结果是独立回执，不自动拼成虚假的串行对话。
 - `tool` 经原 InvocationRunner、工具权限和资源 owner 受理；请求被拒、真实效果、Job 移交与 executor stop
-  保持区别。重复稳定 ID 核对原输入并读原回执，不能重发未知效果。
+  保持区别。重复稳定 ID 核对原输入并读原回执，不能重发未知效果。异步工具的 JobAccepted 是原调用的
+  完成回执，不会被后台结果覆盖；后续状态与输出经原领域读取工具（如 `question_status`、`process_read`）或 Inbox 读取。
 - `context` 显式消费原 Inbox，并重新编译当前指令、资源与工具视图；不建立第二条输入队列。
   原 Agent/Bot 指令已经在编译后的 history 中，不把来源标识当作系统提示词。
 - `wait` 订阅原 Catalog 事件后重读本 Run 事实，以 cursor 等待活动变化；`after:null` 只取基线。

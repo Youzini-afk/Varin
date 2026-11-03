@@ -8,7 +8,7 @@ import {
   VARIN_AGENT_DRIVER_SERVICE_ID, VARIN_AGENT_DRIVER_VERSION,
   type JsonValue, type VarinExtensionServiceRoutingContext,
 } from '@varin/extension-contract';
-import { HostServiceBindingError, type ApplicationExtensionRuntime, type HostInvocationScope,
+import { HostServiceBindingError, HostBindingRestoreError, type ApplicationExtensionRuntime, type HostInvocationScope,
   type HostServiceBinding, type HostServiceOwnerIdentity } from '@varin/extension-host';
 import { waitWithSignal } from '../cancellation.js';
 import type { DriverArtifact, DriverBinding, DriverRunInput, DriverRunOutcome } from './protocol.generated.js';
@@ -50,7 +50,7 @@ async function retainDriver(runtime: ApplicationExtensionRuntime, selected: Host
         composition: selected.composition.root, configurationIdentity, description: { ...description, configuration: undefined } }) },
       modelRoles: description.modelRoles, recovery: description.recovery, checkpointSchema: description.checkpointSchema,
     };
-    if (required && !isDeepStrictEqual(artifact, required)) throw new Error('run_driver_exact_binding_unavailable');
+    if (required && !isDeepStrictEqual(artifact, required)) throw new HostBindingRestoreError('driver', 'binding_changed', required.providerKey);
     pin.assertAvailable();
     const originalPin = pin;
     let released = false;
@@ -72,23 +72,29 @@ export function createAgentDriver(runtime: ApplicationExtensionRuntime): AgentDr
     const { requiredBinding: required, ...routingContext } = scope;
     if (required) {
       if (required.serviceId !== VARIN_AGENT_DRIVER_SERVICE_ID || required.serviceVersion !== VARIN_AGENT_DRIVER_VERSION) {
-        throw new Error('run_driver_service_version_unsupported');
+        throw new HostBindingRestoreError('driver', 'service_version_unsupported', required.providerKey);
       }
-      const retained = runtime.services.getSnapshot().providers.find(provider => provider.providerKey === required.providerKey
-        && provider.extensionId === required.extensionId && provider.extensionVersion === required.extensionVersion
-        && runtime.supervisor.getRetainedArtifactIdentity(provider) === required.artifactIntegrity
-        && runtime.supervisor.getRetainedComposition(provider)?.root === required.composition.root);
-      if (retained) {
-        const binding = runtime.services.bindPinned(required.serviceId, required.serviceVersion, retained.providerId);
-        return retainDriver(runtime, binding, () => {}, required, async () => {}, signal);
+      try {
+        const retained = runtime.services.getSnapshot().providers.find(provider => provider.providerKey === required.providerKey
+          && provider.extensionId === required.extensionId && provider.extensionVersion === required.extensionVersion
+          && runtime.supervisor.getRetainedArtifactIdentity(provider) === required.artifactIntegrity
+          && runtime.supervisor.getRetainedComposition(provider)?.root === required.composition.root);
+        if (retained) {
+          const binding = runtime.services.bindPinned(required.serviceId, required.serviceVersion, retained.providerId);
+          return await retainDriver(runtime, binding, () => {}, required, async () => {}, signal);
+        }
+        // Restart reconstructs only the original still-reviewed graph. Cache presence does not
+        // authorize old code, and current routing is not a substitute for a saved selection.
+        const root = await runtime.supervisor.prepareExtension(required.extensionId, routingContext, signal, required.composition);
+        let binding: HostServiceBinding;
+        try { binding = root.bind(required.serviceId, required.serviceVersion); }
+        catch (error) { root.release(); throw error; }
+        return await retainDriver(runtime, binding, () => root.release(), required, async () => {}, signal);
+      } catch (cause) {
+        signal?.throwIfAborted();
+        if (cause instanceof HostBindingRestoreError) throw cause;
+        throw new HostBindingRestoreError('driver', 'implementation_unavailable', required.providerKey, { cause });
       }
-      // Restart reconstructs only the original still-reviewed graph. Cache presence does not
-      // authorize old code, and current routing is not a substitute for a saved selection.
-      const root = await runtime.supervisor.prepareExtension(required.extensionId, routingContext, signal, required.composition);
-      let binding: HostServiceBinding;
-      try { binding = root.bind(required.serviceId, required.serviceVersion); }
-      catch (error) { root.release(); throw error; }
-      return retainDriver(runtime, binding, () => root.release(), required, async () => {}, signal);
     }
     const readSelection = async () => {
       const [catalog, routing] = await Promise.all([runtime.catalog.snapshot(), runtime.routing.read()]);

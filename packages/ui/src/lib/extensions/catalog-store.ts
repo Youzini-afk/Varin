@@ -11,7 +11,6 @@ import type {
 } from '@varin/extension-contract';
 import { parseVarinExtensionServiceRoutingRule, serviceRoutingRuleKey } from '@varin/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { VARIN_AGENT_DRIVER_SERVICE_ID } from '@varin/extension-contract';
 
 export interface VarinExtensionCatalogStoreState {

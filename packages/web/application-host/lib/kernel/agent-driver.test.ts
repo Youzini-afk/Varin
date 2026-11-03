@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, test } from 'vitest';
-import { ApplicationExtensionRuntime } from '@varin/extension-host';
+import { ApplicationExtensionRuntime, HostBindingRestoreError, HostCompositionRestoreError } from '@varin/extension-host';
 import { VARIN_AGENT_DRIVER_CAPABILITY, VARIN_BUILTIN_AGENT_DRIVER_PROVIDER_KEY } from '@varin/extension-contract';
 import { AgentDriverBridge, createAgentDriver, type AgentDriverLease, type PrivateDriverResponse } from './agent-driver.js';
 import { runDriverCall } from './run-driver-invocation.js';
@@ -43,7 +43,7 @@ async function fixture() {
   };
   const route = async (providerKey: string) => runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
     rule: { serviceId: 'varin.agent.driver', version: 1, providerKeys: [providerKey], scope: { userId: 'default' }, allowFallback: false } });
-  return { runtime, install, route, prepare: createAgentDriver(runtime), scope: { userId: 'default', threadId: 'thread-a' } };
+  return { root, runtime, install, route, prepare: createAgentDriver(runtime), scope: { userId: 'default', threadId: 'thread-a' } };
 }
 
 test('installing one real driver does not select it; explicit scoped routing can return to native default', async () => {
@@ -79,7 +79,41 @@ test('real broker callback receives only its live Run capability and revocation 
   bridge.release('run-a');
   await f.runtime.reviewCapabilities({ extensionId: 'review.run-driver', expectedRevision: (await f.runtime.state()).catalog.revision,
     decisions: [{ realm: 'host', capability: VARIN_AGENT_DRIVER_CAPABILITY, granted: false }] });
-  await assert.rejects(f.prepare({ ...f.scope, requiredBinding: artifact }), /capability|grant|review/i);
+  await assert.rejects(f.prepare({ ...f.scope, requiredBinding: artifact }), (error: unknown) => {
+    assert(error instanceof HostBindingRestoreError);
+    assert.equal(error.kind, 'driver'); assert.equal(error.reason, 'implementation_unavailable');
+    assert(error.cause instanceof HostCompositionRestoreError); assert.equal(error.cause.reason, 'grants_changed');
+    return true;
+  });
+});
+
+test('restarted driver restores only its frozen graph and rejects changed descriptions without changing routing or grants', async () => {
+  const f = await fixture(), key = await f.install(); await f.route(key);
+  const lease = await f.prepare(f.scope); assert.ok(lease);
+  const artifact = structuredClone(lease.binding.artifact); lease.release();
+  await f.route(VARIN_BUILTIN_AGENT_DRIVER_PROVIDER_KEY); await f.runtime.stop();
+  const restarted = await ApplicationExtensionRuntime.create({ dataDir: join(f.root, 'data'), varinVersion: '0.9.36',
+    brokerScript: join(repository, 'packages/extension-host/broker/broker-child.mjs') });
+  cleanups.push(() => restarted.stop()); await restarted.start();
+  const prepare = createAgentDriver(restarted);
+  assert.equal(await prepare(f.scope), undefined, 'new Runs use the newly selected native loop');
+  const restored = await prepare({ ...f.scope, requiredBinding: artifact }); assert.ok(restored);
+  assert.deepEqual(restored.binding.artifact, artifact, 'the original Run keeps its exact driver'); restored.release();
+  const before = await restarted.catalog.snapshot(), routing = await restarted.routing.read();
+  await assert.rejects(prepare({ ...f.scope, requiredBinding: { ...artifact, configurationIdentity: 'changed' } }), {
+    name: 'HostBindingRestoreError', kind: 'driver', code: 'run_driver_exact_binding_unavailable', reason: 'binding_changed',
+  });
+  const unsupported = { ...artifact, serviceVersion: 99 } as unknown as typeof artifact;
+  await assert.rejects(prepare({ ...f.scope, requiredBinding: unsupported }), {
+    name: 'HostBindingRestoreError', kind: 'driver', reason: 'service_version_unsupported',
+  });
+  const after = await restarted.catalog.snapshot();
+  assert.equal(after.revision, before.revision);
+  const authorizations = (snapshot: typeof before) => snapshot.extensions.map(entry => ({
+    manifest: entry.manifest, desired: entry.desired, capabilityGrants: entry.capabilityGrants,
+  }));
+  assert.deepEqual(authorizations(after), authorizations(before));
+  assert.deepEqual((await restarted.routing.read()).document, routing.document);
 });
 
 function heldLease() {
