@@ -401,6 +401,7 @@ const isUrlAuthWebSocketPath = (pathname: string): boolean => {
     || pathname === '/api/varin/observations/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
+    || /^\/api\/computers\/desktops\/[^/]+\/vnc$/u.test(pathname)
     || pathname.startsWith('/api/preview/proxy/');
 };
 
@@ -685,6 +686,7 @@ export const createUiAuth = ({
 
     return {
       enabled: false,
+      authenticationRequired: requireClientAuth,
       requireAuth,
       requireSessionAuth,
       resolveAuthContext,
@@ -1117,6 +1119,7 @@ export const createUiAuth = ({
 
   return {
     enabled: true,
+    authenticationRequired: true,
     requireAuth,
     requireSessionAuth,
     resolveAuthContext,

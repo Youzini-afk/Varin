@@ -18,7 +18,7 @@ function fixture(overrides: Partial<ManagedDesktopHostController> = {}) {
   };
   let hooks!: StartWebUiServerOptions;
   const start = vi.fn(async (options: StartWebUiServerOptions) => { hooks = options; return controller; });
-  const session = createDesktopHostSession({ start, serverOptions: { port: 0 }, send: async frame => { frames.push(frame); }, exit });
+  const session = createDesktopHostSession({ start, serverOptions: { port: 0, requireClientAuth: false }, send: async frame => { frames.push(frame); }, exit });
   return { frames, exit, controller, start, session, get hooks() { return hooks; } };
 }
 const request = (method: string, params?: unknown, id = 'shell:1') => ({ ...desktopHostEnvelope, kind: 'request', id, method, params });
@@ -33,8 +33,21 @@ describe('managed desktop Host lifecycle', () => {
     credentials.resolve({ clientToken: 'existing-identity' });
     await starting;
     expect(f.frames).toMatchObject([{ kind: 'event', event: 'ready', payload: { port: 47123, origin: 'http://127.0.0.1:47123', clientToken: 'existing-identity' } }]);
+    expect(f.hooks.requireClientAuth).toBe(true);
     expect(f.hooks.attachSignals).toBe(false);
     expect(f.hooks.exitOnShutdown).toBe(false);
+  });
+
+  it.each([undefined, async () => ({ clientToken: '' }), async () => { throw new Error('Credential store unavailable'); }])('never publishes readiness or starts a second Host on credential failure', async getDesktopLocalCredentials => {
+    const f = fixture(getDesktopLocalCredentials ? { getDesktopLocalCredentials } : {});
+    if (!getDesktopLocalCredentials) delete f.controller.getDesktopLocalCredentials;
+    await expect(f.session.start()).rejects.toThrow();
+    await expect(f.session.start()).rejects.toThrow();
+    expect(f.start).toHaveBeenCalledTimes(1);
+    expect(f.frames.some(frame => frame.kind === 'event' && frame.event === 'ready')).toBe(false);
+    expect(f.session.phase).toBe('failed');
+    await f.session.stop();
+    expect(f.controller.stop).toHaveBeenCalledTimes(1);
   });
 
   it('does not report a stop or permit restart before real owner drain', async () => {

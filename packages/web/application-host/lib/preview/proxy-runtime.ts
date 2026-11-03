@@ -96,7 +96,7 @@ type PreviewTargetResolution = {
 };
 
 interface PreviewUiAuthController {
-  enabled: boolean;
+  authenticationRequired: boolean;
   ensureSessionToken?(req: PreviewRequest, res: PreviewResponse): Promise<string | null | undefined>;
 }
 
@@ -1614,7 +1614,7 @@ export const createPreviewProxyRuntime = ({
 
     const createPreviewTarget: PreviewRouteHandler = async (req, res) => {
       try {
-        if (uiAuthController?.enabled) {
+        if (uiAuthController?.authenticationRequired) {
           const sessionToken = await uiAuthController?.ensureSessionToken?.(req, res);
           if (!sessionToken) {
             return res.status(401).json({ error: 'UI authentication required' });
@@ -1848,7 +1848,7 @@ export const createPreviewProxyRuntime = ({
 
       const handleUpgrade = async () => {
         try {
-          if (uiAuthController?.enabled) {
+          if (uiAuthController?.authenticationRequired) {
             const originAllowed = await isRequestOriginAllowed(req);
             if (!originAllowed) {
               rejectWebSocketUpgrade(socket, 403, 'Invalid origin');

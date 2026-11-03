@@ -134,7 +134,7 @@ interface TerminalRuntimeDependencies {
   terminalIdleTimeoutMs?: number;
   terminalTerminationGraceMs?: number;
   uiAuthController?: {
-    enabled: boolean;
+    authenticationRequired: boolean;
     ensureSessionToken(req: IncomingMessage, res: null): Promise<string | null>;
   } | null;
 }
@@ -796,7 +796,7 @@ export function createTerminalRuntime({
     if (parseRequestPathname(req.url) !== TERMINAL_WS_PATH) return;
     void (async () => {
       try {
-        if (uiAuthController?.enabled) {
+        if (uiAuthController?.authenticationRequired) {
           if (!await uiAuthController.ensureSessionToken(req, null)) { rejectWebSocketUpgrade(socket, 401, 'UI authentication required'); return; }
           if (!await isRequestOriginAllowed(req)) { rejectWebSocketUpgrade(socket, 403, 'Invalid origin'); return; }
         }

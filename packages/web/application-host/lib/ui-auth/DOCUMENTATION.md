@@ -5,7 +5,8 @@ This module owns Varin UI authentication for browser access, including password 
 
 Trusted-device access has one durable credential model: a remote client bearer token stored by `packages/web/application-host/lib/client-auth/remote-clients.ts`. Password, passkey, and Pairing v2 are issuance methods for that credential, not separate credential systems. Issued client tokens are returned once, stored server-side only as hashes, and are later authenticated via `Authorization: Bearer varin_client_...`.
 
-Pairing v2 is implemented by `packages/web/application-host/lib/client-auth/pairing.ts`. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
+Pairing v2 is implemented by `packages/web/application-host/lib/client-auth/pairing.ts`.
+Public redemption rejects the reserved `desktop-local` dedupe key after trimming; normal device keys and re-pair replacement behavior remain unchanged. Only private desktop provisioning owns that identity. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
 
 Browser-owned URLs are a separate presentation of the same authenticated authority. Elements such as
 iframes, downloads, SSE, and WebSocket upgrades cannot attach the normal `Authorization` header, so
@@ -20,6 +21,11 @@ A saved-connection proxy prefix does not expand the inner read/realtime path
 allowlist, and the proxy additionally requires Host-wide full-control authority.
 When client authentication is required without a UI password, arbitrary session
 cookies are not trusted and missing credentials cannot mint a session.
+The managed desktop Host opts into this policy explicitly through `requireClientAuth`;
+ordinary Web and the Electron transition entry retain their existing passwordless behavior.
+The private desktop credential is delivered over the embedding pipe, never a public HTTP route.
+`enabled` reports whether a password is configured; `authenticationRequired` controls
+security gates for both password sessions and managed client authentication.
 
 WebSocket URL-token paths are enumerated by `isUrlAuthWebSocketPath`. Relay reachability has its own
 independent allowlist in `packages/web/application-host/lib/relay/tunnel-host.ts`; adding a realtime endpoint
@@ -32,8 +38,8 @@ requires both gates while leaving the normal origin and server authentication ch
 - `packages/web/application-host/lib/client-auth/pairing.ts`: short-lived Pairing v2 sessions and one-time secret redemption into trusted-device client tokens.
 
 ## Public exports (ui-auth.js)
-- `createUiAuth({ password, cookieName, sessionTtlMs, readSettingsFromDisk })`: creates UI auth controller with methods:
-  - `enabled`
+- `createUiAuth({ password, requireClientAuth, cookieName, sessionTtlMs, readSettingsFromDisk })`: creates UI auth controller with methods:
+  - `enabled` and `authenticationRequired`
   - `requireAuth(req, res, next)`
   - `handleSessionStatus(req, res)`
   - `handleSessionCreate(req, res)`

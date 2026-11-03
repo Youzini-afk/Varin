@@ -6,15 +6,19 @@ import type { createRemoteClientAuthRuntime } from '../client-auth/remote-client
 export function createDesktopLocalCredentials(options: {
   read: SettingsFileStore['read'];
   update: SettingsFileStore['update'];
-  auth: Pick<ReturnType<typeof createRemoteClientAuthRuntime>, 'authenticateBearerToken' | 'createClient'>;
+  auth: Pick<ReturnType<typeof createRemoteClientAuthRuntime>, 'authenticateBearerToken' | 'createClient' | 'ensureDesktopLocalClientAccess'>;
 }) {
   let pending: Promise<{ clientToken: string }> | undefined;
   return () => pending ??= (async () => {
     const settings = await options.read();
     const stored = typeof settings.desktopLocalClientToken === 'string' ? settings.desktopLocalClientToken.trim() : '';
     const authenticated = stored ? await options.auth.authenticateBearerToken(stored) : null;
-    if (authenticated?.client.clientKind === 'desktop-local') return { clientToken: stored };
+    if (authenticated?.client.clientKind === 'desktop-local') {
+      await options.auth.ensureDesktopLocalClientAccess(stored);
+      return { clientToken: stored };
+    }
     const created = await options.auth.createClient({
+      profile: 'full-control',
       label: 'Varin Desktop', clientKind: 'desktop-local', dedupeKey: 'desktop-local', reuseDedupeIdentity: true,
     });
     await options.update(current => { current.desktopLocalClientToken = created.token; });

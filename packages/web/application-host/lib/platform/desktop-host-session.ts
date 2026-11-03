@@ -122,6 +122,8 @@ export function createDesktopHostSession(options: {
     if (!options.start && options.mode !== 'browser') throw new Error('Application Host start function is missing');
     controller = await options.start?.({
       ...options.serverOptions,
+      // This private managed entry point owns policy, regardless of caller options.
+      requireClientAuth: true,
       ...(browser ? { browser } : {}),
       ...(browser?.renderWebPage ? { renderWebPage: async (url: string, signal?: AbortSignal) => {
         const result = await browser!.renderWebPage!(url, signal ? { signal } : {});
@@ -151,6 +153,7 @@ export function createDesktopHostSession(options: {
     if (phase !== 'starting' || !connected) return;
     if (controller && !controller.isReady()) throw new Error('Application Host returned before becoming ready');
     const credentials = await controller?.getDesktopLocalCredentials?.();
+    if (controller && !credentials?.clientToken?.trim()) throw new Error('Application Host private credentials are unavailable');
     if (phase !== 'starting' || !connected) return;
     phase = 'ready';
     await event('ready', controller

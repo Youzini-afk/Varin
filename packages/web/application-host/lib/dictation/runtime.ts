@@ -36,7 +36,7 @@ const DICTATION_WS_MAX_PAYLOAD_BYTES = 512 * 1024;
 const DICTATION_WS_HEARTBEAT_INTERVAL_MS = 30000;
 
 interface DictationUiAuthController {
-  enabled?: boolean;
+  authenticationRequired?: boolean;
   ensureSessionToken?: (request: IncomingMessage, response: null) => Promise<string | null>;
 }
 
@@ -274,7 +274,7 @@ export function createDictationRuntime({
 
     const handleUpgrade = async () => {
       try {
-        if (uiAuthController?.enabled) {
+        if (uiAuthController?.authenticationRequired) {
           const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
           if (!sessionToken) {
             rejectWebSocketUpgrade(socket, 401, 'UI authentication required');

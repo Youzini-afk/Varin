@@ -399,6 +399,28 @@ export const createRemoteClientAuthRuntime = ({
     });
   };
 
+  /** Private desktop provisioning repair, never request-authentication promotion.
+   * Only the saved, active desktop token can upgrade the historical unrestricted
+   * default identity. Explicitly restricted/custom clients keep their policy. */
+  const ensureDesktopLocalClientAccess = async (token: string): Promise<void> => {
+    if (!token.startsWith(TOKEN_PREFIX)) throw new Error('Desktop local credential is invalid');
+    await mutateStore(async (store) => {
+      const hash = hashToken(token);
+      const client = store.clients.find(entry => constantTimeEqual(entry.tokenHash, hash, crypto));
+      if (!client || client.clientKind !== 'desktop-local' || client.revokedAt
+        || (client.expiresAt && Date.parse(client.expiresAt) <= Date.now())) {
+        throw new Error('Desktop local credential is unavailable');
+      }
+      const legacyDefault = client.profile === REMOTE_CLIENT_PROFILE.CLIENT
+        && client.allowedDirectories.length === 0
+        && client.capabilities.length === 1 && client.capabilities[0] === 'ui:access';
+      if (!legacyDefault) return { result: undefined, write: false };
+      client.profile = REMOTE_CLIENT_PROFILE.FULL_CONTROL;
+      client.capabilities = [...FULL_CONTROL_CAPABILITIES];
+      return { result: undefined };
+    });
+  };
+
   const revokeClient = async (id: unknown) => {
     if (typeof id !== 'string' || id.trim().length === 0) {
       return { revoked: false };
@@ -511,6 +533,7 @@ export const createRemoteClientAuthRuntime = ({
   return {
     authenticateBearerToken,
     createClient,
+    ensureDesktopLocalClientAccess,
     getCapabilitiesForProfile,
     listAuditEvents,
     listClients,

@@ -891,6 +891,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           : { ready: false, epoch: null, version: null, protocolVersion: null },
       };
     },
+    requireClientAuth: options.requireClientAuth ?? false,
     verboseRequestLogs: isEnvFlagEnabled(process.env.VARIN_VERBOSE_REQUEST_LOGS),
     uiPassword,
     tunnelAuthController,

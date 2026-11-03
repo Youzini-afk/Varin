@@ -1,3 +1,4 @@
+import type { DesktopRuntimeInfo, VarinDesktopBridge } from '../desktop.js';
 import { getActiveRelayTunnel } from './relay-provider.js';
 import { fetchWithoutRuntimeRouting } from './runtime-fetch.js';
 
@@ -300,9 +301,37 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
   }
   const generation = localRuntimeUrlAuthGeneration;
   const refreshPromise = withMintDeadline(async (signal) => {
+    const desktop = typeof window === 'undefined' ? undefined : (window as typeof window & {
+      __VARIN_DESKTOP__?: VarinDesktopBridge;
+      __VARIN_DESKTOP_RUNTIME__?: DesktopRuntimeInfo;
+      __VARIN_LOCAL_ORIGIN__?: string;
+    });
+    // Electron keeps its original cookie-based, passwordless local Host path.
+    const managedDesktop = desktop?.__VARIN_DESKTOP_RUNTIME__?.runtime === 'tauri';
+    const bridge = managedDesktop ? desktop?.__VARIN_DESKTOP__ : undefined;
+    if (managedDesktop && !bridge) throw new Error('Local runtime private credential bridge is unavailable');
+    const headers = new Headers();
+    const isCurrentLocalOrigin = () => {
+      const local = desktop?.__VARIN_LOCAL_ORIGIN__;
+      const url = new URL(origin);
+      return url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)
+        && typeof local === 'string' && normalizeOrigin(local) === origin;
+    };
+    if (bridge) {
+      // The selected runtime may be remote. Only the native bridge owns the
+      // local credential; never borrow the selected runtime's token or headers.
+      if (!isCurrentLocalOrigin()) throw new Error('Local runtime URL auth origin is not the native Host');
+      const token = normalizeBearerToken(await bridge.invoke('desktop_local_client_token_get'));
+      signal.throwIfAborted();
+      if (generation !== localRuntimeUrlAuthGeneration || !isCurrentLocalOrigin()) throw new Error('Local runtime URL auth request is stale');
+      if (!token) throw new Error('Local runtime private credential is unavailable');
+      headers.set('Authorization', `Bearer ${token}`);
+    }
     const response = await fetchWithoutRuntimeRouting(buildAuthUrl(origin, '/auth/url-token'), {
       method: 'POST',
       credentials: 'include',
+      headers,
+      ...(bridge ? { redirect: 'error' as const } : {}),
       signal,
     });
     signal.throwIfAborted();
@@ -321,7 +350,8 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
     if (!token || !Number.isFinite(expiresAt)) {
       throw new Error('Local runtime URL auth token response was invalid');
     }
-    if (generation !== localRuntimeUrlAuthGeneration || origin !== localRuntimeUrlAuthRefreshOrigin) {
+    if (generation !== localRuntimeUrlAuthGeneration || origin !== localRuntimeUrlAuthRefreshOrigin
+      || (bridge && !isCurrentLocalOrigin())) {
       throw new Error('Local runtime URL auth token response is stale');
     }
     localRuntimeUrlAuthToken = token;

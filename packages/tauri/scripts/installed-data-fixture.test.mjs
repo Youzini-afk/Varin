@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
-import {admitApplicationFixtureSession,applicationFixtureApi,readApplicationFixture,runInstalledDataFixture,applicationFixtureFile} from './installed-data-fixture.mjs';
+import {admitApplicationFixtureSession,applicationFixtureApi,readApplicationFixture,runInstalledDataFixture,applicationFixtureFile,applicationFixtureOrigin,verifyApplicationFixtureBrowserBoundary} from './installed-data-fixture.mjs';
 
 async function session(t){const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'varin-native-smoke-')));const value={root,data:path.join(root,'data'),home:path.join(root,'home')};await fs.mkdir(value.data);await fs.mkdir(value.home);t.after(()=>fs.rm(root,{recursive:true,force:true}));return value;}
 test('application-data seeding admits only a new nonce-bound native smoke session',async t=>{
@@ -24,12 +24,20 @@ test('application fixture refuses redirected and unowned directories before owne
   assert.deepEqual(await fs.readdir(outside),[]);
 });
 test('fixture API uses actual authenticated loopback requests and rejects other routes and redirects',async t=>{
-  const seen=[];const server=http.createServer((req,res)=>{seen.push({route:req.url,authorization:req.headers.authorization,method:req.method});if(req.url==='/api/models/read'){res.writeHead(302,{location:'https://external.invalid'});res.end();return;}res.setHeader('content-type','application/json');res.end('{"fontSize":113}');});
+  const seen=[];const server=http.createServer((req,res)=>{seen.push({route:req.url,authorization:req.headers.authorization,method:req.method,origin:req.headers.origin});if(req.url==='/api/models/read'){res.writeHead(302,{location:'https://external.invalid'});res.end();return;}res.setHeader('access-control-allow-origin',applicationFixtureOrigin);res.setHeader('content-type','application/json');res.end('{"fontSize":113}');});
   server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));
   const api=applicationFixtureApi(`http://127.0.0.1:${server.address().port}`,'fixture-token');assert.deepEqual(await api('/api/config/settings'),{fontSize:113});
-  assert.deepEqual(seen,[{route:'/api/config/settings',authorization:'Bearer fixture-token',method:'GET'}]);
+  assert.deepEqual(seen,[{route:'/api/config/settings',authorization:'Bearer fixture-token',method:'GET',origin:applicationFixtureOrigin}]);
   await assert.rejects(api('/api/arbitrary',{}),/Unsupported/);await assert.rejects(api('/api/models/read',{}));
   for(const origin of ['http://localhost:123','https://127.0.0.1:123','http://user@127.0.0.1:123','http://127.0.0.1:123/foreign'])assert.throws(()=>applicationFixtureApi(origin,'token'),/loopback/);
+});
+test('Node fixture refuses a readable HTTP result that the packaged browser cannot access',async t=>{
+  const server=http.createServer((_req,res)=>{res.setHeader('content-type','application/json');res.end('{}');});
+  server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const origin=`http://127.0.0.1:${server.address().port}`;
+  await assert.rejects(applicationFixtureApi(origin,'fixture-token')('/api/config/settings'),/renderer origin/);
+  await assert.rejects(verifyApplicationFixtureBrowserBoundary(origin),/preflight/);
+  await assert.rejects(verifyApplicationFixtureBrowserBoundary('http://localhost:123'),/original loopback/);
 });
 test('a missing or extra-data marker cannot authorize reopening a private session',async t=>{
   const s=await session(t),nonce=randomUUID(),candidate={sourceSha:'a'.repeat(40),version:'0.9.37'};
@@ -48,7 +56,7 @@ test('bundled owners preserve real completed chat, project, settings and synthet
   try{
     const seeded=await runInstalledDataFixture('seed',candidate,s,nonce);assert.equal(seeded.ownerStopped,true);
     const reopened=await runInstalledDataFixture('verify',candidate,s,nonce);drained=true;
-    for(const key of ['chatHistoryPreserved','completedRunPreserved','projectRegistrationPreserved','hostSettingsPreserved','modelCredentialBindingPreserved','credentialValueAndIdentityPreserved','desktopInstallIdPreserved','desktopPreferencePreserved','projectFilePreserved','ownerStopped'])assert.equal(reopened[key],true,key);
+    for(const key of ['chatHistoryPreserved','completedRunPreserved','projectRegistrationPreserved','hostSettingsPreserved','modelCredentialBindingPreserved','credentialValueAndIdentityPreserved','desktopInstallIdPreserved','desktopPreferencePreserved','projectFilePreserved','ownerStopped','packagedOriginPreflightVerified','anonymousHostAccessRejected','anonymousUrlTokenRejected','unrelatedOriginRejected'])assert.equal(reopened[key],true,key);
     const encoded=JSON.stringify({seeded,reopened});assert.equal(encoded.includes(nonce),false);assert.equal(encoded.includes('fixture-only:'),false);assert.equal(encoded.includes('Synthetic installer preservation'),false);
     const receipt=await readApplicationFixture(s,nonce,candidate);assert.ok(receipt.sha256);await assert.rejects(readApplicationFixture(s,randomUUID(),candidate),/another invocation/);
   }finally{if(drained)await fs.rm(root,{recursive:true,force:true});else t.diagnostic('Unconfirmed private native fixture retained; no automatic data cleanup.');}

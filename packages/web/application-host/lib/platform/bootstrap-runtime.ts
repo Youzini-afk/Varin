@@ -31,6 +31,7 @@ export type ServerBootstrapOptions =
     mobilePairingRuntime: MobileDependencies['pairingRuntime'];
     mobilePushRuntime: MobileDependencies['mobilePushRuntime'];
     uiPassword: UiAuthOptions['password'];
+    requireClientAuth?: UiAuthOptions['requireClientAuth'];
     verboseRequestLogs?: CommonRequestMiddlewareDependencies['verboseRequestLogs'];
   };
 
@@ -71,6 +72,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       getHealthSnapshot,
       verboseRequestLogs,
       uiPassword,
+      requireClientAuth,
       tunnelAuthController,
       remoteClientAuthRuntime,
       clientPairingRuntime,
@@ -111,6 +113,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
 
     const uiAuthController = createUiAuth({
       password: uiPassword,
+      ...(requireClientAuth !== undefined ? { requireClientAuth } : {}),
       readSettingsFromDisk,
       clientAuthController: remoteClientAuthRuntime,
     });

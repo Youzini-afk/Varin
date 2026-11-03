@@ -13,6 +13,7 @@ import {writeResponsesStream,boundedBody} from './benchmark-fixture-service.mjs'
 import {awaitRun} from './benchmark-seed.mjs';
 
 export const applicationFixtureFile='application-data-fixture.json';
+export const applicationFixtureOrigin='http://tauri.localhost';
 const product='varin-installed-application-data';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const uuid=value=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value);
@@ -56,10 +57,33 @@ export function applicationFixtureApi(origin,token){
   if(url.protocol!=='http:'||url.hostname!=='127.0.0.1'||!url.port||url.pathname!=='/'||url.search||url.hash||url.username||url.password||typeof token!=='string'||!token)throw new Error('Application fixture requires its authenticated loopback Host');
   return async(route,body,method=body===undefined?'GET':'POST')=>{
     if(!['/api/config/settings','/api/models/read','/api/models/save','/api/models/credentials/store','/api/models/settings/read','/api/models/settings/update','/api/threads/create','/api/threads/submit','/api/threads/run','/api/threads/snapshot'].includes(route))throw new Error('Unsupported application fixture route');
-    const response=await fetch(new URL(route,url),{method,headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error',signal:AbortSignal.timeout(60_000)});
+    const response=await fetch(new URL(route,url),{method,headers:{origin:applicationFixtureOrigin,authorization:`Bearer ${token}`,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error',signal:AbortSignal.timeout(60_000)});
     if(!response.ok)throw new Error(`Application fixture API ${route} failed (${response.status})`);
+    if(response.headers.get('access-control-allow-origin')!==applicationFixtureOrigin)throw new Error('Installed renderer origin is not admitted by the actual Host');
     return response.json();
   };
+}
+/** Node does not enforce browser CORS. Exercise the original Host's actual
+ * preflight and authentication boundary rather than hide a packaged UI failure. */
+export async function verifyApplicationFixtureBrowserBoundary(origin){
+  const base=new URL(origin);
+  if(base.protocol!=='http:'||base.hostname!=='127.0.0.1'||!base.port||base.pathname!=='/'||base.search||base.hash||base.username||base.password)throw new Error('Browser boundary requires the original loopback Host');
+  for(const method of ['GET','POST','PUT']){
+    const response=await fetch(new URL('/api/config/settings',base),{method:'OPTIONS',headers:{origin:applicationFixtureOrigin,'access-control-request-method':method,'access-control-request-headers':'authorization,content-type'},redirect:'error',signal:AbortSignal.timeout(20_000)});
+    const methods=(response.headers.get('access-control-allow-methods')??'').split(',').map(value=>value.trim());
+    const headers=(response.headers.get('access-control-allow-headers')??'').toLowerCase().split(',').map(value=>value.trim());
+    if(response.status!==204||response.headers.get('access-control-allow-origin')!==applicationFixtureOrigin||!methods.includes(method)||!headers.includes('authorization')||!headers.includes('content-type')||response.headers.has('set-cookie'))throw new Error('Actual Host browser preflight is missing or issues authentication');
+    await response.arrayBuffer();
+  }
+  for(const [route,method] of [['/api/config/settings','GET'],['/auth/url-token','POST']]){
+    const response=await fetch(new URL(route,base),{method,headers:{origin:applicationFixtureOrigin,cookie:'varin_ui_session=untrusted-fixture-cookie','content-type':'application/json'},redirect:'error',signal:AbortSignal.timeout(20_000)});
+    await response.arrayBuffer();
+    if(response.status!==401)throw new Error('Managed Host accepted an unauthenticated browser request');
+  }
+  const rejected=await fetch(new URL('/api/config/settings',base),{method:'OPTIONS',headers:{origin:'http://tauri.localhost.untrusted.invalid','access-control-request-method':'POST','access-control-request-headers':'authorization,content-type'},redirect:'error',signal:AbortSignal.timeout(20_000)});
+  await rejected.arrayBuffer();
+  if(rejected.headers.has('access-control-allow-origin'))throw new Error('Actual Host admitted an unrelated browser origin');
+  return{packagedOriginPreflightVerified:true,anonymousHostAccessRejected:true,anonymousUrlTokenRejected:true,unrelatedOriginRejected:true};
 }
 export async function verifyApplicationFixtureApi(api,fixture){
   const [snapshot,settings,models,agent,run]=await Promise.all([api('/api/threads/snapshot',fixture.identity),api('/api/config/settings'),api('/api/models/read',{}),api('/api/models/settings/read',{}),api('/api/threads/run',{runId:fixture.runId})]);
@@ -86,7 +110,7 @@ export async function runInstalledDataFixture(mode,candidate,session,nonce,{runt
   return new Promise((resolve,reject)=>{
     let result,done=false,failurePhase='process-observation';const fail=()=>{if(done)return;done=true;clearTimeout(timer);child.unref();child.channel?.unref();reject(Object.assign(new Error(`Application fixture failed at ${failurePhase}; owner completion is unconfirmed and private data retained`),{cleanupUncertain:true}));};
     const timer=setTimeout(fail,timeoutMs);
-    child.once('error',fail);child.on('message',message=>{if(message?.ok===true)result=message.result;else{if(['admission','start-provider','start-host','load-owners','register-project','store-credentials','save-model','configure-agent','create-chat','complete-chat','verify-data','stop-owner','publish-marker'].includes(message?.phase))failurePhase=message.phase;fail();}});
+    child.once('error',fail);child.on('message',message=>{if(message?.ok===true)result=message.result;else{if(['admission','start-provider','start-host','verify-browser-boundary','load-owners','register-project','store-credentials','save-model','configure-agent','create-chat','complete-chat','verify-data','stop-owner','publish-marker'].includes(message?.phase))failurePhase=message.phase;fail();}});
     child.once('exit',(code,signal)=>{if(done)return;if(code!==0||signal||result?.ownerStopped!==true)return fail();done=true;clearTimeout(timer);resolve(result);});
     child.send({mode,runtime,session,nonce,candidate:{sourceSha:candidate.sourceSha,version:candidate.version}},error=>{if(error)fail();});
   });
@@ -107,10 +131,12 @@ async function worker({mode,runtime,session,nonce,candidate}){
     const provider=`http://127.0.0.1:${server.address().port}`;
     phase='start-host';
     const {startWebUiServer}=await importHost('index.js');
-    host=await startWebUiServer({port:0,host:'127.0.0.1',apiOnly:true,attachSignals:false,exitOnShutdown:false,desktopNetworkFetch:(url,init)=>{
+    host=await startWebUiServer({port:0,host:'127.0.0.1',apiOnly:true,requireClientAuth:true,attachSignals:false,exitOnShutdown:false,desktopNetworkFetch:(url,init)=>{
       if(mode!=='seed'||new URL(url).origin!==provider)throw new Error('Installer fixture blocks external network');return fetch(url,init);
     }});
     const credentials=await host.getDesktopLocalCredentials(),api=applicationFixtureApi(`http://127.0.0.1:${host.getPort()}`,credentials.clientToken);
+    phase='verify-browser-boundary';
+    const browserBoundary=await verifyApplicationFixtureBrowserBoundary(`http://127.0.0.1:${host.getPort()}`);
     phase='load-owners';
     const {createDesktopSettingsOwner}=await importHost('desktop-settings.js'),settingsOwner=createDesktopSettingsOwner();
     const {fileSecretStore}=await importHost('lib/models/credentials.js'),secrets=fileSecretStore(path.join(session.data,'model-auth.json'));
@@ -154,7 +180,7 @@ async function worker({mode,runtime,session,nonce,candidate}){
     await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));server=null;
     phase='publish-marker';
     if(mode==='seed')await fs.writeFile(path.join(session.data,applicationFixtureFile),JSON.stringify(fixture)+'\n',{flag:'wx',mode:0o600});
-    return{mode,...observation,credentialValueAndIdentityPreserved:true,desktopInstallIdPreserved:true,desktopPreferencePreserved:true,projectFilePreserved:true,ownerStopped,provider:'controlled-loopback-only',valuesDisclosed:false};
+    return{mode,...observation,...browserBoundary,credentialValueAndIdentityPreserved:true,desktopInstallIdPreserved:true,desktopPreferencePreserved:true,projectFilePreserved:true,ownerStopped,provider:'controlled-loopback-only',valuesDisclosed:false};
   }catch(error){throw Object.assign(new Error('Synthetic application fixture failed'),{fixturePhase:phase});}finally{
     // Await the real owner, not a timeout kill or a sampled process table. No
     // marker is published if stop is uncertain; the caller retains all data.

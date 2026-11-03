@@ -316,7 +316,11 @@ export const createClientPairingRuntime = ({
     const normalizedId = normalizeOptionalString(pairingId);
     const normalizedSecret = normalizeOptionalString(secret);
     const normalizedKind = normalizeClientKind(clientKind) || 'mobile';
-    if (!normalizedId || !normalizedSecret) throw redeemError();
+    const normalizedDedupeKey = normalizeOptionalString(dedupeKey);
+    // Pairing is a public secret exchange, not private desktop provisioning.
+    // Keep existing device keys unchanged, but never let one replace the local
+    // desktop identity through the auth owner's dedupe replacement behavior.
+    if (!normalizedId || !normalizedSecret || normalizedDedupeKey === 'desktop-local') throw redeemError();
 
     return mutateStore(async (store) => {
       const session = store.sessions.find((entry) => entry.id === normalizedId);
@@ -336,7 +340,7 @@ export const createClientPairingRuntime = ({
       const result = await remoteClientAuthRuntime.createClient({
         label,
         clientKind: normalizedKind,
-        dedupeKey: normalizeOptionalString(dedupeKey) || `pairing:${session.id}`,
+        dedupeKey: normalizedDedupeKey || `pairing:${session.id}`,
         authMethod: 'pairing',
         pairingId: session.id,
         deviceName,

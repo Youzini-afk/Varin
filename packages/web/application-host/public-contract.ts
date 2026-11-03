@@ -22,6 +22,8 @@ export interface DesktopRuntimeConfig {
 
 export interface StartWebUiServerOptions {
   apiOnly?: boolean | undefined;
+  /** Managed desktop Hosts require the private client credential even without a UI password. */
+  requireClientAuth?: boolean | undefined;
   attachSignals?: boolean | undefined;
   /** Electron system-network transport for desktop outbound HTTP(S). */
   desktopNetworkFetch?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;

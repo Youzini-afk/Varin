@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 import { createClientPairingRuntime } from './pairing.js';
+import { createRemoteClientAuthRuntime } from './remote-clients.js';
 
 const roots: string[] = [];
 
@@ -187,4 +188,75 @@ describe('client auth pairing runtime', () => {
     await expect(runtime.createPairingSession()).rejects.toBeInstanceOf(SyntaxError);
     expect(await fs.readFile(storePath, 'utf8')).toBe(malformed);
   });
+});
+
+
+const makeRealClientFixture = async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-pairing-clients-'));
+  roots.push(directory);
+  const storePath = path.join(directory, 'clients.json');
+  const auth = createRemoteClientAuthRuntime({ fsPromises: fs, path, crypto, storePath });
+  const { runtime } = await makeRuntime({ remoteClientAuthRuntime: auth });
+  const local = await auth.createClient({ label: 'Original desktop', clientKind: 'desktop-local', dedupeKey: 'desktop-local', profile: 'full-control', deviceName: 'Original device' });
+  const existing = await auth.createClient({ label: 'Existing phone', clientKind: 'mobile', dedupeKey: 'existing-phone' });
+  return { auth, runtime, local, existing, storePath };
+};
+
+it.each(['mobile', 'desktop'])('public %s redemption cannot replace the reserved local desktop credential or subject', async clientKind => {
+  const f = await makeRealClientFixture();
+  const pairing = await f.runtime.createPairingSession({ allowedClientKinds: [clientKind] });
+  const before = await fs.readFile(f.storePath, 'utf8');
+  for (const dedupeKey of ['desktop-local', '  desktop-local\t']) {
+    await expect(f.runtime.redeemPairingSession({ pairingId: pairing.pairing.id, secret: pairing.pairing.secret, clientKind, dedupeKey }))
+      .rejects.toMatchObject({ message: 'Invalid or expired pairing session', statusCode: 400 });
+    expect(await fs.readFile(f.storePath, 'utf8')).toBe(before);
+    expect(await f.runtime.getPairingSession(pairing.pairing.id)).toMatchObject({ usedAt: null, clientId: null });
+  }
+  // A rejected collision did not consume the operator's one-time link.
+  const paired = await f.runtime.redeemPairingSession({ pairingId: pairing.pairing.id, secret: pairing.pairing.secret, clientKind, dedupeKey: 'new-device' });
+  expect((await f.auth.authenticateBearerToken(f.local.token))?.client).toMatchObject({ id: f.local.client.id,
+    createdAt: f.local.client.createdAt, clientKind: 'desktop-local', profile: 'full-control', deviceName: 'Original device', revokedAt: null });
+  expect((await f.auth.authenticateBearerToken(f.existing.token))?.clientId).toBe(f.existing.client.id);
+  expect((await f.auth.authenticateBearerToken(paired.token))?.client.clientKind).toBe(clientKind);
+  expect(await f.auth.listClients()).toHaveLength(3);
+});
+
+it.each(['mobile', 'desktop'])('preserves the existing %s re-pair replacement behavior and exact nonreserved device key', async clientKind => {
+  const f = await makeRealClientFixture();
+  const dedupeKey = 'Existing-Device:key/with-case';
+  let previous = await f.auth.createClient({ label: 'Old paired device', clientKind, dedupeKey });
+  for (const label of ['First re-pair', 'Second re-pair']) {
+    const pairing = await f.runtime.createPairingSession({ label, allowedClientKinds: [clientKind], usesRelay: true });
+    const paired = await f.runtime.redeemPairingSession({ pairingId: pairing.pairing.id, secret: pairing.pairing.secret,
+      clientKind, dedupeKey: `  ${dedupeKey}  `, deviceName: 'Existing device', appVersion: 'test-version' });
+    expect(await f.auth.authenticateBearerToken(previous.token)).toBeNull();
+    const current = await f.auth.authenticateBearerToken(paired.token);
+    expect(current?.client).toMatchObject({ label, clientKind, authMethod: 'pairing', usesRelay: true,
+      deviceName: 'Existing device', appVersion: 'test-version', profile: clientKind === 'desktop' ? 'full-control' : 'client' });
+    expect(current?.clientId).not.toBe(previous.client.id);
+    const stored = JSON.parse(await fs.readFile(f.storePath, 'utf8')) as { clients: Array<{ id: string; dedupeKey: string }> };
+    expect(stored.clients.filter(client => client.dedupeKey === dedupeKey).map(client => client.id)).toEqual([current!.clientId]);
+    expect(stored.clients).toHaveLength(3);
+    expect((await f.auth.authenticateBearerToken(f.local.token))?.clientId).toBe(f.local.client.id);
+    expect((await f.auth.authenticateBearerToken(f.existing.token))?.clientId).toBe(f.existing.client.id);
+    previous = { token: paired.token, client: current!.client };
+  }
+});
+
+
+it('cannot self-assert the private desktop kind and still enforces desktop-only pairing restrictions', async () => {
+  const f = await makeRealClientFixture();
+  const mobile = await f.runtime.createPairingSession({ allowedClientKinds: ['mobile'] });
+  const normalized = await f.runtime.redeemPairingSession({ pairingId: mobile.pairing.id, secret: mobile.pairing.secret,
+    clientKind: '  desktop-local  ', dedupeKey: 'untrusted-device' });
+  expect((await f.auth.authenticateBearerToken(normalized.token))?.client).toMatchObject({ clientKind: 'mobile', profile: 'client', capabilities: ['ui:access'] });
+  expect(normalized.client.id).not.toBe(f.local.client.id);
+  const desktop = await f.runtime.createPairingSession({ allowedClientKinds: ['desktop'] });
+  const before = await fs.readFile(f.storePath, 'utf8');
+  await expect(f.runtime.redeemPairingSession({ pairingId: desktop.pairing.id, secret: desktop.pairing.secret,
+    clientKind: 'desktop-local', dedupeKey: 'another-device' })).rejects.toMatchObject({ statusCode: 400 });
+  expect(await fs.readFile(f.storePath, 'utf8')).toBe(before);
+  expect(await f.runtime.getPairingSession(desktop.pairing.id)).toMatchObject({ usedAt: null, clientId: null });
+  expect((await f.auth.authenticateBearerToken(f.local.token))?.clientId).toBe(f.local.client.id);
+  expect((await f.auth.authenticateBearerToken(f.existing.token))?.clientId).toBe(f.existing.client.id);
 });

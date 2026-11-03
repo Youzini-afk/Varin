@@ -1,4 +1,4 @@
-import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpointSafely } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, setLocalRuntimeUrlAuthToken, switchRuntimeEndpointSafely } from '@varin/application-client';
 import type { DesktopBootstrapTarget, TauriDesktopBootstrap } from './bootstrap.js';
 import type { DesktopNativeTransport } from './bridge.js';
 
@@ -20,6 +20,9 @@ export async function refreshLocalDesktopHost(
   if (typeof previous !== 'string' || !sameOrigin(previous, target.__VARIN_LOCAL_ORIGIN__ ?? '')) return;
   const fresh = readBootstrap(await transport.invoke('varin_bootstrap'));
   if (!fresh || !fresh.localOrigin || isDisposed()) return;
+  // A new Host invalidates local grants even when its port and long-lived
+  // credential are unchanged. Leave the selected remote authentication intact.
+  setLocalRuntimeUrlAuthToken(null, null);
   const stillLocal = () => !isDisposed() && getRuntimeKey() === 'local' && sameOrigin(getRuntimeApiBaseUrl(), previous);
   if (!stillLocal()) { target.__VARIN_LOCAL_ORIGIN__ = fresh.localOrigin; return; }
   // Per-window native identity must also still select its replacement local Host.
