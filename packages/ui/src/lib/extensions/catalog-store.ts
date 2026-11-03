@@ -1,4 +1,6 @@
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import React, { useSyncExternalStore } from 'react';
+import { assertExtensionCodeReview, type ExtensionCodeReview } from './code-trust';
 import type {
   VarinExtensionCandidateCapabilityReviewRequest,
   VarinExtensionCapabilityReviewRequest,
@@ -39,6 +41,8 @@ interface CatalogSurfaceRuntime {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
+    expectedHostId?: string,
+    api?: ReturnType<typeof extensionsApi>,
   ): Promise<VarinExtensionCatalogSnapshot>;
   refresh(): Promise<void>;
 }
@@ -49,8 +53,8 @@ const catalogSurfaceRuntime = async (): Promise<CatalogSurfaceRuntime> => {
   if (catalogSurfaceRuntimeOverride) return catalogSurfaceRuntimeOverride;
   const runtime = await import('./managed-runtime');
   return {
-    applyCandidate: (extensionId, candidateIntegrity, expectedRevision) => (
-      runtime.surfaceExtensionLoader.applyCandidate(extensionId, candidateIntegrity, expectedRevision)
+    applyCandidate: (extensionId, candidateIntegrity, expectedRevision, expectedHostId, api) => (
+      runtime.applySurfaceExtensionCandidate(extensionId, candidateIntegrity, expectedRevision, expectedHostId, api)
     ),
     refresh: runtime.refreshSurfaceExtensions,
   };
@@ -201,17 +205,34 @@ export const refreshVarinExtensionCatalog = async (): Promise<void> => {
 
 const runMutation = (
   extensionId: string,
-  mutate: (snapshot: VarinExtensionCatalogSnapshot) => Promise<VarinExtensionCatalogSnapshot>,
+  mutate: (snapshot: VarinExtensionCatalogSnapshot, api: ReturnType<typeof extensionsApi>, assertCurrentHost: () => void) => Promise<VarinExtensionCatalogSnapshot>,
   refreshAfter = true,
+  expectedHostId?: string,
 ): Promise<void> => {
   const operation = mutationQueue.then(async () => {
     await startVarinExtensionCatalog();
-    const current = state.snapshot;
+    let current = state.snapshot;
     if (!current) throw new Error('Varin extension catalog is unavailable');
     const requestGeneration = generation;
+    const api = extensionsApi(), endpointGeneration = getRuntimeEndpointGeneration();
+    const assertCurrentHost = () => {
+      if (expectedHostId !== undefined && (api !== extensionsApi() || endpointGeneration !== getRuntimeEndpointGeneration())) {
+        throw new Error('Application Host changed after code confirmation. Review this action on the current Host.');
+      }
+    };
     publish({ ...state, busyExtensionId: extensionId, error: null });
     try {
-      const catalog = await mutate(current.catalog);
+      if (expectedHostId !== undefined) {
+        // A reconnect can leave a previous Host snapshot on screen. Check the real current endpoint,
+        // not just that cached display, before interpreting its code confirmation as admission.
+        const observed = await api.hostState();
+        assertCurrentHost();
+        if (observed.catalog.hostId !== expectedHostId) throw new Error('Application Host changed after code confirmation. Review this action on the current Host.');
+        if (!observed.catalog.authoritative) throw new Error('Extension catalog is not authoritative. Refresh before reviewing code.');
+        current = observed;
+        acceptSnapshot(observed, requestGeneration);
+      }
+      const catalog = await mutate(current.catalog, api, assertCurrentHost);
       if (requestGeneration !== generation || state.snapshot?.catalog.hostId !== catalog.hostId) return;
       if (!state.snapshot || catalog.revision >= state.snapshot.catalog.revision) {
         publish({
@@ -243,15 +264,27 @@ const runMutation = (
 export const setVarinExtensionEnabled = (
   extensionId: string,
   enabled: boolean,
-): Promise<void> => runMutation(extensionId, (catalog) => (
-  extensionsApi().setEnabled(extensionId, enabled, catalog.revision)
-));
+  codeReview?: ExtensionCodeReview,
+): Promise<void> => {
+  const capturedReview = codeReview ? structuredClone(codeReview) : undefined;
+  return runMutation(extensionId, (catalog, api) => {
+    if (enabled && capturedReview) {
+      assertExtensionCodeReview(catalog, capturedReview);
+      if (!capturedReview.artifacts.some(artifact => artifact.extensionId === extensionId)) {
+        throw new Error('The code confirmation did not include this extension.');
+      }
+    }
+    return api.setEnabled(extensionId, enabled, catalog.revision);
+  }, true, enabled ? capturedReview?.hostId : undefined);
+};
 
 export const installVarinExtension = (
   source: VarinExtensionPackageSource,
-): Promise<void> => runMutation('__install__', (catalog) => (
-  extensionsApi().install({ expectedRevision: catalog.revision, source })
-));
+  expectedHostId?: string,
+): Promise<void> => {
+  const capturedSource = structuredClone(source);
+  return runMutation('__install__', (catalog, api) => api.install({ expectedRevision: catalog.revision, source: capturedSource }), true, expectedHostId);
+};
 
 export const reloadVarinExtensionLocalSource = (
   extensionId: string,
@@ -260,26 +293,20 @@ export const reloadVarinExtensionLocalSource = (
     expectedRevision: catalog.revision,
     extensionId,
   });
-  if (result.outcome === 'unchanged') return result.snapshot;
-  const entry = result.snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
-  const candidate = entry?.candidate;
-  if (!candidate || candidate.integrity !== result.candidateIntegrity) {
-    throw new Error(`Reloaded local Varin extension candidate is no longer current: ${extensionId}`);
-  }
-  if (!candidate.capabilitiesReviewed) return result.snapshot;
-  return (await catalogSurfaceRuntime()).applyCandidate(
-    extensionId,
-    candidate.integrity,
-    result.snapshot.revision,
-  );
+  // A local edit is new code even when its capability list is unchanged. Stage it for the
+  // same artifact-specific confirmation as any other update; reload is not code approval.
+  return result.snapshot;
 });
 
 export const selectVarinExtensionCandidate = (
   extensionId: string,
   candidateIntegrity: string,
-): Promise<void> => runMutation(extensionId, async (catalog) => {
-  return (await catalogSurfaceRuntime()).applyCandidate(extensionId, candidateIntegrity, catalog.revision);
-});
+  expectedHostId?: string,
+): Promise<void> => runMutation(extensionId, async (catalog, api, assertCurrentHost) => {
+  const runtime = await catalogSurfaceRuntime();
+  assertCurrentHost();
+  return runtime.applyCandidate(extensionId, candidateIntegrity, catalog.revision, expectedHostId, api);
+}, true, expectedHostId);
 
 export const discardVarinExtensionCandidate = (
   extensionId: string,
@@ -412,17 +439,17 @@ export const resetVarinExtensionCatalogForTests = (
 };
 
 /** An explicit restart action has its own stable ID, including after response loss. */
-export const restartVarinExtensionCandidate = (extensionId: string, candidateIntegrity: string): Promise<void> => {
+export const restartVarinExtensionCandidate = (extensionId: string, candidateIntegrity: string, expectedHostId?: string): Promise<void> => {
   const handoffId = crypto.randomUUID();
-  return runMutation(extensionId, async catalog => {
-    try { return await extensionsApi().requestRestartHandoff({ extensionId, candidateIntegrity, expectedRevision: catalog.revision, handoffId }); }
+  return runMutation(extensionId, async (catalog, api) => {
+    try { return await api.requestRestartHandoff({ extensionId, candidateIntegrity, expectedRevision: catalog.revision, handoffId }); }
     catch (error) {
-      const observed = await extensionsApi().hostState().catch(() => undefined);
+      const observed = await api.hostState().catch(() => undefined);
       if (observed?.catalog.authoritative && observed.catalog.extensions.some(entry => entry.manifest.id === extensionId && entry.restartHandoffs?.some(handoff => handoff.id === handoffId))) return observed.catalog;
       throw error;
     }
-  }, false);
+  }, false, expectedHostId);
 };
 
-export const recoverVarinExtensionRestart = (extensionId: string, handoffId: string): Promise<void> => runMutation(extensionId,
-  catalog => extensionsApi().recoverRestartHandoff({ extensionId, handoffId, expectedRevision: catalog.revision }), false);
+export const recoverVarinExtensionRestart = (extensionId: string, handoffId: string, expectedHostId?: string): Promise<void> => runMutation(extensionId,
+  (catalog, api) => api.recoverRestartHandoff({ extensionId, handoffId, expectedRevision: catalog.revision }), false, expectedHostId);

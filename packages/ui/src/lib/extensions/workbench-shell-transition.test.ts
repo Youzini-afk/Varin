@@ -1,3 +1,4 @@
+import { captureExtensionCodeReview } from './code-trust';
 import { expect, test, vi } from 'vitest';
 import type {
   VarinExtensionCatalogEntry,
@@ -239,7 +240,7 @@ test('does not persist a disabled shell profile and does not enable extensions',
 
 test('enable-and-switch turns the shell on and commits after a render-ready candidate', async () => {
   const harness = createDeps({ entry: shellEntry(false), implementation: { render: () => 'ready' } });
-  await runSelectActiveWorkbenchProfile(harness.deps, 'studio', undefined, { enableShell: true });
+  await runSelectActiveWorkbenchProfile(harness.deps, 'studio', undefined, { enableShell: true, codeReview: captureExtensionCodeReview(harness.deps.getCatalogState().snapshot!, [harness.deps.getCatalogState().snapshot!.catalog.extensions[0]!]) });
   expect(harness.enabled).toEqual([shellExtensionId]);
   expect(harness.persistedProfiles).toEqual(['studio']);
   expect(harness.renders).toBe(1);
@@ -321,7 +322,7 @@ test('rolls back automatic enablement when the candidate shell fails to mount', 
     harness.deps,
     'studio',
     undefined,
-    { enableShell: true },
+    { enableShell: true, codeReview: captureExtensionCodeReview(harness.deps.getCatalogState().snapshot!, [harness.deps.getCatalogState().snapshot!.catalog.extensions[0]!]) },
   )).rejects.toThrow('mount failed');
   expect(harness.enabled).toEqual([shellExtensionId, shellExtensionId]);
   expect(entry.desired.enabled).toBe(false);
@@ -379,4 +380,22 @@ test('builtin Agent and IDE profile commits obey the same cover gate', async () 
   await switching;
   expect(harness.persistedProfiles).toEqual(['default']);
   expect(harness.mounts).toBe(0);
+});
+
+
+test('ordinary navigation cannot silently enable a disabled external Shell', async () => {
+  const harness = createDeps({ entry: shellEntry(false), implementation: { render: () => 'ready' } });
+  await expect(runSelectActiveWorkbenchProfile(harness.deps, 'studio', undefined, { enableShell: true }))
+    .rejects.toThrow('Review and enable this external extension');
+  expect(harness.enabled).toEqual([]);
+});
+
+test('a changed profile invalidates the captured code confirmation before enabling', async () => {
+  const harness = createDeps({ entry: shellEntry(false), implementation: { render: () => 'ready' } });
+  const current = harness.deps.getCatalogState().snapshot!;
+  const codeReview = captureExtensionCodeReview(current, current.catalog.extensions);
+  current.workbench.document.revision += 1;
+  await expect(runSelectActiveWorkbenchProfile(harness.deps, 'studio', undefined, { enableShell: true, codeReview }))
+    .rejects.toThrow('Workbench profile changed after code confirmation');
+  expect(harness.enabled).toEqual([]);
 });

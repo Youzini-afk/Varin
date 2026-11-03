@@ -70,12 +70,15 @@ describe("live shell integration", () => {
     const nativePhase = (name: string) => { nativePhases.push({ name, atMs: Math.round(performance.now() - started) }); };
     const nativeStages: NativeProcessDiagnostic[] = [];
     let reportPendingStages = false;
-    const native = createNativeProcessTestHarness(undefined, { onProcessDiagnostic: event => {
+    // Stage-frame writes can perturb teardown scheduling. Normal acceptance
+    // must use the production path; opt in only for a targeted investigation.
+    const onProcessDiagnostic = process.env.VARIN_TEST_TERMINAL_TRACE === '1' ? (event: NativeProcessDiagnostic) => {
       nativeStages.push(event);
       // Once the original teardown is already stalled, retain visibility of
       // later progress without console I/O in the command-to-stop race window.
       if (reportPendingStages) console.info('[live shell] pending native stage', event);
-    } });
+    } : undefined;
+    const native = createNativeProcessTestHarness(undefined, onProcessDiagnostic ? { onProcessDiagnostic } : {});
     let lastControl: Record<string, unknown> | undefined;
     let lastData: Record<string, unknown> | undefined;
     let nativeRoot: string | undefined;

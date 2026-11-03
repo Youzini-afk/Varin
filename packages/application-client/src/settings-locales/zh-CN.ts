@@ -1,4 +1,11 @@
 export const settingsDict = {
+  "settings.varin.extensions.codeTrust.title": "信任这份扩展代码？",
+  "settings.varin.extensions.codeTrust.description": "安装、启用或应用此来源可能执行受信任的 Host 代码，或与 Varin 同页面的代码。Broker worker 不是操作系统沙箱。",
+  "settings.varin.extensions.codeTrust.capabilities": "Varin 能力授权只限制 broker API，不限制受信代码直接访问文件系统、网络或环境变量。本次代码信任确认不会允许任何能力，请单独审查能力授权。",
+  "settings.varin.extensions.codeTrust.confirm": "信任代码并继续",
+  "settings.varin.extensions.codeTrust.restart": "信任代码并重启 Host",
+  "settings.varin.extensions.codeTrust.noIntegrity": "未记录产物哈希",
+  "settings.varin.extensions.codeTrust.authorDiagnostics": "作者接线提示",
   "settings.models.modelDescription": "简介",
   "settings.models.modelDescriptionHint": "在这里记录模型特点、使用经验和渠道偏好。目录更新不会覆盖你的修改。",
   "settings.delegationModelSelection.title": "派发模型选择",

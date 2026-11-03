@@ -18,7 +18,8 @@ export interface WorkbenchCommandMeta {
   mobileTitleKey?: I18nKey;
   order: number;
   shortcutId?: string;
-  titleKey: I18nKey;
+  title?: string;
+  titleKey?: I18nKey;
 }
 
 export interface WorkbenchCommandRegistration {

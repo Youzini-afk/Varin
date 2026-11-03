@@ -36,14 +36,16 @@ export type BuiltinSettingsRenderer =
   | 'varin:voice'
   | 'varin:tunnel';
 
+type BuiltinSettingsPageMeta = SettingsPageMeta & Required<Pick<SettingsPageMeta, 'titleKey'>>;
+
 export interface BuiltinSettingsPageSpec {
   availability?: 'not-mobile' | 'desktop';
-  meta: SettingsPageMeta;
+  meta: BuiltinSettingsPageMeta;
   renderer: BuiltinSettingsRenderer;
 }
 
 const spec = (
-  meta: SettingsPageMeta,
+  meta: BuiltinSettingsPageMeta,
   renderer: BuiltinSettingsRenderer,
   availability?: BuiltinSettingsPageSpec['availability'],
 ): BuiltinSettingsPageSpec => ({ meta, renderer, ...(availability ? { availability } : {}) });

@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
-import { ApplicationExtensionRuntime } from '@varin/extension-host';
+import { ApplicationExtensionRuntime, HostBindingRestoreError, HostCompositionRestoreError } from '@varin/extension-host';
 import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS, VARIN_BUILTIN_COMPUTER_EXTENSION_ID } from '@varin/extension-builtins';
 import { parseVarinExtensionManifest } from '@varin/extension-contract';
 import { createMaterialStoreFixture } from '../harness/web-materials.test-helper.js';
@@ -363,7 +363,17 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
         ...retained.binding,
         artifactIntegrity: 'different-original-artifact',
       }),
-    ).rejects.toThrow('exact_binding_unavailable');
+    ).rejects.toMatchObject({ name: 'HostBindingRestoreError', code: 'extension_tool_exact_binding_unavailable', kind: 'tool', reason: 'binding_changed' });
+    await runtime.setEnabled(manifest.id, false, (await runtime.catalog.snapshot()).revision);
+    const refused = await createExtensionTools(options)(
+      { runId: 'original-recovery', threadId: 'thread', branchId: 'history-branch', source: null },
+      [retained.binding], new AbortController().signal,
+    ).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(HostBindingRestoreError);
+    expect(refused).toMatchObject({ code: 'extension_tool_exact_binding_unavailable', kind: 'tool', reason: 'implementation_unavailable',
+      cause: { reason: 'extension_disabled', extensionId: manifest.id } });
+    expect((refused as Error).cause).toBeInstanceOf(HostCompositionRestoreError);
+    expect((refused as Error).message).toContain('will not select another implementation or restore permissions automatically');
   } finally {
     try {
       await runtime?.stop();
@@ -724,7 +734,8 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
         [scope.initial[0]!.binding],
         new AbortController().signal,
       ),
-    ).rejects.toThrow(/artifact.*unavailable/i);
+    ).rejects.toMatchObject({ code: 'extension_tool_exact_binding_unavailable', kind: 'tool', reason: 'implementation_unavailable',
+      cause: { reason: 'extension_disabled', extensionId: a } });
     await route(a);
     await runtime.setEnabled(
       a,

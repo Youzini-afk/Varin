@@ -41,3 +41,5 @@ export * from "./restart-handoff.js";
 export * from "./models.js";
 export * from "./recovery-files.js";
 export * from "./model-protocol.generated.js";
+
+export * from "./surface-contributions.js";

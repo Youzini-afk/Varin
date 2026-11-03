@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import {
   VARIN_EXTENSION_MANIFEST_FILE,
   checkVarinContributionCompatibility,
+  inspectVarinSurfaceContributions,
   parseVarinExtensionManifest,
   type VarinExtensionManifest,
 } from "@varin/extension-contract";
@@ -139,7 +140,8 @@ export const checkProject = async (directory = "."): Promise<CheckResult> => {
       contractVersion: entry.result.contractVersion,
       supportedVersions: entry.result.supportedVersions,
     }));
-  return { project, referencedFiles: referenced.map((entrypoint) => entrypoint.file), missingFiles, incompatibleContributions };
+  return { project, referencedFiles: referenced.map((entrypoint) => entrypoint.file), missingFiles, incompatibleContributions,
+    authorDiagnostics: inspectVarinSurfaceContributions(project.manifest) };
 };
 
 export const formatContractError = (error: unknown): string[] => {

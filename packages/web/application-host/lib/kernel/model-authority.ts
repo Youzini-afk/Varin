@@ -1,4 +1,5 @@
 import type { ModelTokenizer } from '@varin/application-client';
+import { HostBindingRestoreError } from '@varin/extension-host';
 import { parseModelRetrySettings } from '@varin/protocol';
 import type { TokenizerBinding } from './protocol.generated.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
@@ -245,7 +246,9 @@ export function createModelAuthority(authority: ModelAuthority, options: { outpu
       if (captured.model.api !== configuration.providerFamily
         || (captured.model.adapterId ?? captured.model.api) !== configuration.adapterId
         || (captured.model.adapterVersion ?? '1') !== configuration.adapterVersion
-        || (captured.model.adapterIdentity ?? null) !== (configuration.adapterIdentity ?? null)) return failed('model-configuration-changed');
+        || (captured.model.adapterIdentity ?? null) !== (configuration.adapterIdentity ?? null)) {
+        throw new HostBindingRestoreError('model', 'binding_changed', `${configuration.adapterId ?? configuration.providerFamily}@${configuration.adapterVersion ?? '1'}`);
+      }
       owner = ownerFor(configuration, captured.authority, release);
       if (!sameScope(await owner.scope(), expectedScope)) return failed('credential-scope-changed');
       return owner;

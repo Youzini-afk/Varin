@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue } from '@varin/extension-contract';
+import { parseVarinCommandContributionData, type JsonValue } from '@varin/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import {
   createBuiltinSurfaceController,
@@ -78,12 +78,18 @@ export const executeSurfaceCommandContribution = async (
 const commandRegistration = (contribution: SurfaceContribution): WorkbenchCommandRegistration | null => {
   if (contribution.descriptor.kind !== 'command') return null;
   const data = contribution.descriptor.data;
-  const commandId = stringData(data, 'commandId');
+  let publicData: ReturnType<typeof parseVarinCommandContributionData> | undefined;
+  if (data.titleKey === undefined && data.title !== undefined) {
+    try { publicData = parseVarinCommandContributionData(data); }
+    catch { return null; } // Do not let one invalid legacy v1 declaration break the whole palette.
+  }
+  const commandId = publicData ? contribution.descriptor.id : stringData(data, 'commandId');
   const titleKey = stringData(data, 'titleKey');
-  const icon = stringData(data, 'icon');
+  const icon = publicData ? 'play' : stringData(data, 'icon');
   const mobileTitleKey = stringData(data, 'mobileTitleKey');
   const shortcutId = stringData(data, 'shortcutId');
-  const order = typeof data.order === 'number' && Number.isFinite(data.order) ? data.order : undefined;
+  const order = publicData ? contribution.descriptor.placement?.order ?? 50
+    : typeof data.order === 'number' && Number.isFinite(data.order) ? data.order : undefined;
   const keywords = Array.isArray(data.keywords)
     ? data.keywords.filter((value): value is string => typeof value === 'string')
     : [];
@@ -93,7 +99,7 @@ const commandRegistration = (contribution: SurfaceContribution): WorkbenchComman
     : isDeclarativeImplementation(contribution.implementation)
       ? { execute: (context) => executeSurfaceCommandContribution(contribution.descriptor.id, context) }
       : null;
-  if (!commandId || !titleKey || !icon || order === undefined || !implementation) {
+  if (!commandId || (!titleKey && !publicData) || !icon || order === undefined || !implementation) {
     return null;
   }
   return {
@@ -101,7 +107,8 @@ const commandRegistration = (contribution: SurfaceContribution): WorkbenchComman
     implementation,
     meta: {
       commandId,
-      titleKey: titleKey as WorkbenchCommandMeta['titleKey'],
+      ...(titleKey ? { titleKey: titleKey as WorkbenchCommandMeta['titleKey'] } : {}),
+      ...(publicData ? { title: publicData.title } : {}),
       icon: icon as WorkbenchCommandMeta['icon'],
       keywords,
       ...(mobileTitleKey ? { mobileTitleKey: mobileTitleKey as WorkbenchCommandMeta['mobileTitleKey'] } : {}),

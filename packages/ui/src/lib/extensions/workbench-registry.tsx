@@ -1,4 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
+import { assertExtensionCodeReview, captureExtensionCodeReview, type ExtensionCodeReview } from './code-trust';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import React from 'react';
 import type { ComponentType } from 'react';
 import type {
@@ -663,13 +665,43 @@ export const useWorkbenchMatchRenderers = <TInput,>(
     enabled && contribution.descriptor.kind === kind && contribution.descriptor.placement?.slot === slot
   )), [enabled, kind, slot, snapshot]);
   useVisibleContributionActivation(contributions);
-  return React.useMemo(() => contributions.flatMap((contribution) => {
-    const implementation = contribution.implementation as Partial<WorkbenchMatchRenderer<TInput>>;
-    return typeof implementation.matches === 'function' && typeof implementation.render === 'function'
-      ? [{ contributionId: contribution.descriptor.id, implementation: implementation as WorkbenchMatchRenderer<TInput> }]
-      : [];
-  }), [contributions]);
+  return React.useMemo(() => workbenchMatchRenderersFromContributions<TInput>(contributions), [contributions]);
 };
+
+/** Reuse the normal mount consumer; an author never renders into Varin's React root. */
+export const workbenchMatchRenderersFromContributions = <TInput,>(
+  contributions: readonly SurfaceContribution[],
+): WorkbenchMatchRendererRegistration<TInput>[] => contributions.flatMap<WorkbenchMatchRendererRegistration<TInput>>((contribution) => {
+  const implementation = contribution.implementation as Partial<WorkbenchMatchRenderer<TInput>> & Partial<MountImplementation<object>>;
+  if (typeof implementation.matches !== 'function') return [];
+  if (typeof implementation.mount === 'function') {
+    // A presentation callback gets detached JSON, not mutable UI records or runtime objects.
+    const snapshots = new WeakMap<object, object>();
+    const snapshot = (input: TInput): object => {
+      if (!input || typeof input !== 'object') throw new TypeError('Renderer input must be a presentation object');
+      const existing = snapshots.get(input);
+      if (existing) return existing;
+      const freeze = (value: unknown): unknown => {
+        if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); }
+        return value;
+      };
+      const detached = freeze(JSON.parse(JSON.stringify(input))) as object;
+      snapshots.set(input, detached);
+      return detached;
+    };
+    return [{ contributionId: contribution.descriptor.id, implementation: {
+      matches: (input: TInput) => implementation.matches!(snapshot(input) as TInput),
+      render: (input: TInput) => <WorkbenchSurfaceContributionHost
+        contribution={contribution} props={snapshot(input)}
+        fallback={<div role="alert">{contribution.descriptor.title ?? contribution.descriptor.id} could not render this item.</div>}
+      />,
+    } }];
+  }
+  // Distribution integrations retain their existing in-process renderer while public authors use mount.
+  return typeof implementation.render === 'function'
+    ? [{ contributionId: contribution.descriptor.id, implementation: implementation as WorkbenchMatchRenderer<TInput> }]
+    : [];
+});
 
 export const renderFirstWorkbenchMatch = <TInput,>(
   renderers: readonly WorkbenchMatchRendererRegistration<TInput>[],
@@ -707,13 +739,28 @@ export const removeWorkbenchProfile = async (profileId: string): Promise<void> =
   await refreshVarinExtensionCatalog();
 };
 
-export const applyWorkbenchProfile = async (profileId: string): Promise<void> => {
-  const snapshot = getVarinExtensionCatalogState().snapshot;
-  if (!snapshot?.workbench.authoritative) throw new Error('Workbench profile state is unavailable');
-  const extensions = getRegisteredRuntimeAPIs()?.extensions;
+export const applyWorkbenchProfile = async (profileId: string, codeReview?: ExtensionCodeReview): Promise<void> => {
+  const displayed = getVarinExtensionCatalogState().snapshot;
+  if (!displayed?.workbench.authoritative) throw new Error('Workbench profile state is unavailable');
+  const review = codeReview ? structuredClone(codeReview) : captureExtensionCodeReview(displayed, []);
+  const extensions = getRegisteredRuntimeAPIs()?.extensions, endpointGeneration = getRuntimeEndpointGeneration();
   if (!extensions) throw new Error('Varin Extensions runtime is unavailable');
+  const snapshot = await extensions.hostState();
+  if (endpointGeneration !== getRuntimeEndpointGeneration() || extensions !== getRegisteredRuntimeAPIs()?.extensions) {
+    throw new Error('Application Host changed after code confirmation. Review this action on the current Host.');
+  }
+  assertExtensionCodeReview(snapshot.catalog, review);
+  if (!snapshot.workbench.authoritative || snapshot.workbench.document.revision !== review.workbenchRevision) {
+    throw new Error('Workbench profile changed after code confirmation. Review the current profile again.');
+  }
+  const profile = snapshot.workbench.document.profiles.find(item => item.id === profileId);
+  const unreviewed = snapshot.catalog.extensions.some(entry => !entry.desired.enabled && entry.source.kind !== 'builtin'
+    && profile?.extensionIds?.includes(entry.manifest.id)
+    && !review.artifacts.some(artifact => artifact.extensionId === entry.manifest.id));
+  if (unreviewed) throw new Error('Review external extension code before applying this profile.');
   await extensions.applyWorkbenchProfile({
     expectedCatalogRevision: snapshot.catalog.revision,
+    expectedWorkbenchRevision: snapshot.workbench.document.revision,
     profileId,
   });
   await refreshVarinExtensionCatalog();

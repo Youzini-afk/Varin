@@ -204,7 +204,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
     const meta = settingsPageRegistrations.find((registration) => registration.meta.slug === slug)?.meta;
-    return meta ? t(meta.titleKey) : t('settings.view.home.title');
+    return meta ? (meta.titleKey ? t(meta.titleKey) : meta.title) : t('settings.view.home.title');
   }, [settingsPageRegistrations, t]);
 
   const settingsSearchResults = React.useMemo(() => {

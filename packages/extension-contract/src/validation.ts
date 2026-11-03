@@ -852,6 +852,7 @@ export function parseVarinExtensionInstallationRecord(value: unknown, path = "in
   if (!SEMVER_PATTERN.test(selectedVersion)) issues.push(`${path}.selectedVersion must be SemVer`);
   if (resolvedVersion !== manifest.version) issues.push(`${path}.resolvedVersion must match manifest.version`);
   if (selectedVersion !== resolvedVersion) issues.push(`${path}.selectedVersion must match resolvedVersion until candidate updates are supported`);
+  const storagePublicationId = value.storagePublicationId === undefined ? undefined : hostId(value.storagePublicationId, `${path}.storagePublicationId`, issues);
   const selectedIntegrity = value.integrity === undefined
     ? undefined
     : integrity(value.integrity, `${path}.integrity`, issues);
@@ -884,6 +885,7 @@ export function parseVarinExtensionInstallationRecord(value: unknown, path = "in
     updatedAt,
     resolvedVersion,
     selectedVersion,
+    ...(storagePublicationId ? { storagePublicationId } : {}),
     ...(selectedIntegrity ? { integrity: selectedIntegrity } : {}),
     ...(resolvedPath ? { resolvedPath } : {}),
     ...(candidate ? { candidate } : {}),

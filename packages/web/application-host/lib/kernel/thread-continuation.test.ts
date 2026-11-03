@@ -6,7 +6,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createThreadsHttpAPI } from '@varin/application-client';
 import type { ThreadIdentity } from '@varin/application-client';
 import type { ContextPreparer } from './thread-context.js';
-import type { AgentRuntimeClient } from './agent-runtime-client.js';
+import { AgentRuntimeClient } from './agent-runtime-client.js';
+import { KernelClient } from './kernel-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { CredentialBridge } from './credential-bridge.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
@@ -249,6 +250,117 @@ it('Run or epoch cancellation detaches cold credential preparation before it can
   expect(f.runtime.failLaunch).not.toHaveBeenCalled();
   expect(f.errors).toEqual([]);
 });
+
+it.each(['reconciled', 'event', 'child'] as const)('%s continuation joins its original preparation before recognizing a terminal Run cancellation', async wake => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable';
+  // Keep the actual producer, registration/drain owner and adapter. Only native
+  // reads and the delayed resource/start acknowledgement use controlled ports.
+  const kernel = new KernelClient({ hostId: 'continuation-test', storageRoot: '/unused', buildVersion: 'test' });
+  const owner = new AgentRuntimeClient(kernel);
+  f.runtime.withRunPreparation = owner.withRunPreparation.bind(owner);
+  let settle!: () => void;
+  const resource = new Promise<void>(resolve => { settle = resolve; });
+  const released = vi.fn();
+  f.models.rebindModel.mockResolvedValue(new ExistingHostCredentialOwner({ providerId: 'fixture', providerFamily: 'openai-completions', endpoint: 'https://fixture.invalid/v1/chat/completions',
+    currentScope: async () => f.launch.selection.credential_scope!, runtime: { getAuth: async () => ({ auth: { apiKey: 'fixture-only' } }) }, release: released }));
+  f.runtime.rebindLaunch.mockImplementationOnce(async () => { await resource; return { runId: f.run.id, epoch: 1 }; });
+  const events: RuntimeEvent[] = wake === 'event'
+    ? [{ cursor: 1, subject: 'original-wait', revision: 1, kind: 'observation.run_ready', data: { run_id: f.run.id } }] : [];
+  const child = { execution_id: 'original-child', child_thread_id: f.run.thread_id, revision: 1, state: 'ready', report: null,
+    resources_released: false, receipt: { run_id: f.run.id }, source: { kind: 'absent' }, launch: { mcp_binding: null },
+    trigger: { kind: 'dispatch' } } as unknown as import('./protocol.generated.js').DelegatedExecution;
+  let first = true;
+  const runtime = Object.assign(f.runtime, {
+    onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {},
+    reconcileObservations: async () => wake === 'reconciled' && first ? (first = false, [f.run.id]) : [],
+    children: async () => [], childExecutions: async () => wake === 'child' ? [child] : [], childExecution: async () => child,
+    unacceptedChildDependencies: async () => [], status: async () => ({ eventCursor: 0 }),
+    events: async (cursor: number) => events.filter(event => event.cursor > cursor),
+  });
+  let launched!: Promise<void>;
+  const collaboration = new ThreadCollaboration({ kernel, storageAdapter: {} as never, sourceCaptureOwners: {} as never,
+    resolveLiveSource: async () => { throw new Error('Unexpected source'); }, runtime: runtime as unknown as AgentRuntimeClient,
+    prepareContext: {} as never, recoverLaunches: async () => {},
+    continueRun: (runId, signal) => (launched = f.adapter.continueLaunch(runId, { signal })), onError: (_id, error) => f.errors.push(error) });
+  try {
+    await collaboration.recover();
+    await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+    const rejected = expect(launched).rejects.toMatchObject({ name: 'AbortError', message: 'Run preparation cancelled' });
+    f.run.state = wake === 'child' ? 'failed' : wake === 'event' ? 'cancelled' : 'completed';
+    vi.spyOn(kernel, 'agentRuntimeRequest').mockResolvedValueOnce(structuredClone(f.run));
+    await owner.run(f.run.id); // The real terminal Run reader initiates the cancellation.
+    await rejected; await tick();
+    expect(released).not.toHaveBeenCalled();
+    expect(f.runtime.failLaunch).not.toHaveBeenCalled();
+    expect(f.errors).toEqual([]);
+    const reads = f.runtime.run.mock.calls.length;
+    settle();
+    await vi.waitFor(() => expect(released).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(f.runtime.run.mock.calls.length).toBeGreaterThan(reads));
+    await tick();
+    expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
+    expect(child.resources_released).toBe(false); // Reporting cannot manufacture a stop/release receipt.
+    expect(f.errors).toEqual([]);
+  } finally { settle(); collaboration.stop(); await kernel.close(); }
+});
+
+it.each(['unknown-abort', 'other-run', 'other-client', 'requested-only', 'unreadable-state', 'wrong-run-state'] as const)(
+  'background continuation reports %s rather than treating it as a settled terminal preparation', async kind => {
+    const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable';
+    const runId = f.run.id;
+    const kernel = new KernelClient({ hostId: 'continuation-test', storageRoot: '/unused', buildVersion: 'test' });
+    const otherKernel = new KernelClient({ hostId: 'other-owner', storageRoot: '/unused-other', buildVersion: 'test' });
+    const actual = new AgentRuntimeClient(kernel);
+    f.runtime.withRunPreparation = actual.withRunPreparation.bind(actual);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.runtime.rebindLaunch.mockImplementation(async () => { await gate; return { runId, epoch: 1 }; });
+    let first = true;
+    const runtime = Object.assign(f.runtime, {
+      onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {},
+      reconcileObservations: async () => first ? (first = false, [runId]) : [], children: async () => [],
+      childExecutions: async () => [], unacceptedChildDependencies: async () => [],
+      status: async () => ({ eventCursor: 0 }), events: async () => [],
+    });
+    const collaboration = new ThreadCollaboration({ kernel, storageAdapter: {} as never, sourceCaptureOwners: {} as never,
+      resolveLiveSource: async () => { throw new Error('Unexpected source'); }, runtime: runtime as unknown as AgentRuntimeClient,
+      prepareContext: {} as never, recoverLaunches: async () => {},
+      continueRun: (id, signal) => f.adapter.continueLaunch(id, { signal }), onError: (_id, error) => f.errors.push(error) });
+    let expected: unknown;
+    try {
+      if (['unknown-abort', 'other-run', 'other-client'].includes(kind)) {
+        f.run.state = 'completed';
+        const producer = kind === 'other-client' ? otherKernel : kernel;
+        const id = kind === 'other-run' ? 'another-run' : runId;
+        const registration = producer.beginRunPreparation(id);
+        producer.cancelRunPreparation(id);
+        expected = kind === 'unknown-abort' ? new DOMException('Run preparation cancelled', 'AbortError') : registration.signal.reason;
+        registration.release();
+        f.runtime.rebindLaunch.mockRejectedValueOnce(expected);
+      }
+      await collaboration.recover();
+      await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+      if (!expected) {
+        f.run.state = kind === 'requested-only' ? 'runnable' : 'completed';
+        f.run.cancel_requested = true;
+        if (kind === 'wrong-run-state') f.run.id = 'another-run';
+        if (kind === 'unreadable-state') f.runtime.run.mockRejectedValueOnce(new Error('Catalog read unavailable'));
+        // Obtain the same real owner's cause without changing the adapter's rejection.
+        const registration = kernel.beginRunPreparation(runId);
+        kernel.cancelRunPreparation(runId); expected = registration.signal.reason; registration.release();
+        await tick();
+        expect(f.errors).toEqual([]); // Actual preparation is still alive: no terminal/no-op conclusion yet.
+      }
+      release();
+      await vi.waitFor(() => expect(f.errors).toHaveLength(1));
+      if (kind === 'unreadable-state') {
+        expect(f.errors[0]).toBeInstanceOf(AggregateError);
+        expect((f.errors[0] as AggregateError).errors).toEqual([expected, expect.objectContaining({ message: 'Catalog read unavailable' })]);
+      } else expect(f.errors).toEqual([expected]);
+      expect(f.runtime.failLaunch).not.toHaveBeenCalled();
+      expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
+    } finally { release(); collaboration.stop(); await Promise.all([kernel.close(), otherKernel.close()]); }
+  });
 
 
 it('cancelled launch context refresh cannot publish its late proposal or bind the subsequent owner', async () => {

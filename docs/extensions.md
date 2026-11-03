@@ -58,6 +58,13 @@ Extension storage 管理 namespace、revision 和原子持久化，扩展管理�
 `storage.open` 为各 scope/key 打开独立文档。Disable 保留数据与 layout reference。
 Remove 和 delete-data 是两个选择；删除仅限该扩展 namespace，不包括项目文件或其他服务的私有数据库。
 读取失败、malformed、missing 与有效空数据始终分开。
+`application/profile/workspace/surface/session` 目前是该扩展 namespace 内的分类标签，不会自动按当前项目、用户或
+Thread 分区，也不是权限边界。需要区分多个实体时，作者应在 key 中显式使用稳定实体身份；Host 不猜测
+一个共享 service 当前代表哪个 Run。
+
+安装、启用或应用候选代码是**代码信任**，不等同于逐项批准 Varin capability。Broker 继承 Host 环境并以
+Host OS 账户运行；未申请 capability 的代码仍可能直接访问进程、文件、网络与环境变量。Managed Surface
+也在应用页面 realm 中执行。能力撤销约束 Varin API，不能撤回第三方代码已取得的系统访问或已经发生的效果。
 
 ## 模型接入贡献
 
@@ -118,6 +125,15 @@ Stage update 不执行候选；capability review 和显式 apply intent 是独�
 准备使用原 storage/catalog owner 与 expected revision。发布前失败保留 selected artifact 和活动组合；
 持久发布后，响应丢失或清理失败不能把已提交选择改写成 rollback。
 
+Host 候选迁移在 `storage-publications` 留下原数据/目标数据 journal，持有涉及地址的锁，随后在原 Catalog
+选中候选时写入同一 publication ID。进程中断后，启动在激活任何代码前按该 receipt 完成或撤回数据写入；
+不会重新执行迁移函数、activate 或工具效果。未知 Catalog 决定或不匹配数据保留证据并拒绝启动，不猜测成功。
+显式 remove 在同一发布锁下先消费这些 receipt，再删除安装记录及用户选择的数据，不能在重启时复活数据。
+这保证候选数据与 Catalog 的进程崩溃恢复，不宣称任意插件副作用或所有初次激活文件属于同一事务。
+
+普通更新仍允许原 pin 完成，但旧 generation 不能 refresh/open 为另一 schema 的文档，也不能覆盖它。
+若原 Run 确实依赖已迁移的 schema，调用会明确失败；不会为让旧代码继续运行而降级数据或改绑新实现。
+
 默认情况下 Host 与 Surface entrypoint 各自报告 actual state。Surface 激活失败可以保留自己的旧 owner，
 但不撤销已经选中的 Host artifact。Module ready 也不证明界面已经 mount 或 paint。
 
@@ -169,6 +185,10 @@ Managed/isolated Surface consumer 通过认证 `watchServiceLease` stream 保留
 调用沿用原 routing context。Stream 关闭释放这些 root，已受理 callback 则自行保留 pin 直到实际完成。
 意外结束或撤权使原组合失效，旧 handle 不会重连后偷偷选另一 provider。
 Surface-local service 同样保留已绑定的原 owner。
+
+重启恢复读取原 Run 保存的精确 composition，不重新执行当前 routing。原包、entrypoint、grant 或依赖已变化时，
+返回带原因的恢复错误并指出原扩展身份。磁盘上还留有旧 artifact 不代表仍获授权；不能自动重启已禁用扩展、
+恢复已撤销 grant、切换当前 provider 或重放未知效果。相同内容及原授权仍可用时才重新准备原绑定。
 
 `prepareService` 返回必须释放的精确 generation handle。独立 `pin()` 保留已受理 exchange；
 child 只能从仍被保留的原 binding 派生 pin。撤权沿实际依赖边传播，共享 activation context 不持有
@@ -225,10 +245,14 @@ Dispatch 前因权限/身份拒绝是 `not_dispatched`。Dispatch 后 callback �
 Stable call ID 对相同调用去重、拒绝变更后的参数。外层 callback 返回后关闭新嵌套调用，并等待已受理
 调用完成；捕获内层错误不会抹掉其 Operation/receipt。独立受理 Job 保留原 lifetime。
 
-Policy、context、retrieval 和 observer service 共用这些 selected owner。Policy 在已提交边界返回
-允许的动作，不直接改 core history 或私下执行工具。纯 context/retrieval declaration 选择变换/阶段，
+Policy、context 和 observer service 共用这些 selected owner。Policy 在已提交边界返回
+允许的动作，不直接改 core history 或私下执行工具。纯 context declaration 选择变换，
 不因此取得文件或模型权限；模型决策由原 inference/Operation owner 执行。
 Observer 消费已提交事实，不成为执行进度权威。具体合同与例子见 SDK 和[运行时](runtime.md)。
+
+`code_retrieval` 由原生检索 Agent 使用已冻结的模型、工具、来源和上下文执行。旧的 staged retrieval pipeline
+已退役，`varin.retrieval.plan@1` 没有该 Agent consumer；SDK 仍保留 deprecated 导出供现有作者兼容，发行版
+不再列出无作用的三种检索计划。已有 routing 数据保留为不可用选择，不偷偷删除或改成另一策略。
 
 ## 发现接口与 Agent 编写的扩展
 

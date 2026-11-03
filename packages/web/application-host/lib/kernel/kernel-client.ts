@@ -653,6 +653,7 @@ export class KernelClient {
   private readonly policyBridge: AgentPolicyBridge;
   private readonly driverBridge: AgentDriverBridge;
   private readonly runPreparations = new Map<string, Set<{ controller: AbortController; settled: Promise<void> }>>();
+  private readonly runPreparationCancellations = new WeakMap<Error, { runId: string; settled: Promise<void> }>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private closePromise: Promise<void> | undefined;
@@ -864,8 +865,17 @@ export class KernelClient {
   }
   cancelRunPreparation(runId: string): void {
     const registrations = this.runPreparations.get(runId);
-    if (!registrations) return;
-    for (const { controller } of registrations) controller.abort(new DOMException('Run preparation cancelled', 'AbortError'));
+    if (!registrations?.size || [...registrations].every(({ controller }) => controller.signal.aborted)) return;
+    const reason = new DOMException('Run preparation cancelled', 'AbortError');
+    this.runPreparationCancellations.set(reason, { runId,
+      settled: Promise.all([...registrations].map(registration => registration.settled)).then(() => undefined) });
+    for (const { controller } of registrations) controller.abort(reason);
+  }
+  /** Recognize only this owner's original cancellation, and join its actual work.
+   * This is not a Run/executor stop receipt and releases no source authority. */
+  runPreparationCancellation(runId: string, error: unknown): Promise<void> | undefined {
+    const cancellation = error instanceof Error ? this.runPreparationCancellations.get(error) : undefined;
+    return cancellation?.runId === runId ? cancellation.settled : undefined;
   }
   /** The existing preparation owner settles only when its underlying work exits. */
   async drainRunPreparations(runId: string): Promise<void> {

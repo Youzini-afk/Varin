@@ -246,6 +246,8 @@ export interface VarinExtensionActualState {
 }
 
 export interface VarinExtensionInstallationRecord {
+  /** Host-owned receipt for the last storage-coupled candidate publication. */
+  storagePublicationId?: string;
   restartHandoffs?: VarinExtensionRestartHandoff[];
   candidate?: VarinExtensionCandidateRecord;
   capabilityGrants: VarinExtensionCapabilityGrant[];
@@ -381,6 +383,9 @@ export interface VarinExtensionCapabilityReviewRequest {
   extensionId: string;
 }
 
+/** Operator-authorized installation of trusted package code, not an OS sandbox decision.
+ * A package without capability requests may activate immediately. Callers must make
+ * code trust explicit; capability review grants only access through Varin APIs. */
 export interface VarinExtensionPackageInstallRequest {
   expectedRevision: number;
   source: VarinExtensionPackageSource;

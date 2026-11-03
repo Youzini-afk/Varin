@@ -85,12 +85,9 @@ accepts `output: OutputBody<IncomingMedia>` rather than an untyped text field. I
 supply storage references or source identity. Older internal policy contracts are rejected rather
 than translated.
 
-`VARIN_RETRIEVAL_PLAN_CONTRACT` describes the declarative `varin.retrieval.plan@1` boundary.
-`describe([])` returns an immutable `configurationId`, `structure: 'builtin' | 'disabled'`, and optional
-`semantic: 'builtin' | 'disabled'` (omission disables semantic recall). The parser rejects unknown
-fields, including model selectors. The selected native Host owns keyword/structure implementations,
-the semantic backend/published-reader lease, and all Run-granted reads; the extension gets no query,
-source text, root, filesystem or model capability through this contract.
+`VARIN_RETRIEVAL_PLAN_CONTRACT` retains the deprecated `varin.retrieval.plan@1` wire contract
+for existing SDK packages and custom consumers. The current native retrieval Agent does not consume
+it; it does not grant file/model access or select native keyword/structure/semantic stages.
 
 A service provision may carry a single `tool` declaration: name, description, input/output JSON
 Schema, `completion: result | job`, and `operation: read | effect`, with optional examples and source

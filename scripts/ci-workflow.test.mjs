@@ -75,10 +75,13 @@ test('prose and known renderer edits avoid unrelated native/platform products', 
 
 test('owner/dependency/build input decisions include the actual downstream boundaries', () => {
   const cases = [
-    ['packages/web/application-host/lib/ui-auth/service.ts', ['native', 'production'], ['windows', 'container']],
+    ...['ui-auth.ts', 'ui-passkeys.ts'].map(owner =>
+      [`packages/web/application-host/lib/ui-auth/${owner}`, ['native', 'production', 'windows', 'macos'], ['rust', 'container', 'android']]),
     ...['connections/ssh-manager.ts', 'tunnels/executable-search.ts', 'relay/host-lock.ts'].map(owner =>
       [`packages/web/application-host/lib/${owner}`, ['native', 'production', 'windows', 'macos'], []]),
     ['packages/web/cli/lib/cli-startup.ts', ['native', 'production', 'windows', 'macos'], []],
+    ...['configuration-watch.ts', 'package-manager.ts', 'cloudflare-tunnel.ts'].map(helper =>
+      [`packages/web/application-host/lib/${helper}`, ['native', 'production', 'windows', 'macos'], ['rust', 'android']]),
     ['packages/web/application-host/lib/mcp/sources.ts', ['native', 'production', 'windows', 'macos'], []],
     ['kernel/crates/varin-runtime/src/catalog.rs', ['native', 'rust', 'windows', 'macos', 'production', 'container'], []],
     ['packages/workspace-driver/macos/Volume.swift', ['rust', 'native', 'macos', 'container'], []],
@@ -161,6 +164,11 @@ test('platform discovery keeps native teardown, storage, observation and file-CA
   for (const suffix of ['mcp/settings.test.ts', 'connections/ssh-manager.test.ts',
     'tunnels/executable-search.test.ts', 'relay/host-lock.test.ts', 'cli/cli.test.ts']) {
     assert.ok(portable.some(file => file.endsWith(suffix)), suffix);
+  }
+  const commonHostTests = fs.readdirSync(path.join(root, 'packages/web/application-host/lib'))
+    .filter(file => file.endsWith('.test.ts') && !file.endsWith('.native.test.ts'));
+  for (const file of commonHostTests) {
+    assert.ok(portable.some(found => found.endsWith(`/application-host/lib/${file}`)), file);
   }
   assert.ok(portable.every(file => !file.endsWith('.native.test.ts')));
 });

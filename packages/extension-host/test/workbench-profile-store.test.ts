@@ -198,3 +198,24 @@ test("migrates Agent shells without replacing a chosen IDE shell", async () => {
   assert.equal(desktopIde?.replacementSelections["workbench.shell"], "varin.builtin.ide-workbench.shell");
   assert.equal(migrated.document.activeProfileId, "default");
 });
+
+test("a reviewed profile holds its original storage revision until the related Catalog decision finishes", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-workbench-review-")); directories.push(dataDir);
+  const store = new WorkbenchProfileStore({ hostId: "2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a", storage: new ExtensionStorageStore(dataDir) });
+  const original = await store.upsertProfile({ expectedRevision: 0,
+    profile: { id: "reviewed", label: "Reviewed", extensionIds: ["dev.example.original"] } });
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const events: string[] = [];
+  const applying = store.withRevision(original.document.revision, async document => {
+    assert.deepEqual(document.profiles.find(profile => profile.id === "reviewed")?.extensionIds, ["dev.example.original"]);
+    entered(); await held; events.push("catalog-commit");
+  });
+  await ready;
+  const update = store.upsertProfile({ expectedRevision: original.document.revision,
+    profile: { id: "reviewed", label: "Changed", extensionIds: ["dev.example.other"] } }).then(() => { events.push("profile-commit"); });
+  release(); await Promise.all([applying, update]);
+  assert.deepEqual(events, ["catalog-commit", "profile-commit"]);
+  await assert.rejects(store.withRevision(original.document.revision, async () => { throw new Error("must not run"); }), ExtensionStorageRevisionConflictError);
+});

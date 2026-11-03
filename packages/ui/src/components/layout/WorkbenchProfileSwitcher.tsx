@@ -1,3 +1,4 @@
+import { useCodeTrustedProfileSelection } from '@/components/sections/extensions/ExtensionCodeTrustDialog';
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { VarinLogo } from '@/components/ui/VarinLogo';
@@ -15,7 +16,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useVarinExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { workbenchWorkspaceLabel } from '@/lib/extensions/workbench-profile-label';
-import { selectActiveWorkbenchProfile, WorkbenchShellTransitionAbortedError } from '@/lib/extensions/workbench-shell-transition';
+import { WorkbenchShellTransitionAbortedError } from '@/lib/extensions/workbench-shell-transition';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { useUIStore } from '@/stores/useUIStore';
 import {
@@ -34,6 +35,7 @@ import {
 export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ className }) => {
   const { t } = useI18n();
   const catalog = useVarinExtensionCatalog();
+  const codeTrust = useCodeTrustedProfileSelection();
   const [pending, setPending] = React.useState(false);
   const workbench = catalog.snapshot?.workbench;
   const hostId = workbench?.hostId;
@@ -81,7 +83,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
     if (profileId === resolved.profileId || busy) return;
     setPending(true);
     try {
-      await selectActiveWorkbenchProfile(profileId, undefined, { enableShell: true });
+      await codeTrust.selectProfile(profileId);
     } catch (error) {
       if (error instanceof WorkbenchShellTransitionAbortedError && error.reason === 'superseded') return;
       toast.error(error instanceof Error ? error.message : String(error));
@@ -92,6 +94,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
 
   return (
     <div className="app-region-no-drag flex min-w-0 items-center gap-1.5" aria-busy={busy}>
+      {codeTrust.dialog}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button

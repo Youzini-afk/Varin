@@ -1,7 +1,7 @@
 //! Crash leftovers are owned executor resources, not user projects. A live OS
 //! lock protects every active instance; cleanup never infers death from age.
 use super::*;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::MetadataExt;
 pub(super) fn root() -> Result<PathBuf, KernelError> {
     let path = PathBuf::from(format!("/tmp/varin-workspaces-{}", unsafe {
         libc::geteuid()
@@ -39,26 +39,9 @@ fn cleanup(root: &Path) {
             continue;
         }
         let path = entry.path();
-        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+        let Some(_owner) = resource_owner::claim(root, &path) else {
             continue;
         };
-        if !metadata.is_dir()
-            || metadata.file_type().is_symlink()
-            || metadata.uid() != unsafe { libc::geteuid() }
-        {
-            continue;
-        }
-        let Ok(owner) = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(path.join("owner.lock"))
-        else {
-            continue;
-        };
-        if fs2::FileExt::try_lock_exclusive(&owner).is_err() {
-            continue;
-        }
         let manifest = std::fs::read(path.join("resource.json"))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
