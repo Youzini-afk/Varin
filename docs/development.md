@@ -109,6 +109,7 @@ Electron 的运行时、更新策略与路径打开行为统一由包的 `test` 
 Windows native 或双镜像。Host/共享协议/扩展改动保留 Linux 真 native；Catalog/Storage/schema
 及 Rust 依赖改动继续在 PR 中阻断真实 Rust 升级、耐久、权限、取消和不重放契约。
 公共文件、进程、IPC、凭据和原生依赖会触发相关平台，不只匹配带 win/mac 名称的文件。
+Host `lib` 顶层公共 helper 同样属于平台接线，包括配置 watcher 的路径规范化、更新命令和退出协调。
 根依赖/构建入口、未知路径或取不到 diff 都扩大到完整适用范围；重命名同时考虑旧、新 owner。
 
 Windows 用 `test:packages:platform`、Host `test:platform` 与 `test:kernel -- --platform`
