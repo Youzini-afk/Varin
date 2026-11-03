@@ -13,8 +13,8 @@ import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
 
   ...enDict,
+  "desktopMigration.browserReset": "本次升级使用全新的内置浏览器配置，不导入旧 Cookie、网站登录态和站点存储，需要重新登录网站。旧浏览器资料原样保留；聊天、项目、设置和应用凭据按各自的数据机制保留或迁移。",
   "desktopMigration.openVoice": "检查语音设置",
-  "desktopMigration.browserUnavailable": "旧引擎无法读取原浏览器配置。原数据仍保留，可手动检查已保存的站点，必要时重新登录。此状态不代表浏览器资料已迁移。",
   "desktopMigration.packs": "部分桌宠素材未能导入。原文件和目标位置已有的有效形象都已保留。可重新下载当前素材库中的形象，或打开素材库检查。",
   "desktopMigration.retryPack": "重试下载素材",
   "desktopMigration.openCompanions": "打开桌宠素材库",
@@ -25,9 +25,6 @@ export const dict: Record<I18nKey, string> = {
   "desktopMigration.packPublication": "无法将已验证的素材发布到目标位置。",
   "desktopMigration.packUnavailable": "无法读取原素材缓存。",
   "desktopMigration.review": "查看桌面恢复状态",
-  "desktopMigration.browserStorage": "原生迁移已逐项检查 Cookie 与受支持的本地存储。部分数据无法迁移，网站可能需要重新登录。IndexedDB 数据、服务工作线程与设备绑定凭据保留在旧桌面中。",
-  "desktopMigration.browserInventory": "此列表来自 Cookie 和已保存的浏览器页面。旧配置中还可能存在其他站点数据，原配置已保留。可手动打开站点检查；不会自动打开页面或登录。",
-  "desktopMigration.openSite": "检查站点",
   "desktopMigration.title": "恢复的桌面状态",
   "desktopMigration.description": "旧桌面的待发送消息已保留为草稿，没有自动发送任何内容。",
   "desktopMigration.credentials": "部分语音服务凭据未能迁移，原值仍保留在旧桌面中。使用前请检查语音设置。",

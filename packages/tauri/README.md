@@ -43,6 +43,6 @@ Linux 显示协议边界（x64、arm64 相同）：
 - [完整产品性能采集与待验收边界](scripts/benchmark.md)
 - [原始完整迁移设计](../../docs/design/tauri-desktop-migration.md)
 
-当前分支仍按真实证据控制替换：没有对应平台安装/沙箱/数据恢复验收与签名资格的候选不能成为 production release。保留旧 Electron 的 exporter 与转换安装格式不等于把 Electron 再作为新工作台运行时。原旧 profile 不删除，不能把已知 cookie/localStorage 迁移声称为所有网站会话迁移。
+当前分支仍按真实证据控制替换：没有对应平台安装/沙箱/数据恢复验收与签名资格的候选不能成为 production release。保留旧 Electron 的 exporter 与转换安装格式不等于把 Electron 再作为新工作台运行时。旧 profile 不删除。此次升级不迁移 Browser Use 的 Cookie、登录态与网站存储，用户需要重新登录；聊天、项目、应用设置与非浏览器凭据继续保留。
 
 没有以编译结果替代 GUI 证据，也没有填写未经同版本、同配置、全进程树测量的内存或性能改善数字。

@@ -143,7 +143,7 @@ old profile with no exporter blocks before new Host startup and directs the user
 signed transition release; it is not treated as empty data. The fixed manifest path, architecture, source SHA and all
 file digests are verified before its native-only one-shot protocol runs. It remains inside
 the new installation, so removing/replacing the previous executable cannot strand its
-Chromium storage. Actual data-root locking, secret/cookie acknowledgements and migration
+application preference storage. Actual data-root locking, application-credential acknowledgements and migration
 recovery belong to the native migration owner. Preparing this bundle does not claim that
 an installed user's migration succeeded.
 
@@ -232,8 +232,10 @@ identity, one preference, all six legacy credential slots, an HttpOnly cookie an
 BrowserUse localStorage for an offline `.invalid` origin. No real credentials or
 user profile is read. The installed manifest-fixed private exporter performs the
 actual production handoff; no fixture writes migration-complete settings or a
-fake native receipt. Native CEF reads back the migrated values without exposing
-them in reports. A matching profile creation marker is checked against Tauri's
+fake native receipt. Native CEF reads back the migrated application preferences
+and credentials without exposing them in reports. It also confirms the old
+BrowserUse cookie and localStorage sentinel are absent from the new context: old
+website data is intentionally not migrated and users sign in again. A matching profile creation marker is checked against Tauri's
 native OS config directory **before** the old reader can run. Reopening the target
 requires the previous nonce-bound native migration and successful drain report.
 The original Electron owner reopens its unchanged source records after uninstall.

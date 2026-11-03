@@ -5,7 +5,6 @@ import path from 'node:path';
 import { acquireDesktopSessionLease, verifyInheritedDesktopSessionLease, type DesktopSessionRecord } from '@varin/web/server/lib/platform/desktop-session-lease.js';
 import { resolveVarinDataDir } from '@varin/web/server/lib/platform/data-paths.js';
 import { legacyCredentials, exportLegacyPrivateState, openLegacyPrivateChannel } from './legacy-private-export.js';
-import { legacyBrowserOrigins, openLegacyBrowserExport } from './legacy-browser-export.js';
 import { LEGACY_FRONTEND_ORIGIN, readLegacyFrontendEntries, stageLegacyFrontendEntries, stageLegacyCompanionAssets } from './frontend-migration-export.js';
 app.setName('Varin');
 if (process.env.VARIN_ELECTRON_DEV === '1' || !app.isPackaged)
@@ -42,14 +41,8 @@ else {
     const receipt = await stageLegacyFrontendEntries(entries, app.getVersion());
     const companions = await stageLegacyCompanionAssets(app.getPath('userData'));
     if (channel) {
-      let browser:Awaited<ReturnType<typeof openLegacyBrowserExport>>|undefined;
-      try { browser=await openLegacyBrowserExport(); } catch { /* Source OS/Chromium credentials may be unavailable; preserve the profile and report manual recovery. */ }
-      try {
-        const origins=legacyBrowserOrigins(browser?.cookies??[],entries);
-        await exportLegacyPrivateState({channel,sourceVersion:app.getVersion(),credentials:legacyCredentials(entries),cookies:browser?.cookies??[],
-          origins:browser?browser.origins(origins):(async function*(){for(const origin of origins)yield{origin,localStorage:null,indexedDbDatabases:null,reason:'source-browser-unavailable'};})(),
-          browserStatus:browser?'available':'source-unavailable',uiReceipt:{...receipt,companions}});
-      } finally { await browser?.close(); }
+      await exportLegacyPrivateState({ channel, sourceVersion: app.getVersion(),
+        credentials: legacyCredentials(entries), uiReceipt: { ...receipt, companions } });
     } else {
       // Summary only. Raw native storage never reaches the ordinary CLI output.
       process.stdout.write(JSON.stringify({ ...receipt, companions }) + '\n');

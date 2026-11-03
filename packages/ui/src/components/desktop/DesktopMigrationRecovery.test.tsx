@@ -53,18 +53,20 @@ it('keeps migrated queues inspectable and inserts only text after the user choos
 });
 it('does not install a migration UI in ordinary Web even if an unrelated origin has the same storage key', () => { localStorage.setItem(FRONTEND_RECOVERED_DRAFTS_KEY, JSON.stringify({ schema: 1, drafts: [{ target: 'x', message: { content: 'not desktop' } }] })); render(); expect(container.textContent).toBe(''); });
 
-it('offers explicit native browser site recovery and clears the old credential warning only after native receipts',()=>{
+it('explains the intentional browser reset without offering failed-import repairs or opening sites',()=>{
  window.__VARIN_DESKTOP_RUNTIME__={runtime:'tauri',arch:'x64',macVibrancy:false,macVibrancySupported:false,trayEnabled:false};
- localStorage.setItem(NATIVE_MIGRATION_RECOVERY_KEY,JSON.stringify({schema:1,credentialSlotsPending:[],browserSites:['https://example.test']}));
- render();expect(recoveryBrowser.open).not.toHaveBeenCalled();click('desktopMigration.review');expect(container.textContent).toContain('desktopMigration.browserStorage');expect(container.textContent).not.toContain('desktopMigration.credentials');
- click('desktopMigration.openSite: https://example.test');expect(recoveryBrowser.open).toHaveBeenCalledWith('/work','https://example.test');
- click('desktopMigration.review');click('desktopMigration.closeNotice');expect(JSON.parse(localStorage.getItem(NATIVE_MIGRATION_RECOVERY_KEY)!).browserRecoveryAcknowledged).toBe(true);
+ localStorage.setItem(NATIVE_MIGRATION_RECOVERY_KEY,JSON.stringify({schema:1,credentialSlotsPending:[],browserStatus:'not-migrated',browserRequiresLogin:true}));
+ render();expect(recoveryBrowser.open).not.toHaveBeenCalled();click('desktopMigration.review');
+ expect(container.textContent).toContain('desktopMigration.browserReset');expect(container.textContent).not.toContain('desktopMigration.credentials');
+ expect(container.textContent).not.toContain('desktopMigration.openSite');
+ click('desktopMigration.closeNotice');expect(JSON.parse(localStorage.getItem(NATIVE_MIGRATION_RECOVERY_KEY)!).browserNoticeAcknowledged).toBe(true);
+ expect(recoveryBrowser.open).not.toHaveBeenCalled();
 });
 
 it('keeps failed artwork recoverable without blocking the workbench or automatically starting a download',async()=>{
  window.__VARIN_DESKTOP_RUNTIME__={runtime:'tauri',arch:'x64',macVibrancy:false,macVibrancySupported:false,trayEnabled:false};
- localStorage.setItem(NATIVE_MIGRATION_RECOVERY_KEY,JSON.stringify({schema:1,credentialSlotsPending:['sttApiKey'],browserSites:[],browserSourceUnavailable:true,companionFailures:[{id:'varin',reason:'asset-integrity'}]}));
- render();click('desktopMigration.review');expect(container.textContent).toContain('desktopMigration.packIntegrity');expect(container.textContent).toContain('desktopMigration.browserUnavailable');expect(recoveryBrowser.invoke).not.toHaveBeenCalled();
+ localStorage.setItem(NATIVE_MIGRATION_RECOVERY_KEY,JSON.stringify({schema:1,credentialSlotsPending:['sttApiKey'],browserStatus:'not-migrated',browserRequiresLogin:true,companionFailures:[{id:'varin',reason:'asset-integrity'}]}));
+ render();click('desktopMigration.review');expect(container.textContent).toContain('desktopMigration.packIntegrity');expect(container.textContent).toContain('desktopMigration.browserReset');expect(recoveryBrowser.invoke).not.toHaveBeenCalled();
  await act(async()=>{click('desktopMigration.retryPack: varin');await Promise.resolve();});
  expect(recoveryBrowser.invoke).toHaveBeenCalledWith('desktop_companion_library',{action:'download',id:'varin'});expect(recoveryBrowser.settings).toHaveBeenCalledWith('companion');expect(recoveryBrowser.tab).toHaveBeenCalledWith(true);
  expect(localStorage.getItem(NATIVE_MIGRATION_RECOVERY_KEY)).toContain('asset-integrity');

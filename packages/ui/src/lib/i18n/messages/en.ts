@@ -12,8 +12,8 @@ import { toolMessagesEn } from './tool-interactions';
 import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 export const dict = {
+  "desktopMigration.browserReset": "This upgrade starts with a new built-in browser profile. Cookies, website logins and site storage are not imported, so you will need to sign in again. The previous browser profile is kept unchanged. Chats, projects, settings and application credentials are handled separately.",
   "desktopMigration.openVoice": "Review voice settings",
-  "desktopMigration.browserUnavailable": "The previous browser profile could not be read by its original engine. Its data is still intact. Check saved sites manually and sign in again if needed; no browser state has been claimed as migrated.",
   "desktopMigration.packs": "Some companion artwork could not be imported. The original files and any valid target appearance were kept. Retry a download from the current companion library or review the library below.",
   "desktopMigration.retryPack": "Retry artwork download",
   "desktopMigration.openCompanions": "Open companion library",
@@ -24,9 +24,6 @@ export const dict = {
   "desktopMigration.packPublication": "The verified artwork could not be published at its destination.",
   "desktopMigration.packUnavailable": "The original artwork cache could not be read.",
   "desktopMigration.review": "Review desktop recovery",
-  "desktopMigration.browserStorage": "Native migration checked cookies and supported local storage individually. Some items may not be transferable, and sites may need you to sign in again. IndexedDB data, service workers and device-bound credentials remain in the previous desktop.",
-  "desktopMigration.browserInventory": "The site list comes from cookies and saved browser pages. Other site storage may exist in the old profile, which has been retained. Open a site to review it manually; nothing opens or signs in automatically.",
-  "desktopMigration.openSite": "Review site",
   "desktopMigration.title": "Recovered desktop state",
   "desktopMigration.description": "Your previous queued messages were preserved as drafts. Nothing was sent automatically.",
   "desktopMigration.credentials": "Some saved voice credentials could not be migrated. The originals remain in the previous desktop. Review your voice settings before using them.",

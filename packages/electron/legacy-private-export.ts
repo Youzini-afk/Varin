@@ -19,7 +19,7 @@ export function legacyCredentials(entries: readonly (readonly [string, string])[
   return result;
 }
 /** No data is sent before the private parent handshake; every write obeys pipe
- * backpressure. Failures contain neither cookie values nor credential material. */
+ * backpressure. Failures never contain credential material. */
 export async function openLegacyPrivateChannel(input: AsyncIterable<Uint8Array>, write: (bytes: Uint8Array) => Promise<void>) {
   const read = createLegacyMigrationReader(input), hello = await read();
   if (hello.protocol !== protocol || hello.version !== 1 || hello.kind !== 'begin' || typeof hello.nonce !== 'string' || !/^[a-f0-9-]{36}$/.test(hello.nonce)) throw new Error('Legacy migration parent handshake is invalid');
@@ -29,21 +29,18 @@ export async function openLegacyPrivateChannel(input: AsyncIterable<Uint8Array>,
 export async function exportLegacyPrivateState(options: {
   channel: Awaited<ReturnType<typeof openLegacyPrivateChannel>>;
   sourceVersion: string; credentials: LegacyCredential[];
-  cookies: Record<string, unknown>[];
-  origins: AsyncIterable<Record<string, unknown>>;
-  uiReceipt: unknown; browserStatus?: 'available'|'source-unavailable';
+  uiReceipt: unknown;
 }): Promise<void> {
   const {read,send,nonce}=options.channel;
-  await send({ kind: 'ready', browserStatus:options.browserStatus??'available', sourceVersion: options.sourceVersion, credentialCount: options.credentials.length, cookieCount: options.cookies.length, cookieInventory: options.cookies.map(cookie => Object.fromEntries(['name', 'domain', 'path', 'partitionKey', 'partitionKeyOpaque'].flatMap(key => cookie[key] === undefined ? [] : [[key, cookie[key]]]))), uiReceipt: options.uiReceipt });
+  await send({ kind: 'ready', browserStatus: 'not-migrated', sourceVersion: options.sourceVersion,
+    credentialCount: options.credentials.length, uiReceipt: options.uiReceipt });
   let sequence = 0;
   const item = async (value: Record<string, unknown>) => {
     await send({ ...value, sequence: ++sequence });
     const ack = await read();
-    if (ack.protocol !== protocol || ack.version !== 1 || ack.nonce !== nonce || ack.kind !== 'ack' || ack.sequence !== sequence || !['imported', 'retained', 'unsupported', 'failed'].includes(String(ack.status))) throw new Error('Legacy migration acknowledgement is invalid');
+    if (ack.protocol !== protocol || ack.version !== 1 || ack.nonce !== nonce || ack.kind !== 'ack' || ack.sequence !== sequence || !['imported', 'retained', 'failed'].includes(String(ack.status))) throw new Error('Legacy migration acknowledgement is invalid');
   };
   for (const credential of options.credentials) await item({ ...credential });
-  for (const cookie of options.cookies) await item({ kind: 'cookie', cookie });
-  for await (const origin of options.origins) await item({ ...origin, kind: 'origin' });
   await send({ kind: 'done', records: sequence });
   const complete = await read();
   if (complete.protocol !== protocol || complete.version !== 1 || complete.nonce !== nonce || complete.kind !== 'complete' || complete.records !== sequence) throw new Error('Legacy migration final acknowledgement is invalid');

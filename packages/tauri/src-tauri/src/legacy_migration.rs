@@ -10,7 +10,7 @@ use crate::{
 use base64::Engine as _;
 use serde_json::{Value, json};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::Path,
     process::Stdio,
     sync::{Arc, Mutex},
@@ -19,7 +19,6 @@ use tauri::{AppHandle, Manager, Webview, WebviewUrl, WebviewWindow, WebviewWindo
 use tauri_runtime_cef::{
     AsCefWebviewAttributes, DevToolsProtocol, FrameEventKind, WebviewCefExt,
     WebviewWindowBuilderCefExt, allocate_devtools_message_id,
-    cef::{self, rc::*, *},
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -36,29 +35,49 @@ const INERT: &str = "<!doctype html><html><head><meta charset='utf-8'><title>Var
 struct NativeCdp {
     view: Webview,
     pending: Pending,
+    terminal: watch::Receiver<Option<&'static str>>,
 }
 impl NativeCdp {
     async fn request(&self, method: &str, params: Value) -> Reply {
+        if self.terminal.borrow().is_some() {
+            return Err("Migration native document is unavailable".into());
+        }
         let id = allocate_devtools_message_id()
             .map_err(|_| "Migration native message identity unavailable")?;
+        let message = serde_json::to_vec(&json!({"id":id,"method":method,"params":params}))
+            .map_err(|_| "Migration native request is invalid")?;
+        if message.len() > data::MAX_BYTES {
+            return Err("Migration native request exceeds its byte budget".into());
+        }
         let (send, receive) = oneshot::channel();
         self.pending
             .lock()
             .map_err(|_| "Migration native observer unavailable")?
             .insert(id, send);
-        let message = serde_json::to_vec(&json!({"id":id,"method":method,"params":params}))
-            .map_err(|_| "Migration native request is invalid")?;
-        if message.len() > data::MAX_BYTES {
-            self.pending.lock().unwrap().remove(&id);
-            return Err("Migration native request exceeds its byte budget".into());
-        }
-        if self.view.send_dev_tools_message(&message).is_err() {
+        if self.terminal.borrow().is_some() || self.view.send_dev_tools_message(&message).is_err() {
             self.pending.lock().unwrap().remove(&id);
             return Err("Migration native dispatch is unconfirmed".into());
         }
-        receive
-            .await
-            .map_err(|_| "Migration native response was lost; outcome is unknown")?
+        // A crash/close may have drained the response map immediately before
+        // insertion. Keep this original page's sticky terminal receipt so that
+        // late registration cannot create an unresolvable secret-write waiter.
+        let mut terminal = self.terminal.clone();
+        let result = crate::cdp_settlement::settle(receive, async move {
+            loop {
+                if let Some(reason) = *terminal.borrow_and_update() {
+                    break Err(reason.to_owned());
+                }
+                terminal.changed().await.map_err(|_| {
+                    "Migration native observation was lost; termination is unknown".to_owned()
+                })?;
+            }
+        })
+        .await;
+        self.pending
+            .lock()
+            .map_err(|_| "Migration native observer unavailable")?
+            .remove(&id);
+        result
     }
     async fn entries(&self, origin: &str) -> Result<HashMap<String, String>, String> {
         let result = self
@@ -86,11 +105,16 @@ struct HiddenPage {
 }
 impl HiddenPage {
     async fn open(app: &AppHandle, data_dir: &Path, application: bool) -> Result<Self, String> {
+        if !application && !crate::smoke::requested() {
+            return Err("The migration reader only admits the application profile".into());
+        }
         let label = format!("migration-{}", uuid::Uuid::new_v4());
         let allowed: Arc<Mutex<Option<String>>> = Arc::default();
         let navigation = allowed.clone();
         let pending: Pending = Arc::default();
         let crashed = pending.clone();
+        let (terminal, terminal_receipt) = watch::channel(None);
+        let frame_terminal = terminal.clone();
         let (loaded, committed) = watch::channel(None);
         let page_load = loaded.clone();
         let initial = if application {
@@ -119,6 +143,9 @@ impl HiddenPage {
             })
             .on_frame_event(move |event| {
                 if matches!(event.kind, FrameEventKind::RendererTerminated) {
+                    frame_terminal.send_replace(Some(
+                        "Migration renderer terminated; effect outcome is unknown",
+                    ));
                     page_load.send_replace(Some(Err(
                         "Migration renderer terminated; write outcome is unknown".into(),
                     )));
@@ -127,7 +154,7 @@ impl HiddenPage {
                             "Migration renderer terminated; write outcome is unknown".into(),
                         ));
                     }
-                } else if event.is_main {
+                } else if event.is_main && frame_terminal.borrow().is_none() {
                     if let FrameEventKind::DocumentCommitted { url } = event.kind {
                         page_load.send_replace(Some(Ok(url.to_string())));
                     }
@@ -145,13 +172,15 @@ impl HiddenPage {
         let cdp = NativeCdp {
             view: window.as_ref().clone(),
             pending: pending.clone(),
+            terminal: terminal_receipt,
         };
         let observer = cdp.clone();
         let responses = pending.clone();
         let permitted = allowed.clone();
         let failed_navigation = loaded.clone();
+        let invalid_response = terminal.clone();
         let attached = window.on_dev_tools_protocol(move|message|if let DevToolsProtocol::Message(bytes)=message{
-            if bytes.len()>data::MAX_BYTES{for(_,reply)in responses.lock().unwrap().drain(){let _=reply.send(Err("Migration native response exceeds its byte budget".into()));}return;}
+            if bytes.len()>data::MAX_BYTES{invalid_response.send_replace(Some("Migration native response exceeds its byte budget; effect outcome is unknown"));for(_,reply)in responses.lock().unwrap().drain(){let _=reply.send(Err("Migration native response exceeds its byte budget".into()));}return;}
             if let Ok(value)=serde_json::from_slice::<Value>(&bytes){
                 if let Some(id)=value["id"].as_i64().and_then(|id|i32::try_from(id).ok()){
                     if let Some(reply)=responses.lock().unwrap().remove(&id){let _=reply.send(if value["error"].is_object(){Err("Migration native operation was rejected".into())}else{Ok(value["result"].clone())});}
@@ -172,6 +201,9 @@ impl HiddenPage {
         let stopped = close.clone();
         tauri::async_runtime::spawn(async move {
             stopped.wait_termination().await;
+            terminal.send_replace(Some(
+                "Migration native surface closed; effect outcome is unknown",
+            ));
             loaded.send_replace(Some(Err("Migration native surface closed".into())));
             for (_, reply) in pending.lock().unwrap().drain() {
                 let _ = reply.send(Err(
@@ -220,7 +252,9 @@ impl HiddenPage {
         Ok(())
     }
     async fn origin(&mut self, origin: &str) -> Result<(), String> {
-        data::site_origin(origin)?;
+        if !crate::smoke::requested() || origin != "https://migration-fixture.invalid" {
+            return Err("Only the fixed browser-isolation smoke origin is admitted".into());
+        }
         let url = format!("{origin}/.varin-migration.html");
         *self
             .allowed
@@ -238,45 +272,7 @@ impl HiddenPage {
     async fn close(&self) -> Result<(), String> {
         self.close.request(self.window.as_ref()).await
     }
-    async fn flush_cookies(&self) -> Result<(), String> {
-        let (send, receive) = oneshot::channel();
-        let result = Arc::new(FlushReceipt(Mutex::new(Some(send))));
-        let observer = result.clone();
-        self.window
-            .with_cef_webview(move |view| {
-                let manager = view
-                    .browser()
-                    .host()
-                    .and_then(|host| host.request_context())
-                    .and_then(|context| context.cookie_manager(None));
-                if let Some(manager) = manager {
-                    let mut callback = FlushCookies::new(observer.clone());
-                    if manager.flush_store(Some(&mut callback)) == 1 {
-                        return;
-                    }
-                }
-                if let Some(reply) = observer.0.lock().unwrap().take() {
-                    let _ = reply.send(Err("Migration cookie persistence could not start".into()));
-                }
-            })
-            .map_err(|_| "Migration cookie persistence dispatch failed")?;
-        drop(result);
-        receive
-            .await
-            .map_err(|_| "Migration cookie persistence acknowledgement was lost")?
-    }
 }
-struct FlushReceipt(Mutex<Option<oneshot::Sender<Result<(), String>>>>);
-impl Drop for FlushReceipt {
-    fn drop(&mut self) {
-        if let Some(reply) = self.0.lock().unwrap().take() {
-            let _ = reply.send(Err(
-                "Migration cookie persistence callback ended without a receipt".into(),
-            ));
-        }
-    }
-}
-wrap_completion_callback! {struct FlushCookies{reply:Arc<FlushReceipt>,}impl CompletionCallback{fn on_complete(&self){if let Some(reply)=self.reply.0.lock().unwrap().take(){let _=reply.send(Ok(()));}}}}
 impl Drop for HiddenPage {
     fn drop(&mut self) {
         // Exceptional unwinding still requests closure. Only close().await can
@@ -327,169 +323,6 @@ fn check_frame(frame: &Value, nonce: &str) -> Result<(), String> {
     }
     Ok(())
 }
-async fn import_cookie(
-    browser: &HiddenPage,
-    cookie: &Value,
-    original_target: &[Value],
-) -> Result<&'static str, String> {
-    let identity = data::cookie_identity(cookie)?;
-    let Some(params) = data::cookie_parameters(cookie)? else {
-        return Ok("unsupported");
-    };
-    let current = browser.cdp.request("Storage.getCookies", json!({})).await?;
-    let before = current["cookies"]
-        .as_array()
-        .ok_or("Target cookie inventory is invalid")?;
-    if before
-        .iter()
-        .any(|v| data::cookie_identity(v).ok().as_ref() == Some(&identity))
-    {
-        return Ok("retained");
-    }
-    if original_target
-        .iter()
-        .any(|v| data::cookie_scope_related(cookie, v))
-    {
-        return Ok("unsupported");
-    }
-    let mut applicable = url::Url::parse(
-        params["url"]
-            .as_str()
-            .ok_or("Cookie probe URL is invalid")?,
-    )
-    .map_err(|_| "Cookie probe URL is invalid")?;
-    applicable.set_path(
-        cookie["path"]
-            .as_str()
-            .ok_or("Cookie probe path is invalid")?,
-    );
-    let response = browser.cdp.request("Network.setCookie", params).await?;
-    if response["success"] != true {
-        return Ok("failed");
-    }
-    let after = browser.cdp.request("Storage.getCookies", json!({})).await?;
-    let after = after["cookies"]
-        .as_array()
-        .ok_or("Target cookie verification is invalid")?;
-    // The target page's network view independently verifies the cache context,
-    // rather than trusting a browser-level default-context inventory alone.
-    let visible = browser
-        .cdp
-        .request("Network.getCookies", json!({"urls":[applicable.as_str()]}))
-        .await?;
-    let matches = |values: &Vec<Value>| values.iter().any(|v| data::cookie_matches(cookie, v));
-    if matches(after) && visible["cookies"].as_array().is_some_and(matches) {
-        return Ok("imported");
-    }
-    // The entire related namespace was absent at admission. Retract only newly
-    // introduced identities, including a lost partition/host-only distinction.
-    // Pre-existing target cookies are never candidates for deletion.
-    let introduced = after
-        .iter()
-        .filter(|v| {
-            data::cookie_scope_related(cookie, v)
-                && !before
-                    .iter()
-                    .any(|old| data::cookie_identity(old).ok() == data::cookie_identity(v).ok())
-        })
-        .map(data::cookie_identity)
-        .collect::<Result<Vec<_>, _>>()?;
-    for created in introduced {
-        browser
-            .cdp
-            .request("Network.deleteCookies", created)
-            .await?;
-    }
-    for old in before
-        .iter()
-        .filter(|v| data::cookie_scope_related(cookie, v))
-    {
-        let restore =
-            data::cookie_parameters(old)?.ok_or("Original target cookie cannot be restored")?;
-        if browser.cdp.request("Network.setCookie", restore).await?["success"] != true {
-            return Err("Original target cookie restoration was not confirmed".into());
-        }
-    }
-    let removed = browser.cdp.request("Storage.getCookies", json!({})).await?;
-    let remaining = removed["cookies"]
-        .as_array()
-        .ok_or("Target cookie retraction verification is invalid")?;
-    let old_related = before
-        .iter()
-        .filter(|v| data::cookie_scope_related(cookie, v))
-        .collect::<Vec<_>>();
-    let new_related = remaining
-        .iter()
-        .filter(|v| data::cookie_scope_related(cookie, v))
-        .collect::<Vec<_>>();
-    if old_related.len() != new_related.len()
-        || old_related
-            .iter()
-            .any(|old| !new_related.iter().any(|new| data::cookie_matches(old, new)))
-    {
-        return Err("Migration could not retract an incompatible new cookie".into());
-    }
-    Ok("unsupported")
-}
-async fn recover_cookie_attempt(browser: &HiddenPage, pending: &Value) -> Result<(), String> {
-    if pending.is_null() {
-        return Ok(());
-    }
-    if pending["schema"] != 1 {
-        return Err("Native cookie recovery journal is incompatible".into());
-    }
-    let scopes = pending["scopes"]
-        .as_array()
-        .ok_or("Native cookie recovery namespaces are invalid")?;
-    for scope in scopes {
-        data::cookie_identity(scope)?;
-    }
-    let current = browser.cdp.request("Storage.getCookies", json!({})).await?;
-    for cookie in current["cookies"]
-        .as_array()
-        .ok_or("Target cookie recovery inventory is invalid")?
-    {
-        if scopes
-            .iter()
-            .any(|scope| data::cookie_scope_related(scope, cookie))
-        {
-            browser
-                .cdp
-                .request("Network.deleteCookies", data::cookie_identity(cookie)?)
-                .await?;
-        }
-    }
-    let after = browser.cdp.request("Storage.getCookies", json!({})).await?;
-    if after["cookies"]
-        .as_array()
-        .ok_or("Target cookie recovery readback is invalid")?
-        .iter()
-        .any(|cookie| {
-            scopes
-                .iter()
-                .any(|scope| data::cookie_scope_related(scope, cookie))
-        })
-    {
-        return Err("Previous cookie migration has not been retracted".into());
-    }
-    browser.flush_cookies().await
-}
-fn provisional_cookie_scopes(inventory: &[Value], target: &[Value]) -> Result<Vec<Value>, String> {
-    let mut scopes = Vec::new();
-    let mut seen = HashSet::new();
-    for item in inventory {
-        let identity = data::cookie_identity(item)?;
-        if identity["opaque"] == true || target.iter().any(|v| data::cookie_scope_related(item, v))
-        {
-            continue;
-        }
-        let scope = json!({"domain":item["domain"].as_str().unwrap().trim_start_matches('.'),"name":item["name"],"path":item["path"]});
-        if seen.insert(scope.to_string()) {
-            scopes.push(scope)
-        }
-    }
-    Ok(scopes)
-}
 struct ScopeGuard(ProcessScope);
 impl Drop for ScopeGuard {
     fn drop(&mut self) {
@@ -518,15 +351,15 @@ pub async fn prepare(
             json!({}),
         )
         .await?;
+    let original = app
+        .path()
+        .config_dir()
+        .map_err(|_| "Previous desktop profile location is unavailable")?
+        .join("Varin");
+    let present = tokio::task::spawn_blocking(move || data::legacy_profile_present(&original))
+        .await
+        .map_err(|_| "Previous desktop profile inspection stopped")??;
     let Some(legacy) = runtime.manifest.legacy_electron.as_ref() else {
-        let original = app
-            .path()
-            .config_dir()
-            .map_err(|_| "Previous desktop profile location is unavailable")?
-            .join("Varin");
-        let present = tokio::task::spawn_blocking(move || data::legacy_profile_present(&original))
-            .await
-            .map_err(|_| "Previous desktop profile inspection stopped")??;
         if data::transition_required(&existing, present) {
             return Err(data::TRANSITION_REQUIRED.into());
         }
@@ -539,9 +372,12 @@ pub async fn prepare(
     if existing["sourceSha"] == legacy.source_sha
         && existing["protocol"] == 1
         && existing["attemptComplete"] == true
-        && existing["pendingCookies"].is_null()
+        && existing["browserStatus"] == "not-migrated"
     {
         return Ok(existing);
+    }
+    if !present {
+        return Ok(json!({"available":false}));
     }
     let expected = match crate::manifest::platform() {
         "win32" => "legacy-electron/Varin.exe",
@@ -589,7 +425,8 @@ pub async fn prepare(
         .kill_on_drop(true);
     // The exporter owns private Chromium children as well as its main process.
     // Use the same guardian/Job from admission, never attach after execution.
-    let (mut child, process_scope) = ProcessScope::spawn_with_stderr(command, data_dir, Stdio::null())?;
+    let (mut child, process_scope) =
+        ProcessScope::spawn_with_stderr(command, data_dir, Stdio::null())?;
     let scope = ScopeGuard(process_scope);
     let mut input = child
         .stdout
@@ -601,31 +438,22 @@ pub async fn prepare(
         .ok_or("Legacy private input unavailable")?;
     let nonce = uuid::Uuid::new_v4().to_string();
     let mut application: Option<HiddenPage> = None;
-    let mut browser: Option<HiddenPage> = None;
     let outcome:Reply=async{
         write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"begin","nonce":nonce,"lease":lease.record()})).await?;
         let ready=read_frame(&mut input).await?;check_frame(&ready,&nonce)?;
-        if ready["kind"]!="ready"||ready["sourceVersion"]!=legacy.version||!matches!(ready["browserStatus"].as_str(),Some("available"|"source-unavailable")){return Err("Legacy exporter version was not confirmed".into())}
-        application=Some(HiddenPage::open(app,data_dir,true).await?);browser=Some(HiddenPage::open(app,data_dir,false).await?);
+        if ready["kind"]!="ready" || ready["sourceVersion"]!=legacy.version || ready["browserStatus"]!="not-migrated"
+            || ready["credentialCount"].as_u64().is_none_or(|count| count > 6) {
+            return Err("Legacy exporter version or scope was not confirmed".into());
+        }
+        application=Some(HiddenPage::open(app,data_dir,true).await?);
         let ui=application.as_mut().unwrap();ui.wait_origin("http://tauri.localhost").await?;
-        let browsing=browser.as_mut().unwrap();browsing.offline().await?;
-        recover_cookie_attempt(browsing,&existing["pendingCookies"]).await?;
-        let inventory=ready["cookieInventory"].as_array().ok_or("Legacy cookie identity inventory is unavailable")?;
-        if ready["cookieCount"].as_u64()!=Some(inventory.len()as u64){return Err("Legacy cookie identity inventory is incomplete".into())}
-        let identities=inventory.iter().map(data::cookie_identity).collect::<Result<Vec<_>,_>>()?;
-        if identities.iter().map(Value::to_string).collect::<HashSet<_>>().len()!=identities.len(){return Err("Legacy cookie identity inventory is duplicated".into())}
-        let original=browsing.cdp.request("Storage.getCookies",json!({})).await?;
-        let original_target=original["cookies"].as_array().ok_or("Target cookie admission inventory is invalid")?;
-        let scopes=provisional_cookie_scopes(inventory,original_target)?;
-        settings.call(runtime,data_dir,"nativeMigrationCookiePrepare",json!({"schema":1,"sourceSha":legacy.source_sha,"scopes":scopes}),json!({})).await?;
-
         let staged=settings.call(runtime,data_dir,"frontendMigrationRead",json!({}),json!({})).await?;
         let staged_config=staged["payload"]["entries"]["config-store"].as_str();
         let mut target=ui.cdp.entries("http://tauri.localhost").await?;
-        let mut credentials=Vec::new();let mut cookies=Vec::new();let mut origins=Vec::new();let mut sequence=0u64;
+        let mut credentials=Vec::new();let mut sequence=0u64;
         loop{
             let record=read_frame(&mut input).await?;check_frame(&record,&nonce)?;
-            if record["kind"]=="done"{if record["records"].as_u64()!=Some(sequence)||ready["credentialCount"].as_u64()!=Some(credentials.len()as u64)||ready["cookieCount"].as_u64()!=Some(cookies.len()as u64){return Err("Legacy export receipt omitted original items".into())}break}
+            if record["kind"]=="done"{if record["records"].as_u64()!=Some(sequence)||ready["credentialCount"].as_u64()!=Some(credentials.len()as u64){return Err("Legacy export receipt omitted original items".into())}break}
             sequence+=1;if record["sequence"].as_u64()!=Some(sequence){return Err("Legacy private record ordering is invalid".into())}
             let status=match record["kind"].as_str(){
                 Some("credential")=>{
@@ -634,30 +462,21 @@ pub async fn prepare(
                     let status=if record["sourceStatus"]=="unavailable" {"failed"} else {match data::credential_change(slot,value.ok_or("Legacy credential value is invalid")?,&target,staged_config){Ok(Some((key,value)))=>{ui.cdp.put("http://tauri.localhost",&key,&value).await?;target.insert(key,value);"imported"},Ok(None)=>"retained",Err(_)=>"failed"}};
                     credentials.push(json!({"slot":slot,"status":status}));status
                 }
-                Some("cookie")=>{let cookie=&record["cookie"];let identity=data::cookie_identity(cookie)?;if identities.get(cookies.len())!=Some(&identity){return Err("Legacy cookie record differs from its admitted inventory".into())}let status=import_cookie(browsing,cookie,original_target).await?;cookies.push(json!({"identity":identity,"status":status}));status}
-                Some("origin")=>{
-                    let origin=record["origin"].as_str().ok_or("Legacy BrowserUse origin is invalid")?;data::site_origin(origin)?;
-                    let mut imported=0usize;let mut retained=0usize;
-                    let status=if record["localStorage"].is_null(){"unsupported"}else{
-                        let source=data::storage_entries(&record["localStorage"])?;browsing.origin(origin).await?;let current=browsing.cdp.entries(origin).await?;
-                        for(key,value)in source{if current.contains_key(&key){retained+=1;}else{browsing.cdp.put(origin,&key,&value).await?;imported+=1;}}"imported"
-                    };
-                    let database_names=record["indexedDbDatabases"].as_array().filter(|values|values.iter().all(Value::is_string)).cloned();
-                    origins.push(json!({"origin":origin,"status":status,"localStorageImported":imported,"localStorageRetained":retained,"indexedDbDatabases":database_names,"serviceWorkers":"requires-site-recovery"}));status
-                }
                 _=>return Err("Legacy private record kind is not allowed".into())
             };
             write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"ack","nonce":nonce,"sequence":sequence,"status":status})).await?;
         }
-        browsing.flush_cookies().await?;
-        let receipt=json!({"schema":1,"protocol":1,"sourceSha":legacy.source_sha,"sourceVersion":legacy.version,"attemptComplete":true,"browserStatus":ready["browserStatus"],"companionFailures":ready["uiReceipt"]["companions"]["failures"].as_array().cloned().unwrap_or_default(),"credentials":credentials,"cookies":cookies,"origins":origins,"siteStorageInventory":"cookies-and-saved-browser-pages","indexedDb":"requires-site-recovery","serviceWorkers":"requires-site-recovery","sourceRetained":true});
+        let receipt=json!({"schema":1,"protocol":1,"sourceSha":legacy.source_sha,"sourceVersion":legacy.version,"attemptComplete":true,
+            "browserStatus":"not-migrated","browserRequiresLogin":true,
+            "companionFailures":ready["uiReceipt"]["companions"]["failures"].as_array().cloned().unwrap_or_default(),
+            "credentials":credentials,"sourceRetained":true});
         ui.cdp.put("http://tauri.localhost",data::RECOVERY_KEY,&serde_json::to_string(&data::safe_recovery(&receipt)).map_err(|_|"Migration recovery status could not be encoded")?).await?;
         write_frame(&mut output,json!({"protocol":data::PROTOCOL,"version":1,"kind":"complete","nonce":nonce,"records":sequence})).await?;
         Ok(receipt)
     }.await;
     drop(output);
     // Native close and process cleanup proceed independently. A stuck/lost
-    // process observation cannot prevent closure of either original CEF page.
+    // process observation cannot prevent closure of the original CEF page.
     let process_cleanup = async {
         let mut cleanup_error = None;
         if outcome.is_err() {
@@ -671,10 +490,13 @@ pub async fn prepare(
             let mut trailing = [0];
             match input.read(&mut trailing).await {
                 Ok(0) => {
-                    if let Err(error) = scope.0.confirm_owner_drained() { cleanup_error.get_or_insert(error); }
+                    if let Err(error) = scope.0.confirm_owner_drained() {
+                        cleanup_error.get_or_insert(error);
+                    }
                 }
                 _ => {
-                    cleanup_error.get_or_insert("Legacy exporter emitted incomplete trailing data".into());
+                    cleanup_error
+                        .get_or_insert("Legacy exporter emitted incomplete trailing data".into());
                     let _ = scope.0.terminate();
                 }
             }
@@ -682,32 +504,23 @@ pub async fn prepare(
         let status = child.wait().await;
         drop(child);
         let settled = scope.0.settle_after_node_exit(&status).await;
-        if let Some(error) = cleanup_error { return Err(error); }
+        if let Some(error) = cleanup_error {
+            return Err(error);
+        }
         let settled = settled?;
         if !settled.clean || !settled.success {
             return Err("Legacy exporter did not confirm clean process-scope termination".into());
         }
         Ok::<_, String>(())
     };
-    let (status, app_close, browser_close) = tokio::join!(
-        process_cleanup,
-        async {
-            if let Some(page) = application.as_ref() {
-                page.close().await
-            } else {
-                Ok(())
-            }
-        },
-        async {
-            if let Some(page) = browser.as_ref() {
-                page.close().await
-            } else {
-                Ok(())
-            }
-        },
-    );
+    let (status, app_close) = tokio::join!(process_cleanup, async {
+        if let Some(page) = application.as_ref() {
+            page.close().await
+        } else {
+            Ok(())
+        }
+    });
     app_close?;
-    browser_close?;
     let receipt = outcome?;
     status?;
     lease.verify()?;

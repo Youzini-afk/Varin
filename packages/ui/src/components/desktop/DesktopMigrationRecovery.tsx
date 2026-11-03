@@ -4,7 +4,6 @@ import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { invokeDesktop } from '@/lib/desktop';
 import { getDesktopRuntime } from '@/lib/desktopRuntime';
 import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { Button } from '@/components/ui/button';
@@ -21,14 +20,19 @@ function recovered(): FrontendRecoveredDraft[] {
     return [];
   }
 }
-interface NativeRecovery { credentialSlotsPending: string[]; browserSites: string[]; browserRecoveryAcknowledged?: boolean;browserSourceUnavailable:boolean;companionFailures:Array<{id:string;reason:string}> }
+interface NativeRecovery { credentialSlotsPending: string[]; browserRequiresLogin: boolean; browserNoticeAcknowledged?: boolean; companionFailures: Array<{id: string; reason: string}> }
 function nativeRecovery(): NativeRecovery | null {
   if (getDesktopRuntime()?.runtime !== 'tauri') return null;
   try {
-    const value=JSON.parse(localStorage.getItem(NATIVE_MIGRATION_RECOVERY_KEY)||'null');
-    if(value?.schema!==1||!Array.isArray(value.credentialSlotsPending)||!Array.isArray(value.browserSites))return null;
-    return {browserSourceUnavailable:value.browserSourceUnavailable===true,companionFailures:Array.isArray(value.companionFailures)?value.companionFailures.filter((item:{id?:unknown;reason?:unknown})=>typeof item?.id==='string'&&typeof item.reason==='string'):[],credentialSlotsPending:value.credentialSlotsPending.filter((slot:unknown)=>typeof slot==='string'),browserSites:value.browserSites.filter((site:unknown)=>{try{return typeof site==='string'&&new URL(site).origin===site&&/^https?:/.test(site);}catch{return false;}}),browserRecoveryAcknowledged:value.browserRecoveryAcknowledged===true};
-  }catch{return null;}
+    const value = JSON.parse(localStorage.getItem(NATIVE_MIGRATION_RECOVERY_KEY) || 'null');
+    if (value?.schema !== 1 || !Array.isArray(value.credentialSlotsPending)) return null;
+    return {
+      credentialSlotsPending: value.credentialSlotsPending.filter((slot: unknown) => typeof slot === 'string'),
+      browserRequiresLogin: value.browserStatus === 'not-migrated' && value.browserRequiresLogin === true,
+      browserNoticeAcknowledged: value.browserNoticeAcknowledged === true,
+      companionFailures: Array.isArray(value.companionFailures) ? value.companionFailures.filter((item: {id?: unknown; reason?: unknown}) => typeof item?.id === 'string' && typeof item.reason === 'string') : [],
+    };
+  } catch { return null; }
 }
 /** Recovered queued inputs are inspectable drafts. They never enter an executor
  * queue; inserting text is an explicit user action and does not send it. */
@@ -36,7 +40,6 @@ export function DesktopMigrationRecovery() {
   const { t } = useI18n();
   const [drafts, setDrafts] = React.useState(recovered), [open, setOpen] = React.useState(false), [error, setError] = React.useState('');
   const [native,setNative]=React.useState(nativeRecovery);
-  const directory=useDirectoryStore(state=>state.currentDirectory);
   const [credentials, setCredentials] = React.useState(() => {
     if (getDesktopRuntime()?.runtime !== 'tauri')
       return false; try {
@@ -61,8 +64,8 @@ export function DesktopMigrationRecovery() {
     if (!composerKey)
       return; useThreadDraftStore.getState().patch(composerKey, current => ({ text: [current.text.trimEnd(), String(draft.message.content)].filter(Boolean).join('\n\n') })); setOpen(false);
   };
-  const browserRecovery=!!native&&!native.browserRecoveryAcknowledged;
-  const dismissBrowser=()=>{try{const current=JSON.parse(localStorage.getItem(NATIVE_MIGRATION_RECOVERY_KEY)||'null');localStorage.setItem(NATIVE_MIGRATION_RECOVERY_KEY,JSON.stringify({...current,browserRecoveryAcknowledged:true}));setNative(previous=>previous?{...previous,browserRecoveryAcknowledged:true}:null);}catch{setError(t('desktopMigration.saveFailed'));}};
+  const browserRecovery=!!native?.browserRequiresLogin&&!native.browserNoticeAcknowledged;
+  const dismissBrowser=()=>{try{const current=JSON.parse(localStorage.getItem(NATIVE_MIGRATION_RECOVERY_KEY)||'null');localStorage.setItem(NATIVE_MIGRATION_RECOVERY_KEY,JSON.stringify({...current,browserNoticeAcknowledged:true}));setNative(previous=>previous?{...previous,browserNoticeAcknowledged:true}:null);}catch{setError(t('desktopMigration.saveFailed'));}};
   const openSettings=(slug:string)=>requestSettingsNavigation(()=>{useUIStore.getState().setSettingsPage(slug);useUIStore.getState().setSettingsDialogOpen(true);setOpen(false);});
   const retryPack=(id:string)=>{void invokeDesktop('desktop_companion_library',{action:'download',id}).then(()=>openSettings('companion')).catch(()=>setError(t('desktopMigration.packRetryFailed')));};
   const packReasons:Record<string,string>={'source-validation':t('desktopMigration.packInvalid'),'asset-integrity':t('desktopMigration.packIntegrity'),'destination-conflict':t('desktopMigration.packConflict'),'publication-unavailable':t('desktopMigration.packPublication'),'source-cache-unavailable':t('desktopMigration.packUnavailable')};
@@ -73,9 +76,7 @@ export function DesktopMigrationRecovery() {
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{t('desktopMigration.title')}</DialogTitle><DialogDescription>{t('desktopMigration.description')}</DialogDescription></DialogHeader>
       {credentials && <section className="rounded-md border border-border p-3 text-sm"><p>{t('desktopMigration.credentials')}</p><Button variant="outline" onClick={()=>openSettings('voice')}>{t('desktopMigration.openVoice')}</Button><Button variant="ghost" onClick={() => setCredentials(false)}>{t('desktopMigration.closeNotice')}</Button></section>}
       {browserRecovery&&<section className="space-y-2 rounded-md border border-border p-3 text-sm">
-        <p>{t(native?.browserSourceUnavailable?'desktopMigration.browserUnavailable':'desktopMigration.browserStorage')}</p>
-        <p className="text-muted-foreground">{t('desktopMigration.browserInventory')}</p>
-        {native?.browserSites.map(site=><Button className="mr-2" key={site} variant="outline" disabled={!directory} onClick={()=>{useUIStore.getState().openContextBrowser(directory,site);setOpen(false);}}>{t('desktopMigration.openSite')}: {site}</Button>)}
+        <p>{t('desktopMigration.browserReset')}</p>
         <Button variant="ghost" onClick={dismissBrowser}>{t('desktopMigration.closeNotice')}</Button>
       </section>}
       {!!native?.companionFailures.length&&<section className="space-y-2 rounded-md border border-border p-3 text-sm">

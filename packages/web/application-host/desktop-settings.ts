@@ -1,7 +1,7 @@
 /** Short-lived desktop settings process. Importing this entry does not construct
  * an Application Host, Catalog, KnowledgeStore or network listener. All writes
  * use the existing cross-process settings owner, including its lock/recovery. */
-import { nativeMigrationReceipt, nativeMigrationCookieJournal } from './lib/platform/native-migration-receipt.js';
+import { nativeMigrationReceipt } from './lib/platform/native-migration-receipt.js';
 import { createDesktopFrontendMigrationOwner } from './lib/platform/frontend-migration.js';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
@@ -29,11 +29,10 @@ export function createDesktopSettingsOwner(filePath = path.join(resolveVarinData
   }): Promise<unknown> => {
     const args = record(input);
     switch (method) {
-      case 'nativeMigrationRead': { const root=store.readSync(); return {...record(root.desktopNativeMigration),pendingCookies:root.desktopNativeMigrationCookies??null}; }
-      case 'nativeMigrationCookiePrepare': { const pending=nativeMigrationCookieJournal(input);await store.update(root=>{root.desktopNativeMigrationCookies=pending;});return null; }
+      case 'nativeMigrationRead': return record(store.readSync().desktopNativeMigration);
       case 'nativeMigrationComplete': {
         const receipt=nativeMigrationReceipt(input);
-        await store.update(root=>{if(root.desktopNativeMigrationCookies&&record(root.desktopNativeMigrationCookies).sourceSha!==receipt.sourceSha)throw new Error('Native migration attempt identity changed');root.desktopNativeMigration=receipt;delete root.desktopNativeMigrationCookies;const frontend=record(root.desktopFrontendMigration);if(frontend.stage==='imported')root.desktopFrontendMigration={...frontend,credentialsComplete:receipt.credentialsComplete};});
+        await store.update(root=>{root.desktopNativeMigration=receipt;const frontend=record(root.desktopFrontendMigration);if(frontend.stage==='imported')root.desktopFrontendMigration={...frontend,credentialsComplete:receipt.credentialsComplete};});
         return null;
       }
       case 'frontendMigrationRead': return createDesktopFrontendMigrationOwner(store).read();
