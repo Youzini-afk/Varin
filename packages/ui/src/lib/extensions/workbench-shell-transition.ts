@@ -1,3 +1,4 @@
+import { assertExtensionCodeReview, type ExtensionCodeReview } from './code-trust';
 import type {
   VarinApplicationSurface,
   VarinWorkbenchLayoutLayer,
@@ -84,6 +85,7 @@ export interface WorkbenchProfileTransitionOptions {
   selectOnLeavingBot?: () => void;
   beforePrepare?: () => Promise<void>;
   enableShell?: boolean;
+  codeReview?: ExtensionCodeReview;
 }
 
 interface WorkbenchShellTransitionOptions extends WorkbenchProfileTransitionOptions {
@@ -97,7 +99,7 @@ export interface WorkbenchShellTransitionDependencies {
   getSurfaceSnapshot(): SurfaceRegistrySnapshot;
   refreshCatalog(): Promise<void>;
   selectProfile(request: VarinWorkbenchProfileSelectionRequest): Promise<void>;
-  setEnabled(extensionId: string, enabled: boolean): Promise<void>;
+  setEnabled(extensionId: string, enabled: boolean, codeReview?: ExtensionCodeReview): Promise<void>;
   stageRender(
     contribution: SurfaceContribution,
     props: Readonly<Record<string, unknown>>,
@@ -291,6 +293,7 @@ const commitCandidateShell = async (
     beforeCommit?: () => Promise<void>;
     beforePrepare?: () => Promise<void>;
     enableShell?: boolean;
+    codeReview?: ExtensionCodeReview;
     profileId: string;
     replacementSelections: Readonly<Record<string, string>>;
     persist(expectedRevision: number): Promise<void>;
@@ -315,8 +318,16 @@ const commitCandidateShell = async (
     input.signal?.throwIfAborted();
     let inspected = inspectShell();
     if (input.enableShell && inspected.status === 'disabled' && inspected.shellExtensionId) {
-      await deps.setEnabled(inspected.shellExtensionId, true);
+      const snapshot = requireAuthoritativeWorkbench(deps);
+      const entry = snapshot.catalog.extensions.find(item => item.manifest.id === inspected.shellExtensionId);
+      if (entry?.source.kind !== 'builtin' && !input.codeReview?.artifacts.some(artifact => artifact.extensionId === inspected.shellExtensionId)) {
+        throw new Error('Review and enable this external extension in Extensions before switching its Shell.');
+      }
+      await deps.setEnabled(inspected.shellExtensionId, true, input.codeReview);
       autoEnabledExtensionId = inspected.shellExtensionId;
+      if (input.codeReview && requireAuthoritativeWorkbench(deps).workbench.document.revision !== input.codeReview.workbenchRevision) {
+        throw new Error('Workbench profile changed after code confirmation. Review the current profile again.');
+      }
       inspected = inspectShell();
     }
     const captured = captureIdentity(deps);
@@ -378,6 +389,12 @@ export const runSelectActiveWorkbenchProfile = (
 ): Promise<void> => enqueueWorkbenchShellTransition(async () => {
   options?.signal?.throwIfAborted();
   const snapshot = requireAuthoritativeWorkbench(deps);
+  if (options?.codeReview) {
+    assertExtensionCodeReview(snapshot.catalog, options.codeReview);
+    if (snapshot.workbench.document.revision !== options.codeReview.workbenchRevision) {
+      throw new Error('Workbench profile changed after code confirmation. Review the current profile again.');
+    }
+  }
   const layout = resolveVarinWorkbenchLayoutForProfile(snapshot.workbench.document, {
     surface: deps.getSurface(),
     userId: 'default',
@@ -391,6 +408,7 @@ export const runSelectActiveWorkbenchProfile = (
     profileId,
     replacementSelections: layout.replacementSelections,
     ...(options?.enableShell ? { enableShell: true } : {}),
+    ...(options?.codeReview ? { codeReview: options.codeReview } : {}),
   });
 });
 
@@ -445,6 +463,7 @@ export const selectActiveWorkbenchProfile = (
     && previous.runtimeGeneration === runtimeGeneration
     && previous.profileId === profileId && previous.workspaceId === workspaceId
     && Boolean(previous.options.enableShell) === Boolean(options?.enableShell)
+    && previous.options.codeReview === options?.codeReview
     && previous.options.beforePrepare === options?.beforePrepare
     && previous.options.beforeCommit === options?.beforeCommit
     && previous.options.selectOnLeavingBot === options?.selectOnLeavingBot) return previous.promise;

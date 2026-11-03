@@ -208,9 +208,9 @@ export class ExtensionPackageManager {
     return { candidateIntegrity: candidate.integrity, outcome: "staged", snapshot };
   }
 
-  selectCandidate(requestValue: VarinExtensionCandidateSelectionRequest | unknown, validateBeforeCommit?: () => void, restartCommit?: VarinExtensionRestartCommit): Promise<VarinExtensionCatalogSnapshot> {
+  selectCandidate(requestValue: VarinExtensionCandidateSelectionRequest | unknown, validateBeforeCommit?: () => void, restartCommit?: VarinExtensionRestartCommit, storagePublicationId?: string): Promise<VarinExtensionCatalogSnapshot> {
     const request = parseVarinExtensionCandidateSelectionRequest(requestValue);
-    return this.catalog.selectCandidate(request.extensionId, request.candidateIntegrity, request.expectedRevision, validateBeforeCommit, restartCommit);
+    return this.catalog.selectCandidate(request.extensionId, request.candidateIntegrity, request.expectedRevision, validateBeforeCommit, restartCommit, storagePublicationId);
   }
 
   async readAsset(requestValue: VarinExtensionAssetRequest | unknown): Promise<VarinExtensionAssetPayload> {

@@ -23,7 +23,9 @@ Host extensions open independent namespaced documents with
 `await context.storage.open({ scope, key, schemaVersion? })`. Each document client exposes its own
 snapshot, refresh, revision-checked update, and schema version. Varin injects the extension ID, so
 an extension cannot address another extension's namespace. `context.storage.snapshot/update` remains
-the compatibility client for `application/state`; new code should use `storage.open(...)` explicitly.
+the compatibility client for `application/state`; new code should use `storage.open(...)` explicitly. Scope names are
+namespace labels, not automatic per-user/project/session partitioning. Put an explicit stable entity identity
+in the key when a shared provider needs separate documents; they are not authorization boundaries.
 The manifest-driven `migrate` callback applies to that compatibility document only. For other documents,
 `open({ schemaVersion })` selects the version for later writes, not a data conversion. Inspect the
 returned snapshot, explicitly transform older data, and commit with its revision. Activation-time
@@ -35,6 +37,14 @@ mount-scoped `AbortSignal`, and `reportError`; it may return a synchronous or as
 Varin aborts and disposes that mounted instance when its props or owner change, the extension is
 disabled, or the host unmounts it. DOM, Canvas, Web Components, and framework-owned roots can all use
 the same contract without importing Varin's React or private UI.
+
+`defineSettingsPageMount` connects an ordinary mount to Settings using public literal-title metadata;
+`defineCommand` provides a palette command without private translation keys. `defineMessageRenderer`,
+`defineToolRenderer`, and `defineSessionDecoration` combine a presentation-only `matches` predicate
+with the same mount contract. They receive detached read-only JSON snapshots. Use the exported
+`VARIN_CONVERSATION_SLOTS` for actual conversation host points. These callable contracts are for
+managed/native code, not functions transferred through an isolated MessagePort. A descriptor alone
+is discovery metadata, not a mounted view or permission to perform work.
 
 `defineTransitionSceneMount` specializes that boundary for `transition-scene` contributions. It
 receives one stable external-store controller for the full cover/covered/reveal transaction; the
@@ -102,13 +112,11 @@ shows direct child dispatch and observation, and [delivery with explicit pause](
 shows independent output and the original Run/Wait resume boundary. Installing these examples does
 not select their policy or give it ownership of core history.
 
-`provideRetrievalPlan(context, { configurationId, structure })` registers an immutable
-`varin.retrieval.plan@1` declaration with matching `inspect` schemas. Select `structure: 'builtin'`
-for the existing native structure stage or `'disabled'` for keyword-only retrieval. Do not perform
-filesystem, model, index or other external work during declaration. The Host supplies stages and
-keeps a generation pin for each native query; ordinary extension replacement preserves existing
-queries, while explicit disable/crash revokes their bindings. See the
-[authoring guide](../../docs/ops/varin-extension-authoring.md#native-retrieval-plans) for routing.
+`provideRetrievalPlan` and `varin.retrieval.plan@1` are deprecated compatibility exports.
+The current native retrieval Agent does not consume staged keyword/structure/semantic plans.
+Existing custom service consumers may still use the wire contract; registering it does not change
+`code_retrieval`. Use the ordinary tool, policy and context contracts for current Agent behavior.
+See the [authoring guide](../../docs/ops/varin-extension-authoring.md#native-retrieval-plans).
 
 `provideTool(context, declaration, execute)` registers an ordinary Host service with `inspect` and
 `execute` methods. Import the service descriptor directly from the package's `varin.extension.json`

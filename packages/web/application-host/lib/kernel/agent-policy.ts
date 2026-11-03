@@ -3,7 +3,7 @@
 import { waitWithSignal } from '../cancellation.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { HostServiceBindingError, HostCompositionPreparationRequiredError, type ApplicationExtensionRuntime, type HostServiceBinding } from '@varin/extension-host';
+import { HostServiceBindingError, HostCompositionPreparationRequiredError, HostBindingRestoreError, type ApplicationExtensionRuntime, type HostServiceBinding } from '@varin/extension-host';
 import {
   parseVarinAgentPolicyDescription, parseVarinAgentPolicyInput, parseVarinAgentPolicyDecision,
   parseVarinAgentPolicyTransitionInput, parseVarinAgentPolicyTransition, resolveVarinExtensionServiceRouting,
@@ -55,7 +55,7 @@ async function retainAgentPolicy(
       identity: { name: `${selected.providerKey}:${description.identity.name}`, version: hash({ artifact, composition: selected.composition.root, configurationIdentity,
         identity: description.identity, modelRoles: description.modelRoles, stateTransition: description.stateTransition, serviceVersion: VARIN_AGENT_POLICY_VERSION }) },
     };
-    if (required && !isDeepStrictEqual(durable, required)) throw new Error('policy_exact_binding_unavailable');
+    if (required && !isDeepStrictEqual(durable, required)) throw new HostBindingRestoreError('policy', 'binding_changed', required.providerKey);
     pin.assertAvailable();
     return { binding: { reference: selected.providerId, artifact: durable }, revocationSignal: pin.revocationSignal,
       decide: async (input, signal) => parseVarinAgentPolicyDecision(await pin.invoke('decide', [input as unknown as JsonValue], AbortSignal.any([signal, pin.revocationSignal]))),
@@ -80,7 +80,7 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
     const request = { serviceId: VARIN_AGENT_POLICY_SERVICE_ID, version: VARIN_AGENT_POLICY_VERSION,
       method: 'describe', args: [], routing: { threadId: scope.threadId, ...(scope.projectId ? { projectId: scope.projectId } : {}) } };
     if (required) {
-      if (required.serviceId !== VARIN_AGENT_POLICY_SERVICE_ID || required.serviceVersion !== VARIN_AGENT_POLICY_VERSION) throw new Error('policy_exact_binding_unavailable');
+      if (required.serviceId !== VARIN_AGENT_POLICY_SERVICE_ID || required.serviceVersion !== VARIN_AGENT_POLICY_VERSION) throw new HostBindingRestoreError('policy', 'service_version_unsupported', required.providerKey);
       const retained = runtime.services.getSnapshot().providers.filter(provider => provider.providerKey === required.providerKey
         && provider.extensionId === required.extensionId && provider.extensionVersion === required.extensionVersion
         && runtime.supervisor.getRetainedArtifactIdentity(provider) === required.artifactIntegrity
@@ -95,7 +95,11 @@ export function createAgentPolicy(runtime: ApplicationExtensionRuntime): AgentPo
       try {
         const selected = await runtime.prepareService(request, { ...(signal ? { signal } : {}), frozenComposition: required.composition });
         return await retainAgentPolicy(runtime, selected, required, async () => {}, signal);
-      } catch (error) { signal?.throwIfAborted(); throw new Error('policy_exact_binding_unavailable', { cause: error }); }
+      } catch (cause) {
+        signal?.throwIfAborted();
+        if (cause instanceof HostBindingRestoreError) throw cause;
+        throw new HostBindingRestoreError('policy', 'implementation_unavailable', required.providerKey, { cause });
+      }
     }
     const routing = await waitWithSignal(runtime.routing.read(), signal);
     if (!routing.authoritative) throw new Error('Cannot prepare a Host service from stale selection state');

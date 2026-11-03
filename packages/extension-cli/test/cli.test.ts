@@ -200,6 +200,7 @@ test("CLI output modes preserve validation and emit script-safe results", async 
     command: "check",
     extensionId: "dev.example.output",
     incompatibleContributions: [],
+    authorDiagnostics: [],
     missingFiles: [],
     ok: true,
     referencedFiles: [],
@@ -342,3 +343,47 @@ const mkdirSource = async (root: string): Promise<void> => {
   await writeFile(join(root, "src", "main.js"), `export default { activate(context) { context.onDispose(() => undefined); } };\n`);
   await writeFile(join(root, "src", "isolated.js"), `export default { activate(context) { context.effect(() => undefined); } };\n`);
 };
+
+test("check distinguishes accepted declarations from an implemented product feature", async () => {
+  const root = await temporaryDirectory();
+  await writeFile(join(root, "package.json"), JSON.stringify({ name: "dev.example.metadata", version: "1.0.0" }));
+  await writeFile(join(root, "varin.extension.json"), JSON.stringify({
+    schemaVersion: 1, id: "dev.example.metadata", version: "1.0.0", engines: { varin: ">=0.2.0" },
+    contributions: [{ id: "dev.example.metadata.action", kind: "menu-item", contractVersion: 1,
+      supports: ["web"], data: {} }],
+  }));
+  const lines: string[] = [];
+  const exit = await runCli(["check", root, "--json"], {
+    log: (...values) => lines.push(values.join(" ")),
+    error: (...values) => { throw new Error(values.join(" ")); },
+  });
+  const result = JSON.parse(lines[0] as string) as {
+    ok: boolean; authorDiagnostics: Array<{ contributionId: string; code: string; message: string }>;
+  };
+  assert.equal(exit, 0, "author guidance does not invalidate a persisted v1 manifest");
+  assert.equal(result.ok, true);
+  assert.ok(result.authorDiagnostics.some(item => item.code === "no-product-consumer" && /does not create a menu/.test(item.message)));
+  assert.ok(result.authorDiagnostics.some(item => item.code === "implementation-required"));
+  assert.ok(result.authorDiagnostics.every(item => item.contributionId === "dev.example.metadata.action"));
+});
+
+
+test("check explains isolated callable limitations without mislabeling private settings metadata", async () => {
+  const root = await temporaryDirectory();
+  await writeFile(join(root, "package.json"), JSON.stringify({ name: "dev.example.isolated", version: "1.0.0" }));
+  await writeFile(join(root, "main.js"), "export default { activate() {} };\n");
+  await writeFile(join(root, "varin.extension.json"), JSON.stringify({
+    schemaVersion: 1, id: "dev.example.isolated", version: "1.0.0", engines: { varin: ">=0.2.0" },
+    entrypoints: { surfaces: [{ id: "main", mode: "isolated", file: "main.js", supports: ["web"] }] },
+    contributions: [
+      { id: "dev.example.isolated.renderer", kind: "tool-renderer", contractVersion: 1, supports: ["web"],
+        placement: { slot: "chat.timeline.tools" }, data: {} },
+      { id: "dev.example.isolated.settings", kind: "settings-page", contractVersion: 1, supports: ["web"],
+        data: { titleKey: "private.settings.title", slug: "private_settings", title: "Private settings" } },
+    ],
+  }));
+  const checked = await checkProject(root);
+  assert.ok(checked.authorDiagnostics.some(item => item.contributionId.endsWith(".renderer")
+    && item.code === "unsupported-execution-mode" && /matches/.test(item.message)));
+  assert.ok(!checked.authorDiagnostics.some(item => item.contributionId.endsWith(".settings") && item.code === "invalid-public-data"));
+});

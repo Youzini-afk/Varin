@@ -1,3 +1,4 @@
+import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
 import { flushSync } from 'react-dom';
 import type { ThreadModelInfo, ThreadThinkingLevel } from '@varin/application-client';
@@ -453,12 +454,12 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
               {backendControls === undefined && <ThreadPermissionControl workspacePath={permissionWorkspacePath} className={footerIconButtonClass} />}
               {backendControls === undefined && goalEnabled && onGoal && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
               {onWorkspace && <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>}
-              <WorkbenchContributionSlot kind="composer-action" slot="chat.composer.actions.leading" props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
+              <WorkbenchContributionSlot kind="composer-action" slot={VARIN_CONVERSATION_SLOTS.composerLeading} props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
             </div>
 
             {!isMobile ? <div className="conversation-composer-models">{modelControls}</div> : null}
             <div className="conversation-composer-actions">
-              <WorkbenchContributionSlot kind="composer-action" slot="chat.composer.actions.trailing" props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
+              <WorkbenchContributionSlot kind="composer-action" slot={VARIN_CONVERSATION_SLOTS.composerTrailing} props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
               <ComposerDictation
                 key={identityKey}
                 disabled={sending}

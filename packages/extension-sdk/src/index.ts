@@ -725,3 +725,5 @@ export * from "./retrieval-plan.js";
 export * from "./tools.js";
 
 export * from "./models.js";
+
+export * from "./surface-contributions.js";

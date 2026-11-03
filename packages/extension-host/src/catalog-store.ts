@@ -20,6 +20,7 @@ import {
   type VarinExtensionManifest,
   type VarinExtensionPreparedArtifact,
 } from "@varin/extension-contract";
+import type { ExtensionStoragePublication } from "./storage-store.js";
 import type { VarinBuiltinExtensionDefinition } from "@varin/extension-builtins";
 import {
   ExtensionCatalogRevisionConflictError,
@@ -551,12 +552,23 @@ export class ExtensionCatalogStore {
     });
   }
 
+  /** Read the original publication decision, never infer success from a live worker. */
+  async resolveStoragePublication(publication: ExtensionStoragePublication, id: string): Promise<"committed" | "uncommitted"> {
+    const state = await this.read();
+    if (!state.authoritative) throw new ExtensionCatalogStorageError("catalog_read_failed", "Cannot recover extension storage without authoritative Catalog state");
+    const record = state.document.extensions[publication.extensionId];
+    if (record?.storagePublicationId === id) return "committed";
+    if (record && record.integrity === publication.previousIntegrity) return "uncommitted";
+    throw new ExtensionCatalogStorageError("catalog_invalid", `Storage publication ${id} has no matching original Catalog decision; preserve its journal and repair the Catalog before starting extensions`);
+  }
+
   selectCandidate(
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
     validateBeforeCommit?: () => void,
     restartCommit?: VarinExtensionRestartCommit,
+    storagePublicationId?: string,
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
@@ -583,6 +595,7 @@ export class ExtensionCatalogStore {
       }
       // Pure Host-owned readiness/owner check after the real catalog lock and CAS checks.
       validateBeforeCommit?.();
+      if (storagePublicationId) record.storagePublicationId = storagePublicationId;
       record.manifest = structuredClone(candidate.manifest);
       record.source = structuredClone(candidate.source);
       record.integrity = candidate.integrity;

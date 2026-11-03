@@ -1,3 +1,4 @@
+import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { useSidebarCatalog, type SidebarConversation as SessionSummary, type ConversationSessionAttentionState } from './sidebarCatalog';
@@ -196,7 +197,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
     current: boolean;
     pinned: boolean;
     session: SessionSummary;
-  }>('session-decoration', 'sessions.navigator.row.decorations');
+  }>('session-decoration', VARIN_CONVERSATION_SLOTS.sessionDecorations);
   const extensionDecoration = renderFirstWorkbenchMatch(decorationRenderers, {
     attention,
     busy: isBusy,

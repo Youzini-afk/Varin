@@ -128,10 +128,9 @@ selected handles without changing the ordinary `prepareService`/`invokeService` 
 roots and their original dependencies prepare. Frozen declarations cross the private context boundary,
 and Rust's existing composition resolver/registry binds the typed immutable ordered transform. The SDK's `provideContextFragments`
 helper and `inspect` metadata share the contract; the packaged default and installable project example
-use the ordinary lifecycle. `varin.retrieval.plan@1` also uses this binding path: its declarative
-stage choices are frozen with the executing artifact and a separate pin for every native query.
-It supplies no filesystem or model capability to the extension. See `examples/extensions/project-context` for the actual author
-and project-selection path.
+use the ordinary lifecycle. See `examples/extensions/project-context` for the actual author
+and project-selection path. Native retrieval uses the ordinary Agent execution owners; the deprecated
+`varin.retrieval.plan@1` contract has no native retrieval consumer.
 
 Brokered process shutdown has a configurable `brokerShutdownGraceMs` (default 5000 ms).
 This is a cleanup grace addressing an observed indefinitely hanging disposer, not a model/tool
@@ -269,7 +268,7 @@ transport tests exercise these interruption windows against the real artifact, C
 owners; they do not claim a whole-process or cross-process atomic transaction.
 
 
-Pure context/retrieval declarations cache values against their resolved immutable composition, without
+Pure context declarations cache values against their resolved immutable composition, without
 keeping an unused worker alive. Pure graph resolution does not activate or materialize a cold package;
 ordinary preparation handles a declared package that still needs materialization. Budget descriptions
 also include the actual provider generation in their cache identity: a new activation can capture new

@@ -22,7 +22,9 @@ modes.
 `init` is non-interactive. Both `--id` and `--name` are required, and an existing non-empty target is
 never overwritten. `--template` selects `surface` (default), `shell`, `editor`, `view`, `language`, `debug`, or `test`.
 The generated project contains a public manifest, package metadata, TypeScript configuration, and the
-matching Surface or Host entrypoint. Language and debug templates also include a runnable packaged
+matching Surface or Host entrypoint. The default Surface is a working counter beside the conversation
+composer: install, enable, open a conversation, and click it. It does not send messages or call tools.
+Language and debug templates also include a runnable packaged
 protocol adapter under `runtime/`; the Host resolves it through `context.assets.path`, so it works from
 local, npm, and immutable artifact installations. The test template uses Varin's native Node test
 provider and does not generate a redundant adapter process.
@@ -35,8 +37,10 @@ then saves through the same expected-document-version authority.
 `package.json` version agree, and checks every declared Host or executable Surface file. Errors name
 the failing path and the next useful action. The JSON output includes `incompatibleContributions`
 (contributions with unknown contract versions — parsed but not executable on the current runtime),
-`missingFiles`, and `referencedFiles`. A check with incompatible contributions still succeeds (exit 0)
-because the manifest is structurally valid.
+`missingFiles`, and `referencedFiles`. Incompatible contracts return a non-zero exit code.
+`authorDiagnostics` separately explains unhosted contributions, missing product consumers, and
+declarations without executable implementations. These nonfatal warnings do not claim a view is
+mounted just because its descriptor was accepted.
 
 `build` bundles each declared executable entrypoint with esbuild. Host entrypoints use the Node 22
 platform; Surface entrypoints use the browser platform. The manifest `file` remains the exact output

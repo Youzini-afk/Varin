@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
   HostCompositionPreparationRequiredError,
+  HostBindingRestoreError,
   type ApplicationExtensionRuntime,
   type HostServiceBinding,
 } from '@varin/extension-host';
@@ -193,7 +194,7 @@ export async function retainExtensionTool(
       tool: schema,
     };
     if (required && !isDeepStrictEqual(binding, required))
-      throw new Error('extension_tool_exact_binding_unavailable');
+      throw new HostBindingRestoreError('tool', 'binding_changed', required.providerKey);
     const validateInput = compileToolJsonSchema(schema.schema),
       validateOutput = compileToolJsonSchema(schema.output_schema);
     const approved = new Map<string, { identity: string; policy: string; subjects: PermissionSubject[]; permissionSettingsRevision?: PermissionSettingsRevision; arguments: ReturnType<typeof parseVarinToolJson> }>();
@@ -613,11 +614,17 @@ export function createExtensionTools(
           signal.throwIfAborted();
           continue;
         }
-        const selected = await runtime.prepareService({ serviceId: binding.serviceId, version: binding.serviceVersion,
-          method: 'execute', args: [], routing: routingScope }, { signal, frozenComposition: binding.composition });
-        const retained = await retainExtensionTool(preparedOptions, selected, binding);
-        initial.push(retained);
-        signal.throwIfAborted();
+        try {
+          const selected = await runtime.prepareService({ serviceId: binding.serviceId, version: binding.serviceVersion,
+            method: 'execute', args: [], routing: routingScope }, { signal, frozenComposition: binding.composition });
+          const retained = await retainExtensionTool(preparedOptions, selected, binding);
+          initial.push(retained);
+          signal.throwIfAborted();
+        } catch (cause) {
+          signal.throwIfAborted();
+          if (cause instanceof HostBindingRestoreError) throw cause;
+          throw new HostBindingRestoreError('tool', 'implementation_unavailable', binding.providerKey, { cause });
+        }
       }
       if (!required.length && !run.fixed) await Promise.all([...services(snapshot).values()].map(async entry => {
         try {

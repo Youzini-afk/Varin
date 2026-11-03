@@ -151,9 +151,6 @@ const {
   VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION,
   VARIN_BUILTIN_SCRIPT_EXTENSION,
   VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION,
-  VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION,
-  VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION,
-  VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION,
 } = await import('../dist/index.js');
 const { VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE } = await import('../dist/host.js');
 
@@ -339,9 +336,6 @@ for (const [name, definition] of [
   ['interactive-ui', VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION],
   ['scripts', VARIN_BUILTIN_SCRIPT_EXTENSION],
   ['runtime-contracts', VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION],
-  ['retrieval-structured', VARIN_BUILTIN_RETRIEVAL_STRUCTURED_EXTENSION],
-  ['retrieval-keyword', VARIN_BUILTIN_RETRIEVAL_KEYWORD_EXTENSION],
-  ['retrieval-semantic', VARIN_BUILTIN_RETRIEVAL_SEMANTIC_EXTENSION],
 ]) {
   const outputRoot = join(builtinOutputRoot, name);
   await rm(outputRoot, { force: true, recursive: true });

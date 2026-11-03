@@ -1,10 +1,12 @@
-/** A declarative stage selection, not permission to read files, query an index or call a model.
- * The retrieval owner supplies and authorizes the selected stage implementations. */
+/** Legacy stage-selection wire contract retained for published SDK compatibility.
+ * The current native retrieval Agent does not consume it. A custom service consumer may still
+ * use these declarations, but they grant no file, index or model authority. */
 import type { JsonObject } from './types.js';
 export const VARIN_RETRIEVAL_PLAN_SERVICE_ID = 'varin.retrieval.plan';
 export const VARIN_RETRIEVAL_PLAN_VERSION = 1 as const;
 export const VARIN_RETRIEVAL_PLAN_METHOD = 'describe' as const;
 
+/** @deprecated Native retrieval uses the ordinary Agent execution and tool contracts. */
 export interface VarinRetrievalPlan {
   /** Immutable, author-defined configuration identity within this package artifact. */
   configurationId: string;

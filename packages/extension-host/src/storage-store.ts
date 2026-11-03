@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import {
   isVarinExtensionId,
@@ -105,8 +105,12 @@ const emptyDocument = (): VarinExtensionStorageDocument => ({
   updatedAt: new Date(0).toISOString(),
 });
 
+const canonicalJson = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => (
+  typeof item === "object" && item !== null && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))) : item
+));
 const fingerprint = (document: VarinExtensionStorageDocument): string => (
-  createHash("sha256").update(JSON.stringify(document)).digest("hex")
+  createHash("sha256").update(canonicalJson(document)).digest("hex")
 );
 
 const diagnostic = (address: VarinExtensionStorageAddress, code: string, message: string): VarinExtensionDiagnostic => ({
@@ -188,6 +192,50 @@ export class ExtensionStorageMigrationTransaction {
   }
 }
 
+/** Catalog-owned publication identity; not an extension-provided transaction. */
+export interface ExtensionStoragePublication {
+  extensionId: string;
+  previousIntegrity?: string;
+  candidateIntegrity: string;
+}
+export type ExtensionStoragePublicationResolver = (
+  publication: ExtensionStoragePublication, id: string,
+) => Promise<"committed" | "uncommitted">;
+interface StoragePublicationJournal {
+  version: 1;
+  id: string;
+  publication: ExtensionStoragePublication;
+  phase: "prepared" | "committed";
+  documents: Array<{ before: VarinExtensionStorageSnapshot; after: VarinExtensionStorageSnapshot }>;
+}
+function parseStoragePublicationJournal(value: unknown): StoragePublicationJournal {
+  const invalid = () => new ExtensionStorageError("storage_invalid", "Invalid storage publication journal; data and receipt preserved");
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalid();
+  const raw = value as Record<string, unknown>;
+  if (raw.version !== 1 || typeof raw.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(raw.id)
+    || (raw.phase !== "prepared" && raw.phase !== "committed") || !Array.isArray(raw.documents)
+    || typeof raw.publication !== "object" || raw.publication === null || Array.isArray(raw.publication)) throw invalid();
+  const publication = raw.publication as Record<string, unknown>;
+  if (typeof publication.extensionId !== "string" || !isVarinExtensionId(publication.extensionId)
+    || typeof publication.candidateIntegrity !== "string"
+    || (publication.previousIntegrity !== undefined && typeof publication.previousIntegrity !== "string")) throw invalid();
+  const seen = new Set<string>();
+  const documents = raw.documents.map((value: unknown) => {
+    if (typeof value !== "object" || value === null) throw invalid();
+    const pair = value as Record<string, unknown>;
+    const before = parseVarinExtensionStorageSnapshot(pair.before), after = parseVarinExtensionStorageSnapshot(pair.after);
+    const key = JSON.stringify(after.address);
+    if (JSON.stringify(before.address) !== key || seen.has(key) || !before.authoritative || !after.authoritative
+      || !after.exists || after.document.revision !== before.document.revision + 1) throw invalid();
+    seen.add(key);
+    return { before, after };
+  });
+  return { version: 1, id: raw.id, phase: raw.phase, documents, publication: {
+    extensionId: publication.extensionId, candidateIntegrity: publication.candidateIntegrity,
+    ...(typeof publication.previousIntegrity === "string" ? { previousIntegrity: publication.previousIntegrity } : {}),
+  } };
+}
+
 export class ExtensionStorageStore {
   readonly dataDir: string;
   readonly directory: string;
@@ -201,7 +249,34 @@ export class ExtensionStorageStore {
 
   read(addressValue: VarinExtensionStorageAddress | unknown): Promise<VarinExtensionStorageSnapshot> {
     const address = parseVarinExtensionStorageAddress(addressValue);
-    return this.#serialize(this.#path(address), () => this.#readPreserving(address));
+    const path = this.#path(address);
+    return this.#serialize(path, async () => {
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      const release = await acquireLock(`${path}.lock`);
+      try { return await this.#readPreserving(address); }
+      finally { await release(); }
+    });
+  }
+
+  /** Keep a reviewed storage revision fixed while its original owner commits a related Catalog decision.
+   * The callback must not activate code or re-enter this address. */
+  withRevision<T>(
+    addressValue: VarinExtensionStorageAddress | unknown,
+    expectedRevision: number,
+    operation: (snapshot: VarinExtensionStorageSnapshot) => Promise<T>,
+  ): Promise<T> {
+    const address = parseVarinExtensionStorageAddress(addressValue), path = this.#path(address);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error("Extension storage expectedRevision must be non-negative");
+    return this.#serialize(path, async () => {
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      const release = await acquireLock(`${path}.lock`);
+      try {
+        const current = await this.#readPreserving(address);
+        if (!current.authoritative) throw new ExtensionStorageError("storage_read_failed", "Cannot commit a related decision from stale extension storage");
+        if (current.document.revision !== expectedRevision) throw new ExtensionStorageRevisionConflictError(expectedRevision, current.document.revision);
+        return await operation(current);
+      } finally { await release(); }
+    });
   }
 
   update(
@@ -209,6 +284,7 @@ export class ExtensionStorageStore {
     expectedRevision: number,
     schemaVersion: number,
     dataValue: JsonObject,
+    expectedSchemaVersion?: number,
   ): Promise<VarinExtensionStorageSnapshot> {
     const address = parseVarinExtensionStorageAddress(addressValue);
     if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 0) throw new Error("Extension storage schemaVersion must be non-negative");
@@ -220,6 +296,9 @@ export class ExtensionStorageStore {
       const release = await acquireLock(`${path}.lock`);
       try {
         const current = await this.#readStrict(address);
+        if (current.exists && expectedSchemaVersion !== undefined && current.document.schemaVersion !== expectedSchemaVersion) {
+          throw new ExtensionStorageError("storage_schema_changed", `Extension storage schema changed from ${expectedSchemaVersion} to ${current.document.schemaVersion}; this original generation cannot write the new schema`);
+        }
         if (current.document.revision !== expectedRevision) {
           throw new ExtensionStorageRevisionConflictError(expectedRevision, current.document.revision);
         }
@@ -254,6 +333,154 @@ export class ExtensionStorageStore {
     for (const path of [...this.#queues.keys()]) {
       if (belongsToNamespace(path)) this.#queues.delete(path);
     }
+  }
+
+  /**
+   * Publish candidate data and the Catalog selection as one recoverable decision.
+   * The Catalog receipt is the commit point; no extension callback is replayed.
+   * Address locks cover both data replacement and the Catalog write.
+   */
+  async publishPrepared<T>(
+    transactions: readonly ExtensionStorageMigrationTransaction[],
+    publication: ExtensionStoragePublication,
+    commit: (id: string, snapshots: readonly VarinExtensionStorageSnapshot[]) => Promise<T>,
+    resolvePublication: ExtensionStoragePublicationResolver,
+  ): Promise<T> {
+    const states = transactions.map(transaction => transaction[transactionState]());
+    if (states.some(state => state.store !== this || state.committed !== null)) {
+      throw new Error("Storage publication requires uncommitted transactions from this store");
+    }
+    const entries = states.map((state, index) => ({ state, index, path: this.#path(state.address) }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    if (new Set(entries.map(entry => entry.path)).size !== entries.length) {
+      throw new Error("Storage publication contains a duplicate address");
+    }
+    const directory = join(this.dataDir, "extensions", "storage-publications");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const releasePublication = await acquireLock(join(directory, "publication.lock"));
+    try {
+      await this.#recoverPublications(directory, resolvePublication);
+      return await this.#serializeMany(entries.map(entry => entry.path), async () => {
+        const releases: Array<() => Promise<void>> = [];
+        const id = randomUUID();
+        const path = join(directory, `${id}.json`);
+        let journal: StoragePublicationJournal | undefined;
+        try {
+          for (const entry of entries) {
+            await mkdir(dirname(entry.path), { recursive: true, mode: 0o700 });
+            releases.push(await acquireLock(`${entry.path}.lock`));
+          }
+          const documents = await Promise.all(entries.map(entry => this.#readStrict(entry.state.address)));
+          const snapshots = new Array<VarinExtensionStorageSnapshot>(entries.length);
+          journal = { version: 1, id, publication, phase: "prepared", documents: entries.map((entry, index) => {
+            const before = documents[index]!;
+            if (before.document.revision !== entry.state.previous.document.revision
+              || fingerprint(before.document) !== fingerprint(entry.state.previous.document)
+              || before.exists !== entry.state.previous.exists) {
+              throw new ExtensionStorageRevisionConflictError(entry.state.previous.document.revision, before.document.revision);
+            }
+            const after = this.#snapshot(entry.state.address, {
+              data: structuredClone(entry.state.data), schemaVersion: entry.state.schemaVersion,
+              revision: before.document.revision + 1, updatedAt: new Date().toISOString(),
+            }, true, true, "ready", []);
+            snapshots[entry.index] = after;
+            return { before: entry.state.previous, after };
+          }) };
+          await atomicWrite(path, journal);
+          for (const { after } of journal.documents) await atomicWrite(this.#path(after.address), { address: after.address, ...after.document });
+          const result = await commit(id, snapshots);
+          journal.phase = "committed";
+          await atomicWrite(path, journal);
+          snapshots.forEach((snapshot, index) => {
+            transactions[index]?.[transactionSetCommitted](snapshot);
+            this.#remember(snapshot);
+          });
+          // Keep the small committed receipt until the next publication/startup.
+          // Cleanup is not part of the user-visible commit outcome.
+          return result;
+        } catch (error) {
+          // A partial data write has no Catalog receipt yet. Recover under the
+          // same address locks; if authority/readback is uncertain leave evidence.
+          if (journal && journal.phase === "prepared") {
+            const decision = await resolvePublication(publication, id);
+            if (decision === "uncommitted") {
+              await this.#restorePublication(journal, false);
+              await rm(path, { force: true });
+            } else {
+              // The durable Catalog receipt survived a lost response. Record
+              // that decision before a later removal can erase its Catalog row.
+              journal.phase = "committed";
+              await atomicWrite(path, journal);
+            }
+          }
+          throw error;
+        } finally { for (const release of releases.reverse()) await release(); }
+      });
+    } finally { await releasePublication(); }
+  }
+
+  /** Called before builtin reconciliation or any extension code is activated. */
+  async recoverPublications(
+    resolvePublication: ExtensionStoragePublicationResolver,
+    afterRecovery?: () => Promise<void>,
+  ): Promise<void> {
+    const directory = join(this.dataDir, "extensions", "storage-publications");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const release = await acquireLock(join(directory, "publication.lock"));
+    try {
+      await this.#recoverPublications(directory, resolvePublication);
+      // Removal consumes receipts before deleting Catalog identity or data,
+      // under the same publication lock used by candidate publication.
+      await afterRecovery?.();
+    } finally { await release(); }
+  }
+
+  async #recoverPublications(directory: string, resolvePublication: ExtensionStoragePublicationResolver): Promise<void> {
+    for (const filename of (await readdir(directory)).filter(name => name.endsWith(".json")).sort()) {
+      const path = join(directory, filename);
+      const journal = parseStoragePublicationJournal(JSON.parse(await readFile(path, "utf8")));
+      if (filename !== `${journal.id}.json`) throw new ExtensionStorageError("storage_invalid", "Storage publication identity does not match its file");
+      const paths = journal.documents.map(({ after }) => this.#path(after.address)).sort();
+      await this.#serializeMany(paths, async () => {
+        const releases: Array<() => Promise<void>> = [];
+        try {
+          for (const documentPath of paths) {
+            await mkdir(dirname(documentPath), { recursive: true, mode: 0o700 });
+            releases.push(await acquireLock(`${documentPath}.lock`));
+          }
+          const committed = journal.phase === "committed" || await resolvePublication(journal.publication, journal.id) === "committed";
+          await this.#restorePublication(journal, committed);
+          await rm(path, { force: true });
+        } finally { for (const release of releases.reverse()) await release(); }
+      });
+    }
+  }
+
+  async #restorePublication(journal: StoragePublicationJournal, committed: boolean): Promise<void> {
+    const repairs: VarinExtensionStorageSnapshot[] = [];
+    for (const { before, after } of journal.documents) {
+      const current = await this.#readStrict(after.address);
+      const matches = (snapshot: VarinExtensionStorageSnapshot) => current.exists === snapshot.exists
+        && fingerprint(current.document) === fingerprint(snapshot.document);
+      if (committed && current.document.revision > after.document.revision) continue;
+      if (!matches(before) && !matches(after)) {
+        throw new ExtensionStorageError("storage_invalid", `Storage publication ${journal.id} conflicts with later data; preserved for recovery`);
+      }
+      repairs.push(committed ? after : before);
+    }
+    // Check the complete group before touching any member.
+    for (const snapshot of repairs) {
+      const path = this.#path(snapshot.address);
+      if (snapshot.exists) await atomicWrite(path, { address: snapshot.address, ...snapshot.document });
+      else await rm(path, { force: true });
+      this.#remember(snapshot);
+    }
+  }
+
+  #remember(snapshot: VarinExtensionStorageSnapshot): void {
+    this.#lastValid.set(this.#path(snapshot.address), {
+      document: structuredClone(snapshot.document), exists: snapshot.exists, fingerprint: fingerprint(snapshot.document),
+    });
   }
 
   commitPrepared(

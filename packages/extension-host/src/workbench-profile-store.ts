@@ -57,6 +57,11 @@ export class WorkbenchProfileStore {
     return this.#load();
   }
 
+  /** Hold the original profile document revision while the Catalog commits its captured enable set. */
+  withRevision<T>(expectedRevision: number, operation: (document: VarinWorkbenchProfileDocument) => Promise<T>): Promise<T> {
+    return this.storage.withRevision(ADDRESS, expectedRevision, snapshot => operation(workbenchDocumentFromStorage(snapshot)));
+  }
+
   async read(): Promise<VarinWorkbenchProfileSnapshot> {
     const snapshot = await this.#load();
     if (!snapshot.authoritative) return snapshot;

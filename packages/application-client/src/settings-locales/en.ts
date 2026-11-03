@@ -1,4 +1,11 @@
 export const settingsDict = {
+  "settings.varin.extensions.codeTrust.title": "Trust this extension code?",
+  "settings.varin.extensions.codeTrust.description": "Installing, enabling, or applying this source may execute trusted Host code or code in the same page as Varin. A brokered worker is not an operating-system sandbox.",
+  "settings.varin.extensions.codeTrust.capabilities": "Varin capability grants restrict broker APIs, not direct filesystem, network, or environment access by trusted code. This code-trust confirmation does not allow any capability; review those separately.",
+  "settings.varin.extensions.codeTrust.confirm": "Trust code and continue",
+  "settings.varin.extensions.codeTrust.restart": "Trust code and restart Host",
+  "settings.varin.extensions.codeTrust.noIntegrity": "No artifact hash recorded",
+  "settings.varin.extensions.codeTrust.authorDiagnostics": "Author wiring guidance",
   "settings.models.modelDescription": "Description",
   "settings.models.modelDescriptionHint": "Describe this model, your experience and channel preferences in one place. Directory updates preserve your edits.",
   "settings.delegationModelSelection.title": "Delegation model selection",

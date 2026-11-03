@@ -2,6 +2,11 @@ import { createElement, createContext, useContext, type ComponentType, useSyncEx
 import { createRoot, type Root } from "react-dom/client";
 import type {
   VarinManagedSurfaceContext,
+  VarinMatchRenderer,
+  VarinMessageRendererPropsV1,
+  VarinToolRendererPropsV1,
+  VarinSessionDecorationPropsV1,
+  VarinSettingsPageMountPropsV1,
   VarinShellMountContext,
   VarinShellMountImplementation,
   VarinSurfaceMountImplementation,
@@ -120,3 +125,18 @@ export const ownReactRoot = (context: VarinManagedSurfaceContext, root: Root): R
   context.onDispose(() => root.unmount());
   return root;
 };
+
+/** These adapters use the same extension-owned root and mount lifetime as ordinary views. */
+export const defineReactSettingsPage = defineReactContribution<VarinSettingsPageMountPropsV1>;
+export const defineReactMessageRenderer = (
+  matches: VarinMatchRenderer<VarinMessageRendererPropsV1>['matches'],
+  Component: ComponentType<VarinMessageRendererPropsV1>,
+) => ({ ...defineReactContribution(Component), matches });
+export const defineReactToolRenderer = (
+  matches: VarinMatchRenderer<VarinToolRendererPropsV1>['matches'],
+  Component: ComponentType<VarinToolRendererPropsV1>,
+) => ({ ...defineReactContribution(Component), matches });
+export const defineReactSessionDecoration = (
+  matches: VarinMatchRenderer<VarinSessionDecorationPropsV1>['matches'],
+  Component: ComponentType<VarinSessionDecorationPropsV1>,
+) => ({ ...defineReactContribution(Component), matches });
