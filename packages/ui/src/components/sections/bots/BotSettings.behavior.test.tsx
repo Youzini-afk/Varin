@@ -6,9 +6,19 @@ import type { BotSummary } from '@/lib/bots';
 import { BotSettings } from './BotSettings';
 import { BotDetailsDialog } from './BotDetailsDialog';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), update: vi.fn(), remove: vi.fn(), archive: vi.fn(), change: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), memory: vi.fn(), update: vi.fn(), remove: vi.fn(), archive: vi.fn(), change: vi.fn() }));
 vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/lib/bots')>(), listBots: api.list, listBotWork: api.work, updateBot: api.update,
-  deleteBot: api.remove, archiveBot: api.archive, changeBotState: api.change, createBot: vi.fn(), openBotEntryFor: vi.fn() }));
+  listBotMemory: api.memory, deleteBot: api.remove, archiveBot: api.archive, changeBotState: api.change, createBot: vi.fn(), openBotEntryFor: vi.fn() }));
+vi.mock('./BotMemoryPreferences', () => ({ BotMemoryPreferences: () => null }));
+vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
+vi.mock('@/components/ui/dropdown-menu', async () => {
+  const { createContext, useContext } = await import('react');
+  const Selection = createContext((_id: string) => {});
+  const Children = ({ children }: React.PropsWithChildren) => <>{children}</>;
+  return { DropdownMenu: Children, DropdownMenuContent: Children, DropdownMenuTrigger: Children,
+    DropdownMenuRadioGroup: ({ children, onValueChange }: React.PropsWithChildren<{ onValueChange(id: string): void }>) => <Selection.Provider value={onValueChange}>{children}</Selection.Provider>,
+    DropdownMenuRadioItem: ({ value }: { value: string }) => { const select = useContext(Selection); return <button onClick={() => select(value)}>select-{value}</button>; } };
+});
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
@@ -41,6 +51,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   api.list.mockReset().mockResolvedValue([bot('a'), bot('b', true)]);
   api.work.mockReset().mockResolvedValue([]); api.update.mockReset().mockResolvedValue(bot('a'));
+  api.memory.mockReset().mockResolvedValue([]);
   api.archive.mockReset().mockResolvedValue(bot('a', true)); api.change.mockReset().mockResolvedValue(bot('b'));
   api.remove.mockReset().mockResolvedValue(null);
 });
@@ -60,13 +71,15 @@ it('marks thinking-only changes as dirty and saves them with the profile', async
   expect(api.update).toHaveBeenCalledWith('a', expect.objectContaining({ model: { ...model, thinkingLevel: 'high' } }));
 });
 
-it('connects list rename/archive/restore to the right Bot without changing the selected profile', async () => {
+it('switches Bots in the compact picker and applies lifecycle actions to the selected Bot', async () => {
   api.list.mockResolvedValue([bot('a'), bot('b')]);
-  await render(); await click('rename-b'); await click('set-name');
+  await render(); await click('select-b'); await click('rename-b'); await click('set-name');
   await act(async () => { container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
   expect(api.update).toHaveBeenCalledWith('b', { name: 'New name' });
-  expect(container.querySelector('[aria-current=page]')?.textContent).toContain('a');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')?.value).toBe('b');
+  await click('select-a');
   await click('archive-a'); expect(api.archive).toHaveBeenCalledWith('a');
+  await click('select-b');
   await click('restore-b'); expect(api.change).toHaveBeenCalledWith('b', 'restore');
 });
 
@@ -80,7 +93,7 @@ it('requires confirmation, keeps request failures retryable and selects the rema
   await click('settings.bots.delete');
   expect(api.remove).toHaveBeenCalledTimes(2);
   expect(container.querySelector('[role=dialog]')).toBeNull();
-  expect(container.querySelector('[aria-current=page]')?.textContent).toContain('b');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')?.value).toBe('b');
 });
 
 it('shows pending cleanup and exposes retry when an archived Bot deletion fails', async () => {
@@ -111,6 +124,32 @@ it('saves name, instructions and model as one profile draft', async () => {
   await click('settings.bots.save');
   expect(api.update).toHaveBeenCalledExactlyOnceWith('a', { name: 'Unsaved name', instructions: 'Unsaved instructions', model: { providerId: 'gateway', modelId: 'claude' } });
   expect(container.querySelector('[data-settings-action-bar] [role=status]')?.textContent).toBe('settings.common.status.saved');
+});
+
+it('opens work and memory in place, keeps drafts across tabs, and guards changing Bots', async () => {
+  api.memory.mockResolvedValue([{ id: 1, content: 'Remember this', trigger: '', inactive: false }]);
+  await render();
+  expect(api.work).not.toHaveBeenCalled();
+  expect(api.memory).not.toHaveBeenCalled();
+  await click('settings.bots.section.work');
+  expect(api.work).toHaveBeenCalledWith('a');
+  await click('bot.profile.title');
+  const name = container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')!;
+  await act(async () => { name.value = 'Draft'; name.dispatchEvent(new Event('input', { bubbles: true })); });
+  vi.mocked(window.confirm).mockReturnValueOnce(false);
+  await click('select-b');
+  expect(name.value).toBe('Draft');
+  expect(window.confirm).toHaveBeenCalledWith('settings.bots.discardConfirm');
+  await click('settings.bots.memory');
+  expect(container.querySelector('[role=dialog]')).toBeNull();
+  await click('settings.bots.memory.correct');
+  const memory = container.querySelector<HTMLTextAreaElement>('[aria-label="settings.bots.memory.correct"]')!;
+  await act(async () => { memory.value = 'Memory draft'; memory.dispatchEvent(new Event('input', { bubbles: true })); });
+  await click('bot.profile.title');
+  expect(name.value).toBe('Draft');
+  await click('settings.bots.memory');
+  expect(memory.value).toBe('Memory draft');
+  expect(api.memory).toHaveBeenCalledTimes(1);
 });
 
 it('keeps a failed profile save editable and cancels back to the saved profile', async () => {
