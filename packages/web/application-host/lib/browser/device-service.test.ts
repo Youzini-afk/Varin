@@ -12,25 +12,43 @@ import { createNativeShellBrowserOwner } from './native-shell-owner.js';
 import { BrowserRegistry } from './registry.js';
 import { registerBrowserRoutes, attachBrowserDevices } from './routes.js';
 import { browserActor } from './remote-owner.js';
+import { deferred } from './device-wire.js';
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const stop of cleanup.splice(0).reverse()) await stop(); });
 const eventually = async (check: () => boolean) => { for (let i = 0; i < 500 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 2)); expect(check()).toBe(true); };
-async function fixture() {
+async function fixture(holdAdmission?: 'grant' | 'sockets') {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'varin-browser-device-'));
   const native = new NativeDevice(directory), owner = createNativeShellBrowserOwner({ port: native, scratchDirectory: path.join(directory, 'transfers') });
   const hostId = randomUUID(), registry = new BrowserRegistry(hostId), app = express(); app.use(express.json());
+  const admissionReached = deferred<void>(), admissionRelease = deferred<void>(), admissionPassed = deferred<void>();
+  let held = false;
+  const hold = async () => {
+    if (held) return;
+    held = true; admissionReached.resolve(); await admissionRelease.promise; admissionPassed.resolve();
+  };
+  if (holdAdmission === 'grant') app.use('/api/browsers/device-grants', (_request, response, next) => {
+    const json = response.json.bind(response);
+    response.json = value => {
+      if (held) return json(value);
+      // The real Host has already issued the grant. Delay only its response,
+      // so withdrawal also covers an unknown HTTP effect, not just queued work.
+      void hold().then(() => json(value)); return response;
+    };
+    next();
+  });
   const authenticate = async (request: { headers: { authorization?: string | undefined } }) => request.headers.authorization === 'Bearer user-token' ? { type: 'session', token: 'trusted-user' }
     : request.headers.authorization === 'Bearer other-token' ? { type: 'session', token: 'other-user' } : request.headers.authorization === 'Bearer readonly-token'
       ? { type: 'client', clientId: 'reader', client: { id: 'reader', profile: 'readonly', capabilities: ['instance:read'] } } : null;
   const server = createServer(app);
   registerBrowserRoutes(app, { browsers: registry, requireAuth: (request, response, next) => { if (request.headers.authorization) next(); else response.sendStatus(401); }, authenticate });
-  const transport = attachBrowserDevices({ server, browsers: registry, authenticate, originAllowed: () => true });
+  const transport = attachBrowserDevices({ server, browsers: registry, authenticate, originAllowed: async () => { if (holdAdmission === 'sockets') await hold(); return true; } });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  cleanup.push(async () => { native.pendingScript.resolve({ result: { type: 'string', value: 'test-cleanup' } }); transport.stop(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await owner.dispose().catch(() => {}); await rm(directory, { recursive: true, force: true }); });
+  cleanup.push(async () => { admissionRelease.resolve(); native.pendingScript.resolve({ result: { type: 'string', value: 'test-cleanup' } }); transport.stop(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await owner.dispose().catch(() => {}); await rm(directory, { recursive: true, force: true }); });
   const request = async (route: string, body?: unknown, token = 'user-token') => fetch(`${origin}/api/browsers${route}`, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${token}`, 'X-Varin-Browser-Host': hostId, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const connect = () => owner.invoke({ command: 'desktop_browser_device', windowLabel: 'main', args: { action: 'connect', expectedHostId: hostId, shareInteractiveProfile: true }, trustedTarget: { apiBaseUrl: origin, clientToken: 'user-token', requestHeaders: {} } });
-  return { native, owner, hostId, registry, origin, request, connect };
+  return { native, owner, hostId, registry, origin, request, connect, admissionReached: admissionReached.promise,
+    releaseAdmission: async () => { admissionRelease.resolve(); await admissionPassed.promise; } };
 }
 test('explicit Browser grant registers the original device without page creation or Computer permission', async () => {
   const f = await fixture();
@@ -123,6 +141,7 @@ test('reconnect followed by local revocation cancels all old Host grants and rec
   const revoke = f.owner.invoke({ command: 'desktop_browser_device', windowLabel: 'main', args: { action: 'disconnect', expectedHostId: f.hostId } }).then(() => { revoked = true; });
   await eventually(() => f.native.calls.some(call => call.params.method === 'Runtime.terminateExecution'));
   expect(revoked).toBe(false); expect(stopped).toBe(false);
+  await expect(f.connect()).rejects.toThrow('still being revoked');
   f.native.pendingScript.resolve({ result: { type: 'string', value: 'original-terminal' } });
   await revoke; await unknown.completion; expect(revoked).toBe(true); expect(stopped).toBe(true);
   expect(f.native.calls.filter(call => call.params.method === 'Runtime.evaluate' && String((call.params.params as { expression?: string })?.expression).startsWith('pending-script'))).toHaveLength(1);
@@ -202,8 +221,46 @@ test('remote revocation after reconnect also drains the original disconnected sc
   const revoke = f.request(`/devices/${encodeURIComponent(f.owner.browserId)}/revoke`, {}).then(response => { expect(response.status).toBe(200); revoked = true; });
   await eventually(() => f.native.calls.some(call => call.params.method === 'Runtime.terminateExecution'));
   expect(revoked).toBe(false); expect(stopped).toBe(false);
+  await expect(f.connect()).rejects.toThrow('still being revoked');
   f.native.pendingScript.resolve({ result: { type: 'string', value: 'original-terminal' } });
   await revoke; await unknown.completion;
   expect(stopped).toBe(true);
   expect(f.native.calls.filter(call => call.params.method === 'Runtime.evaluate' && String((call.params.params as { expression?: string })?.expression).startsWith('pending-script'))).toHaveLength(1);
+});
+
+
+for (const stage of ['grant', 'sockets'] as const) {
+  for (const withdrawal of ['disconnect', 'dispose'] as const) {
+    test(`${withdrawal} cancels an unfinished real ${stage} admission before it can publish`, async () => {
+      const f = await fixture(stage);
+      const connecting = f.connect().then(() => null, error => error as Error);
+      await f.admissionReached;
+      await expect(f.connect()).rejects.toThrow('already being authorized');
+      if (withdrawal === 'dispose') await f.owner.dispose();
+      else await f.owner.invoke({ command: 'desktop_browser_device', windowLabel: 'main', args: { action: 'disconnect', expectedHostId: f.hostId } });
+      expect(await connecting).toBeInstanceOf(Error);
+      await f.releaseAdmission();
+      expect((await (await f.request('')).json() as BrowserCatalog).devices.every(device => device.state !== 'connected')).toBe(true);
+      expect(f.native.calls).toEqual([]);
+      if (withdrawal === 'dispose') await expect(f.connect()).rejects.toThrow('disposed');
+      else {
+        await f.connect();
+        const catalog = await (await f.request('')).json() as BrowserCatalog;
+        expect(catalog.devices).toMatchObject([{ browserId: f.owner.browserId, state: 'connected' }]);
+        const original = catalog.devices[0]!.grantId;
+        await f.connect();
+        expect((await (await f.request('')).json() as BrowserCatalog).devices[0]!.grantId).toBe(original);
+      }
+    });
+  }
+}
+
+
+test('withdrawing another Host does not cancel this original pending authorization', async () => {
+  const f = await fixture('grant');
+  const connecting = f.connect();
+  await f.admissionReached;
+  await f.owner.invoke({ command: 'desktop_browser_device', windowLabel: 'main', args: { action: 'disconnect', expectedHostId: randomUUID() } });
+  await f.releaseAdmission(); await connecting;
+  expect((await (await f.request('')).json() as BrowserCatalog).devices).toMatchObject([{ browserId: f.owner.browserId, state: 'connected' }]);
 });

@@ -12,6 +12,7 @@ import { parseBrowserInput } from './input-validation.js';
 type Owner = BrowserPresentationOwner & { proveIdentity(hostId: string, challenge: string): { publicKey: string; signature: string }; act: BrowserPresentationOwner['act'] & ((pageId: string, action: import('@varin/protocol').BrowserAction, signal?: AbortSignal, user?: boolean) => Promise<import('@varin/protocol').BrowserActionResult>) };
 interface Active { leaseId: string; controller: AbortController; completion: Promise<void> }
 interface Connection { grant: BrowserDeviceGrant; wire: BrowserDeviceWire; state: 'connected' | 'disconnected' | 'revoking'; active: Map<string, Active>; streams: Map<string, { pageId: string; principalId: string; stop(): Promise<void> }>; receipts: Map<string, { leaseId: string; acknowledged: ReturnType<typeof deferred<void>> }>; closed: ReturnType<typeof deferred<void>>; revoked: boolean; revocationComplete: boolean; releaseEvents(): void; error?: string }
+interface Admission { hostId: string; controller: AbortController; finished: ReturnType<typeof deferred<void>>; connection?: Connection }
 interface TrustedTarget { apiBaseUrl: string; clientToken?: string; requestHeaders: Record<string, string>; connectionId?: string }
 
 function files(value: unknown): { name: string; bytes: Uint8Array }[] {
@@ -30,7 +31,9 @@ export class BrowserDeviceService {
   private identity?: Promise<BrowserDeviceIdentity>;
   private readonly connections = new Map<string, Connection>();
   private readonly all = new Set<Connection>();
-  private connecting = false;
+  private admission: Admission | undefined;
+  private readonly revokingHosts = new Map<string, number>();
+  private disposed = false;
   constructor(private readonly options: { owner: Owner; identityFile: string; fetch?: typeof fetch }) {}
   private getIdentity(): Promise<BrowserDeviceIdentity> {
     return this.identity ??= (async () => {
@@ -60,8 +63,12 @@ export class BrowserDeviceService {
     await this.connect(expectedHostId, target); return this.status();
   }
   private async connect(expectedHostId: string, target: TrustedTarget): Promise<void> {
-    if (this.connecting) throw new Error('A browser device connection is already being authorized');
-    this.connecting = true;
+    if (this.disposed) throw new Error('This Browser device service has been disposed');
+    if (this.admission) throw new Error('A browser device connection is already being authorized');
+    if (this.revokingHosts.has(expectedHostId)) throw new Error('The original Browser device authorization is still being revoked');
+    const admission: Admission = { hostId: expectedHostId, controller: new AbortController(), finished: deferred<void>() };
+    this.admission = admission;
+    const signal = admission.controller.signal;
     try {
       const base = new URL(target.apiBaseUrl);
       if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw new Error('The selected Host has no supported direct Browser device endpoint');
@@ -69,10 +76,13 @@ export class BrowserDeviceService {
       if (target.clientToken) headers.set('Authorization', `Bearer ${target.clientToken}`);
       headers.set('X-Varin-Browser-Host', expectedHostId);
       const request = async (suffix: string, body?: unknown) => {
+        signal.throwIfAborted();
         const response = await (this.options.fetch ?? fetch)(`${base.href.replace(/\/$/u, '')}/api/browsers${suffix}`, { headers: body === undefined ? headers : new Headers([...headers, ['Content-Type', 'application/json']]),
-          method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: 'error' });
+          method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: 'error', signal });
+        signal.throwIfAborted();
         if (response.headers.get('X-Varin-Browser-Host') !== expectedHostId) { await response.body?.cancel(); throw new Error('The selected connection reaches a different Browser Host'); }
         const result = object(await response.json());
+        signal.throwIfAborted();
         if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : 'Browser Host rejected this device authorization');
         return result;
       };
@@ -86,10 +96,12 @@ export class BrowserDeviceService {
       for (const original of this.all) if (original.state === 'disconnected' && !original.active.size && !original.receipts.size) this.all.delete(original);
       if (this.all.size >= BROWSER_REQUESTS) throw new Error('Browser recovery window is full; wait for the original executors and receipts before adding another grant');
       const identity = await this.getIdentity();
+      signal.throwIfAborted();
       const challenge = await request('/device-challenges', { ...identity, expectedHostId });
       if (challenge.hostId !== expectedHostId) throw new Error('Browser identity challenge changed its Host');
       const proof = this.options.owner.proveIdentity(expectedHostId, text(challenge.challenge));
       const issued = await request('/device-grants', { ...identity, expectedHostId, shareInteractiveProfile: true, challengeId: text(challenge.challengeId), ...proof });
+      signal.throwIfAborted();
       const grant: BrowserDeviceGrant = { ...identity, hostId: expectedHostId, grantId: text(issued.grantId) };
       const socket = (lane: 'control' | 'media', token: string) => {
         const url = new URL(`${base.href.replace(/\/$/u, '')}/api/browsers/devices/${lane}`); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -99,6 +111,7 @@ export class BrowserDeviceService {
       const wire = new BrowserDeviceWire(socket('control', text(issued.controlToken)), socket('media', text(issued.mediaToken)));
       const ready = deferred<void>();
       const connection: Connection = { grant, wire, state: 'disconnected', active: new Map(), streams: new Map(), receipts: new Map(), closed: deferred<void>(), revoked: false, revocationComplete: false, releaseEvents: () => {} };
+      admission.connection = connection;
       this.all.add(connection);
       const cancelled = new Map<string, string>(); let sequence = 0;
       wire.onMessage = message => {
@@ -145,12 +158,29 @@ export class BrowserDeviceService {
       };
       const timeout = setTimeout(() => { ready.reject(new Error('Browser device handshake timed out')); wire.close(); }, 30_000); timeout.unref();
       try { await ready.promise; } finally { clearTimeout(timeout); }
+      signal.throwIfAborted();
       connection.releaseEvents = this.options.owner.subscribe(event => { void wire.send({ kind: 'event', event }).catch(() => wire.close()); });
       this.connections.set(expectedHostId, connection);
       for (const original of this.all) if (original !== connection && original.grant.hostId === expectedHostId) for (const [requestId, receipt] of original.receipts) {
         await wire.send({ kind: 'recovered-stop', originalGrantId: original.grant.grantId, requestId, leaseId: receipt.leaseId, executorStopped: true });
       }
-    } finally { this.connecting = false; }
+      signal.throwIfAborted();
+    } finally {
+      if (this.admission === admission) this.admission = undefined;
+      admission.finished.resolve();
+    }
+  }
+  private cancelAdmission(hostId?: string): Admission | undefined {
+    const admission = this.admission;
+    if (!admission || hostId !== undefined && admission.hostId !== hostId) return;
+    // Withdrawal includes requests still fetching the challenge/grant and
+    // sockets waiting for admission. They may never publish a late connection.
+    admission.controller.abort(new Error('Browser device authorization was withdrawn'));
+    if (admission.connection) {
+      admission.connection.revoked = true;
+      admission.connection.wire.close();
+    }
+    return admission;
   }
   private async execute(connection: Connection, requestId: string, leaseId: string, caller: BrowserActor, method: string, args: Record<string, unknown>, controller: AbortController): Promise<void> {
     const { owner } = this.options, signal = controller.signal;
@@ -234,9 +264,16 @@ export class BrowserDeviceService {
     await Promise.all(active.map(value => value.completion)); connection.revocationComplete = true; connection.state = 'disconnected';
   }
   private async revokeHost(hostId: string, current?: Connection, except?: string): Promise<void> {
-    const originals = [...this.all].filter(connection => connection.grant.hostId === hostId);
-    for (const connection of originals) { connection.revoked = true; connection.state = 'revoking'; }
-    await Promise.all(originals.map(connection => this.revoke(connection, connection === current ? except : undefined)));
+    this.revokingHosts.set(hostId, (this.revokingHosts.get(hostId) ?? 0) + 1);
+    const admission = this.cancelAdmission(hostId);
+    try {
+      const originals = [...this.all].filter(connection => connection.grant.hostId === hostId);
+      for (const connection of originals) { connection.revoked = true; connection.state = 'revoking'; }
+      await Promise.all([...originals.map(connection => this.revoke(connection, connection === current ? except : undefined)), admission?.finished.promise]);
+    } finally {
+      const remaining = this.revokingHosts.get(hostId)! - 1;
+      if (remaining) this.revokingHosts.set(hostId, remaining); else this.revokingHosts.delete(hostId);
+    }
   }
   async disconnect(hostId: string): Promise<void> {
     await this.revokeHost(hostId);
@@ -244,5 +281,11 @@ export class BrowserDeviceService {
     this.connections.delete(hostId);
   }
 
-  async dispose(): Promise<void> { for (const connection of this.all) { await this.revoke(connection); connection.wire.close(); } this.all.clear(); this.connections.clear(); }
+  async dispose(): Promise<void> {
+    this.disposed = true;
+    const admission = this.cancelAdmission();
+    for (const connection of this.all) { await this.revoke(connection); connection.wire.close(); }
+    await admission?.finished.promise;
+    this.all.clear(); this.connections.clear();
+  }
 }
