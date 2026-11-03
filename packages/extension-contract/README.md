@@ -36,6 +36,14 @@ entry, that no unsupported surface is declared, that targets and slots are uniqu
 `workbench.shell` and `workbench.transition` never appear as nested targets. Use
 `resolveVarinWorkbenchShellSurfaceSeams` to read the seams for a specific surface.
 
+Command contributions may opt into the conversation menu with validated `composer` metadata:
+`name`, a supported `group`, and `interaction: 'action' | 'select'`. Registration alone does not
+add a global command to that menu. Extensions retain their contribution identity and activation
+path; name collisions use a distinct extension invocation. The public execution context carries
+the selected Host generation and optional native Thread/branch/Source DTO, never native composer
+action closures. Both availability checks and execution receive that same public context, and
+Host replacement fences activation before execution.
+
 Current transition lifecycle and owner boundaries are described in
 [the workbench contract](../../docs/workbench.md). The generic Motion/shared-element service is not implemented.
 The contract does not prescribe which elements a Shell must render.

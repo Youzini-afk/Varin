@@ -30,6 +30,9 @@ pub struct MessageWaitOptions {
 )]
 pub enum MessageActor {
     User,
+    /// A domain result can exist before a child Run starts. It is never a user instruction
+    /// or a synthetic model/tool invocation. Only the report owner creates this actor.
+    AgentReport { execution_id: String, operation_id: String },
     Agent {
         run_id: String,
         operation_id: String,
@@ -221,11 +224,20 @@ fn route(
     actor: &MessageActor,
 ) -> Result<(String, String)> {
     branch_owner(db, sender, branch)?;
+    if let MessageActor::AgentReport { execution_id, operation_id } = actor {
+        let execution = super::delegated::execution(db, execution_id)?;
+        let child = super::delegated::relation(db, operation_id)?;
+        if execution.child_operation_id != *operation_id || execution.report.is_none()
+            || child.child_thread_id != sender || child.child_branch_id != branch {
+            return Err(RuntimeError::Conflict("Agent report does not belong to this original child execution".into()));
+        }
+        super::user_dispatch::validate_relation(db, &child)?;
+    }
     if !super::retrieval::is_result_sender(db,sender,actor,input)? { super::threads::require_public(db,sender)?; }
     let (target, target_branch) = if let Some(reply) = &input.reply_to {
         let original: QueuedInputMetadata = record(db, "input_queue", reply)?;
         let original = message_identity(&original)?;
-        if matches!(actor, MessageActor::Agent { .. })
+        if !matches!(actor, MessageActor::User)
             && (original.target_thread_id != sender || original.target_branch_id != branch) {
             return Err(RuntimeError::Conflict(
                 "replyTo was not received by this exact Thread and branch".into(),
@@ -264,7 +276,7 @@ fn route(
         let branch = input.target_branch_id.clone().map(Ok).unwrap_or_else(||super::threads::branch(db,&target))?;
         (target,branch)
     };
-    if sender == target && matches!(actor, MessageActor::Agent { .. }) {
+    if sender == target && !matches!(actor, MessageActor::User) {
         return Err(RuntimeError::Invalid(
             "messages must target another task-family member".into(),
         ));
@@ -381,8 +393,8 @@ impl Catalog {
             MessageIdentity {
                 source_agent: input.source_agent.clone(),
                 message_id: match &actor {
-                    MessageActor::Agent { .. } if key.starts_with("bot-report:") => format!("message:{key}"),
-                    MessageActor::Agent { operation_id, .. } => format!("message:{operation_id}"),
+                    MessageActor::Agent { .. } | MessageActor::AgentReport { .. } if key.starts_with("bot-report:") => format!("message:{key}"),
+                    MessageActor::Agent { operation_id, .. } | MessageActor::AgentReport { operation_id, .. } => format!("message:{operation_id}"),
                     MessageActor::User => id(),
                 },
                 sender_thread_id: sender.clone(),
@@ -713,7 +725,7 @@ impl MessagePreparation {
         );
         let body = match &self.identity.actor {
             MessageActor::User => super::attachments::incoming_input(&envelope,&self.attachments,&self.attachment_media),
-            MessageActor::Agent { .. } => {
+            MessageActor::Agent { .. } | MessageActor::AgentReport { .. } => {
                 serde_json::to_value(ConversationItem::<crate::output::ResolvedMedia> {
                     resource_activation: None,
                     id: self.identity.message_id.clone(),

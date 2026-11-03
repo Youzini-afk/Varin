@@ -141,6 +141,7 @@ export function createKernelComputeService(options: KernelComputeServiceOptions)
         const params: KernelComputeInput = {
           ...input, workspaceId: identity.workspaceId, rootId: admitted.rootId!,
           paths: (input.paths ?? [""]).map(join),
+          ...(input.startAfterPath === undefined ? {} : { startAfterPath: join(input.startAfterPath) }),
           ...(input.excludePaths ? { excludePaths: input.excludePaths.map(join) } : {}),
           ...(input.files ? { files: input.files.map((file) => ({ ...file, path: join(file.path) })) } : {}),
         };

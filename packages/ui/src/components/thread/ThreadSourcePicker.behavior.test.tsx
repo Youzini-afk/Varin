@@ -73,7 +73,7 @@ async function fixture() {
   registry.applyTransaction(selected, 'selected unsaved', { origin: 'editor' });
   registry.applyTransaction(other, 'unrelated unsaved', { origin: 'editor' });
   const prepareSource = vi.fn<ThreadsAPI['prepareSource']>(async () => prepared);
-  const sources: ThreadsAPI['sources'] = {
+  const sources: ThreadsAPI['sources'] = { files: async () => { throw new Error('unused fixture API'); }, draftFiles: async () => { throw new Error('unused fixture API'); },
     list: vi.fn<ThreadsAPI['sources']['list']>(async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] })),
     resolve: vi.fn(async (_identity, request) => ({ resourceOwner: request.resourceOwner, path: request.path, workspaceId: (await documents.resolveWorkspace({ path: request.path })).workspaceId })),
   };
@@ -202,7 +202,7 @@ it('freezes the managed Host and resolves its Documents workspace once without c
   const resourceOwner = { kind: 'managed_host' as const, hostId: 'host-b', connectionId: 'saved-b', endpointIdentity: 'sha256-endpoint-b' };
   const remotePrepared: ThreadPreparedSource = { ...prepared, path: '/same-folder', source: { ...prepared.source, resourceOwner, workspaceId: 'b-documents-workspace', executionWorkspaceId: 'b-documents-workspace' } };
   const resolve = vi.fn<ThreadsAPI['sources']['resolve']>(async (_identity, request) => ({ resourceOwner: request.resourceOwner, workspaceId: 'b-documents-workspace', path: '/same-folder' }));
-  const sources: ThreadsAPI['sources'] = { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] },
+  const sources: ThreadsAPI['sources'] = { files: async () => { throw new Error('unused fixture API'); }, draftFiles: async () => { throw new Error('unused fixture API'); }, list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] },
     { resourceOwner, label: 'Remote B', capabilities: ['sources'] }], unavailable: [] }), resolve };
   const api = { ...f.api, sources };
   f.prepareSource.mockRejectedValueOnce(new Error('Remote receipt response lost')).mockResolvedValue(remotePrepared);

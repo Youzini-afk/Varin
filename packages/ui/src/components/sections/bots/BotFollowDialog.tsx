@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 
-export function BotFollowDialog({ identity, onClose }: { identity: ThreadIdentity; onClose(): void }) {
+export function BotFollowDialog({ identity, onClose, embedded = false }: { identity: ThreadIdentity; onClose(): void; embedded?: boolean }) {
   const { bots } = useRuntimeAPIs(); const { t } = useI18n();
   const [profiles, setProfiles] = React.useState<BotSummary[]>([]), [selected, setSelected] = React.useState('');
   const [title, setTitle] = React.useState(''), [description, setDescription] = React.useState('');
@@ -51,14 +51,15 @@ export function BotFollowDialog({ identity, onClose }: { identity: ThreadIdentit
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSaving(false); }
   };
-  return <Dialog open onOpenChange={open => { if (!open && !saving) onClose(); }}><DialogContent className="max-w-lg">
-    <DialogHeader><DialogTitle>{t('bot.follow.title')}</DialogTitle><DialogDescription>{t('bot.follow.description')}</DialogDescription></DialogHeader>
-    {profiles.length > 1 && <Select value={selected} onValueChange={setSelected} disabled={saving}><SelectTrigger aria-label={t('bot.follow.assistant')}><SelectValue /></SelectTrigger><SelectContent>{profiles.map(bot => <SelectItem key={bot.id} value={bot.id}>{bot.name}</SelectItem>)}</SelectContent></Select>}
+  const content = <>
+    {embedded ? <p className="typography-meta text-muted-foreground">{t('bot.follow.description')}</p> : <DialogHeader><DialogTitle>{t('bot.follow.title')}</DialogTitle><DialogDescription>{t('bot.follow.description')}</DialogDescription></DialogHeader>}
+    {profiles.length > 1 && (embedded ? <select value={selected} onChange={event => setSelected(event.target.value)} disabled={saving} aria-label={t('bot.follow.assistant')} className="w-full rounded border bg-background p-2">{profiles.map(bot => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</select> : <Select value={selected} onValueChange={setSelected} disabled={saving}><SelectTrigger aria-label={t('bot.follow.assistant')}><SelectValue /></SelectTrigger><SelectContent>{profiles.map(bot => <SelectItem key={bot.id} value={bot.id}>{bot.name}</SelectItem>)}</SelectContent></Select>)}
     <Input value={title} onChange={event => setTitle(event.target.value)} disabled={loading || saving} aria-label={t('bot.follow.name')} />
     <Textarea value={description} onChange={event => setDescription(event.target.value)} disabled={loading || saving} placeholder={t('bot.follow.context')} rows={3} />
     <label className="flex items-start gap-3 typography-body"><Checkbox checked={send} onChange={setSend} disabled={loading || saving} />{t('bot.follow.send')}</label>
     <label className="flex items-start gap-3 typography-body"><Checkbox checked={memory} onChange={setMemory} disabled={loading || saving} />{t('bot.follow.memory')}</label>
     {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
-    <DialogFooter><Button variant="ghost" onClick={onClose} disabled={saving}>{t('settings.common.actions.cancel')}</Button><Button onClick={() => { void save(); }} disabled={loading || saving || !title.trim()}>{t('bot.follow.save')}</Button></DialogFooter>
-  </DialogContent></Dialog>;
+    <DialogFooter>{!embedded && <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>{t('settings.common.actions.cancel')}</Button>}<Button type="button" onClick={() => { void save(); }} disabled={loading || saving || !title.trim()}>{t('bot.follow.save')}</Button></DialogFooter>
+  </>;
+  return embedded ? <div className="space-y-3">{content}</div> : <Dialog open onOpenChange={open => { if (!open && !saving) onClose(); }}><DialogContent className="max-w-lg">{content}</DialogContent></Dialog>;
 }

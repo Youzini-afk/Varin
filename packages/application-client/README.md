@@ -391,3 +391,33 @@ Child report reads return `ChildReportPage` with an original-owner `format` of `
 callers cannot choose or reinterpret that format. Both original-dispatch and explicit-execution readers
 accept AbortSignal. Report media uses the `child_report` holder with its original dispatch, returned
 execution identity and report item; it never borrows a latest Run or a family-view anchor.
+
+
+## Composer resource selections
+
+`ThreadSubmit`, queued input and child continuation share `skills` selectors: stable `resourceId`,
+captured `version`, and UTF-16 `start`/`end` offsets identifying the exact visible `/skill:name` text.
+The Host prepares multiple selections in text order and deduplicates repeated effective identities.
+Manual leading `/skill:name` still uses the original parser. Raw selectors participate in durable input
+identity, so an uncertain retry must retain them alongside the original text and request key.
+
+`ThreadsAPI.resources.skills(identity, { source? }, signal?)` reads metadata for the real branch
+checkpoint or its explicit pending source. Candidate IDs never come from cwd/project-name equality.
+`threads.sources.files(identity, options?, signal?)` returns metadata-only file/directory candidates from the
+branch's actual Source or an explicitly prepared replacement. `draftFiles({ source: { resourceOwner, path },
+query?, type?, limit?, cursor? }, signal?)` queries a selected pending source without creating a Thread.
+Paths are Source-relative, including managed Hosts. `entries` carry `path`, `relativePath`, `name`, and
+`type`; `nextCursor` continues the same Source/query/type. The default page size is 50, not a total
+search limit. Missing source yields an empty page only for a chat-only Thread; failed/revoked/partial
+source reads reject rather than masquerading as no results. File discovery is independent of skills.
+
+`draftSkills(options?, signal?)` discovers global resources or the selected pending source before a Thread exists.
+Pending-source candidates carry a source-owner/workspace/domain/path locator and content version. Submission maps
+that exact locator to the captured source descriptor, rejects drift, and never selects by display name. The
+managed target performs discovery through its authenticated read service. Its response is a
+catalog generation, not permission to read project resources. Both calls reject cancellation and late
+results after Host switching. Changed/missing resource selections fail explicitly rather than switching
+silently to a skill with the same name.
+
+`references` contains exact task/branch or current-source directory locators and text ranges. These add
+context; they never change the message recipient, impersonate an Agent or authorize additional files.

@@ -21,6 +21,7 @@ pub struct Entry {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Dispatch {
+    pub actor: String,
     pub attachments: Vec<super::super::attachments::Attachment>,
     pub operation_id: String,
     pub execution_id: String,
@@ -245,6 +246,7 @@ impl Read {
                 }
                 let input: super::super::dispatch::DispatchInput = serde_json::from_value(self.content.load_cancellable(&execution.input_ref, cancel)?)?;
                 dispatches.push(Dispatch {
+                    actor: if child.origin.is_none() { "user" } else { "agent" }.into(),
                     attachments: super::super::attachments::descriptors(&db,"dispatch",&child.operation_id)?,
                     operation_id: child.operation_id,
                     execution_id: execution.execution_id,

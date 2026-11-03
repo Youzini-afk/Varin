@@ -68,7 +68,7 @@ export function CollaborationMessage({ api, identity, item, members, original, e
   const record = item.kind === 'message' ? item.message : item.kind === 'dispatch' ? item.dispatch : item.report;
   const text = item.kind === 'message' ? item.message.text : item.kind === 'dispatch' ? item.dispatch.task
     : [item.report.text, item.report.detail].filter(Boolean).join('\n\n');
-  const outgoing = message?.actor.kind === 'user';
+  const outgoing = message?.actor.kind === 'user' || item.kind === 'dispatch' && item.dispatch.actor === 'user';
   const find = (id: string) => members.find(member => member.threadId === id);
   const name = (id: string) => find(id)?.name || find(id)?.agentId || id;
   const exchange = message && exchangeSummary(message);

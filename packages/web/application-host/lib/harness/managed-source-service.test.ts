@@ -486,6 +486,26 @@ describe('managed Source target admission orchestration', () => {
 
 });
 
+describe('managed pending skill discovery', () => {
+  it('uses target registration and read principal without opening a Thread/source grant', async () => {
+    const f = fixture();
+    const draftSourceSkills = vi.fn(async () => ({ snapshotId: 'draft', skills: [] }));
+    const resolveWorkspace = vi.fn(async () => ({ workspaceId: 'workspace', hostId: 'target' }));
+    const admitWorkspaceRegistration = vi.fn(async () => ({ workspaceId: 'workspace', hostId: 'target', canonicalPath: '/target/project' }));
+    const service = createManagedSourceService({ kernel: f.kernel, hostId: 'target',
+      documents: { resolveWorkspace, admitWorkspaceRegistration } as never,
+      validateLiveSource: async () => {}, prepareSource: f.prepareSource, draftSourceSkills });
+    expect(await service.skills(principal, { coordinatorHostId: 'coordinator', path: '/target/project' })).toEqual({ snapshotId: 'draft', skills: [] });
+    expect(draftSourceSkills).toHaveBeenCalledWith('workspace', undefined);
+    expect(f.issueGrant).not.toHaveBeenCalled();
+    expect(f.sourceRequest).not.toHaveBeenCalled();
+    await expect(service.skills({ principalId: 'verified', capabilities: [] }, { coordinatorHostId: 'coordinator', path: '/target/project' })).rejects.toThrow();
+    expect(resolveWorkspace).toHaveBeenCalledTimes(1);
+    admitWorkspaceRegistration.mockResolvedValueOnce({ workspaceId: 'workspace', hostId: 'other', canonicalPath: '/target/project' });
+    await expect(service.skills(principal, { coordinatorHostId: 'coordinator', path: '/target/project' })).rejects.toThrow();
+    expect(draftSourceSkills).toHaveBeenCalledTimes(1);
+  });
+});
 
 it.each(['attachment_cleanup', 'attachment_discard'] as const)('requires write-capable result authority for destructive %s', async kind => {
   const f = fixture();
@@ -586,4 +606,29 @@ it('waits for the exact original capture response and keeps uncertain terminatio
   await expect(capturing).rejects.toThrow('reply was lost');
   await expect(discarded).rejects.toThrow('writer termination is unconfirmed');
   expect(f.serviceOperation).toHaveBeenCalledTimes(1);
+});
+
+it('metadata read scopes reopen only an existing materialized environment and never create one for a completed Run', async () => {
+  const { mkdtemp, mkdir, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { originalMaterializationLocation } = await import('../kernel/source-launch.js');
+  const root = await mkdtemp(join(tmpdir(), 'varin-source-metadata-'));
+  try {
+    const f = fixture();
+    Object.assign(f.kernel, { handshake: { hostId: 'target', storageRoot: root } });
+    const location = await originalMaterializationLocation(root, source.workspaceId, 'finished-run');
+    await mkdir(location.targetPath, { recursive: true });
+    const getOperation = vi.fn(async () => ({ state: 'committed', result: { status: 'materialized' } }));
+    f.fileRootRegister.mockResolvedValue({ rootId: 'original-environment', canonicalRoot: location.targetPath });
+    vi.spyOn(f.kernel, 'scoped').mockReturnValue({ readBranch: f.readBranch, getOperation,
+      fileRootRegister: f.fileRootRegister, fileMaterialize: f.fileMaterialize } as never);
+    const selected = { ...request, source: { ...source, mode: 'materialized' as const, environmentRunId: 'finished-run' } };
+    expect((await f.service.bind(principal, selected)).physicalRoot).toMatchObject({ rootId: 'original-environment', canonicalRoot: location.targetPath });
+    expect(f.fileMaterialize).not.toHaveBeenCalled();
+    getOperation.mockResolvedValue(null as never);
+    expect((await f.service.bind(principal, { ...selected, source: { ...selected.source, environmentRunId: 'never-started' } })).physicalRoot).toBeNull();
+    expect(f.fileRootRegister).toHaveBeenCalledTimes(1);
+    expect(f.fileMaterialize).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

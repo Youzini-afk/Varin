@@ -243,7 +243,8 @@ pub(super) fn active_for_branch(db: &Connection, branch: &str) -> Result<Option<
     let raw:Option<String>=db.query_row("SELECT body FROM goals WHERE branch_id=?1 AND json_extract(body,'$.control') NOT IN ('complete','cancelled') ORDER BY rowid DESC LIMIT 1",[branch],|r|r.get(0)).optional()?;
     raw.map(|r| Ok(serde_json::from_str(&r)?)).transpose()
 }
-/// Follow actual parent ownership, not branch ancestry, user text or workspace identity.
+/// Follow actual goal/tool ownership, not branch ancestry or workspace identity.
+/// A User-created child has a family relationship, but no inherited parent Goal duty.
 pub(super) fn for_run(db: &Connection, run_id: &str) -> Result<Option<Definition>> {
     let mut current = run_id.to_owned();
     let mut seen = std::collections::BTreeSet::new();
@@ -273,11 +274,11 @@ pub(super) fn for_run(db: &Connection, run_id: &str) -> Result<Option<Definition
             continue;
         }
         let run: Run = record(db, "runs", &current)?;
-        let delegated_goal:Option<String>=db.query_row("SELECT g.goal_id FROM goal_children g JOIN child_tasks c ON c.id=g.id WHERE c.child_thread_id=?1 AND json_extract(c.body,'$.child_branch_id')=?2",params![run.thread_id,run.branch_id],|r|r.get(0)).optional()?;
+        let delegated_goal:Option<String>=db.query_row("SELECT g.goal_id FROM goal_children g JOIN child_tasks c ON c.id=g.id WHERE c.child_thread_id=?1 AND json_extract(c.body,'$.child_branch_id')=?2 AND json_type(c.body,'$.origin')='object'",params![run.thread_id,run.branch_id],|r|r.get(0)).optional()?;
         if let Some(goal) = delegated_goal {
             return Ok(Some(record(db, "goals", &goal)?));
         }
-        let parent:Option<String>=db.query_row("SELECT json_extract(body,'$.parent_run_id') FROM child_tasks WHERE child_thread_id=?1 AND json_extract(body,'$.child_branch_id')=?2",params![run.thread_id,run.branch_id],|r|r.get(0)).optional()?;
+        let parent:Option<String>=db.query_row("SELECT json_extract(body,'$.parent_run_id') FROM child_tasks WHERE child_thread_id=?1 AND json_extract(body,'$.child_branch_id')=?2 AND json_type(body,'$.origin')='object'",params![run.thread_id,run.branch_id],|r|r.get(0)).optional()?;
         match parent {
             Some(parent) => current = parent,
             None => return Ok(None),
@@ -299,13 +300,13 @@ pub(super) fn bind_admission(tx: &Transaction<'_>, run: &Run) -> Result<()> {
     }
     let parent: Option<String> = tx
         .query_row(
-            "SELECT json_extract(body,'$.parent_run_id') FROM child_tasks WHERE child_thread_id=?1 AND json_extract(body,'$.child_branch_id')=?2",
+            "SELECT json_extract(body,'$.parent_run_id') FROM child_tasks WHERE child_thread_id=?1 AND json_extract(body,'$.child_branch_id')=?2 AND json_type(body,'$.origin')='object'",
             params![run.thread_id,run.branch_id],
             |r| r.get(0),
         )
         .optional()?;
     if let Some(parent) = parent {
-        let frozen:Option<String>=tx.query_row("SELECT g.goal_id FROM goal_children g JOIN child_tasks c ON c.id=g.id WHERE c.child_thread_id=?1 AND json_extract(c.body,'$.child_branch_id')=?2",params![run.thread_id,run.branch_id],|r|r.get(0)).optional()?;
+        let frozen:Option<String>=tx.query_row("SELECT g.goal_id FROM goal_children g JOIN child_tasks c ON c.id=g.id WHERE c.child_thread_id=?1 AND json_extract(c.body,'$.child_branch_id')=?2 AND json_type(c.body,'$.origin')='object'",params![run.thread_id,run.branch_id],|r|r.get(0)).optional()?;
         if let Some(goal) = frozen {
             tx.execute("INSERT INTO goal_runs(id,goal_id,primary_run) VALUES(?1,?2,0) ON CONFLICT(id) DO NOTHING",params![run.id,goal])?;
             return Ok(());
@@ -335,8 +336,8 @@ pub(super) fn bind_child(tx: &Transaction<'_>, operation: &str, parent: &str) ->
     Ok(())
 }
 fn adopt_descendants(tx: &Transaction<'_>, run: &str, goal: &str) -> Result<()> {
-    tx.execute("WITH RECURSIVE descendants(id) AS (SELECT ?1 UNION SELECT j.run_id FROM context_jobs j JOIN descendants d ON j.owner_run_id=d.id UNION SELECT r.id FROM child_tasks c JOIN descendants d ON json_extract(c.body,'$.parent_run_id')=d.id JOIN runs r ON r.branch_id=json_extract(c.body,'$.child_branch_id') WHERE NOT EXISTS(SELECT 1 FROM delegated_executions e WHERE e.run_id=r.id AND json_extract(e.body,'$.trigger.kind') IN ('user_continuation','message_request','followup','calendar','computer_event'))) INSERT INTO goal_runs(id,goal_id,primary_run) SELECT id,?2,0 FROM descendants WHERE id!=?1 ON CONFLICT(id) DO NOTHING",params![run,goal])?;
-    tx.execute("INSERT INTO goal_children(id,goal_id) SELECT c.id,?1 FROM child_tasks c JOIN goal_runs g ON json_extract(c.body,'$.parent_run_id')=g.id WHERE g.goal_id=?1 ON CONFLICT(id) DO NOTHING",[goal])?;
+    tx.execute("WITH RECURSIVE descendants(id) AS (SELECT ?1 UNION SELECT j.run_id FROM context_jobs j JOIN descendants d ON j.owner_run_id=d.id UNION SELECT r.id FROM child_tasks c JOIN descendants d ON json_extract(c.body,'$.parent_run_id')=d.id JOIN runs r ON r.branch_id=json_extract(c.body,'$.child_branch_id') WHERE json_type(c.body,'$.origin')='object' AND NOT EXISTS(SELECT 1 FROM delegated_executions e WHERE e.run_id=r.id AND json_extract(e.body,'$.trigger.kind') IN ('user_continuation','message_request','followup','calendar','computer_event'))) INSERT INTO goal_runs(id,goal_id,primary_run) SELECT id,?2,0 FROM descendants WHERE id!=?1 ON CONFLICT(id) DO NOTHING",params![run,goal])?;
+    tx.execute("INSERT INTO goal_children(id,goal_id) SELECT c.id,?1 FROM child_tasks c JOIN goal_runs g ON json_extract(c.body,'$.parent_run_id')=g.id WHERE g.goal_id=?1 AND json_type(c.body,'$.origin')='object' ON CONFLICT(id) DO NOTHING",[goal])?;
     Ok(())
 }
 pub(super) fn detach_ended_for_input(tx: &Transaction<'_>, run: &str) -> Result<()> {

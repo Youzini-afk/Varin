@@ -24,6 +24,8 @@ export interface AdmittedContextScope {
   childProfile?: ChildSelectedProfile;
 }
 export interface ContextPreparer {
+  userSkills?(signal?: AbortSignal): Promise<PreparedAgentResources['skills']>;
+  draftSourceSkills?(workspaceId: string, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSkillCatalog>;
   (identity: ThreadIdentity, source: ThreadSource | null, admitted: AdmittedContextScope, signal?: AbortSignal): Promise<InitialContext>;
   main(identity: ThreadIdentity, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext>;
   withAgent?(context: InitialContext, agent: AgentSelection, instructions: string): Promise<InitialContext>;
@@ -143,6 +145,8 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     return { ...candidate, memoryCheckpoint: checkpoint.proposal.memory_checkpoint };
   };
   return Object.assign(initial, {
+    ...(owners.resources.draftSourceSkills ? { draftSourceSkills: (workspaceId: string, signal?: AbortSignal) => owners.resources.draftSourceSkills!(workspaceId, signal) } : {}),
+    ...(owners.resources.userSkills ? { userSkills: (signal?: AbortSignal) => owners.resources.userSkills!(signal) } : {}),
     async withAgent(context: InitialContext, _agent: AgentSelection, instructions: string): Promise<InitialContext> {
       const basis = context.personalization;
       if (!basis || basis.mode !== 'agent' || basis.threadRole !== 'main') throw new Error('Agent selection requires an ordinary main conversation');

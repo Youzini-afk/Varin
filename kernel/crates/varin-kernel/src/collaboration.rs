@@ -388,7 +388,7 @@ impl ToolExecutor for CollaborationTools {
                         let input_ref = input_preparation.reference(&input).map_err(error)?;
                         if old.input_ref != input_ref
                             || old.parent_run_id != c.run_id
-                            || old.origin != c.origin
+                            || old.origin.as_ref() != Some(&c.origin)
                         {
                             return Err(error("dispatch origin input changed"));
                         }
@@ -711,7 +711,7 @@ pub(crate) fn resolve_selection(
 > {
     resolve_selection_with_attachments(selected, input, &[])
 }
-fn resolve_selection_with_attachments(
+pub(crate) fn resolve_selection_with_attachments(
     selected: &ChildDispatchSelection, input: &DispatchInput,
     attachments: &[varin_runtime::catalog::attachments::Attachment],
 ) -> Result<(varin_runtime::catalog::dispatch::ResolvedChildSelection, Vec<ToolSchema>), ExecutionError> {

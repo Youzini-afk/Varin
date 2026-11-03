@@ -140,6 +140,10 @@ export interface ThreadResolvedSource {
   path: string;
 }
 export interface ThreadSourcesAPI {
+  /** Metadata only from the current branch Source or an explicitly prepared replacement. */
+  files(identity: ThreadIdentity, options?: import('./thread-source-files.js').ThreadSourceFilesOptions, signal?: AbortSignal): Promise<import('./thread-source-files.js').ThreadSourceFilePage>;
+  /** Explicit pending source discovery before Thread creation. */
+  draftFiles(options: import('./thread-source-files.js').ThreadDraftFileOptions, signal?: AbortSignal): Promise<import('./thread-source-files.js').ThreadSourceFilePage>;
   /** A draft may discover configured Hosts before a Thread exists; discovery grants no source access. */
   list(identity: ThreadIdentity | null, signal?: AbortSignal): Promise<ThreadSourceTargets>;
   resolve(identity: ThreadIdentity, request: { resourceOwner: SourceResourceOwner; path: string }, signal?: AbortSignal): Promise<ThreadResolvedSource>;
@@ -149,6 +153,20 @@ export interface ThreadPreparedSource {
   source: ThreadSource;
   provenance?: ChildSourceProvenance;
 }
+/** An explicit draft selection. UTF-16 offsets bind only its visible /skill:name text.
+ * The Host resolves the stable resource and captured version in the actual execution source. */
+export interface ThreadSkillLocator { resourceOwner: SourceResourceOwner; workspaceId: string; domainId: string; path: string }
+export interface ThreadDraftSkillOptions { source?: { resourceOwner: SourceResourceOwner; path: string } }
+export interface ThreadSkillSelection { resourceId: string; version: string; start: number; end: number; locator?: ThreadSkillLocator }
+export interface ThreadSkillCandidate {
+  resourceId: string; version: string; name: string; description: string;
+  origin: 'user' | 'project' | 'package'; path: string; packageIdentity?: string; locator?: ThreadSkillLocator;
+}
+/** Object references add context only; they never select a recipient or grant file access. */
+export type ThreadObjectReference =
+  | { kind: 'thread'; threadId: string; branchId: string; start: number; end: number }
+  | { kind: 'directory'; path: string; start: number; end: number };
+export interface ThreadSkillCatalog { snapshotId: string; skills: ThreadSkillCandidate[] }
 export interface ThreadSubmit extends ThreadIdentity {
   clientTime?: import('@varin/protocol').MessageTimeObservation;
   key: string;
@@ -156,6 +174,8 @@ export interface ThreadSubmit extends ThreadIdentity {
   text: string;
   images?: ImageAttachment[];
   materials?: ThreadMaterialAttachment[];
+  skills?: ThreadSkillSelection[];
+  references?: ThreadObjectReference[];
   attachments?: import('@varin/protocol').AttachmentSelection[];
   model: ThreadModel;
   agent?: ThreadAgentChoice;
@@ -270,9 +290,13 @@ export interface ThreadChildContinuation extends ThreadIdentity {
   text: string;
   images?: ImageAttachment[];
   materials?: ThreadMaterialAttachment[];
+  skills?: ThreadSkillSelection[];
+  references?: ThreadObjectReference[];
   attachments?: import('@varin/protocol').AttachmentSelection[];
 }
 export interface ThreadCollaborationAPI {
+  dispatchCatalog(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('./thread-dispatch.js').ThreadDispatchCatalog>;
+  dispatch(input: import('./thread-dispatch.js').ThreadDispatchInput, signal?: AbortSignal): Promise<import('./thread-dispatch.js').ThreadDispatchReceipt>;
   exchange(identity: ThreadIdentity, request: ThreadCodeExchangeRequest, signal?: AbortSignal): Promise<ThreadCodeExchange>;
   page?(identity: ThreadIdentity, options?: Omit<FamilyListParams,'callerThreadId'>, signal?:AbortSignal):Promise<ThreadChildPage>;
   integration(input: ThreadIntegrationCommand, signal?: AbortSignal): Promise<ThreadIntegrationState>;
@@ -340,6 +364,10 @@ export interface ThreadResourceRefresh extends ThreadIdentity {
   supportingFiles?: Array<{ skillName: string; relativePath: string }>;
 }
 export interface ThreadResourcesAPI {
+  /** Global skills and an explicitly selected pending source, without creating a Thread. */
+  draftSkills(options?: ThreadDraftSkillOptions, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
+  /** Metadata from this branch’s prepared resources, or the explicitly admitted pending source. */
+  skills(identity: ThreadIdentity, options?: { source?: ThreadSource }, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
   /** Prepare a new resource snapshot; old in-flight requests keep their original version. */
   refresh(input: ThreadResourceRefresh): Promise<ContextCheckpoint>;
 }
@@ -498,6 +526,7 @@ export interface ThreadAttachmentsAPI {
   read(identity: ThreadIdentity, request: { ref: string }, signal?: AbortSignal): Promise<Blob>;
 }
 export interface ThreadsAPI {
+  workflows?: import('./thread-workflows.js').ThreadWorkflowsAPI;
   attachments: ThreadAttachmentsAPI;
   nextStep?(identity: ThreadIdentity, cut: { runId: string; headId: string }, signal?: AbortSignal): Promise<ThreadNextStep>;
   materials: ThreadMaterialsAPI;
@@ -538,8 +567,8 @@ export interface ThreadsAPI {
   cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;
-  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: import('@varin/protocol').AttachmentSelection[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
-  editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[]): Promise<QueuedInput>;
+  enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: import('@varin/protocol').AttachmentSelection[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
+  editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], skills?: ThreadSkillSelection[]): Promise<QueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
   sendInputNow(inputId: string, expectedRevision: number, expectedRunId: string): Promise<QueuedInput>;
   /** Read one original-holder media chunk; the expected reference is identity, never authority. */

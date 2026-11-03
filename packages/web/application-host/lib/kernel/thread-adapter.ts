@@ -19,7 +19,8 @@ import { threadInput } from './thread-images.js';
 import { messageSentTime } from './thread-message-time.js';
 import type { MessageTimeObservation, MessageTimeSettings } from '@varin/protocol';
 import { materialInputText, parseThreadMaterials, type ThreadInputMaterials } from './thread-material-input.js';
-import type { ThreadMaterialAttachment } from '@varin/application-client';
+import { createThreadObjectInputPreparer, parseThreadObjectReferences } from './thread-object-input.js';
+import type { ThreadObjectReference, ThreadDraftSkillOptions, ThreadSkillSelection, ThreadSkillCatalog, ThreadMaterialAttachment } from '@varin/application-client';
 import { listThreadFollowups } from './thread-followups.js';
 import { listThreadGoals } from './thread-goals.js';
 import { createHash } from 'node:crypto';
@@ -30,7 +31,8 @@ import { isAbortError, waitWithSignal } from '../cancellation.js';
 import { modelCredentialBindingIdentity, waitForModelBinding } from './model-binding-lifetime.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
-import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
+import { parseThreadSkills, type ThreadSkillInputPreparer } from './thread-skill-input.js';
+import { resourceThreadSource } from './thread-context.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
 import { KernelRequestError } from './kernel-error.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
@@ -94,27 +96,35 @@ export class ThreadAdapter {
   bindMaterials(owner: ThreadInputMaterials): void { this.inputMaterials = owner; }
   private messageTime?: () => Promise<MessageTimeSettings>;
   bindMessageTime(settings: () => Promise<MessageTimeSettings>): void { this.messageTime = settings; }
-  private async prepareInput(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; clientTime?: MessageTimeObservation }, signal?: AbortSignal, acceptsImages = true) {
+  private async prepareInput(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; source?: ThreadSource; clientTime?: MessageTimeObservation }, signal?: AbortSignal, options: { rawReferences?: boolean; acceptsImages?: boolean } = {}) {
     const sentTime = this.messageTime ? messageSentTime(await this.messageTime(), input.clientTime) : undefined;
     const selected = parseThreadMaterials(input.materials);
     const attachments = parseAttachmentSelections(input.attachments) ?? [];
-    if (this.attachments && (attachments.length || selected?.length)) {
-      const fileAttachments = await this.attachments.prepare(input, [...attachments, ...(selected ?? []).map(material => ({ ref: material.snapshotId }))], `user-input:${input.key}`, input.threadId, signal);
+    const attachmentSelections = [...attachments, ...(selected ?? []).map(material => ({ ref: material.snapshotId }))];
+    const skills = parseThreadSkills(input.skills, input.text);
+    const references = parseThreadObjectReferences(input.references, input.text);
+    const text = references?.length && !options.rawReferences ? await createThreadObjectInputPreparer({ runtime: this.runtime, admitSource: this.admitSource })({ ...input, references }, signal) : input.text;
+    const explicit = { ...(skills?.length ? { skills } : {}), ...(references?.length ? { references, referenceIntent: { text: input.text,
+      ...(selected?.length ? { materials: selected } : {}), ...(attachmentSelections.length ? { attachmentSelections, originalImageCount: input.images?.length ?? 0 } : {}) } } : {}) };
+    const metadata = { ...(text === input.text ? {} : { userText: input.text }), ...explicit, ...(sentTime ? { sentTime } : {}) };
+    if (options.rawReferences) return { ...threadInput(input.text, input.images), ...explicit, ...(sentTime ? { sentTime } : {}) };
+    if (this.attachments && attachmentSelections.length) {
+      const fileAttachments = await this.attachments.prepare(input, attachmentSelections, `user-input:${input.key}`, input.threadId, signal);
       const images = [...input.images ?? []];
-      if (acceptsImages) for (const attachment of fileAttachments) if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
+      if (options.acceptsImages !== false) for (const attachment of fileAttachments) if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(attachment.mimeType)) {
         const source = await this.attachments.read(input, attachment.ref, signal);
         const chunks: Uint8Array[] = [];
         for await (const chunk of source.stream) chunks.push(chunk);
         images.push({ mimeType: attachment.mimeType, data: Buffer.concat(chunks).toString('base64') });
       }
-      return { ...threadInput(input.text, images.length ? images : input.images), fileAttachments, ...(sentTime ? { sentTime } : {}) };
+      return { ...threadInput(text, images.length ? images : input.images), fileAttachments, ...metadata };
     }
     if (attachments.length) throw new Error('Thread attachment admission is unavailable');
-    if (!selected?.length) return { ...threadInput(input.text, input.images), ...(sentTime ? { sentTime } : {}) };
+    if (!selected?.length) return { ...threadInput(text, input.images), ...metadata };
     if (!this.inputMaterials) throw new Error('Thread material admission is unavailable');
     const materials = await this.inputMaterials(input, selected, signal);
     signal?.throwIfAborted();
-    return { ...threadInput(materialInputText(input.text, materials), input.images), ...(sentTime ? { sentTime } : {}) };
+    return { ...threadInput(materialInputText(text, materials), input.images), ...metadata, userText: input.text };
   }
 
   private compaction?: ContextCompactionOwner;
@@ -123,6 +133,26 @@ export class ThreadAdapter {
   bindContextAgent(owner: ContextAgentOwner): void { this.contextAgent = owner; }
   private readContextPolicy?: (run: import('@varin/protocol').Run, signal?: AbortSignal) => Promise<NonNullable<ThreadContextState['policy']>>;
   bindContextPolicy(reader: (run: import('@varin/protocol').Run, signal?: AbortSignal) => Promise<NonNullable<ThreadContextState['policy']>>): void { this.readContextPolicy = reader; }
+  private sourceFiles?: import('./thread-source-files.js').ThreadSourceFilesOwner;
+  bindSourceFiles(owner: import('./thread-source-files.js').ThreadSourceFilesOwner): void { this.sourceFiles = owner; }
+  async draftSourceFiles(options: import('@varin/application-client').ThreadDraftFileOptions, signal?: AbortSignal) {
+    if (!this.sourceFiles) throw new Error('Source file discovery is unavailable');
+    return this.sourceFiles.draftFiles(options, signal);
+  }
+  async files(identity: ThreadIdentity, options: import('@varin/application-client').ThreadSourceFilesOptions = {}, signal?: AbortSignal) {
+    const thread = await this.requireIdentity(identity, signal);
+    const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
+    const runId = branch.active_run_id ?? branch.latest_run?.id;
+    const launch = runId ? await this.runtime.launch(runId, signal) : null;
+    const original = resourceThreadSource(launch?.selection.source ?? null);
+    const source = options.source ?? original;
+    signal?.throwIfAborted();
+    if (!source) return { entries: [], nextCursor: null };
+    if (!this.sourceFiles) throw new Error('Source file discovery is unavailable');
+    const sourceRunId = original && isDeepStrictEqual({ ...source, tools: [] }, original) ? runId : undefined;
+    await this.admitSource(source, identity, sourceRunId, signal);
+    return this.sourceFiles.files(identity, source, options, signal, sourceRunId);
+  }
   private sourceDirectory?: SourceDirectory;
   private botWorkProfile?: (botId: string, signal: AbortSignal) => Promise<{ homeDir: string; model: ThreadModel } | null>;
   private readonly coldBotPreparations = new Set<string>();
@@ -198,6 +228,63 @@ export class ThreadAdapter {
     const prepared = await this.prepareSkillInput(identity, resources, text, signal);
     if (prepared.status !== 'ready') throw new ResourceScopeError(prepared);
     return prepared.skill;
+  }
+
+  private async selectedSkillInput(identity: ThreadIdentity, resources: ContextResources | undefined, text: string,
+    selections?: readonly ThreadSkillSelection[], signal?: AbortSignal): Promise<Omit<InputResourcePreparation, 'expectedContextCheckpoint'> | null> {
+    if (!selections?.length && !parseExplicitSkillCommand(text)) return null;
+    if (!this.prepareSkillInput) throw Object.assign(new Error('Skill input preparation is unavailable'), { code: 'resource-unavailable' });
+    const prepared = await this.prepareSkillInput(identity, resources, text, signal, selections);
+    if (prepared.status !== 'ready') throw new ResourceScopeError(prepared);
+    return prepared.skills?.length ? { skills: prepared.skills } : prepared.skill ? { skill: prepared.skill } : null;
+  }
+
+  /** Candidate metadata uses the same source/context owner as submission, never navigation cwd. */
+  async skills(identity: ThreadIdentity, options: { source?: ThreadSource } = {}, signal?: AbortSignal): Promise<ThreadSkillCatalog> {
+    const thread = await this.requireIdentity(identity, signal);
+    const checkpoint = await this.runtime.context(identity.branchId, signal);
+    let resources = checkpoint?.resources;
+    if (options.source !== undefined || !checkpoint) {
+      if (!this.prepareContext) throw Object.assign(new Error('Resource catalog is unavailable'), { code: 'resource-unavailable' });
+      let source = options.source ?? null;
+      if (!source) {
+        const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
+        const runId = branch.active_run_id ?? branch.latest_run?.id;
+        const launch = runId ? await this.runtime.launch(runId, signal) : null;
+        source = resourceThreadSource(launch?.selection.source ?? null);
+      }
+      if (source) await this.admitSource(source, identity, undefined, signal);
+      const context = checkpoint
+        ? await this.prepareContext.forSource?.(checkpoint, source, signal)
+        : await this.prepareContext.main(identity, source, signal);
+      resources = context?.resources;
+    }
+    if (!resources) throw Object.assign(new Error('Resource catalog is unavailable'), { code: 'resource-unavailable' });
+    signal?.throwIfAborted();
+    return this.skillCatalog(resources.snapshot.id, resources.snapshot.skills);
+  }
+  async draftSkills(options: ThreadDraftSkillOptions = {}, signal?: AbortSignal): Promise<ThreadSkillCatalog> {
+    if (options.source) {
+      if (!this.sourceDirectory) throw Object.assign(new Error('Source discovery is unavailable'), { code: 'resource-unavailable' });
+      if (options.source.resourceOwner.kind === 'managed_host') {
+        if (!this.sourceDirectory.draftSkills) throw Object.assign(new Error('Pending source discovery is unavailable'), { code: 'resource-unavailable' });
+        return this.sourceDirectory.draftSkills(options.source, signal);
+      }
+      const source = await this.sourceDirectory.resolve(options.source, signal);
+      if (!this.prepareContext?.draftSourceSkills) throw Object.assign(new Error('Draft source resource catalog is unavailable'), { code: 'resource-unavailable' });
+      return this.prepareContext.draftSourceSkills(source.workspaceId, signal);
+    }
+    if (!this.prepareContext?.userSkills) throw Object.assign(new Error('Draft resource catalog is unavailable'), { code: 'resource-unavailable' });
+    const skills = await this.prepareContext.userSkills(signal);
+    signal?.throwIfAborted();
+    const catalog = this.skillCatalog('', skills);
+    return { ...catalog, snapshotId: `draft-skills:${createHash('sha256').update(JSON.stringify(catalog.skills)).digest('hex')}` };
+  }
+  private skillCatalog(snapshotId: string, skills: ContextResources['snapshot']['skills']): ThreadSkillCatalog {
+    return { snapshotId, skills: skills.map(skill => ({ resourceId: skill.id, version: skill.reference.version,
+      name: skill.name, description: skill.description, origin: skill.origin, path: skill.reference.path,
+      ...(skill.packageIdentity ? { packageIdentity: skill.packageIdentity } : {}),
+    })) };
   }
 
   private readonly contextRefreshes = new Map<string, Promise<void>>();
@@ -359,7 +446,7 @@ export class ThreadAdapter {
   async cancelOperation(operationId: string) {
     const current = await this.runtime.operationStatus(operationId);
     await this.requireRun(current.run_id);
-    if (current.executor === 'dispatch' || current.executor === 'code_retrieval') {
+    if (current.executor === 'dispatch' || current.executor === 'code_retrieval' || current.executor === 'user_dispatch') {
       await this.runtime.cancelTree({ kind: 'child', operation_id: operationId }); return this.runtime.operationStatus(operationId);
     }
     if ((current.executor === 'wait_child' || current.executor === 'retrieval_control') && current.waiting_on?.startsWith('child-wait:')) {
@@ -458,14 +545,40 @@ export class ThreadAdapter {
       await this.requireIdentity(input, signal);
       const child = await this.runtime.childForThread(input.threadId, signal);
       if (!child || child.child_branch_id !== input.branchId) throw new Error('Continuation requires the original child branch');
-      const preparedInput = await this.prepareInput(input, signal);
-      // This call is the durable input acceptance. Cold source/configuration preparation belongs
-      // to the existing event-driven collaboration owner, including after Host restart.
-      admissionStarted = true;
-      return await this.runtime.acceptChildContinuation({ key: input.key, childOperationId: child.operation_id,
+      let existingReference = Boolean(input.references?.length && (await this.runtime.childExecutions(child.operation_id, signal))
+        .some(execution => execution.trigger.kind === 'user_continuation' && execution.trigger.key === input.key));
+      let preparedInput;
+      try { preparedInput = await this.prepareInput(input, signal, { rawReferences: existingReference }); }
+      catch (error) {
+        if (!input.references?.length || !(await this.runtime.childExecutions(child.operation_id, signal))
+          .some(execution => execution.trigger.kind === 'user_continuation' && execution.trigger.key === input.key)) throw error;
+        existingReference = true;
+        preparedInput = await this.prepareInput(input, signal, { rawReferences: true });
+      }
+      const command = { key: input.key, childOperationId: child.operation_id,
         ...(input.name === undefined ? {} : { name: input.name }),
         ...(input.sourceAgent === undefined ? {} : { sourceAgent: input.sourceAgent }),
-        previousRunId: input.previousRunId, expectedHead: input.expectedHead, input: preparedInput }, signal);
+        previousRunId: input.previousRunId, expectedHead: input.expectedHead, input: preparedInput };
+      let inputPreparation: InputResourcePreparation | undefined;
+      if (!existingReference && (input.skills?.length || parseExplicitSkillCommand(input.text))) {
+        // The original Catalog compares the full intent. This lookup only avoids preparing
+        // mutable resources again when an uncertain acceptance already froze the input.
+        const accepted = async () => (await this.runtime.childExecutions(child.operation_id, signal))
+          .some(execution => execution.trigger.kind === 'user_continuation' && execution.trigger.key === input.key);
+        if (!await accepted()) {
+          try {
+            const checkpoint = await this.runtime.context(input.branchId, signal);
+            const prepared = await this.selectedSkillInput(input, checkpoint?.resources, input.text, input.skills, signal);
+            if (prepared) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, ...prepared };
+          } catch (error) {
+            if (!await accepted()) throw error;
+          }
+        }
+      }
+      // Acceptance freezes explicit skill material at this checkpoint. The existing
+      // collaboration owner still owns deferred source/configuration preparation and launch.
+      admissionStarted = true;
+      return await this.runtime.acceptChildContinuation({ ...command, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
     } catch (error) {
       if (!admissionStarted || error instanceof KernelRequestError && error.method === 'runtime.child.continuation.accept' && error.settlement === 'not_dispatched') {
         throw new ThreadPreAdmissionError(error, 'thread-request-failed');
@@ -825,20 +938,39 @@ export class ThreadAdapter {
     let admissionStarted = false;
     try {
       const thread = await this.requireIdentity(input);
-      await this.refreshContext(input);
-      if (input.source) await this.admitSource(input.source, input);
       const model = await this.models.resolveModel(input.model);
       try {
         this.assertImagesSupported(input.images, model.configuration);
         const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          expectedHead: input.expectedHead, input: await this.prepareInput(input, undefined, model.configuration.acceptsImages !== false), configuration: model.configuration,
+          expectedHead: input.expectedHead, input: await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length), acceptsImages: model.configuration.acceptsImages !== false }), configuration: model.configuration,
           launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: input.source ? {
             resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
             ...(input.source.mode==='native_workspace'&&input.source.nativeScope?{nativeScope:input.source.nativeScope}:{}),branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
           } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
         };
+        if (input.references?.length || input.skills?.length || parseExplicitSkillCommand(input.text) || this.prepareContext || this.prepareChildProfiles || input.agent) {
+          const accepted = await this.runtime.inputReceipt(command);
+          if (accepted) {
+            admissionStarted = true;
+            this.titles?.schedule(thread, input.branchId);
+            void this.continueLaunch(accepted.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+            return accepted;
+          }
+        }
+        if (input.references?.length) {
+          try { command.input = await this.prepareInput(input, undefined, { acceptsImages: model.configuration.acceptsImages !== false }); }
+          catch (error) {
+            const accepted = await this.runtime.inputReceipt(command);
+            if (!accepted) throw error;
+            admissionStarted = true;
+            void this.continueLaunch(accepted.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+            return accepted;
+          }
+        }
+        await this.refreshContext(input);
+        if (input.source) await this.admitSource(input.source, input);
         let initialContext: InitialContext | undefined;
-        const explicitSkill = parseExplicitSkillCommand(input.text) !== null;
+        const explicitSkill = Boolean(input.skills?.length) || parseExplicitSkillCommand(input.text) !== null;
         const checkpoint = this.prepareContext || explicitSkill ? await this.runtime.context(input.branchId) : null;
         const preparesResources = this.prepareContext && (input.source !== undefined || !checkpoint);
         let inputPreparation: InputResourcePreparation | undefined;
@@ -893,8 +1025,8 @@ export class ThreadAdapter {
                 configuration: model.configuration, credential_scope: command.launch!.credentialScope ?? null,
               } });
             }
-            const skill = await this.skillInput(input, initialContext ? initialContext.resources : checkpoint?.resources, input.text);
-            if (skill) inputPreparation = { expectedContextCheckpoint: initialContext ? null : checkpoint?.id ?? null, skill };
+            const prepared = await this.selectedSkillInput(input, initialContext ? initialContext.resources : checkpoint?.resources, input.text, input.skills);
+            if (prepared) inputPreparation = { expectedContextCheckpoint: initialContext ? null : checkpoint?.id ?? null, ...prepared };
           } catch (error) {
             // Another identical request can finish after the first read. Only its authoritative,
             // matching receipt recovers this failure; a miss leaves the preparation error visible.
@@ -923,10 +1055,19 @@ export class ThreadAdapter {
     }
   }
 
-  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
+  async enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; mode: InputMode; clientTime?: MessageTimeObservation }) {
     let admissionStarted = false;
     try {
       const thread = await this.requireIdentity(input);
+      if (input.references?.length) {
+        const accepted = await this.runtime.enqueueReceipt({ key: input.key, threadId: input.threadId, branchId: input.branchId,
+          mode: input.mode, input: await this.prepareInput(input, undefined, { rawReferences: true }) });
+        if (accepted) {
+          admissionStarted = true;
+          void this.continueLaunch(accepted.run_id).catch(() => undefined);
+          return accepted;
+        }
+      }
       const branch = thread.branches.find(candidate => candidate.branch_id === input.branchId)!;
       const previousId = branch.active_run_id ?? branch.latest_run?.id;
       if (!previousId) throw new Error('An initial model selection is required');
@@ -941,9 +1082,19 @@ export class ThreadAdapter {
         if (!previous) throw new Error('An initial model selection is required');
         this.assertImagesSupported(input.images, selected.desired?.configuration ?? previous.configuration);
         const command: InputEnqueueParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          mode: input.mode, input: await this.prepareInput(input, undefined, (selected.desired?.configuration ?? previous.configuration as ModelSessionConfiguration).acceptsImages !== false) };
+          mode: input.mode, input: await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length), acceptsImages: (selected.desired?.configuration ?? previous.configuration as ModelSessionConfiguration).acceptsImages !== false }) };
+        if (input.references?.length) {
+          try { command.input = await this.prepareInput(input, undefined, { acceptsImages: (selected.desired?.configuration ?? previous.configuration as ModelSessionConfiguration).acceptsImages !== false }); }
+          catch (error) {
+            const accepted = await this.runtime.enqueueReceipt(command);
+            if (!accepted) throw error;
+            admissionStarted = true;
+            await this.continueQueuedLaunch(accepted.run_id, previousId, credentialOwner);
+            return accepted;
+          }
+        }
         let inputPreparation: InputResourcePreparation | undefined;
-        if (parseExplicitSkillCommand(input.text)) {
+        if (input.skills?.length || parseExplicitSkillCommand(input.text)) {
           const existing = await this.runtime.enqueueReceipt(command);
           if (existing) {
             admissionStarted = true;
@@ -952,8 +1103,8 @@ export class ThreadAdapter {
           }
           try {
             const checkpoint = await this.runtime.context(input.branchId);
-            const skill = await this.skillInput(input, checkpoint?.resources, input.text);
-            if (skill) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, skill };
+            const prepared = await this.selectedSkillInput(input, checkpoint?.resources, input.text, input.skills);
+            if (prepared) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, ...prepared };
           } catch (error) {
             const accepted = await this.runtime.enqueueReceipt(command);
             if (!accepted) throw error;
@@ -1026,24 +1177,31 @@ export class ThreadAdapter {
     return result;
   }
 
-  async editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], signal?: AbortSignal) {
+  async editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], signal?: AbortSignal, skills?: ThreadSkillSelection[]) {
     const queued = await this.requireInput(inputId);
     if (queued.state !== 'queued' || queued.revision !== expectedRevision) {
       throw Object.assign(new Error('Queued input changed'), { code: 'thread-conflict' });
     }
     if (images?.length) this.assertImagesSupported(images, (await this.requireRun(queued.run_id)).configuration);
     const existing = typeof queued.content === 'string' ? { text: queued.content }
-      : queued.content as { text?: string; attachments?: unknown[] };
+      : queued.content as { text?: string; userText?: string; attachments?: unknown[]; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; referenceIntent?: { text: string; materials?: ThreadMaterialAttachment[]; attachmentSelections?: AttachmentSelection[]; originalImageCount?: number } };
+    const existingText = existing.userText ?? existing.text ?? '';
+    const unchanged = text === existingText;
     // Text-only edits preserve accepted media; an explicit images array replaces/removes it.
-    const content = images === undefined
-      ? { text }
-      : threadInput(text, images);
+    const selections = parseThreadSkills(skills === undefined && unchanged ? existing.skills : skills, text);
+    const contentText = unchanged ? existing.text ?? text : text;
+    const content = { ...(images === undefined ? { text: contentText } : threadInput(contentText, images)),
+      ...(unchanged && existing.userText !== undefined ? { userText: existing.userText } : {}),
+      ...(unchanged && existing.references?.length ? { references: existing.references } : {}),
+      ...(unchanged && existing.referenceIntent ? { referenceIntent: { ...existing.referenceIntent, ...(images !== undefined && existing.referenceIntent.originalImageCount !== undefined ? { originalImageCount: images.length } : {}) } } : {}),
+      ...(selections?.length ? { skills: selections } : {}) };
     if (!text.length && !(images === undefined ? existing.attachments?.length : images.length)) throw new Error('Text or images are required');
     let inputPreparation: InputResourcePreparation | undefined;
-    if (text !== (existing.text ?? '') && parseExplicitSkillCommand(text)) {
+    if ((!unchanged || !isDeepStrictEqual(selections ?? [], existing.skills ?? []))
+      && (selections?.length || parseExplicitSkillCommand(text))) {
       const checkpoint = await this.runtime.context(queued.branch_id, signal);
-      const skill = await this.skillInput({ runtime: 'agent', threadId: queued.thread_id, branchId: queued.branch_id }, checkpoint?.resources, text, signal);
-      if (skill) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, skill };
+      const prepared = await this.selectedSkillInput({ runtime: 'agent', threadId: queued.thread_id, branchId: queued.branch_id }, checkpoint?.resources, text, selections, signal);
+      if (prepared) inputPreparation = { expectedContextCheckpoint: checkpoint?.id ?? null, ...prepared };
     }
     signal?.throwIfAborted();
     // The input owner preserves old activation when raw text is unchanged and removes it when

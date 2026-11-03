@@ -1,3 +1,4 @@
+import { isComposerLiteral } from './triggers';
 /** Slash invocations are recognized at word boundaries, then checked against the registry. */
 const SLASH_SCANNER = /(^|\s)\/([A-Za-z0-9][A-Za-z0-9_:-]*)/g;
 
@@ -16,6 +17,7 @@ export function scanSlashTokens(text: string): SlashToken[] {
     while ((match = SLASH_SCANNER.exec(text)) !== null) {
         const name = match[2];
         const start = match.index + match[1].length;
+        if (isComposerLiteral(text, start)) continue;
         tokens.push({ start, end: start + 1 + name.length, name });
     }
     return tokens;

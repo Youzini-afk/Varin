@@ -370,8 +370,8 @@ impl RunAssembly {
                 let owner=runtime.catalog();let catalog=owner.lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?;
                 match catalog.child_task_for_thread(&run.thread_id).map_err(domain)? {
                     Some(child) if catalog.operation(&child.operation_id).map_err(domain)?.executor.as_deref()==Some("code_retrieval")=>{
-                        let context=varin_runtime::execution::ToolExecutionContext{run_id:child.parent_run_id,origin:child.origin,operation_id:child.operation_id};
-                        Some(catalog.capture_tool_invocation(&context,&child.call_id).map_err(domain)?)
+                        let context=varin_runtime::execution::ToolExecutionContext{run_id:child.parent_run_id,origin:child.origin.ok_or_else(||KernelError::Authorization("Retrieval tool origin missing".into()))?,operation_id:child.operation_id};
+                        Some(catalog.capture_tool_invocation(&context,child.call_id.as_deref().ok_or_else(||KernelError::Authorization("Retrieval call identity missing".into()))?).map_err(domain)?)
                     },_=>None,
                 }
             };

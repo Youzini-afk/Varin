@@ -209,20 +209,36 @@ network installer would introduce another authority. The resource owner never gu
 
 ### Explicit input material
 
-`activation.ts` recognizes leading `/skill:` syntax and first ASCII-space delimiter;
-only arguments are trimmed. Name diagnostics remain warnings. `thread-skill-input.ts` selects from the
-full published snapshot, rechecks its existing resource admission and parses the captured SKILL.md
-without reopening live files or settings. Unknown, malformed, unavailable and denied selections retain
-distinct failures instead of silently becoming successful ordinary prompts.
+`activation.ts` retains leading `/skill:` syntax and the first ASCII-space delimiter for manual
+commands. Structured composer selections additionally bind exact resource IDs and captured versions to
+UTF-16 ranges anywhere in the raw input. `thread-skill-input.ts` resolves both paths from the full
+published snapshot, rechecks the existing resource admission and parses captured SKILL.md content
+without reopening live files or settings. Explicit selections follow text order, and repeated references
+to the same effective resource load once. Identity is never inferred from a display name; stale versions,
+ambiguous manual names, invalid ranges, missing resources and denied admission remain distinct failures.
 
-The Thread adapter passes this private preparation alongside unchanged text/media. Catalog binds it to
-the same initial/source-replacement checkpoint or compares the existing checkpoint ID, and stores the
-body with the original input. Submit/enqueue retry uses the original command receipt before resource
-preparation. Queue edits share the existing revision CAS: unchanged text preserves the old selection,
-changed text prepares a new one, ordinary text removes it, and failure changes neither media nor material.
-The UI inserts a command into the draft without sending it and displays accepted resource metadata
-separately from raw user history. Names containing ASCII spaces remain visible but cannot use this
-command syntax; their resource-read availability is unchanged.
+`ThreadResourcesAPI.skills` obtains content-free candidate metadata from the actual branch checkpoint
+or an explicitly admitted pending source through the same context owner. `draftSkills` discovers global or explicit pending-source resources before a Thread exists, using the
+same resource readers, project trust and precedence as execution. Pending selections retain the exact
+source owner, workspace, domain, path and content version; acceptance maps these to the captured
+descriptor and rejects drift. Managed discovery runs on the original target with read permission. It does not
+pretend that a navigation project is a prepared execution source. Project/managed-source discovery
+requires that actual source; a management-list ID is not a substitutable selector.
+
+The Thread adapter passes preparation alongside unchanged selection ranges and text/media. Catalog
+binds it to the same initial/source-replacement checkpoint or compares the existing checkpoint ID, and
+stores all skill bodies with the original input. Submit/enqueue retries reuse the original matching
+receipt before resource preparation. Object references additionally retain raw text and material IDs in
+a typed `referenceIntent`; receipt lookup does not re-resolve current family membership, source locators
+or material bodies, and an accepted retry returns the original frozen context. A user child continuation freezes its selected resources at durable
+acceptance; delayed source preparation cannot select a newer version. Previously accepted continuations
+without frozen input retain their original compatibility path. Queue edits share the existing revision
+CAS: unchanged text and selectors preserve old material, changed selections prepare new material, and
+ordinary replacement text clears it. Failure changes neither media nor material.
+
+Names containing ASCII spaces can be selected structurally even though the legacy command syntax
+cannot represent them. Hidden/model-invocation-disabled skills remain explicitly selectable, subject to
+the same resource admission. No selection grants tool, file or process access.
 
 Typed activations travel with the real compiled ModelStep/policy history. Compaction retains small source
 references; fork/recovery uses actual inherited input ancestry. A support-file read selecting an activation

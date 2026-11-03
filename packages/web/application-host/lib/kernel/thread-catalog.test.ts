@@ -186,3 +186,23 @@ it('rejects an attention snapshot whose kernel was replaced during the read', as
   });
   await expect(f.adapter.attention()).rejects.toThrow('original kernel replaced');
 });
+
+it('keeps Source file discovery authenticated and validates metadata-only paging before the owner runs', async () => {
+  const f = fixture();
+  const page = { entries: [{ path: 'src', relativePath: 'src', name: 'src', type: 'directory' as const }], nextCursor: null };
+  const files = vi.spyOn(f.adapter, 'files').mockResolvedValue(page);
+  const draft = vi.spyOn(f.adapter, 'draftSourceFiles').mockResolvedValue(page);
+  const identity = { runtime: 'agent', threadId: 'thread:files', branchId: 'branch:files' };
+  const pending = { resourceOwner: { kind: 'managed_host', hostId: 'B', connectionId: 'B-connection', endpointIdentity: 'B-identity' }, path: '/B/project' };
+  expect(await (await f.request('/api/threads/source/draft-files', { source: pending, query: 'src', type: 'directory', limit: 4 })).json()).toEqual(page);
+  expect(draft).toHaveBeenCalledWith({ source: pending, query: 'src', type: 'directory', limit: 4 }, expect.any(AbortSignal));
+  expect(await (await f.request('/api/threads/source/files', { ...identity, query: 'src' })).json()).toEqual(page);
+  expect(files).toHaveBeenCalledWith(identity, { query: 'src' }, expect.any(AbortSignal));
+  expect((await f.request('/api/threads/source/draft-files', { source: pending }, false)).status).toBe(401);
+  for (const malformed of [{ limit: 0 }, { type: ['directory'] }, { cursor: '' }, { query: {} }, { root: '/elsewhere' }]) {
+    expect((await f.request('/api/threads/source/files', { ...identity, ...malformed })).status).toBe(400);
+  }
+  expect((await f.request('/api/threads/source/draft-files', { source: { ...pending, workspaceId: 'unadmitted' } })).status).toBe(400);
+  expect(draft).toHaveBeenCalledTimes(1); expect(files).toHaveBeenCalledTimes(1);
+  expect(f.requests).not.toHaveBeenCalled();
+});

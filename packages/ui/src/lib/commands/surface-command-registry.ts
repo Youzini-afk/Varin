@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { parseVarinCommandContributionData, type JsonValue } from '@varin/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import {
@@ -53,11 +54,19 @@ const surfaceCommandExecutionDependencies: SurfaceCommandExecutionDependencies =
   },
 };
 
+/** Native action closures belong only to built-ins; extensions receive their public target DTO. */
+const commandContextForOwner = (context: Parameters<WorkbenchCommandImplementation['execute']>[0], extensionId: string) => (
+  extensionId === BUILTIN_COMMANDS_EXTENSION_ID || !context.composer ? context
+    : { ...context, composer: { host: context.composer.host, identity: context.composer.identity, source: context.composer.source } } as Parameters<WorkbenchCommandImplementation['execute']>[0]
+);
+
 export const executeSurfaceCommandContribution = async (
   contributionId: string,
   context: Parameters<WorkbenchCommandImplementation['execute']>[0],
   dependencies: SurfaceCommandExecutionDependencies = surfaceCommandExecutionDependencies,
 ): Promise<void> => {
+  const assertTarget = () => { if (context.composer && context.composer.host !== getRuntimeEndpointGeneration()) throw new Error('Conversation target changed'); };
+  assertTarget();
   const contribution = dependencies.getSnapshot().visibleContributions.find((candidate) => (
     candidate.descriptor.id === contributionId && candidate.descriptor.kind === 'command'
   ));
@@ -65,6 +74,7 @@ export const executeSurfaceCommandContribution = async (
   if (isDeclarativeImplementation(contribution.implementation)) {
     await dependencies.trigger(contribution);
   }
+  assertTarget();
   const latest = dependencies.getSnapshot().visibleContributions.find((candidate) => (
     candidate.descriptor.id === contributionId && candidate.descriptor.kind === 'command'
   ));
@@ -72,7 +82,9 @@ export const executeSurfaceCommandContribution = async (
   if (!implementation || typeof implementation.execute !== 'function') {
     throw new Error(`Surface command did not provide an executable implementation: ${contributionId}`);
   }
-  await implementation.execute(context);
+  const targetContext = commandContextForOwner(context, contribution.owner.extensionId);
+  if (implementation.isAvailable && !implementation.isAvailable(targetContext)) throw new Error('Command is no longer available in this conversation');
+  await implementation.execute(targetContext);
 };
 
 const commandRegistration = (contribution: SurfaceContribution): WorkbenchCommandRegistration | null => {
@@ -95,7 +107,8 @@ const commandRegistration = (contribution: SurfaceContribution): WorkbenchComman
     : [];
   const providedImplementation = contribution.implementation as Partial<WorkbenchCommandImplementation>;
   const implementation: WorkbenchCommandImplementation | null = typeof providedImplementation?.execute === 'function'
-    ? providedImplementation as WorkbenchCommandImplementation
+    ? contribution.owner.extensionId !== BUILTIN_COMMANDS_EXTENSION_ID ? { execute: context => executeSurfaceCommandContribution(contribution.descriptor.id, context),
+      ...(providedImplementation.isAvailable ? { isAvailable: (context: Parameters<WorkbenchCommandImplementation['execute']>[0]) => providedImplementation.isAvailable!(commandContextForOwner(context, contribution.owner.extensionId)) } : {}) } : providedImplementation as WorkbenchCommandImplementation
     : isDeclarativeImplementation(contribution.implementation)
       ? { execute: (context) => executeSurfaceCommandContribution(contribution.descriptor.id, context) }
       : null;
@@ -107,6 +120,11 @@ const commandRegistration = (contribution: SurfaceContribution): WorkbenchComman
     implementation,
     meta: {
       commandId,
+      ...(data.composer && typeof data.composer === 'object' && !Array.isArray(data.composer)
+        && typeof data.composer.name === 'string' && typeof data.composer.group === 'string'
+        && ['conversation', 'execution', 'context', 'collaboration', 'resources', 'application', 'management', 'skills'].includes(data.composer.group)
+        && ['action', 'select'].includes(String(data.composer.interaction))
+        ? { composer: data.composer as unknown as NonNullable<WorkbenchCommandMeta['composer']> } : {}),
       ...(titleKey ? { titleKey: titleKey as WorkbenchCommandMeta['titleKey'] } : {}),
       ...(publicData ? { title: publicData.title } : {}),
       icon: icon as WorkbenchCommandMeta['icon'],

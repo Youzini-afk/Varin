@@ -9,6 +9,9 @@ struct Upgrade {
 }
 
 const UPGRADES: &[Upgrade] = &[
+    // Tool children retain their exact old bodies. Nullable provenance admits the new
+    // User domain only; the marker prevents an old reader from treating it as a tool.
+    Upgrade { from: 85, to: 86, convert: |_, _| Ok(()) },
     Upgrade { from: 84, to: 85, convert: |tx, _| attachments::initialize(tx) },
     Upgrade { from: 83, to: 84, convert: |tx, _| driver::upgrade(tx) },
     Upgrade {
@@ -55,7 +58,7 @@ pub(super) fn supports(mut version: i64) -> bool {
 /// Standalone 82 does not contain Zone2. A blanket >=81 check would reject that
 /// valid asset or, worse, relabel a different layout without running its converter.
 pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> {
-    if matches!(version, 81 | 83 | 84 | 85) {
+    if matches!(version, 81 | 83 | 84 | 85 | 86) {
         return context_observations::check_format(db);
     }
     let present: bool = db.query_row(
@@ -74,7 +77,7 @@ pub(super) fn check_context_schema(db: &Connection, version: i64) -> Result<()> 
 /// Environment queue entries (including Zone2 captures) intentionally have a
 /// different representation and are not evidence of a missing history index.
 pub(super) fn check_history_indexes(db: &Connection, version: i64) -> Result<()> {
-    if !matches!(version, 82 | 83 | 84 | 85) {
+    if !matches!(version, 82 | 83 | 84 | 85 | 86) {
         return Ok(());
     }
     let missing: bool = db.query_row(

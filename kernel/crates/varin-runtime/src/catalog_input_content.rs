@@ -91,7 +91,7 @@ impl QueuePreparation {
             }
             let current = if input_preparation
                 .as_ref()
-                .is_some_and(|prepared| prepared.skill.is_some())
+                .is_some_and(|prepared| prepared.has_skills())
             {
                 current.map(context::CheckpointRead::load).transpose()?
             } else {
@@ -180,14 +180,14 @@ impl InputEditPreparation {
         self
     }
     pub fn load(self) -> Result<PreparedInputEdit> {
-        resources::validate_raw_input(&self.value)?;
         let revision = self
             .revision
             .checked_add(1)
             .ok_or_else(|| RuntimeError::Invalid("input revision exhausted".into()))?;
         let previous = self.previous.load()?;
+        resources::validate_edited_input(&self.value, &previous.content)?;
         let (material, checkpoint) =
-            if resources::input_text(&self.value) == resources::input_text(&previous.content) {
+            if resources::same_skill_intent(&self.value, &previous.content) {
                 (
                     resources::preserve(&self.value, &previous.content, revision)?,
                     None,
@@ -209,7 +209,7 @@ impl InputEditPreparation {
                 let current = if self
                     .input_preparation
                     .as_ref()
-                    .is_some_and(|prepared| prepared.skill.is_some())
+                    .is_some_and(|prepared| prepared.has_skills())
                 {
                     self.current
                         .map(context::CheckpointRead::load)
@@ -218,16 +218,17 @@ impl InputEditPreparation {
                     None
                 };
                 (
-                    resources::bind_input(
+                    resources::bind_edited_input(
                         &self.value,
                         revision,
                         self.input_preparation.as_ref(),
                         current.as_ref(),
+                        &previous.content,
                     )?,
                     self.input_preparation.as_ref().map(|_| current_id),
                 )
             };
-        let mut stored = self.content.store_user_input(&self.id, &material)?;
+        let mut stored = self.content.store_edited_user_input(&self.id, &material, &previous.content)?;
         // Editing a queued message preserves its original sending time.
         if let Some(time) = previous.content.get("sentTime") {
             if stored.is_string() {
@@ -253,6 +254,7 @@ impl InputEditPreparation {
                 stored["fileAttachments"] = files.clone();
             }
         }
+        crate::output::validate_user_metadata(&stored)?;
         let attachments = super::super::attachments::input_attachments(&stored)?;
         let reference = self.content.save_stored_user_history(&stored)?;
         Ok(PreparedInputEdit {

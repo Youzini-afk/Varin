@@ -267,15 +267,20 @@ it('ThreadAdapter reuses an accepted input receipt after settings break, and onl
 
   fAdapter.runtime.inputReceipt.mockReset().mockResolvedValue(null);
   await expect(fAdapter.adapter.submit({ ...input, key: 'unaccepted-key' })).rejects.toMatchObject({ code: 'resource-invalid', reason: { failure: { status: 'invalid', path: 'agent-settings.json' } } });
-  expect(fAdapter.runtime.inputReceipt).toHaveBeenCalledTimes(2);
+  // The initial replay check precedes context refresh, followed by the
+  // pre-preparation check and the race check after preparation fails.
+  expect(fAdapter.runtime.inputReceipt).toHaveBeenCalledTimes(3);
+  expect(fAdapter.runtime.inputReceipt.mock.calls[1]![0]).toEqual(fAdapter.runtime.inputReceipt.mock.calls[0]![0]);
+  expect(fAdapter.runtime.inputReceipt.mock.calls[2]![0]).toEqual(fAdapter.runtime.inputReceipt.mock.calls[0]![0]);
   expect(fAdapter.runtime.submit).toHaveBeenCalledOnce();
   expect(fAdapter.active()).toEqual(saved);
 
   const concurrent = { ...receipt, input_id: 'concurrently-accepted-input', run_id: 'concurrently-accepted-run' };
-  fAdapter.runtime.inputReceipt.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce(concurrent);
+  fAdapter.runtime.inputReceipt.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(concurrent);
   expect(await fAdapter.adapter.submit({ ...input, key: 'raced-key' })).toEqual(concurrent);
-  expect(fAdapter.runtime.inputReceipt).toHaveBeenCalledTimes(2);
+  expect(fAdapter.runtime.inputReceipt).toHaveBeenCalledTimes(3);
   expect(fAdapter.runtime.inputReceipt.mock.calls[0]![0]).toEqual(fAdapter.runtime.inputReceipt.mock.calls[1]![0]);
+  expect(fAdapter.runtime.inputReceipt.mock.calls[0]![0]).toEqual(fAdapter.runtime.inputReceipt.mock.calls[2]![0]);
   expect(fAdapter.runtime.submit).toHaveBeenCalledOnce();
   expect(fAdapter.active()).toEqual(saved);
   await vi.waitFor(() => expect(fAdapter.runtime.launch).toHaveBeenCalledWith(concurrent.run_id, expect.any(AbortSignal)));

@@ -1,4 +1,8 @@
 import { parseAttachmentSelections, THINKING_LEVELS, isWorkFocusId } from '@varin/protocol';
+import { parseThreadObjectReferences } from './thread-object-input.js';
+import { ResourceScopeError } from './thread-resource-scope.js';
+import { parseThreadSkills } from './thread-skill-input.js';
+import { parseThreadSourceFileOptions } from './thread-source-files.js';
 import { parseThreadMaterials } from './thread-material-input.js';
 import { normalizeThreadSourcePreparation, parseSourceResourceOwner } from './thread-sources.js';
 import { threadSourceFailureMessage } from '@varin/application-client';
@@ -36,6 +40,31 @@ const identity = (body: Record<string, unknown>): ThreadIdentity => {
   if (body.runtime !== 'agent') throw new Error('Explicit thread runtime selection is required');
   return { runtime: 'agent', threadId: text(body.threadId), branchId: text(body.branchId) };
 };
+
+const threadSource = (value: unknown): NonNullable<ThreadSubmit['source']> => {
+  const source = object(value);
+  if (Object.keys(source).some(key => !['resourceOwner', 'workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot', 'environmentRunId','nativeScope'].includes(key))) throw new Error('Unsupported source selection field');
+  if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root'&&source.mode!=='native_workspace') throw new Error('Invalid source mode');
+  if(source.nativeScope!==undefined&&(source.mode!=='native_workspace'||typeof source.nativeScope!=='string'||!source.nativeScope.split('/').every(part=>part&&part!=='.'&&part!=='..'&&!part.includes('\\'))))throw new Error('Invalid native source scope');
+  if (source.environmentRunId !== undefined && source.mode !== 'materialized') throw new Error('Only a materialized source has an execution environment');
+  // The kernel resolves names against the same tool declarations used for admission.
+  if (!Array.isArray(source.tools) || source.tools.some(tool => typeof tool !== 'string' || !tool.length)) throw new Error('Tool names must be non-empty strings');
+  const base = { resourceOwner: parseSourceResourceOwner(source.resourceOwner), workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
+    tools: source.tools as NonNullable<ThreadSubmit['source']>['tools'] };
+  if (source.mode === 'live_root') {
+    if (source.branchId !== undefined || source.revision !== undefined) throw new Error('Live source cannot claim a fixed revision');
+    const root = object(source.liveRoot);
+    if (Object.keys(root).some(key => !['hostId', 'canonicalRoot', 'rootId'].includes(key))) throw new Error('Unsupported live root field');
+    return { ...base, mode: 'live_root', liveRoot: { hostId: text(root.hostId), canonicalRoot: text(root.canonicalRoot), rootId: text(root.rootId) } };
+  } else if(source.mode==='native_workspace'){
+    if(source.liveRoot!==undefined||source.revision!==undefined)throw new Error('Native source has no frozen revision or stored mount path');
+    return {...base,mode:'native_workspace',branchId:text(source.branchId),...(source.nativeScope===undefined?{}:{nativeScope:source.nativeScope as string})};
+  } else {
+    if (source.liveRoot !== undefined) throw new Error('Fixed source cannot claim a live root');
+    return { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode, ...(source.environmentRunId === undefined ? {} : { environmentRunId: text(source.environmentRunId) }) };
+  }
+};
+
 /** Rust owns the nested query decoder and family authorization; Host owns caller identity. */
 const familyRequest = <T>(value: unknown): Omit<T, 'callerThreadId'> => {
   const request = object(value);
@@ -109,6 +138,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
     'mcp/interactions/sampling/request': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action', 'model', 'editedRequest'],
     'mcp/interactions/sampling/output': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action'],
+    'source/files': ['runtime', 'threadId', 'branchId', 'source', 'query', 'type', 'limit', 'cursor'],
+    'source/draft-files': ['source', 'query', 'type', 'limit', 'cursor'],
     'source/list': ['runtime', 'threadId', 'branchId'],
     'source/resolve': ['runtime', 'threadId', 'branchId', 'resourceOwner', 'path'],
     'source/prepare': ['resourceOwner', 'runtime', 'threadId', 'branchId', 'key', 'workspaceId', 'mode', 'content', 'captureScopes'],
@@ -125,12 +156,14 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
     'family/read': ['runtime', 'threadId', 'branchId', 'request'],
     'family/item': ['runtime', 'threadId', 'branchId', 'request'],
-    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'materials', 'attachments', 'clientTime'],
+    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'materials', 'attachments', 'clientTime', 'skills', 'references'],
     'child/executions': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/execution/report': ['runtime', 'threadId', 'branchId', 'executionId', 'itemId', 'offset', 'maxBytes'],
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
     'child/list': ['runtime', 'threadId', 'branchId'], 'child/page':['runtime','threadId','branchId','options'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
+    'resources/draft-skills': ['source'],
+    'resources/skills': ['runtime', 'threadId', 'branchId', 'source'],
     'resources/refresh': ['runtime', 'threadId', 'branchId', 'expectedRevision', 'instructionDirectories', 'supportingFiles'],
     'followup/jobs': ['runtime', 'threadId', 'branchId', 'runId'],
     'followup/registrations/pending': ['runtime', 'threadId', 'branchId'],
@@ -159,13 +192,13 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     update: ['runtime', 'threadId', 'key', 'expectedRevision', 'title', 'pinned', 'archived'],
     delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
-    attention: [], create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'attachments', 'expectedHead', 'model', 'source', 'agent', 'clientTime'],
+    attention: [], create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'attachments', 'expectedHead', 'model', 'source', 'agent', 'clientTime', 'skills', 'references'],
     usage: ['runtime', 'threadId', 'branchId'],
     'context/inspect': ['runtime', 'threadId', 'branchId', 'headId'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
-    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'attachments', 'mode', 'clientTime'],
-    'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
+    'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'attachments', 'mode', 'clientTime', 'skills', 'references'],
+    'input/edit': ['inputId', 'expectedRevision', 'text', 'images', 'skills'], 'input/cancel': ['inputId', 'expectedRevision'],
     'input/send-now': ['inputId', 'expectedRevision', 'expectedRunId'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
@@ -201,6 +234,11 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       catch (error) {
         // Errors from credentials/model services can contain upstream bodies. Do not echo them.
         const reason = error instanceof ThreadPreAdmissionError ? error.reason : error;
+        if (reason instanceof ResourceScopeError) {
+          const status = reason.failure.status === 'denied' ? 403 : reason.failure.status === 'stale' ? 409
+            : reason.failure.status === 'missing' ? 404 : reason.failure.status === 'unavailable' ? 503 : 400;
+          response.status(status).json({ code: reason.code, error: reason.message, ...(error instanceof ThreadPreAdmissionError ? { admission: 'not_started' } : {}) }); return;
+        }
         if (reason instanceof WorkspaceBackendUnavailableError) {
           response.status(503).json({ code: reason.code, error: reason.message, admission: 'not_started' }); return;
         }
@@ -369,7 +407,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         ...(body.sourceAgent===undefined?{}:{sourceAgent:text(body.sourceAgent)}),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }),
-        ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }) };
+        ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }), ...(body.skills === undefined ? {} : { skills: parseThreadSkills(body.skills, body.text as string)! }),
+        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }) };
     });
     return adapter.continueChild(input, signal);
   });
@@ -382,6 +421,22 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
   post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
   post('tree/cancel', body => adapter.cancelTree(identity(body)));
+  post('resources/draft-skills', (body, signal) => {
+    if (body.source === undefined) return adapter.draftSkills({}, signal);
+    const source = object(body.source);
+    if (Object.keys(source).some(key => !['resourceOwner', 'path'].includes(key))) throw new Error('Unsupported draft source field');
+    return adapter.draftSkills({ source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
+  });
+  post('source/files', (body, signal) => adapter.files(identity(body), { ...parseThreadSourceFileOptions(body),
+    ...(body.source === undefined ? {} : { source: threadSource(body.source) }) }, signal));
+  post('source/draft-files', (body, signal) => {
+    const source = object(body.source);
+    if (Object.keys(source).some(key => !['resourceOwner', 'path'].includes(key))) throw new Error('Pending source is malformed');
+    return adapter.draftSourceFiles({ ...parseThreadSourceFileOptions(body),
+      source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
+  });
+  post('resources/skills', (body, signal) => adapter.skills(identity(body),
+    body.source === undefined ? {} : { source: threadSource(body.source) }, signal));
   post('resources/refresh', (body, signal) => {
     let instructionDirectories: string[] | undefined;
     if (body.instructionDirectories !== undefined) {
@@ -486,7 +541,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const materials = parseThreadMaterials(body.materials);
       const attachments = parseAttachmentSelections(body.attachments);
       if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length && !attachments?.length)) throw new Error('Text, images or materials are required');
-      const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }),
+      const input: ThreadSubmit = { ...identity(body), key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }), ...(body.skills === undefined ? {} : { skills: parseThreadSkills(body.skills, body.text as string)! }),
+        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }),
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead),
         model: modelSelection(body.model) };
@@ -495,29 +551,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         if (Object.keys(agent).some(key => !['profileId', 'workFocus'].includes(key)) || !isWorkFocusId(agent.workFocus)) throw new Error('Invalid Agent selection');
         input.agent = { profileId: agent.profileId === null ? null : text(agent.profileId), workFocus: agent.workFocus };
       }
-      if (body.source !== undefined) {
-        const source = object(body.source);
-        if (Object.keys(source).some(key => !['resourceOwner', 'workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot', 'environmentRunId','nativeScope'].includes(key))) throw new Error('Unsupported source selection field');
-        if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root'&&source.mode!=='native_workspace') throw new Error('Invalid source mode');
-        if(source.nativeScope!==undefined&&(source.mode!=='native_workspace'||typeof source.nativeScope!=='string'||!source.nativeScope.split('/').every(part=>part&&part!=='.'&&part!=='..'&&!part.includes('\\'))))throw new Error('Invalid native source scope');
-        if (source.environmentRunId !== undefined && source.mode !== 'materialized') throw new Error('Only a materialized source has an execution environment');
-        // The kernel resolves names against the same tool declarations used for admission.
-        if (!Array.isArray(source.tools) || source.tools.some(tool => typeof tool !== 'string' || !tool.length)) throw new Error('Tool names must be non-empty strings');
-        const base = { resourceOwner: parseSourceResourceOwner(source.resourceOwner), workspaceId: text(source.workspaceId), executionWorkspaceId: text(source.executionWorkspaceId),
-          tools: source.tools as NonNullable<ThreadSubmit['source']>['tools'] };
-        if (source.mode === 'live_root') {
-          if (source.branchId !== undefined || source.revision !== undefined) throw new Error('Live source cannot claim a fixed revision');
-          const root = object(source.liveRoot);
-          if (Object.keys(root).some(key => !['hostId', 'canonicalRoot', 'rootId'].includes(key))) throw new Error('Unsupported live root field');
-          input.source = { ...base, mode: 'live_root', liveRoot: { hostId: text(root.hostId), canonicalRoot: text(root.canonicalRoot), rootId: text(root.rootId) } };
-        } else if(source.mode==='native_workspace'){
-          if(source.liveRoot!==undefined||source.revision!==undefined)throw new Error('Native source has no frozen revision or stored mount path');
-          input.source={...base,mode:'native_workspace',branchId:text(source.branchId),...(source.nativeScope===undefined?{}:{nativeScope:source.nativeScope as string})};
-        } else {
-          if (source.liveRoot !== undefined) throw new Error('Fixed source cannot claim a live root');
-          input.source = { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode, ...(source.environmentRunId === undefined ? {} : { environmentRunId: text(source.environmentRunId) }) };
-        }
-      }
+      if (body.source !== undefined) input.source = threadSource(body.source);
       return input;
     });
     return adapter.submit(input);
@@ -539,7 +573,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const materials = parseThreadMaterials(body.materials);
       const attachments = parseAttachmentSelections(body.attachments);
       if (typeof body.text !== 'string' || (!body.text.length && !images?.length && !materials?.length && !attachments?.length)) throw new Error('Text, images or materials are required');
-      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }),
+      return { ...selected, key: text(body.key), text: body.text, ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }), ...(attachments === undefined ? {} : { attachments }), ...(body.skills === undefined ? {} : { skills: parseThreadSkills(body.skills, body.text as string)! }),
+        ...(body.references === undefined ? {} : { references: parseThreadObjectReferences(body.references, body.text as string)! }),
         ...(body.clientTime === undefined ? {} : { clientTime: parseClientTime(body.clientTime)! }), mode: body.mode as 'boundary' | 'interrupt' | 'next_run' };
     });
     return adapter.enqueue(input);
@@ -550,7 +585,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   }, signal));
   post('input/edit', (body, signal) => {
     if (typeof body.text !== 'string') throw new Error('Input text must be a string');
-    return adapter.editInput(text(body.inputId), revision(body.expectedRevision), body.text, parseThreadImages(body.images), signal);
+    return adapter.editInput(text(body.inputId), revision(body.expectedRevision), body.text, parseThreadImages(body.images), signal, parseThreadSkills(body.skills, body.text));
   });
   post('input/cancel', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
   post('input/send-now', (body, signal) => adapter.sendInputNow(text(body.inputId), revision(body.expectedRevision), text(body.expectedRunId), signal));

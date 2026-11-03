@@ -6,7 +6,7 @@ import { useWorkspaceHarnessSettings } from '@/components/sections/harness/useHa
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
-export function ThreadPermissionControl({ workspacePath, className }: { workspacePath?: string; className?: string }) {
+export function ThreadPermissionControl({ workspacePath, className, embedded }: { workspacePath?: string; className?: string; embedded?: boolean }) {
   const { t } = useI18n();
   const { harness, effectivePermissionMode, effectiveUnavailable, status, error, update, retry } = useWorkspaceHarnessSettings(workspacePath);
   const mode = harness?.permissions?.mode ?? 'normal';
@@ -16,6 +16,14 @@ export function ThreadPermissionControl({ workspacePath, className }: { workspac
   const effectiveLabel = effective ? t(`settings.page.harness.permissions.mode.${effective.effective}`) : t(effectiveUnavailable ? 'common.unavailable' : 'common.loading');
   const configured = resolvePermissionMode(mode);
 
+  if (embedded) return <div className="space-y-3 typography-ui-label">
+    <p>{label} · {t('settings.common.scope.global')}</p>
+    <p className="typography-meta text-muted-foreground">{t('settings.permissions.ownerScope')}</p>
+    {(['normal', 'bypass'] as const).map(value => <button type="button" key={value} disabled={!harness || busy} className="flex w-full justify-between rounded px-2 py-2 hover:bg-interactive-hover"
+      onClick={() => void update({ permissions: { mode: value } })}>{t(`settings.page.harness.permissions.mode.${value}`)}{value === mode && '✓'}</button>)}
+    <p className="typography-meta text-muted-foreground">{effectiveLabel}</p>
+    {error && <p role="alert" className="text-destructive">{error} <button type="button" onClick={() => void retry()}>{t('settings.harness.retry')}</button></p>}
+  </div>;
   return <DropdownMenu>
     <DropdownMenuTrigger asChild>
       <button type="button" className={cn(className, error ? 'text-destructive' : effectivePermissionMode === 'bypass' && 'text-primary')}

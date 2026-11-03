@@ -497,7 +497,7 @@ impl Catalog {
                 }
                 let execution = delegated::execution(&self.db, parent.intent["executionId"].as_str().ok_or_else(conflict)?)?;
                 let relation = delegated::relation(&self.db, &execution.child_operation_id)?;
-                (parent.run_id, goals::origin_goal(&self.db, &relation.origin)?)
+                (parent.run_id, relation.origin.as_ref().map(|origin| goals::origin_goal(&self.db, origin)).transpose()?.flatten())
             }
             InferenceCaller::Knowledge => {
                 let parent = self.operation(&p.parent_operation_id)?;

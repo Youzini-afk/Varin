@@ -1,0 +1,65 @@
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { parseHTML } from 'linkedom';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { ThreadRequestError, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
+import { ThreadRememberForm } from './ThreadRememberForm';
+import { ComposerDirectedInput } from './ComposerDirectedInput';
+import { directedComposerKey, type ComposerRecipient } from './composerWorkflowState';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ simple, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { simple?: boolean }) => { void simple; return <textarea {...props} ref={node => { if (node) node.value = String(props.value ?? ''); }} />; } }));
+const identity: ThreadIdentity = { runtime: 'agent', threadId: 'source', branchId: 'source-branch' };
+let root: Root; let container: HTMLDivElement;
+beforeEach(() => {
+  const { document, window } = parseHTML('<html><body></body></html>');
+  vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container); useThreadDraftStore.setState({ drafts: {} });
+});
+afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
+const click = async (label: string) => { const button = [...container.querySelectorAll('button')].find(button => button.textContent === label || button.getAttribute('aria-label') === label); expect(button).toBeTruthy(); await act(async () => button!.click()); };
+it('remember opens without model work, preserves uncertain save through dismissal, and retries its original receipt identity', async () => {
+  const memoryScopes = vi.fn(async () => [{ destination: { kind: 'thread', id: identity.threadId }, revision: 8 }]);
+  const remember = vi.fn().mockRejectedValueOnce(new Error('receipt not observed')).mockImplementation(async input => ({ id: 12, destination: input.destination, content: input.content, created: true }));
+  const api = { workflows: { memoryScopes, remember } } as unknown as ThreadsAPI;
+  const render = () => root.render(<ThreadRememberForm api={api} identity={identity} draftKey="ordinary" initialText="Selected passage only" />);
+  await act(async () => render());
+  expect(remember).not.toHaveBeenCalled(); expect(container.querySelector('textarea')?.value).toBe('Selected passage only');
+  await click('composer.confirm'); const first = remember.mock.calls[0]![0];
+  expect(first).toMatchObject({ ...identity, content: 'Selected passage only', revision: 8 });
+  expect(container.querySelector('textarea')?.disabled).toBe(true);
+  await act(async () => root.render(null)); await act(async () => render()); await click('composer.menu.retry');
+  expect(remember.mock.calls[1]![0]).toEqual(first); expect(container.textContent).toContain('composer.remember.saved');
+  expect(useThreadDraftStore.getState().drafts.ordinary).toBeUndefined();
+});
+it('recipient changes and cancellation preserve separate ordinary and per-recipient drafts and failed send attempts', async () => {
+  const first: ComposerRecipient = { identity: { runtime: 'agent', threadId: 'one', branchId: 'b1' }, name: 'First task' };
+  const second: ComposerRecipient = { identity: { runtime: 'agent', threadId: 'two', branchId: 'b2' }, name: 'Second task' };
+  const send = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ messageId: 'accepted' });
+  const api = { messages: { send } } as unknown as ThreadsAPI;
+  useThreadDraftStore.getState().patch('ordinary', { text: 'Original draft', images: [{ data: 'image', mimeType: 'image/png' }] });
+  useThreadDraftStore.getState().patch(directedComposerKey('ordinary', first.identity), { text: 'First directed draft' });
+  useThreadDraftStore.getState().patch(directedComposerKey('ordinary', second.identity), { text: 'Second directed draft' });
+  const select = vi.fn(); const render = (recipient: ComposerRecipient) => root.render(<ComposerDirectedInput api={api} identity={identity} draftKey="ordinary" recipient={recipient} select={select} onSent={() => {}} />);
+  await act(async () => render(first)); await click('collaboration.send');
+  const failed = send.mock.calls[0]![1];
+  await act(async () => render(second)); expect(container.querySelector('textarea')?.value).toBe('Second directed draft');
+  await click('composer.contact.cancel'); expect(select).toHaveBeenCalledWith();
+  await act(async () => render(first)); await click('chat.messages.retry');
+  expect(send.mock.calls[1]![1]).toEqual(failed);
+  expect(useThreadDraftStore.getState().drafts.ordinary).toMatchObject({ text: 'Original draft', images: [{ data: 'image' }] });
+  expect(useThreadDraftStore.getState().drafts[directedComposerKey('ordinary', second.identity)]?.text).toBe('Second directed draft');
+});
+
+it('memory rejection shows the owner conflict and only unlocks after explicit refresh', async () => {
+  const detail = 'The selected memory revision changed; refresh before editing.';
+  const memoryScopes = vi.fn(async () => [{ destination: { kind: 'thread', id: identity.threadId }, revision: 8 }]);
+  const remember = vi.fn().mockRejectedValue(new ThreadRequestError(409, 'memory-conflict', undefined, detail));
+  const api = { workflows: { memoryScopes, remember } } as unknown as ThreadsAPI;
+  await act(async () => root.render(<ThreadRememberForm api={api} identity={identity} draftKey="ordinary" initialText="Preserved memory draft" />));
+  await click('composer.confirm');
+  expect(container.textContent).toContain(detail); expect(container.querySelector('textarea')?.disabled).toBe(true);
+  await click('composer.workflow.refreshMemory');
+  expect(container.querySelector('textarea')?.disabled).toBe(false); expect(memoryScopes).toHaveBeenCalledTimes(2);
+  expect(useThreadDraftStore.getState().drafts['ordinary:remember']?.text).toBe('Preserved memory draft');
+});

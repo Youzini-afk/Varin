@@ -13,10 +13,14 @@ export interface VarinCommandContributionDataV1 {
   /** Literal author-supplied label, not a key in Varin's private translation catalog. */
   title: string;
   keywords?: string[];
+  /** Explicit opt-in to the conversation menu; global editor commands stay out. */
+  composer?: { name: string; group: 'conversation' | 'execution' | 'context' | 'collaboration' | 'resources' | 'application' | 'management' | 'skills'; interaction: 'action' | 'select' };
 }
 export interface VarinCommandExecutionContextV1 {
   currentDirectory: string | null;
   isMobile: boolean;
+  /** Exact target at confirmation, never the globally selected conversation. */
+  composer?: { host: number; identity?: { runtime: 'agent'; threadId: string; branchId: string }; source?: JsonObject };
 }
 export interface VarinSettingsPageContributionDataV1 {
   slug: string;
@@ -62,8 +66,15 @@ const keywords = (data: JsonObject): { keywords?: string[] } => {
   }
   return { keywords: [...data.keywords] as string[] };
 };
+export function parseComposerCommand(value: unknown): Pick<VarinCommandContributionDataV1, 'composer'> {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid composer command');
+  const item = value as Record<string, unknown>;
+  if (typeof item.name !== 'string' || !/^[\p{L}\p{N}_:-]+$/u.test(item.name) || !['conversation', 'execution', 'context', 'collaboration', 'resources', 'application', 'management', 'skills'].includes(String(item.group)) || !['action', 'select'].includes(String(item.interaction))) throw new TypeError('Invalid composer command');
+  return { composer: { name: item.name, group: item.group as NonNullable<VarinCommandContributionDataV1['composer']>['group'], interaction: item.interaction as 'action' | 'select' } };
+}
 export const parseVarinCommandContributionData = (data: JsonObject): VarinCommandContributionDataV1 => ({
-  title: nonempty(data.title, 'Command title'), ...keywords(data),
+  title: nonempty(data.title, 'Command title'), ...keywords(data), ...parseComposerCommand(data.composer),
 });
 export const parseVarinSettingsPageContributionData = (data: JsonObject): VarinSettingsPageContributionDataV1 => {
   const slug = nonempty(data.slug, 'Settings page slug');
