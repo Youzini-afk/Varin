@@ -5,7 +5,7 @@ import { createThreadsHttpAPI } from '../src/threads-http.js';
 
 it('keeps pending remote source and native branch discovery separate, with query cancellation', async () => {
   const original = globalThis.fetch;
-  const calls: Array<{ path: string; body: unknown; signal?: AbortSignal | null }> = [];
+  const calls: Array<{ path: string; body: unknown; signal: AbortSignal | null | undefined }> = [];
   globalThis.fetch = async (url, init) => {
     calls.push({ path: String(url), body: JSON.parse(String(init?.body)), signal: init?.signal });
     return Response.json({ entries: [], nextCursor: null });

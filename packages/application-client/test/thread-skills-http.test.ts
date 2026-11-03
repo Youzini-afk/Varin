@@ -9,7 +9,7 @@ const skills = [{ resourceId: 'selected-resource', version: 'captured-version', 
 
 it('keeps raw skill ranges through every real input HTTP path and reads the actual branch catalog', async () => {
   const original = globalThis.fetch;
-  const calls: Array<{ path: string; body: unknown; signal?: AbortSignal | null }> = [];
+  const calls: Array<{ path: string; body: unknown; signal: AbortSignal | null | undefined }> = [];
   globalThis.fetch = async (url, init) => {
     calls.push({ path: String(url), body: JSON.parse(String(init?.body)), signal: init?.signal });
     return Response.json({});
