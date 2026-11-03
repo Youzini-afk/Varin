@@ -142,7 +142,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
       <button type="button" onClick={onToggleArchived} className={rowClass}>
         <Icon name={showArchived ? 'robot' : 'archive'} className="size-4 shrink-0" />{t(showArchived ? 'settings.bots.activeList' : 'settings.bots.archivedList')}
       </button>
-      <button type="button" onClick={onOpenSettings} className={rowClass}>
+      <button type="button" onClick={onOpenSettings} data-open-settings="" className={rowClass}>
         <Icon name="settings-3" className="size-4 shrink-0" />{t('sessions.sidebar.footer.actions.settings')}
       </button>
     </div>

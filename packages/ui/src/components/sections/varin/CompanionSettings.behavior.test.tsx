@@ -41,6 +41,11 @@ afterEach(async () => { await act(async () => root.unmount()); expect(state.unli
 const button = (key: string) => [...host.querySelectorAll('button')].find(node => node.textContent === key)!;
 
 test('downloads on request, observes real progress and wakes or sleeps independently of downloading', async () => {
+  const pack = host.querySelector('[data-companion-pack="varin"]')!;
+  expect(pack.getAttribute('data-installed-version')).toBe('');
+  expect(pack.getAttribute('data-installed-bytes')).toBe('0');
+  expect(pack.getAttribute('data-selected')).toBe('false');
+  expect(button('companion.library.download').getAttribute('data-companion-action')).toBe('download');
   expect(button('companion.library.wake').disabled).toBe(true);
   expect(state.invoke).toHaveBeenCalledTimes(1);
   await act(async () => button('companion.library.download').click());
@@ -53,8 +58,13 @@ test('downloads on request, observes real progress and wakes or sleeps independe
   state.library.packs[0]!.installedBytes = 100; state.library.selectedPackId = 'varin';
   await act(async () => state.changed?.());
   expect(button('companion.library.wake').disabled).toBe(false);
+  expect(pack.getAttribute('data-installed-version')).toBe('v1');
+  expect(pack.getAttribute('data-installed-bytes')).toBe('100');
+  expect(pack.getAttribute('data-selected')).toBe('true');
+  expect(button('companion.library.wake').getAttribute('data-companion-action')).toBe('wake');
   await act(async () => button('companion.library.wake').click());
   expect(state.invoke).toHaveBeenCalledWith('desktop_set_companion', { enabled: true });
+  expect(button('companion.library.sleep').getAttribute('data-companion-action')).toBe('sleep');
   await act(async () => button('companion.library.sleep').click());
   expect(state.invoke).toHaveBeenCalledWith('desktop_set_companion', { enabled: false });
 });

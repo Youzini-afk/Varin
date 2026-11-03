@@ -12,6 +12,7 @@ import { fixtureApi, seedProduct } from './benchmark-seed.mjs';
 import { productWorkloads, operatorInstructions, manualScenarios } from './benchmark-workloads.mjs';
 import { planTemplate, environmentProbe, runBenchmark } from './benchmark-desktop.mjs';
 import { hashDirectory, hashJson, scenarioRequirements } from './benchmark-contract.mjs';
+import { startBenchmarkWindowManager } from './benchmark-companion.mjs';
 import { providerDisclosure } from './benchmark-fixture-service.mjs';
 const read = async file => JSON.parse(await fs.readFile(file, 'utf8'));
 const save = (file, value) => fs.writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
@@ -20,7 +21,7 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
   output = path.resolve(output); await fs.mkdir(output, { recursive: false });
   const report = { schema: 1, product: 'varin-desktop-benchmark-suite', status: 'running', qualification: 'not-accepted', sourceSha: null,
     providerDisclosure, scenarios: [], setup: [], limitations: [], cleanup: [] };
-  let root, provider, cleanupUncertain = false;
+  let root, provider, windowManager, cleanupUncertain = false;
   try {
     const pair = await read(path.resolve(pairFile)); report.sourceSha = pair.sourceSha;
     if (pair.schema !== 1 || pair.product !== 'varin-desktop-benchmark-pair' || pair.target !== `${process.platform}-${process.arch}`) throw new Error('Expected native same-source benchmark pair');
@@ -31,6 +32,8 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
     if (!probe.displayAvailable) throw new Error('Native display is unavailable; explicitly provision a desktop or declared Linux Xvfb correctness session');
     if (process.env.VARIN_BENCHMARK_DISPOSABLE_OS_USER !== '1') throw new Error('A disposable OS account/session is required before full products register OS handlers');
     if (!Number.isSafeInteger(repetitions) || repetitions < 1 || !Number.isSafeInteger(turns) || turns < 20) throw new Error('Expected positive repetitions and at least 20 real history turns');
+    try { windowManager = await startBenchmarkWindowManager(); report.setup.push(windowManager.receipt); }
+    catch (error) { report.limitations.push(`Companion system-input scenario blocked: ${error.message}`); }
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-benchmark-suite-'));
     const node = path.join(pair.runtime, manifest.node.executable), worker = (directory, configuration) => startFixtureWorker({ node,
       env: isolatedEnvironment(directory, pair.runtime, manifest), configuration: { runtime: pair.runtime, ...configuration } });
@@ -64,7 +67,7 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
       await fs.cp(path.join(seedRoot, 'data'), path.join(fixtureDirectory, 'data'), { recursive: true });
       await fs.cp(seedRoot, path.join(fixtureDirectory, 'remote'), { recursive: true });
       await fs.writeFile(path.join(fixtureDirectory, 'data', 'benchmark-upload.txt'), 'Varin synthetic native-browser upload.\n');
-      const localHost = ['local-hybrid-execution', 'browser-interaction'].includes(name);
+      const localHost = ['local-hybrid-execution', 'browser-interaction', 'companion-drag'].includes(name);
       const settings = await worker(fixtureDirectory, { mode: 'settings', operations: [
         { method: 'desktop_set_locale', args: { locale: 'en' } },
         { method: 'desktop_set_local_host_mode', args: { enabled: localHost } },
@@ -76,11 +79,11 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
       if (!configured.drained) throw new Error('Settings owner did not stop before hashing fixture');
       plan.scenarios.push({ name, fixtureDirectory, syntheticFixture: true, requirements: scenarioRequirements[name],
         configuration: { motion: 'full', width: 1440, height: 1000, locale: 'en', localHost, remoteOrigin, providerOrigin: provider.origin, workspace, seedTurns: turns }, workload });
-      report.scenarios.push({ name, status: manualScenarios.includes(name) && !manual ? 'not-executed-native-operator-required' : 'prepared', fixtureSha256: await hashDirectory(fixtureDirectory), workloadSha256: hashJson(workload) });
+      report.scenarios.push({ name, status: name === 'companion-drag' && !windowManager ? 'blocked-system-pointer-window-manager' : manualScenarios.includes(name) && !manual ? 'not-executed-native-operator-required' : 'prepared', fixtureSha256: await hashDirectory(fixtureDirectory), workloadSha256: hashJson(workload) });
     }
     // Plans contain private, ephemeral filesystem locations; preserve only the
     // hashed public preflight/comparison files in CI, not prepared profiles.
-    const selected = plan.scenarios.filter(s => manual || !manualScenarios.includes(s.name)).map(s => s.name);
+    const selected = plan.scenarios.filter(s => (s.name !== 'companion-drag' || windowManager) && (manual || !manualScenarios.includes(s.name))).map(s => s.name);
     const comparison = await runBenchmark(plan, { output: path.join(output, 'measurements'), selected, hooks: {
       async beforeRun({ root: copy, scenario }) {
         const remote = await worker(path.join(copy, 'remote'), { mode: 'host', providerOrigin: provider.origin, port: remotePort });
@@ -110,12 +113,13 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
       entry.status = comparison.status === 'blocked' ? 'blocked-preflight' : measured?.pairs.length ? 'executed-see-paired-receipts'
         : comparison.retainedPrivateDirectories?.some(run => run.scenario === entry.name) ? 'interrupted-cleanup-unresolved' : 'not-executed-after-interruption';
     }
-    const failed = issue => ['missing-or-failed-bound-product-receipt', 'product-exit-not-successful', 'real-product-startup-not-observed', 'process-tree-did-not-drain-before-observation-deadline'].includes(issue)
+    const failed = issue => ['companion-install-drag-or-diagnostic-incomplete', 'missing-or-failed-bound-product-receipt', 'product-exit-not-successful', 'real-product-startup-not-observed', 'process-tree-did-not-drain-before-observation-deadline'].includes(issue)
       || issue.startsWith('measurement-failed:') || issue.startsWith('fixture-drain-failed:');
     report.status = cleanupUncertain ? 'failed-cleanup' : comparison.status === 'blocked' ? 'blocked' : comparison.scenarios?.some(s => s.pairs.some(p => [...(p.coverage?.electron ?? []), ...(p.coverage?.tauri ?? [])].some(failed)))
       ? 'failed-measurement' : 'observed-not-qualified';
   } catch (error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'blocked'; report.failure = { code: error.code ?? 'suite-owner-operation-failed', reason: error.message }; }
   finally {
+    if (windowManager) { try { report.cleanup.push({ owner: 'window-manager', ...(await windowManager.stop()) }); } catch(error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'failed-cleanup'; report.cleanup.push({ owner: 'window-manager', reason: error.message }); } }
     if (provider) { try { report.cleanup.push({ owner: 'provider', ...(await provider.stop()) }); } catch (error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'failed-cleanup'; report.cleanup.push({ owner: 'provider', error: error.message, ...error.fixtureCleanup }); } }
     if (root && !cleanupUncertain) await fs.rm(root, { recursive: true, force: true });
     else if (root) report.retainedPrivateDirectory = root;

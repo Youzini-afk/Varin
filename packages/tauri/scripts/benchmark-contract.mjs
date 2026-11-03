@@ -7,7 +7,7 @@ import { createReadStream } from 'node:fs';
 import { canonicalJson } from '../../../scripts/desktop-update-signatures.mjs';
 import { performanceScenarios } from './performance-evidence.mjs';
 
-export const collectorVersion = '1';
+export const collectorVersion = '2';
 export const scenarioRequirements = {
   'remote-idle': ['real-workbench-ready', 'no-local-host-or-database', 'cold-and-warm-startup'],
   'long-chat-stream': ['long-history', 'stream-completed', 'scroll-and-compose', 'image-release'],
@@ -60,6 +60,18 @@ export function validateWorkload(workload) {
     || !positive(workload.timeoutMs) || !positive(workload.readyTimeoutMs)
     || !Array.isArray(workload.ready) || !workload.ready.length
     || !Array.isArray(workload.steps) || !workload.steps.length) throw new Error('A complete full-motion workload and real readiness observations are required');
+  if (workload.companion && (workload.name !== 'companion-drag' || !isHash(workload.companion.version) || !isHash(workload.companion.epoch)
+    || !/^https:\/\/raw\.githubusercontent\.com\/Youzini-afk\/Varin-companion-assets\/[a-f0-9]{40}\/pack\/varin\/$/u.test(workload.companion.baseUrl)
+    || !Array.isArray(workload.companion.files) || workload.companion.files.length !== 45 || !Number.isSafeInteger(workload.companion.packageCount) || workload.companion.packageCount < 1
+    || !positive(workload.companion.idleMs))) throw new Error('Companion diagnostic needs the immutable complete catalog');
+  if (workload.companion) {
+    const value = workload.companion;
+    if (value.files.some(file => !/^[\w.-]+\.(json|png)$/u.test(file.path) || !Number.isSafeInteger(file.bytes) || file.bytes <= 0 || !isHash(file.sha256))
+      || new Set(value.files.map(file => file.path)).size !== value.files.length
+      || createHash('sha256').update(JSON.stringify(value.files)).digest('hex') !== value.version
+      || value.files.find(file => file.path === 'bundle.json')?.sha256 !== value.epoch
+      || value.bytes !== value.files.reduce((sum, file) => sum + file.bytes, 0)) throw new Error('Companion catalog hashes/bytes/epoch do not agree');
+  }
   if (workload.ownerIdentity && (workload.ownerIdentity.runtime !== 'agent' || !text(workload.ownerIdentity.threadId) || !text(workload.ownerIdentity.branchId)
     || !path.isAbsolute(workload.workspace ?? ''))) throw new Error('Owner observation needs the original Thread and an absolute synthetic workspace');
   if (workload.remote) {
@@ -80,8 +92,8 @@ export function validateWorkload(workload) {
       || !['wait', 'click', 'key', 'text', 'scroll', 'checkpoint', 'manual', 'file'].includes(step.action)) throw new Error('Every replay action needs one unique ID and a supported operation');
     ids.add(step.id);
     if (step.action === 'file' && (workload.surface !== 'fixture-browser' || step.selector !== '#upload-input')) throw new Error('File automation is confined to the synthetic Browser fixture');
-    if (step.optional !== undefined && (step.optional !== true || step.action !== 'click' || step.selector !== '[data-permission-tool="process_spawn"] [data-permission-choice="allow_once"]')) throw new Error('Only the bounded synthetic process permission may be conditionally acknowledged');
-    if (step.owner !== undefined && !['process-running', 'process-completed', 'process-stopped', 'run-completed', 'browser-download-completed', 'browser-page-opened', 'run-cancelled', 'remote-completed'].includes(step.owner)) throw new Error('Unknown read-only owner observation');
+    if (step.optional !== undefined && (step.optional !== true || step.action !== 'click' || !['[data-permission-tool="process_spawn"] [data-permission-choice="allow_once"]', '[data-companion-pack="varin"] [data-companion-action="select"]'].includes(step.selector))) throw new Error('Only fixed companion selection or the bounded synthetic process permission may be optional');
+    if (step.owner !== undefined && !['process-running', 'process-completed', 'process-stopped', 'run-completed', 'browser-download-completed', 'browser-page-opened', 'run-cancelled', 'remote-completed', 'companion-completed', 'companion-closed'].includes(step.owner)) throw new Error('Unknown read-only owner observation');
     if (Object.keys(step).some(key => !['id', 'action', 'selector', 'expect', 'timeoutMs', 'settleMs', 'durationMs', 'key', 'modifiers', 'text', 'deltaX', 'deltaY', 'cycle', 'milestone', 'owner', 'optional'].includes(key))) throw new Error('Unknown replay field; executable expressions are forbidden');
     if (step.selector !== undefined && (!text(step.selector) || step.selector.length > 2048)) throw new Error('Invalid replay selector');
     if (['click', 'scroll'].includes(step.action) && !step.selector) throw new Error('Pointer replay requires an actual product element');
@@ -124,19 +136,36 @@ export function quantile(values, fraction) {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
 }
+export const isResourceSample = sample => !sample.phase || ['workload', 'companion-idle', 'companion-input'].includes(sample.phase);
 export function summarizeRun(run) {
-  const samples = (run.samples ?? []).filter(sample => !sample.phase || sample.phase === 'workload');
+  const allSamples = run.samples ?? [], samples = allSamples.filter(isResourceSample);
   const totals = samples.map(sample => sample.processes.reduce((sum, process) => sum + (process.memoryBytes ?? 0), 0));
-  const seen = new Map(); let cpuMs = 0, cpuComplete = samples.length > 1 && samples.every(sample => sample.processes.length > 0 && sample.coverage?.processCountersComplete !== false);
-  for (const [index, sample] of samples.entries()) for (const process of [...sample.processes, ...(sample.coverage?.exitedProcesses ?? [])]) {
-    if (!Number.isFinite(process.cpuTimeMs)) { cpuComplete = false; continue; }
-    const key = `${process.pid}:${process.startIdentity}`, before = seen.get(key);
-    if (before !== undefined) cpuMs += Math.max(0, process.cpuTimeMs - before);
-    else if (index > 0) cpuMs += process.cpuTimeMs; // New child: its own lifetime, never cutime/cstime.
-    seen.set(key, process.cpuTimeMs);
+  const rows = sample => [...sample.processes, ...(sample.coverage?.exitedProcesses ?? [])];
+  const identity = process => `${process.pid}:${process.startIdentity}`;
+  const seen = new Set(samples.flatMap(sample => rows(sample).map(identity)));
+  let cpuMs = 0, durationMs = 0, intervals = 0;
+  let cpuComplete = samples.every(sample => sample.processes.length > 0 && sample.coverage?.processCountersComplete !== false && rows(sample).every(process => Number.isFinite(process.cpuTimeMs)));
+  const rendererSequences = new Set();
+  for (let index = 1; index < allSamples.length; index++) {
+    const before = allSamples[index - 1], sample = allSamples[index];
+    // Counters are cumulative. Dropping an intermediate excluded sample and
+    // subtracting across it would silently charge verification/diagnostic work.
+    if (!isResourceSample(before) || !isResourceSample(sample)) continue;
+    const elapsed = sample.monotonicMs - before.monotonicMs;
+    if (!(elapsed > 0)) { cpuComplete = false; continue; }
+    durationMs += elapsed; intervals++;
+    if (Number.isSafeInteger(sample.rendererSequence)) rendererSequences.add(sample.rendererSequence);
+    const previous = new Map(rows(before).map(process => [identity(process), process.cpuTimeMs]));
+    for (const process of rows(sample)) {
+      const old = previous.get(identity(process));
+      if (!Number.isFinite(process.cpuTimeMs) || previous.has(identity(process)) && (!Number.isFinite(old) || process.cpuTimeMs < old)) { cpuComplete = false; continue; }
+      cpuMs += process.cpuTimeMs - (old ?? 0); // New child: its own lifetime, never cutime/cstime.
+    }
   }
-  const durationMs = samples.length > 1 ? samples.at(-1).monotonicMs - samples[0].monotonicMs : 0;
-  const targetSamples = run.rendererSamples?.filter(sample => sample.targets?.some(target => ['main', 'application:main'].includes(target.label) && ['running', 'completed'].includes(target.status))).flatMap(sample => sample.targets ?? []);
+  cpuComplete &&= intervals > 0;
+  const targetSamples = run.rendererSamples?.filter(sample => (run.scenario !== 'companion-drag' || rendererSequences.has(sample.sequence)
+    && sample.targets?.some(target => target.companion && ['waiting-ready', 'waiting-system-drag'].includes(target.companion.status) && (target.companion.normal?.paints > 0 || target.companion.normal?.lastSuccessfulPaint?.epoch === target.companion.normal?.epoch && typeof target.companion.normal?.epoch === 'string')))
+    && sample.targets?.some(target => ['main', 'application:main'].includes(target.label) && ['running', 'completed'].includes(target.status))).flatMap(sample => sample.targets ?? []);
   const render = targetSamples ?? samples;
   const frames = render.flatMap(sample => sample.frameTimesMs ?? []), inputs = render.flatMap(sample => sample.inputLatenciesMs ?? []);
   const byTarget = Object.fromEntries([...new Set((targetSamples ?? []).map(sample => sample.surfaceRole ?? sample.label))].map(label => {
@@ -149,5 +178,7 @@ export function summarizeRun(run) {
     memoryPeakObservedBytes: totals.length && samples.every(sample => sample.processes.length && sample.coverage?.processCountersComplete !== false && sample.processes.every(process => Number.isFinite(process.memoryBytes))) ? Math.max(...totals) : null,
     frameCount: frames.length, frameP50Ms: quantile(frames, .5), frameP95Ms: quantile(frames, .95), frameP99Ms: quantile(frames, .99),
     inputCount: inputs.length, inputP50Ms: quantile(inputs, .5), inputP95Ms: quantile(inputs, .95), startupMs: run.startupMs ?? null,
-    byTarget, quantiles: 'nearest-rank; pooled renderer totals are descriptive only, compare named surfaces independently; observed samples, not an inferred peak or display presentation latency' };
+    byTarget, resourceIntervals: intervals, resourceWindow: 'adjacent included samples only; no counter subtraction across excluded phases',
+    rendererWindow: run.scenario === 'companion-drag' ? 'collector-observed sequences within adjacent normal samples; phase boundaries and unsampled records excluded' : 'ready active workload',
+    quantiles: 'nearest-rank; pooled renderer totals are descriptive only, compare named surfaces independently; observed samples, not an inferred peak or display presentation latency' };
 }

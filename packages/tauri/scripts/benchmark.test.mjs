@@ -27,7 +27,7 @@ function browserHarness({ ready = true, motion = 'full' } = {}) {
   const element = () => ({ contains: () => false, scrollTop: 0, disabled: false, attrs: new Map(), textContent: '', getClientRects: () => [1],
     getBoundingClientRect: () => ({ left: 10, top: 20, width: 100, height: 30 }), getAttribute(name) { return this.attrs.get(name) ?? null; } });
   if (ready) elements.set('[data-varin-workbench-switcher]', element());
-  const context = { console, innerWidth: 1440, innerHeight: 1000, devicePixelRatio: 1,
+  const context = { console, AbortController, innerWidth: 1440, innerHeight: 1000, devicePixelRatio: 1,
     performance: { now: () => now }, matchMedia: () => ({ matches: false }),
     getComputedStyle: () => ({ visibility: 'visible' }),
     requestAnimationFrame: callback => { frame = callback; return 1; }, cancelAnimationFrame: () => { frame = null; },
@@ -367,4 +367,91 @@ test('observer identity rejects passive-as-active and active restart never repla
   assert.equal(h.api.poll().status, 'completed');
   h.api.stop(); assert.equal(h.api.matchesWorkload(active), false);
   assert.throws(() => h.api.start(active), /ended/u);
+});
+
+test('companion diagnostic distinguishes real paint coverage from asset traversal and closes bitmaps on draw failure', async () => {
+  const { webcrypto, createHash } = await import('node:crypto');
+  for (const failDraw of [false, true]) {
+    const h = browserHarness();
+    const bundle = { packages: [{ id: 'synthetic-action', canvas: [8,8], pages: [{ file: 'atlas.png' }], frames: [{ page: 0, rect: [0,0,8,8], offset: [0,0] }] }] };
+    const bytes = new TextEncoder().encode(JSON.stringify(bundle)), epoch = createHash('sha256').update(bytes).digest('hex');
+    let closed = 0, draws = 0;
+    const pixels = new Uint8ClampedArray(8*8*4); pixels.fill(255);
+    const canvas = { width: 8, height: 8, getBoundingClientRect: () => ({ left: 0, top: 0, width: 8, height: 8 }),
+      getContext: () => ({ getImageData: () => ({ data: pixels }) }),
+      __varinCompanionAssetBase: 'varin-companion://localhost/varin/version/',
+      __varinCompanionEvidence: { epoch, paints: 0, lastSuccessfulPaint: { epoch, packageId: 'static-pose', source: 'original-painter-successful-commit' }, notCovered: ['synthetic-action'] } };
+    h.elements.set('canvas', canvas);
+    Object.assign(h.context, { crypto: webcrypto, Uint8Array, TextDecoder, URL, setTimeout, location: { href: 'varin-ui://app/companion.html?companionPack=varin&companionVersion=test-version' }, screenX: 0, screenY: 0, outerWidth: 8, outerHeight: 8,
+      fetch: async url => ({ ok: true, arrayBuffer: async () => bytes.buffer, blob: async () => ({}) }),
+      createImageBitmap: async () => ({ width: 8, height: 8, close: () => { closed++; } }),
+      OffscreenCanvas: class { constructor(w,h) { this.width=w; this.height=h; } getContext() { return { clearRect() {}, drawImage() { draws++; if (failDraw) throw new Error('decode succeeded but draw failed'); }, getImageData() {}, isContextLost: () => false }; } },
+    });
+    const api = h.context.__varinCompanionBenchmark;
+    api.start({ epoch, version: 'test-version', packageCount: 1, idleMs: 1, files: [{ path: 'atlas.png' }] });
+    assert.throws(() => api.recordDrag({ complete: true, released: true }), /precede drag/);
+    api.poll(); h.advance(2); assert.equal(api.poll().status, 'waiting-system-drag');
+    api.recordDrag({ complete: true, released: true });
+    for (let i=0; i<100 && api.poll().status === 'asset-diagnostic'; i++) await new Promise(resolve => setTimeout(resolve, 2));
+    const result = api.poll(); assert.equal(result.status, failDraw ? 'failed' : 'completed');
+    assert.equal(result.diagnostic.packages.length, failDraw ? 0 : 1);
+    assert.equal(result.diagnostic.failed.length, failDraw ? 1 : 0);
+    assert.deepEqual([...result.normal.notCovered], ['synthetic-action']);
+    assert.equal(closed, 1); assert.equal(draws, 1); assert.equal(result.diagnostic.released, true);
+    const elapsed = result.normalObservationMs; h.advance(1000); assert.equal(api.poll().normalObservationMs, elapsed);
+    vm.runInNewContext(pageSource, h.context); assert.equal(h.context.__varinCompanionBenchmark, api);
+    assert.equal((await api.stop()).settled, true);
+  }
+});
+
+test('companion verification and diagnostics never enter normal counter deltas or renderer quantiles', () => {
+  const record = (phase, sequence, cpu, memory = 100) => ({ phase, rendererSequence: sequence, monotonicMs: sequence * 100, processes: [{ pid: 1, startIdentity: 'original', cpuTimeMs: cpu, memoryBytes: memory }] });
+  const renderer = (sequence, status, frame) => ({ sequence, targets: [{ label: 'application:main', status: 'running', frameTimesMs: [frame] },
+    { label: 'companion:original', surfaceRole: 'companion', companion: { status, normal: { paints: 1 } }, frameTimesMs: [frame] }] });
+  const summary = summarizeRun({ scenario: 'companion-drag', samples: [record('companion-idle', 0, 10), record('companion-idle', 1, 20),
+    record('companion-verification', 2, 1000, 9999), record('companion-input', 3, 1100), record('companion-input', 4, 1120), record('companion-asset-diagnostic', 5, 9000, 9999)],
+    rendererSamples: [renderer(0, 'waiting-ready', 999), renderer(1, 'waiting-ready', 16), renderer(2, 'waiting-system-drag', 999),
+      renderer(3, 'waiting-system-drag', 999), renderer(4, 'waiting-system-drag', 20), renderer(5, 'asset-diagnostic', 999)] });
+  assert.equal(summary.cpuTimeMs, 30); assert.equal(summary.durationMs, 200); assert.equal(summary.resourceIntervals, 2);
+  assert.equal(summary.memoryPeakObservedBytes, 100); assert.equal(summary.frameP95Ms, 20); assert.equal(summary.byTarget.companion.frames, 2);
+});
+
+test('isolated resource samples cannot claim a measured CPU window across an excluded phase', () => {
+  const sample = (phase, monotonicMs) => ({ phase, monotonicMs, processes: [{ pid: 1, startIdentity: 'original', cpuTimeMs: monotonicMs, memoryBytes: 100 }] });
+  const summary = summarizeRun({ samples: [sample('companion-idle', 0), sample('companion-verification', 100), sample('companion-input', 200)] });
+  assert.equal(summary.cpuTimeMs, null); assert.equal(summary.cpuCoreEquivalent, null); assert.equal(summary.durationMs, 0);
+});
+
+test('an absent optional UI control still requires its committed product postcondition', () => {
+  const h = browserHarness(); const pack = h.element(); h.elements.set('#pack', pack);
+  h.api.start(workload([{ id: 'select-if-needed', action: 'click', optional: true, durationMs: 10, selector: '#select', expect: [{ selector: '#pack', attribute: 'data-selected', equals: 'true' }] }]));
+  h.api.poll(); h.advance(11); assert.equal(h.api.poll().status, 'running');
+  pack.attrs.set('data-selected', 'true'); assert.equal(h.api.poll().status, 'completed');
+});
+
+test('companion stop joins an in-flight decode and closes its bitmap without painting after cancellation', async () => {
+  const { webcrypto, createHash } = await import('node:crypto');
+  const h = browserHarness();
+  const bundle = { packages: [{ id: 'action', canvas: [8, 8], pages: [{ file: 'atlas.png' }], frames: [{ page: 0, rect: [0, 0, 8, 8], offset: [0, 0] }] }] };
+  const bytes = new TextEncoder().encode(JSON.stringify(bundle)), epoch = createHash('sha256').update(bytes).digest('hex');
+  const pixels = new Uint8ClampedArray(8 * 8 * 4).fill(255);
+  const canvas = { width: 8, height: 8, getBoundingClientRect: () => ({ left: 0, top: 0, width: 8, height: 8 }), getContext: () => ({ getImageData: () => ({ data: pixels }) }),
+    __varinCompanionAssetBase: 'varin-companion://localhost/varin/version/', __varinCompanionEvidence: { epoch, paints: 1 } };
+  h.elements.set('canvas', canvas);
+  let finishDecode, closed = 0, draws = 0, decodeStarted;
+  const decoding = new Promise(resolve => { decodeStarted = resolve; });
+  Object.assign(h.context, { crypto: webcrypto, Uint8Array, TextDecoder, URL, setTimeout,
+    location: { href: 'varin-ui://app/companion.html?companionPack=varin&companionVersion=test-version' }, screenX: 0, screenY: 0, outerWidth: 8, outerHeight: 8,
+    fetch: async () => ({ ok: true, arrayBuffer: async () => bytes.buffer, blob: async () => ({}) }),
+    createImageBitmap: () => new Promise(resolve => { finishDecode = resolve; decodeStarted(); }),
+    OffscreenCanvas: class { getContext() { return { drawImage() { draws++; } }; } },
+  });
+  const api = h.context.__varinCompanionBenchmark;
+  api.start({ epoch, version: 'test-version', packageCount: 1, idleMs: 1, files: [{ path: 'atlas.png' }] });
+  api.poll(); h.advance(2); api.poll(); api.recordDrag({ complete: true, released: true }); await decoding;
+  let settled = false; const stop = api.stop().then(value => { settled = true; return value; });
+  await Promise.resolve(); assert.equal(settled, false);
+  finishDecode({ width: 8, height: 8, close() { closed++; } });
+  assert.equal((await stop).released, true); assert.equal(closed, 1); assert.equal(draws, 0); assert.equal(api.poll().status, 'failed');
+  assert.throws(() => api.start({}), /interrupted/u);
 });

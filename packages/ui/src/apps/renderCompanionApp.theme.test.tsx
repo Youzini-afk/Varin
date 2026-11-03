@@ -11,7 +11,7 @@ import { renderCompanionApp } from './renderCompanionApp';
 
 // Keep real root composition, theme owner, asset admission, player, painting and
 // material. Only Host/native observation, bitmap decoding and canvas IO are fixtures.
-const boundary = vi.hoisted(() => ({ scene: vi.fn(), native: vi.fn(), persist: vi.fn(), refresh: vi.fn(), root: undefined as Root | undefined, grab: undefined as undefined | (() => void), release: undefined as undefined | (() => void), phase: 'rest', working: true, stopKey: undefined as string | undefined, update: undefined as (() => void) | undefined, consumed: vi.fn(), blockPaint: false, noop: () => {} }));
+const boundary = vi.hoisted(() => ({ scene: vi.fn(), native: vi.fn(), persist: vi.fn(), refresh: vi.fn(), root: undefined as Root | undefined, grab: undefined as undefined | (() => void), release: undefined as undefined | (() => void), phase: 'rest', working: true, stopKey: undefined as string | undefined, update: undefined as (() => void) | undefined, consumed: vi.fn(), blockPaint: false, blockDraw: false, noop: () => {} }));
 vi.mock('react-dom/client', async original => {
   const actual = await original<typeof import('react-dom/client')>();
   return { ...actual, createRoot: (...args: Parameters<typeof actual.createRoot>) => (boundary.root = actual.createRoot(...args)) };
@@ -48,7 +48,7 @@ let cleanup: (() => void) | undefined;
 afterEach(async () => { await act(async () => boundary.root?.unmount()); cleanup?.(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function mountHarness(production = false, loadFailure?: Error) {
-  vi.clearAllMocks(); boundary.working=true; boundary.stopKey=undefined; boundary.blockPaint=false;
+  vi.clearAllMocks(); boundary.working=true; boundary.stopKey=undefined; boundary.blockPaint=false; boundary.blockDraw=false;
   boundary.native.mockResolvedValue(null);
   const { window, document } = parseHTML('<html><head></head><body style="background-color:transparent"><div id="root"></div></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('crypto', webcrypto);
@@ -70,12 +70,12 @@ async function mountHarness(production = false, loadFailure?: Error) {
   // Registered real masks process deterministic blue canvas samples. Raster decode
   // fidelity belongs to artwork tests; this checks the real render/material path.
   const contexts = new WeakMap<object, CanvasRenderingContext2D>();
-  const paintedPixels = vi.fn();
+  const paintedPixels = vi.fn(), draws = vi.fn();
   const originalCreate = document.createElement.bind(document);
   document.createElement = ((name: string, options?: ElementCreationOptions) => {
     const node = originalCreate(name, options);
     if (name === 'canvas') Object.assign(node, { getContext: () => {
-      if (!contexts.has(node)) contexts.set(node, { clearRect() {}, drawImage() {}, save() {}, restore() {}, getImageData: () => {
+      if (!contexts.has(node)) contexts.set(node, { clearRect() {}, drawImage() { draws(); if (boundary.blockDraw) throw new Error('fixture canvas draw unavailable'); }, save() {}, restore() {}, getImageData: () => {
         const data = new Uint8ClampedArray(512 * 512 * 4);
         for (let i = 0; i < data.length; i += 4) data.set([63, 142, 243, 255], i);
         return { width: 512, height: 512, data };
@@ -104,7 +104,7 @@ async function mountHarness(production = false, loadFailure?: Error) {
     await act(async () => { selectedReview.checked = true; selectedReview.dispatchEvent(new window.Event('click', { bubbles: true })); });
   }
   const tick = async (now: number) => { await act(async () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(now)); }); };
-  if (loadFailure) return {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick};
+  if (loadFailure) return {window,document,write,paintedPixels,draws,request,grab,release,material,listThreads,tick};
   // Bundle digest/decode are async; wait on their actual completion, not wall time.
   let frameTime = 0;
   await vi.waitFor(async () => {
@@ -115,7 +115,7 @@ async function mountHarness(production = false, loadFailure?: Error) {
   }, { timeout: 5000 });
   await tick(1000); await tick(1200);
   if (!production) expect(material.mock.lastCall?.[1].action).toBe('work-active');
-  return {window,document,write,paintedPixels,request,grab,release,material,listThreads,tick};
+  return {window,document,write,paintedPixels,draws,request,grab,release,material,listThreads,tick};
 }
 
 it('shows a painted character without persistent status boxes and opens controls on demand', async () => {
@@ -187,4 +187,31 @@ it('consumes an executor-stop edge once only after real recovery has painted its
  expect(boundary.consumed).toHaveBeenCalledExactlyOnceWith('exact-stop');
  for(let n=0;n<20;n++) await tick(15000+n*50);
  expect(boundary.consumed).toHaveBeenCalledTimes(1);
+});
+
+it('publishes read-only actual paint evidence without counting a failed canvas commit', async () => {
+  const { window, document, draws } = await mountHarness(true);
+  const canvas = document.querySelector('canvas')! as HTMLCanvasElement & { __varinCompanionEvidence: {
+    epoch: string; paints: number; lastSuccessfulPaint: { epoch: string; packageId: string; source: string } | null; enabled: boolean; startupHistory: string; decoded: unknown[]; packages: unknown[]; notCovered: string[];
+  }; __varinObserveCompanionPaint(): void };
+  expect(canvas.__varinCompanionEvidence.enabled).toBe(false);
+  expect(canvas.__varinCompanionEvidence.paints).toBe(0);
+  expect(canvas.__varinCompanionEvidence.lastSuccessfulPaint?.source).toBe('original-painter-successful-commit');
+  canvas.__varinObserveCompanionPaint();
+  expect(canvas.__varinCompanionEvidence.paints).toBe(0); // Do not invent historical observations.
+  await act(async () => window.dispatchEvent(new window.CustomEvent('varin:settings-synced', { detail: { useSystemTheme: false, themeVariant: 'light', lightThemeId: 'aura-light' } })));
+  const before = canvas.__varinCompanionEvidence;
+  expect(before.epoch).toMatch(/^[a-f0-9]{64}$/);
+  expect(before.paints).toBeGreaterThan(0);
+  expect(before.startupHistory).toBe('not-observed-before-enable');
+  expect(before.packages.length).toBe(550);
+  expect(before.notCovered.length).toBeGreaterThan(0);
+  expect(Object.getOwnPropertyDescriptor(canvas, '__varinCompanionEvidence')?.set).toBeUndefined();
+  before.notCovered.length = 0;
+  expect(canvas.__varinCompanionEvidence.notCovered.length).toBeGreaterThan(0);
+  const attempts = draws.mock.calls.length;
+  boundary.blockDraw = true;
+  await act(async () => window.dispatchEvent(new window.CustomEvent('varin:settings-synced', { detail: { useSystemTheme: false, themeVariant: 'light', lightThemeId: 'varin-light' } })));
+  expect(draws.mock.calls.length).toBeGreaterThan(attempts);
+  expect(canvas.__varinCompanionEvidence.paints).toBe(before.paints);
 });

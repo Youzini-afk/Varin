@@ -57,7 +57,7 @@ export const CompanionSettings: React.FC = () => {
                 <span className="companion-presence-status" data-awake={awake}><i /><SwapText text={t(awake ? 'companion.library.awake' : 'companion.library.asleep')} /></span></div>
               <p className="max-w-lg typography-meta leading-relaxed text-muted-foreground">{t(selected?.installedVersion ? 'companion.library.sleepNote' : 'companion.library.downloadNote')}</p>
             </div>
-            <Button disabled={busy !== null || !selected?.installedVersion} variant={awake ? 'outline' : 'default'}
+            <Button data-companion-action={awake ? 'sleep' : 'wake'} disabled={busy !== null || !selected?.installedVersion} variant={awake ? 'outline' : 'default'}
               onClick={() => { void run('presence', () => invokeDesktop('desktop_set_companion', { enabled: !awake })); }}>
               {t(awake ? 'companion.library.sleep' : 'companion.library.wake')}
             </Button>
@@ -67,7 +67,8 @@ export const CompanionSettings: React.FC = () => {
               {library.packs.map(pack => {
                 const installed = pack.installedVersion !== null, downloading = pack.download?.state === 'downloading';
                 const chosen = pack.id === library.selectedPackId;
-                return <article key={pack.id} className="companion-appearance" data-selected={chosen}>
+                return <article key={pack.id} className="companion-appearance" data-companion-pack={pack.id}
+                  data-installed-version={pack.installedVersion ?? ''} data-installed-bytes={pack.installedBytes} data-selected={chosen}>
                   <div className="companion-appearance-preview">
                     <img src={`/companion-previews/${encodeURIComponent(pack.id)}.png`} alt={pack.name} loading="lazy" draggable={false} />
                   </div>
@@ -90,8 +91,8 @@ export const CompanionSettings: React.FC = () => {
                     <div className="mt-5 flex flex-wrap items-center gap-2">
                       {downloading ? <Button variant="outline" disabled={busy !== null} onClick={() => { void manage({ action: 'cancel', id: pack.id }); }}>{t('companion.library.cancel')}</Button>
                         : <>
-                          {(!installed || pack.version !== pack.installedVersion) && <Button disabled={busy !== null} onClick={() => { void manage({ action: 'download', id: pack.id }); }}>{t(pack.download ? 'companion.library.retry' : installed ? 'companion.library.update' : 'companion.library.download')}</Button>}
-                          {installed && !chosen && <Button disabled={busy !== null} onClick={() => { void manage({ action: 'select', id: pack.id }); }}>{t('companion.library.use')}</Button>}
+                          {(!installed || pack.version !== pack.installedVersion) && <Button data-companion-action="download" disabled={busy !== null} onClick={() => { void manage({ action: 'download', id: pack.id }); }}>{t(pack.download ? 'companion.library.retry' : installed ? 'companion.library.update' : 'companion.library.download')}</Button>}
+                          {installed && !chosen && <Button data-companion-action="select" disabled={busy !== null} onClick={() => { void manage({ action: 'select', id: pack.id }); }}>{t('companion.library.use')}</Button>}
                           {(installed || pack.download) && <Button variant="ghost" disabled={busy !== null} onClick={() => { void manage({ action: 'remove', id: pack.id }); }}>{t(installed ? 'companion.library.remove' : 'companion.library.clear')}</Button>}
                         </>}
                     </div>

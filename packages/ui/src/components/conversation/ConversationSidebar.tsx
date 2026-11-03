@@ -1449,6 +1449,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
                   variant="ghost"
                   size="icon"
                   onClick={handleOpenSettings}
+                  data-open-settings=""
                   className="size-9 text-muted-foreground hover:text-foreground"
                   aria-label={t('sessions.sidebar.footer.actions.settings')}
                 >

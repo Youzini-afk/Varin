@@ -247,14 +247,18 @@ pub async fn run(app: AppHandle, request: BenchmarkRequest, main: Session) -> bo
         let mut sequence = 0_u64;
         let mut fixture_label: Option<String> = None; let mut fixture_complete = false;
         let mut remote_label: Option<String> = None; let mut remote_complete = false;
+        let mut companion_label: Option<String> = None; let mut companion_complete = false;
         let mut input_counters: HashMap<String, u64> = HashMap::new(); let mut external_inputs = 0_u64;
         let mut output = fs::OpenOptions::new().write(true).create_new(true).open(request.data_dir.join("benchmark-renderer.jsonl")).map_err(|_| "Benchmark recording already exists or cannot be created".to_string())?;
         loop {
             if started.elapsed() > deadline { return Err("Workload did not produce its terminal observation".to_string()); }
-            let mut samples = Vec::new();
+            let mut samples = Vec::new(); let mut companion_present = false;
             let mut main_status = String::new(); let mut main_error = None;
             let sessions = crate::desktop::benchmark_sessions(&app).await;
             for (label, session) in sessions {
+                let companion = label.starts_with("companion:companion:") && request.document["workload"]["companion"].is_object();
+                if companion { companion_present = true; if companion_label.as_ref().is_some_and(|original| original != &label) { return Err("Original companion identity changed".into()); } companion_label = Some(label.clone()); }
+                if companion && companion_complete { continue; } // Sleep owns document destruction; still track original surface presence.
                 let fixture = if label.starts_with("browser:") && request.document["workload"]["browser"].is_object() {
                     eval(&session, format!("location.href === {}", request.document["workload"]["browser"]["url"])).await.unwrap_or(json!(false)) == true
                 } else { false };
@@ -276,15 +280,16 @@ pub async fn run(app: AppHandle, request: BenchmarkRequest, main: Session) -> bo
                 let workload = if label == "application:main" { request.document["workload"].clone() } else if fixture { request.document["workload"]["browser"].clone() } else if remote { request.document["workload"]["remote"].clone() } else { json!({"passive":true}) };
                 let installed = eval(&session, "Boolean(window.__varinDesktopBenchmark)".into()).await.unwrap_or(json!(false));
                 if installed != true {
-                    if label == "application:main" || ((fixture || remote) && targets.contains(&label)) { return Err("The original measured active document ended".to_string()); }
+                    if label == "application:main" || ((fixture || remote || companion) && targets.contains(&label)) { return Err("The original measured active document ended".to_string()); }
                     session.request("Runtime.evaluate", json!({"expression":PAGE})).await?;
                     eval(&session, format!("window.__varinDesktopBenchmark.start({workload})")).await?;
                 }
-                if (label == "application:main" || fixture || remote) && eval(&session, format!("window.__varinDesktopBenchmark.matchesWorkload({workload})")).await? != true { return Err("The original active observer workload changed".into()); }
+                if (label == "application:main" || fixture || remote || companion) && eval(&session, format!("window.__varinDesktopBenchmark.matchesWorkload({workload})")).await? != true { return Err("The original active observer workload changed".into()); }
                 if !targets.contains(&label) { targets.push(label.clone()); }
                 if label == "application:main" {
                     eval(&session, format!("window.__varinDesktopBenchmark.nativeCompletion({fixture_complete})")).await?;
                     eval(&session, format!("window.__varinDesktopBenchmark.remoteCompletion({remote_complete})")).await?;
+                    eval(&session, format!("window.__varinDesktopBenchmark.companionCompletion({companion_complete})")).await?;
                 }
                 if label == "application:main" || remote { eval(&session, "window.__varinDesktopBenchmark.observeOwner()".into()).await?; }
                 let observed = eval(&session, "window.__varinDesktopBenchmark.poll()".into()).await;
@@ -302,6 +307,17 @@ pub async fn run(app: AppHandle, request: BenchmarkRequest, main: Session) -> bo
                     let before = input_counters.insert(label.clone(), actual).unwrap_or(0);
                     external_inputs += if actual >= before { actual - before } else { actual };
                 }
+                if companion {
+                    eval(&session, format!("window.__varinCompanionBenchmark.start({})", request.document["workload"]["companion"])).await?;
+                    if let Ok(bytes) = fs::read(request.data_dir.join("benchmark-companion-drag.json")) {
+                        let drag: Value = serde_json::from_slice(&bytes).map_err(|_| "Invalid companion drag receipt")?;
+                        if drag["nonce"] == request.document["nonce"] { eval(&session, format!("window.__varinCompanionBenchmark.recordDrag({})", drag["result"])).await?; }
+                    }
+                    let observation = eval(&session, "window.__varinCompanionBenchmark.poll()".into()).await?;
+                    if observation["status"] == "failed" { return Err("Original companion diagnostic failed".into()); }
+                    if observation["status"] == "completed" { companion_complete = true; }
+                    value["companion"] = observation;
+                }
                 if remote {
                     remote_complete = value["status"] == "completed";
                     if value["status"] == "failed" { return Err("Original remote UI replay failed".into()); }
@@ -313,7 +329,7 @@ pub async fn run(app: AppHandle, request: BenchmarkRequest, main: Session) -> bo
                     if let Some(receipts) = value["receipts"].as_array() { steps.extend(receipts.iter().cloned()); }
                 }
                 if (label == "application:main" || fixture || remote) && value["pendingAction"].is_object() { dispatch(&session, &value["pendingAction"], &request).await?; }
-                if let Some(object) = value.as_object_mut() { object.remove("pendingAction"); object.insert("surfaceRole".into(), json!(if label == "application:main" { "main-workbench" } else if remote { "remote-workbench" } else if fixture { "native-browser" } else { "passive" })); object.insert("label".into(), json!(label)); }
+                if let Some(object) = value.as_object_mut() { object.remove("pendingAction"); object.insert("surfaceRole".into(), json!(if label == "application:main" { "main-workbench" } else if remote { "remote-workbench" } else if fixture { "native-browser" } else if companion { "companion" } else { "passive" })); object.insert("label".into(), json!(label)); }
                 samples.push(value);
             }
             eval(&main, format!("window.__varinDesktopBenchmark.externalInputs({external_inputs})")).await?;
@@ -322,7 +338,9 @@ pub async fn run(app: AppHandle, request: BenchmarkRequest, main: Session) -> bo
             output.write_all(b"\n").map_err(|_| "Renderer recording failed")?;
             write(&request, "benchmark-live.json", &record)?;
             sequence += 1;
+            eval(&main, format!("window.__varinDesktopBenchmark.companionClosed({})", companion_complete && !companion_present)).await?;
             if main_status == "completed" {
+                if request.document["workload"]["companion"].is_object() && !companion_complete { return Err("Original companion did not complete".into()); }
                 if request.document["workload"]["browser"].is_object() && !fixture_complete { return Err("Original native fixture did not complete".into()); }
                 if request.document["workload"]["remote"].is_object() && !remote_complete { return Err("Original remote UI replay did not complete".into()); }
                 return Ok(());
@@ -334,7 +352,7 @@ pub async fn run(app: AppHandle, request: BenchmarkRequest, main: Session) -> bo
     // Disconnect passive observers on every still-live original surface before
     // the product owner drains windows and sessions, including failure paths.
     for (_, session) in crate::desktop::benchmark_sessions(&app).await {
-        let _ = eval(&session, "window.__varinDesktopBenchmark?.stop()".into()).await;
+        let _ = eval(&session, "(async () => ({ observer: window.__varinDesktopBenchmark?.stop(), companion: await window.__varinCompanionBenchmark?.stop() }))()".into()).await;
     }
     let drained = crate::desktop::smoke_shutdown(&app).await.is_ok();
     let complete = outcome.is_ok() && drained;

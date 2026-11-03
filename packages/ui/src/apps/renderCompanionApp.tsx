@@ -1,3 +1,4 @@
+import { createCompanionPaintEvidence } from '@/components/companion/paintEvidence';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { resolveCompanionAccentPalette } from '@/components/companion/companionAccentPalette';
@@ -113,6 +114,20 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const directorMode = companionDirectorMode(assetList, review, directorReview, bundleEndpoints, selectedDirectorReview);
   const [imageLibrary, setImageLibrary] = React.useState<Record<string, ImageBitmap[]>>({});
   const imageCache = React.useRef<Record<string, ImageBitmap[]>>({});
+  const [paintEvidence] = React.useState(createCompanionPaintEvidence);
+  React.useEffect(() => {
+    const node = canvas.current;
+    if (!node) return;
+    Object.defineProperty(node, '__varinObserveCompanionPaint', { configurable: true, value: () => paintEvidence.enable() });
+    Object.defineProperty(node, '__varinCompanionEvidence', { configurable: true, get: () => paintEvidence.snapshot() });
+    return () => { paintEvidence.close(); delete (node as HTMLCanvasElement & { __varinObserveCompanionPaint?: unknown }).__varinObserveCompanionPaint; delete (node as HTMLCanvasElement & { __varinCompanionEvidence?: unknown }).__varinCompanionEvidence; };
+  }, [paintEvidence]);
+  React.useEffect(() => {
+    const node = canvas.current;
+    if (!node) return;
+    Object.defineProperty(node, '__varinCompanionAssetBase', { configurable: true, get: () => companionAssetBase(window.location.href, directorReview) });
+    return () => { delete (node as HTMLCanvasElement & { __varinCompanionAssetBase?: unknown }).__varinCompanionAssetBase; };
+  }, [directorReview]);
   const atlasReader = React.useRef<((name: string) => Promise<ImageBitmap>) | null>(null);
   const loadingImages = React.useRef(new Map<string, object>());
   const decodedPages = React.useRef(new Map<string, { promise: Promise<ImageBitmap>; image?: ImageBitmap }>());
@@ -400,10 +415,10 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   }, [attention.projectionAPI, attention.observationRevision, selected, generation, receiptScope]);
   React.useEffect(() => () => {
     loadGeneration.current++;
-    for (const page of decodedPages.current.values()) page.image?.close();
+    for (const [file, page] of decodedPages.current) { page.image?.close(); paintEvidence.released(file); }
     decodedPages.current.clear();
-  }, []);
-  const installBundle = async (raw: unknown, readImage: (name: string) => Promise<ImageBitmap>, allowCandidates: boolean, manualSelection = false) => {
+  }, [paintEvidence]);
+  const installBundle = async (raw: unknown, readImage: (name: string) => Promise<ImageBitmap>, allowCandidates: boolean, manualSelection = false, observedEpoch = bundledEpoch) => {
     ++loadGeneration.current;
     accentMaterial.current.clear();
     if (manualSelection) { setBundledEpoch(null); setVisibleDrawing(undefined); lastVisibleDrawingKey.current = ''; }
@@ -414,8 +429,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       const nextPackages = Array.isArray(data.packages) ? data.packages.map(value => readCompanionPackage(value, allowCandidates)) : [readCompanionPackage(raw, allowCandidates)];
       if (!nextPackages.length || new Set(nextPackages.map(item => item.id)).size !== nextPackages.length) throw new Error('Empty bundle or duplicate sequence identity');
       const nextEndpoints = readCompanionEndpoints(data.endpoints, nextPackages);
-      for (const page of decodedPages.current.values()) page.image?.close();
+      for (const [file, page] of decodedPages.current) { page.image?.close(); paintEvidence.released(file); }
       decodedPages.current.clear();
+      paintEvidence.reset(manualSelection ? 'manual-review' : observedEpoch ?? 'pending', nextPackages);
       imageCache.current = {}; loadingImages.current.clear(); atlasReader.current = readImage;
       setImageLibrary({}); setAssetList(nextPackages); setBundleEndpoints(nextEndpoints);
       setAsset(manualSelection ? nextPackages[0] : undefined); setExposure(0);
@@ -437,7 +453,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     for (const id of loadingImages.current.keys()) if (!wanted.has(id)) loadingImages.current.delete(id);
     const wantedPages = new Set(assetList.filter(item => wanted.has(item.id)).flatMap(item => item.pages.map(page => page.file)));
     wantedAtlasFiles.current = wantedPages;
-    for (const [file, page] of decodedPages.current) if (!wantedPages.has(file) && page.image) { page.image.close(); decodedPages.current.delete(file); }
+    for (const [file, page] of decodedPages.current) if (!wantedPages.has(file) && page.image) { page.image.close(); paintEvidence.released(file); decodedPages.current.delete(file); }
     let evicted = false;
     for (const id of Object.keys(imageCache.current)) if (!wanted.has(id)) {
       delete imageCache.current[id]; evicted = true;
@@ -461,7 +477,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
               const created: { promise: Promise<ImageBitmap>; image?: ImageBitmap } = { promise: reader(page.file) };
               created.promise = created.promise.then(image => {
                 if (revision !== loadGeneration.current || !wantedAtlasFiles.current.has(page.file)) { image.close(); throw new Error('Superseded artwork load'); }
-                created.image = image; return image;
+                paintEvidence.decoded(page.file, image.width, image.height); created.image = image; return image;
               }).catch(cause => { if (decodedPages.current.get(page.file) === created) decodedPages.current.delete(page.file); throw cause; });
               decodedPages.current.set(page.file, created); cached = created;
             }
@@ -479,7 +495,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         finally { if (isCurrent()) loadingImages.current.delete(id); }
       })();
     }
-  }, [asset?.id, assetList, automatic.packageId, automatic.neededPackageId, imageLibrary, directorReview]);
+  }, [asset?.id, assetList, automatic.packageId, automatic.neededPackageId, imageLibrary, directorReview, paintEvidence]);
   const loadFiles = async (files: FileList | null) => {
     if (!review || !files) return;
     setManualReview(true);
@@ -518,7 +534,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         const image = await fetch(atlasUrl, { signal: abort.signal });
         if (!image.ok) throw new Error(`Bundled atlas unavailable: ${name}`);
         return createImageBitmap(await image.blob());
-      }, directorReview); }
+      }, directorReview, false, digest); }
     }).catch(cause => { if (!abort.signal.aborted && loadGeneration.current === initialGeneration) setError(String(cause)); });
     return () => { abort.abort(); loadGeneration.current++; };
   }, [directorReview]);
@@ -535,6 +551,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (!paintCompanionFrame(node, paintSurface.current, sequence, images, exposure, stage => {
       accentMaterial.current.apply(stage, sequence, images[sequence.frames[exposure]!.page]!, exposure, bundledEpoch, accentPalette);
     })) return;
+    paintEvidence.painted(sequence.id, exposure);
     if (firstPaint.current === 'pending') {
       firstPaint.current = 'ready'; setPresented(true);
       if (!review && isDesktopShell()) void invokeDesktop('desktop_companion_presented', { status: 'ready' }).catch(cause => setError(String(cause)));

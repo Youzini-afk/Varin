@@ -1,8 +1,13 @@
 /** Concrete product selectors and committed UI outcomes, shared without any
  * animation or feature overrides. Physical-only paths remain explicit. */
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { validateWorkload } from './benchmark-contract.mjs';
-export const manualScenarios = ['companion-drag'];
+export const manualScenarios = [];
+const companionLock = JSON.parse(readFileSync(new URL('../../web/companion-assets.lock.json', import.meta.url), 'utf8'));
+const companionBundle = JSON.parse(readFileSync(new URL('../../web/public/companion-assets/bundle.json', import.meta.url), 'utf8'));
+const companionFiles = [...companionLock.files].sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+const companion = { version: createHash('sha256').update(JSON.stringify(companionFiles)).digest('hex'), baseUrl: `https://raw.githubusercontent.com/${companionLock.repository}/${companionLock.commit}/${companionLock.path}/`, files: companionFiles, bytes: companionFiles.reduce((n,f) => n + f.bytes, 0), epoch: companionFiles.find(f => f.path === 'bundle.json').sha256, packageCount: companionBundle.packages.length, idleMs: 30000 };
 const switcher = '[data-varin-workbench-switcher]';
 const composer = '[data-chat-input] [contenteditable="true"]';
 const primary = '[data-conversation-composer-primary-action]';
@@ -13,6 +18,12 @@ function switchMode(target, id) {
   return [
     { id: `${id}-open`, action: 'click', selector: switcher, expect: [shown(`[data-workbench-mode-option="${target}"]`)] },
     { id: `${id}-commit`, action: 'click', selector: `[data-workbench-mode-option="${target}"]`, expect: [mode(target)], settleMs: 1200, milestone: `committed-${target}` },
+  ];
+}
+function settingsCycle(id) {
+  return [
+    { id: `${id}-open-settings`, action: 'click', selector: '[data-open-settings]', expect: [shown('[data-settings-view]'), shown('[data-close-settings]')], settleMs: 500 },
+    { id: `${id}-close-settings`, action: 'click', selector: '[data-close-settings]', expect: [{ selector: '[data-settings-view]', count: 0 }, shown(switcher)], settleMs: 500, milestone: 'settings-dismissed' },
   ];
 }
 function selectHistory(identity) {
@@ -29,7 +40,7 @@ function compose(text, id, admittedOnly = false) {
     { id: `${id}-submit`, action: 'click', selector: `${primary}[data-conversation-composer-primary-action="send"]`, expect: admittedOnly ? [{ selector: composer, textEquals: '' }] : [shown(`${primary}[data-conversation-composer-primary-action="stop"]`)] },
   ];
 }
-export function productWorkloads(identity, { manualDurationMs = 120000, workspace, browserOrigin, remoteOrigin }  = {}) {
+export function productWorkloads(identity, { workspace, browserOrigin, remoteOrigin }  = {}) {
   if (!/^[a-zA-Z0-9:_-]+$/u.test(identity?.threadId ?? '')) throw new Error('Expected a real product Thread identity');
   const browserUrl = browserOrigin ? `${browserOrigin}/site` : 'http://127.0.0.1:1/site';
   const browser = { name: 'browser-interaction', surface: 'fixture-browser', motion: 'full', url: browserUrl, readyTimeoutMs: 60000, timeoutMs: 90000,
@@ -65,9 +76,18 @@ export function productWorkloads(identity, { manualDurationMs = 120000, workspac
       { id: 'stream-observation-window', action: 'wait', durationMs: 20000 },
       { id: 'return-to-live-tail', action: 'scroll', selector: '[data-conversation-timeline]', deltaY: 100000, settleMs: 500 },
       { id: 'stream-owner-completed', action: 'wait', durationMs: 500, timeoutMs: 60000,
-        expect: [{ selector: '[data-thread-conversation]', textIncludes: 'VARIN_BENCHMARK_STREAM_COMPLETE' }, { selector: `${primary}[data-conversation-composer-primary-action="stop"]`, count: 0 }], milestone: 'stream-completed' },
+        owner: 'run-completed', expect: [{ selector: '[data-thread-conversation]', textIncludes: 'VARIN_BENCHMARK_STREAM_COMPLETE' }, { selector: `${primary}[data-conversation-composer-primary-action="stop"]`, count: 0 }], milestone: 'stream-completed' },
     ],
-    'companion-drag': [{ id: 'physical-companion-actions-and-cross-display-drag', action: 'manual', durationMs: manualDurationMs, expect: ready, milestone: 'operator-companion-evidence-required' }],
+    'companion-drag': [
+      { id: 'open-product-settings', action: 'click', selector: '[data-open-settings]', expect: [shown('[data-settings-page-link="companion"]')] },
+      { id: 'open-companion-library', action: 'click', selector: '[data-settings-page-link="companion"]', expect: [shown('[data-companion-action="download"]')] },
+      { id: 'download-fixed-complete-pack', action: 'click', selector: '[data-companion-pack="varin"] [data-companion-action="download"]', expect: [{ selector: '[data-companion-pack="varin"]', attribute: 'data-installed-version', equals: companion.version }], timeoutMs: 600000 },
+      { id: 'select-installed-pack-if-needed', action: 'click', optional: true, durationMs: 1000, selector: '[data-companion-pack="varin"] [data-companion-action="select"]', expect: [{ selector: '[data-companion-pack="varin"]', attribute: 'data-selected', equals: 'true' }] },
+      { id: 'wake-original-companion', action: 'click', selector: '[data-companion-action="wake"]', expect: [shown('[data-companion-action="sleep"]')] },
+      { id: 'companion-normal-and-independent-asset-diagnostic', action: 'wait', durationMs: 1000, owner: 'companion-completed', timeoutMs: 900000 },
+      { id: 'sleep-original-companion', action: 'click', selector: '[data-companion-action="sleep"]', expect: [shown('[data-companion-action="wake"]')] },
+      { id: 'settle-original-companion-close', action: 'wait', durationMs: 2000, owner: 'companion-closed', timeoutMs: 30000 },
+    ],
     'browser-interaction': [
       { id: 'reveal-context-rail', action: 'click', selector: 'button[aria-label="contextRail.actions.expand"]', expect: [shown('button[data-rail-surface="browser"]')] },
       { id: 'open-original-native-pane', action: 'click', selector: 'button[data-rail-surface="browser"]', expect: [shown('input[aria-label="Browser address"]')] },
@@ -93,14 +113,14 @@ export function productWorkloads(identity, { manualDurationMs = 120000, workspac
       { id: 'remote-window-original-task-and-stop-confirmed', action: 'wait', durationMs: 1000, owner: 'remote-completed', timeoutMs: 90000 },
     ],
     'repeated-lifecycle': [{ id: 'baseline', action: 'checkpoint', cycle: 0, settleMs: 3000 },
-      ...Array.from({ length: 5 }, (_, index) => [...switchMode('ide', `cycle-${index}-ide`), ...switchMode('workbench', `cycle-${index}-workbench`),
+      ...Array.from({ length: 5 }, (_, index) => [...switchMode('ide', `cycle-${index}-ide`), ...switchMode('workbench', `cycle-${index}-workbench`), ...settingsCycle(`cycle-${index}`),
         { id: `settled-${index}`, action: 'checkpoint', cycle: index + 1, settleMs: 3000, expect: [mode('workbench')], milestone: 'settled-cycle' }]).flat()],
   };
-  return Object.fromEntries(Object.entries(steps).map(([name, steps]) => [name, validateWorkload({ name, motion: 'full', readyTimeoutMs: 90000, timeoutMs: 240000, ready, steps, ...(name === 'local-hybrid-execution' ? { ownerIdentity: identity, workspace, remote } : {}), ...(name === 'browser-interaction' ? { browser } : {}) })]));
+  return Object.fromEntries(Object.entries(steps).map(([name, steps]) => [name, validateWorkload({ name, motion: 'full', readyTimeoutMs: 90000, timeoutMs: name === 'companion-drag' ? 1800000 : 240000, ready, steps, ...(name === 'companion-drag' ? { companion } : {}), ...(['local-hybrid-execution', 'long-chat-stream'].includes(name) ? { ownerIdentity: identity, workspace } : {}), ...(name === 'local-hybrid-execution' ? { remote } : {}), ...(name === 'browser-interaction' ? { browser } : {}) })]));
 }
 export function operatorInstructions(origin) {
   return {
-    'companion-drag': ['Use a real multi-display desktop session and an installed complete companion pack.', 'Perform all pack actions, drag across physical monitors, verify transparent composition and click-through outside opaque pixels.', 'Record native input, display identities, DPI and action/drag outcomes separately; renderer activity alone cannot prove these.'],
+    'companion-drag': ['Automatic Linux X11 diagnostic installs the locked complete pack through Settings and uses the original companion window. Physical qualification remains separate.', 'Perform all pack actions, drag across physical monitors, verify transparent composition and click-through outside opaque pixels.', 'Record native input, display identities, DPI and action/drag outcomes separately; renderer activity alone cannot prove these.'],
     'browser-interaction': [`Automatic replay uses the original native page at ${origin}/site, including owner-verified completed download bytes.`, 'Supplemental physical evidence must separately exercise OS file chooser, selection/IME, native resizing and display alignment; Chromium file automation is not OS chooser evidence.'],
     'local-hybrid-execution': ['Automatic replay uses actual local and remote workbench windows, original composer submissions and UI stop controls.', 'Read-only owner evidence verifies original process writer exit and remote Run cancellation; no task is dispatched by the observation API.'],
     limitations: ['Mode switcher deliberately disables interaction while busy; these UI cycles do not certify reverse-in-flight transitions.', 'The fixed history workload does not yet certify image/texture release.', 'Repeated shell cycles are not by themselves a subscription/texture/native-window leak qualification.'],

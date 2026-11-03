@@ -7,7 +7,7 @@
   let readyAt = null, startedAt = performance.now(), status = 'waiting-ready', error = null;
   let pendingAction = null, previousFrame = null, frames = [], events = [], receipts = [];
   let trustedInputs = 0, stepInputBaseline = 0, scrollBefore = null, framesObserved = 0, externalInputs = 0, externalBaseline = 0;
-  let ownerObservation = null, nativeBrowserComplete = false, remoteComplete = false, lastRunId = null;
+  let ownerObservation = null, nativeBrowserComplete = false, remoteComplete = false, companionComplete = false, companionClosed = false, lastRunId = null;
   const observedProcesses = new Map();
   let observer = null, raf = null, stopped = false;
   const visible = element => !!element && !element.closest?.('[inert], [aria-hidden="true"]') && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
@@ -28,6 +28,8 @@
   const matches = tests => (tests ?? []).every(match);
   const ownerMatches = expected => {
     if (!expected) return true;
+    if (expected === 'companion-closed') return companionClosed;
+    if (expected === 'companion-completed') return companionComplete;
     if (expected === 'remote-completed') return remoteComplete;
     if (!ownerObservation || ownerObservation.error) return false;
     if (expected === 'browser-page-opened') return typeof ownerObservation.pageId === 'string';
@@ -78,7 +80,7 @@
     }
     if (!dispatched && !pendingAction) {
       const element = step.selector ? find(step.selector) : document.activeElement;
-      if (step.optional && !visible(element)) { if (now - stepStarted >= (step.durationMs ?? 10000)) finishStep(now); return; }
+      if (step.optional && !visible(element)) { if (now - stepStarted >= (step.durationMs ?? 10000) && matches(step.expect) && ownerMatches(step.owner)) finishStep(now); return; }
       if (!visible(element) || element?.disabled || element?.getAttribute('aria-disabled') === 'true') return;
       if (step.action !== 'scroll' && !step.expect?.some(test => test.focused === true) && matches(step.expect) && ownerMatches(step.owner)) return fail(`Replay action ${step.id} postcondition already held before input`);
       const bounds = element.getBoundingClientRect(), x = bounds.left + bounds.width / 2, y = bounds.top + bounds.height / 2;
@@ -121,6 +123,8 @@
       return { installed: true, frameTiming: 'visible-document-requestAnimationFrame', inputTiming: 'PerformanceEventTiming-durationThreshold-16ms-plus-first-input; quantized-event-duration-not-INP', eventTimingAvailable: !!observer };
     },
     matchesWorkload(value) { return !stopped && workloadIdentity === JSON.stringify(value); },
+    companionClosed(value) { if (typeof value !== 'boolean') throw new Error('Invalid companion closed state'); companionClosed = value; return true; },
+    companionCompletion(value) { if (typeof value !== 'boolean') throw new Error('Invalid companion completion'); companionComplete = value; return true; },
     remoteCompletion(value) { if (typeof value !== 'boolean') throw new Error('Invalid remote completion'); remoteComplete = value; return true; },
     nativeCompletion(value) { if (typeof value !== 'boolean') throw new Error('Invalid native completion'); nativeBrowserComplete = value; return true; },
     async observeOwner() {
@@ -187,5 +191,105 @@
       for (const name of ['pointerdown', 'keydown', 'input', 'wheel']) document.removeEventListener(name, input, true);
       return true;
     },
+  };
+})();
+
+// Opt-in native benchmark diagnostic. It never selects a production action,
+// mutates Host state, changes timing, or returns image bytes. Asset coverage is
+// deliberately separate from the normal player's real paint observations.
+(() => {
+  if (window.__varinCompanionBenchmark) return;
+  let config, start = null, normalEnd = null, status = 'waiting-ready', drag = null, normal = null, diagnostic = null, stopped = false, pending = null;
+  let bitmap = null, surface = null;
+  const controller = new AbortController();
+  const ensureActive = () => { if (stopped) throw new Error('Diagnostic interrupted'); };
+  const readAsset = async url => { ensureActive(); const response = await fetch(url, { signal: controller.signal }); ensureActive(); return response; };
+  const observation = () => document.querySelector('canvas')?.__varinCompanionEvidence;
+  async function diagnose() {
+    status = 'asset-diagnostic';
+    const decoded = new Map(), packages = [], failed = [];
+    let closedBitmaps = 0;
+    try {
+      const assetBase = document.querySelector('canvas')?.__varinCompanionAssetBase;
+      if (typeof assetBase !== 'string') throw new Error('Original pinned asset reader is unavailable');
+      const base = new URL(assetBase, location.href);
+      if (!['varin-ui:', 'varin-companion:', 'http:'].includes(base.protocol) || base.protocol === 'http:' && base.hostname !== 'varin-companion.localhost') throw new Error('Diagnostic only reads the original native asset protocol');
+      const response = await readAsset(new URL('bundle.json', base));
+      if (!response.ok) throw new Error('Installed bundle is unavailable');
+      const bytes = await response.arrayBuffer(); ensureActive();
+      const epoch = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2,'0')).join('');
+      if (epoch !== config.epoch || observation()?.epoch !== epoch) throw new Error('Original installed and painted epochs differ');
+      const bundle = JSON.parse(new TextDecoder().decode(bytes));
+      if (bundle.packages.length !== config.packageCount) throw new Error('Installed package coverage universe changed');
+      for (const item of bundle.packages) {
+        if (stopped) throw new Error('Diagnostic interrupted');
+        const images = [];
+        let drawn = 0;
+        try {
+          for (const page of item.pages) {
+            if (!/^[\w.-]+\.png$/u.test(page.file)) throw new Error('Invalid fixed atlas name');
+            const url = new URL(page.file, base); url.searchParams.set('epoch', epoch);
+            const source = await readAsset(url); if (!source.ok) throw new Error('Original atlas unavailable');
+            const blob = await source.blob(); ensureActive();
+            bitmap = await createImageBitmap(blob); images.push(bitmap); bitmap = null; ensureActive();
+            const image = images.at(-1); decoded.set(page.file, { file: page.file, width: image.width, height: image.height });
+          }
+          surface = new OffscreenCanvas(...item.canvas); const context = surface.getContext('2d');
+          if (!context) throw new Error('Diagnostic canvas unavailable');
+          for (const frame of item.frames) {
+            const image = images[frame.page];
+            if (!image || frame.rect[0] + frame.rect[2] > image.width || frame.rect[1] + frame.rect[3] > image.height) throw new Error('Frame exceeds decoded atlas');
+            context.clearRect(0, 0, surface.width, surface.height);
+            context.drawImage(image, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
+            // Force a real canvas readback without retaining or transmitting pixels.
+            context.getImageData(Math.max(0, Math.min(surface.width-1, frame.offset[0])), Math.max(0, Math.min(surface.height-1, frame.offset[1])), 1, 1);
+            if (context.isContextLost?.()) throw new Error('Diagnostic canvas context lost');
+            drawn++;
+          }
+          packages.push({ id: item.id, frames: drawn, expectedFrames: item.frames.length });
+        } catch { failed.push({ id: item.id, frames: drawn, expectedFrames: item.frames.length }); }
+        finally { for (const image of images) { image.close(); closedBitmaps++; } if (surface) { surface.width = 0; surface.height = 0; surface = null; } }
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      for (const file of config.files.filter(file => file.path.endsWith('.png') && !decoded.has(file.path))) {
+        if (stopped) throw new Error('Diagnostic interrupted');
+        try {
+          const url = new URL(file.path, base); url.searchParams.set('epoch', epoch);
+          const response = await readAsset(url); if (!response.ok) throw new Error('Auxiliary original atlas unavailable');
+          const blob = await response.blob(); ensureActive();
+          bitmap = await createImageBitmap(blob); ensureActive();
+          surface = new OffscreenCanvas(bitmap.width, bitmap.height); const context = surface.getContext('2d');
+          if (!context) throw new Error('Auxiliary diagnostic canvas unavailable');
+          context.drawImage(bitmap, 0, 0); context.getImageData(0, 0, 1, 1);
+          if (context.isContextLost?.()) throw new Error('Auxiliary canvas context lost');
+          decoded.set(file.path, { file: file.path, width: bitmap.width, height: bitmap.height });
+        } catch { failed.push({ id: `asset:${file.path}`, frames: 0, expectedFrames: 1 }); }
+        finally { if (bitmap) { bitmap.close(); bitmap = null; closedBitmaps++; } if (surface) { surface.width = 0; surface.height = 0; surface = null; } }
+      }
+      ensureActive();
+      diagnostic = { epoch, mode: 'independent-offscreen-asset-decode-draw-not-production-action-playback', packages, failed, decoded: [...decoded.values()], closedBitmaps, released: true };
+      status = failed.length ? 'failed' : 'completed';
+    } catch { diagnostic = { mode: 'independent-asset-diagnostic', failed: true, closedBitmaps, released: !bitmap && !surface }; status = 'failed'; }
+  }
+  window.__varinCompanionBenchmark = {
+    start(value) { ensureActive(); const params = new URL(location.href).searchParams; if (params.get('companionPack') !== 'varin' || params.get('companionVersion') !== value.version || params.has('review')) throw new Error('Companion diagnostic requires the original pinned production surface'); if (config && JSON.stringify(config) !== JSON.stringify(value)) throw new Error('Companion benchmark identity changed'); config ??= value; document.querySelector('canvas')?.__varinObserveCompanionPaint?.(); return true; },
+    recordDrag(value) { ensureActive(); if (!drag) { if (status !== 'waiting-system-drag') throw new Error('Original idle/hit observation did not precede drag'); if (!value.complete || !value.released) { status = 'failed'; return false; } drag = value; normal = observation(); normalEnd = performance.now(); pending = diagnose(); } return true; },
+    poll() {
+      const evidence = observation();
+      if (!config || !evidence || evidence.epoch !== config.epoch || !(evidence.paints > 0 || evidence.lastSuccessfulPaint?.epoch === config.epoch)) return { status, surfaceRole: 'companion' };
+      start ??= performance.now();
+      let systemDrag = null;
+      if (!drag && performance.now() - start >= config.idleMs) {
+        const canvas = document.querySelector('canvas'), context = canvas.getContext('2d'), rect = canvas.getBoundingClientRect();
+        const pixels = context.getImageData(0,0,canvas.width,canvas.height).data;
+        for (let y = Math.floor(canvas.height / 4); y < canvas.height * 3/4 && !systemDrag; y += 4) for (let x = Math.floor(canvas.width / 4); x < canvas.width * 3/4; x += 4) {
+          if (pixels[(y * canvas.width + x) * 4 + 3] > 200) { systemDrag = { point: { x: (rect.left + x * rect.width / canvas.width) / innerWidth, y: (rect.top + y * rect.height / canvas.height) / innerHeight }, bounds: { x: screenX, y: screenY, width: outerWidth, height: outerHeight } }; break; }
+        }
+        status = 'waiting-system-drag';
+      }
+      return { status, surfaceRole: 'companion', systemDrag, normal: normal ?? evidence, drag, diagnostic, normalObservationMs: (normalEnd ?? performance.now()) - start, idleMinimumMs: config.idleMs,
+        notQualified: ['physical-cross-display', 'physical-GPU-composition', 'OS-click-through', 'all-normal-action-paths'] };
+    },
+    async stop() { stopped = true; controller.abort(); await pending; return { stopped: true, settled: true, released: !bitmap && !surface }; },
   };
 })();

@@ -7,7 +7,7 @@
 在匹配架构、有原生显示与固定官方构建工具/CEF SDK的一次性 OS 账户执行。SDK 必须在 checkout 外，避免 checkout clean 删除它。不要使用真实用户 profile、登录或文件。
 
 ```sh
-node --test packages/tauri/scripts/benchmark-processes.test.mjs packages/tauri/scripts/benchmark.test.mjs packages/tauri/scripts/benchmark-suite.test.mjs
+node --test packages/tauri/scripts/benchmark*.test.mjs
 CEF_PATH=/absolute/pinned/cef node packages/tauri/scripts/benchmark-build.mjs --output artifacts/desktop-benchmark-products
 VARIN_BENCHMARK_DISPOSABLE_OS_USER=1 node packages/tauri/scripts/benchmark-suite.mjs --pair artifacts/desktop-benchmark-products/pair.json --output artifacts/desktop-benchmark-evidence
 ```
@@ -25,14 +25,18 @@ node packages/tauri/scripts/benchmark-build.mjs --candidate /absolute/native-can
 ## 工作负载与证据边界
 
 - Remote idle：真正认证远端 Host 的完整工作台空闲 30 秒。远端服务单独记录进程树，不偷偷计入某一外壳。当前是新 profile、OS cache 未控制，不代证冷/暖启动分组。
-- Long chat：真实 Host API 配置受控 SSE provider，Rust owner 完成 40 个历史 turn 后才快照。实际 UI 导航、滚动、输入并发送流式内容，检查终态与 provider 完成回执。不是模型性能；尚不代证图片/纹理释放。
+- Long chat：真实 Host API 配置受控 SSE provider，Rust owner 完成 40 个历史 turn 后才快照。实际 UI 导航、滚动、输入并发送流式内容，检查原 Thread Run 终态、UI 内容与 provider 完成回执。不是模型性能；尚不代证图片/纹理释放。
 - Workspace transitions：实际菜单切换 Workbench、IDE、Bot，等待提交态及正常动画。产品在 busy 时禁用切换器，当前路径不代证 reverse-in-flight。
-- Companion drag：`--manual` 下预留 120 秒原生操作窗口。仓库目前只带preview与lock，没有完整atlas；lock指向 `Youzini-afk/Varin-companion-assets` 的 `ebfbcd3383b120b4427ce7820e5eda21e63e6b60`、`pack/varin`，45项约121 MB。实际完整资产、许可核验及安装仍需完成，不能用preview代替。必须在隔离 profile 内安装完整 pack，执行全部动作、物理跨屏拖动、透明区域穿透。默认明确未执行；没有内置假 sprite 或缺少动作时的替代成功路径。
+- Companion drag：Linux X11 自动通过真实 Settings → Desktop companion → Download → 必要时 Use → Wake。每轮在私有 profile 从既有固定源下载完整45文件121,431,042字节，通过原 assets owner 安装，再验证 installedVersion、固定源与全部文件 SHA-256。保留30秒正常播放；系统光标经 xdotool 实际 hover/tap/repeat/drag-release，要求命中唯一同进程树、同几何窗口，验证真实bounds移动及释放后稳定，然后 Sleep 并观察原surface消失。原生产 decoder/painter 的只读 ledger 分别记录启用后成功解码、成功绘制、释放数与正常路径 notCovered；静态姿势的 readiness 使用原 painter 保留的最后成功绘制回执，不重播动作，也不把启用前的绘制补入观察计数。独立 asset diagnostic 对同一固定bundle的550 packages/1284 frames及43张PNG进行解码、离屏draw/readback与释放，不更改正常播放器动作或计时。该诊断不等于550条正常Host动作路径，也不计入正常性能窗口。物理跨屏、透明GPU合成与OS点击穿透仍未验收。
 - Browser interaction：自动从真实工作台展开 rail、打开原生 Browser pane、地址栏导航；私有 driver 只驱动匹配 fixture URL 的同一个原生页面。真实 synthetic 登录、Chromium 文件选择自动化、上传、滚动与下载均保留原 owner。主页面只读 Browser owner 的 completed download，再读取原落盘文件字节并核验 SHA-256。服务端上传 hash、login/download 回执另行检查。DOM.setFileInputFiles 仅指定本轮固定 synthetic 文件，是 Browser automation 路径，不证明 OS chooser、物理输入或 resize/display 对齐。
 - Local/hybrid：自动从真实 Host switcher 打开同源远端新窗口。两边均用原 composer 提交：本地完成一个有界 CPU 任务，再通过原 process card Stop 取消长任务；远端完成一条 SSE 对话，再用 composer Stop 取消另一条。只读原 owner 的 Run/operation/process 回执，要求实际 writerActive=false 与原 job terminal/cancelled，不能把取消意图当停止。两个窗口分别保留输入与renderer观察；受控 provider 还须确认正常完成和被取消的原 SSE 请求。
-- Repeated lifecycle：五轮 IDE/Workbench 切换、六个 settled checkpoints，记录进程、handles、内存及可用 GPU。尚不代证全部窗口/任务/subscription/texture 无增长。
+- Repeated lifecycle：五轮 IDE/Workbench 切换及真实 Settings modal 开关、六个 settled checkpoints，记录进程、handles、内存及可用 GPU。尚不代证全部窗口/任务/subscription/texture 无增长。
 
-`--manual` 仅把仍需完整pack与物理跨屏证据的 Companion 场景加入执行；默认六个自动化场景并明确未执行 Companion。它会在手动场景启动时输出 operator 指令位置。私有 synthetic profile、服务 token 和临时 upload 文件仅在本轮保留，结束后清理；因此指令中的临时路径不是持久交付物。实际手动输入也不自动使 native coverage 合格。
+默认尝试七个自动化场景。桌宠场景需要独立 Linux X11 display、`xdotool` 和 `openbox`（官方 apt 包）；suite 启动自己的 `openbox --sm-disable`，记录版本/pid并在结束时只停止自己的子进程，不替换已有WM。不可用时明确标记第七类 blocked 并继续其余六类。`--manual` 为兼容参数，不把物理验收改为自动通过。
+
+锁定素材来源为 `Youzini-afk/Varin-companion-assets` 提交 `ebfbcd3383b120b4427ce7820e5eda21e63e6b60` 的 `pack/varin/`。来源README说明角色/插画许可尚未确定，不能声称代码AGPL覆盖图片。这里仅测试现有产品下载到一次性私有profile，不把素材加入源码、安装包或上传artifact。只输出数值、动作/文件身份、coverage与缺失状态，不输出PNG、canvas像素或profile。数据、服务token、下载资源与诊断canvas均由本轮隔离生命周期清理。
+
+重复运行会重复真实下载，网络和安装窗口单独标记；只有实际已绘制后的正常 idle 与系统指针输入窗口参与该场景的 CPU/内存与 renderer 汇总；两种阶段保留独立标签，合并值不称为纯 idle 成本。文件校验、下载与独立素材诊断均排除。累计 CPU 仅在相邻有效采样之间相减，不跨排除区间；renderer 仅采用采集器实际读到的对应序列，并排除阶段边界，未采到的记录不补作有效帧。独立诊断停止会等待未完成解码、释放 bitmap 后返回。原始记录保留对应阶段，且全部normal动作覆盖尚未完成。
 
 ## 失败与清理
 

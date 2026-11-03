@@ -8,10 +8,11 @@ import { spawn, execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { hashDirectory, hashFile, hashJson, isHash, validateWorkload, summarizeRun, scenarioRequirements, collectorVersion } from './benchmark-contract.mjs';
+import { hashDirectory, hashFile, hashJson, isHash, validateWorkload, summarizeRun, isResourceSample, scenarioRequirements, collectorVersion } from './benchmark-contract.mjs';
 import { performanceScenarios } from './performance-evidence.mjs';
 import { createProcessCollector } from './benchmark-processes.mjs';
 import { verifyRuntimeManifest } from './runtime-manifest.mjs';
+import { verifyInstalledCompanion, dragOriginalCompanion, startCompanionInputTask, companionSamplePhase } from './benchmark-companion.mjs';
 import { engineInventory } from './build-candidate.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -132,9 +133,9 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
   const nonce = randomUUID(), request = { schema: 1, product: 'varin-desktop-benchmark-request', nonce, sourceSha: plan.sourceSha, frontendDirectory: shell === 'electron' ? plan.electron.frontendDirectory : path.join(preflightResult.candidate.runtime, 'frontend'),
     version: plan.version, inputs: bound.inputs, scenarioSha256: bound.scenarioSha256, sampleIntervalMs: plan.intervalMs, workload: scenario.workload };
   const samples = [], issues = [], lifecycle = []; let child, exit = null, timedOut = false, startupMs = null, receipt = null, productComplete = false;
-  let rendererSequence = -1;
+  let rendererSequence = -1, companionTask = null, companionAcknowledged = false, lastCompanion = null;
   let services;
-  const execution = { shell, sourceSha: plan.sourceSha, version: plan.version, inputs: bound.inputs, scenarioSha256: bound.scenarioSha256,
+  const execution = { shell, scenario: scenario.name, sourceSha: plan.sourceSha, version: plan.version, inputs: bound.inputs, scenarioSha256: bound.scenarioSha256,
     artifactSha256: shell === 'electron' ? preflightResult.electronArtifact.sha256 : preflightResult.tauriArtifact.sha256,
     executableSha256: null,
     rootPid: null, iteration, cacheCondition: plan.cacheCondition, memoryMetric: collector.memoryMetric, startupMs: null, samples, status: 'pending', coverage: issues };
@@ -163,6 +164,7 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
     const deadline = scenario.workload.timeoutMs + scenario.workload.readyTimeoutMs + 30000;
     while (performance.now() - started <= deadline) {
       if (spawnError) throw spawnError;
+      if (exit && companionTask && !companionTask.state.settled) { companionTask.cancel(); throw new Error('Product exited during owned companion input'); }
       const sampledAt = performance.now(), observed = await collector.sample();
       const live = await readOptional(path.join(data, 'benchmark-live.json'));
       let targets = [];
@@ -176,9 +178,24 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
           memoryBytes: observed.processes.every(p => Number.isFinite(p.memoryBytes)) ? observed.processes.reduce((sum, p) => sum + p.memoryBytes, 0) : null,
           gpuBytes: observed.gpuBytes, rendererTargets: targets.length });
       }
-      samples.push({ ...observed, monotonicMs: sampledAt - started, phase: startupMs === null ? 'startup' : exit ? 'exit-observation' : productComplete ? 'post-workload' : 'workload',
+      const companion = targets.find(target => target.companion)?.companion ?? lastCompanion;
+      if (companion) lastCompanion = companion;
+      if (scenario.workload.companion && companion?.systemDrag && !companionTask) {
+        companionTask = startCompanionInputTask({ verify: () => verifyInstalledCompanion(data, shell, scenario.workload.companion),
+          drive: signal => dragOriginalCompanion(companion.systemDrag, observed.processes.map(row => row.pid), { signal }) });
+      }
+      if (companionTask?.state.error) throw companionTask.state.error;
+      if (companion?.diagnostic) execution.companionEvidence = companion;
+      samples.push({ ...observed, monotonicMs: sampledAt - started, phase: startupMs === null ? 'startup' : exit ? 'exit-observation' : productComplete ? 'post-workload' : scenario.workload.companion ? companionSamplePhase(companion, companionTask?.state, companionAcknowledged) : 'workload',
         frameTimesMs: targets.flatMap(target => target.frameTimesMs ?? []), inputLatenciesMs: targets.flatMap(target => target.inputLatenciesMs ?? []),
-        rendererSequence: targets.length ? rendererSequence : null });
+        rendererSequence: targets.length ? rendererSequence : null, companionTaskPhase: companionTask?.state.phase ?? null });
+      // Capture the terminal input sample BEFORE authorizing the independent diagnostic.
+      if (companionTask?.state.phase === 'completed' && !companionAcknowledged) {
+        execution.companionInstallation = companionTask.state.installation; execution.companionDrag = companionTask.state.result;
+        const temporary = path.join(data, '.benchmark-companion-drag.tmp');
+        await fs.writeFile(temporary, JSON.stringify({ nonce, result: execution.companionDrag }), { flag: 'wx', mode: 0o600 });
+        await fs.rename(temporary, path.join(data, 'benchmark-companion-drag.json')); companionAcknowledged = true;
+      }
       receipt = await readOptional(path.join(data, 'benchmark-receipt.json'));
       if (exit && !observed.processes.length && observed.coverage?.rootState === 'exited' && observed.coverage?.processCountersComplete) break;
       await sleep(Math.max(0, plan.intervalMs - (performance.now() - sampledAt)));
@@ -192,7 +209,7 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
       || hashJson(receipt.inputs) !== hashJson(bound.inputs) || receipt.complete !== true) issues.push('missing-or-failed-bound-product-receipt');
     if (exit?.code !== 0) issues.push('product-exit-not-successful');
     if (startupMs === null) issues.push('real-product-startup-not-observed');
-    const activeSamples = samples.filter(sample => sample.phase === 'workload');
+    const activeSamples = samples.filter(isResourceSample);
     if (activeSamples.length < 2 || activeSamples.some(sample => !sample.processes.length)) issues.push('workload-process-window-insufficient');
     if (!activeSamples.length || activeSamples.some(sample => sample.gpuBytes === null)) issues.push('gpu-accounting-incomplete');
     if (samples.some(sample => sample.coverage?.processCountersComplete === false)) issues.push('process-counter-coverage-incomplete');
@@ -209,6 +226,8 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
         }
       } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
+    if (scenario.workload.companion) execution.companionEvidence = execution.rendererSamples?.flatMap(record => record.targets ?? []).map(target => target.companion).filter(value => value?.diagnostic).at(-1) ?? execution.companionEvidence;
+    if (scenario.workload.companion && (!execution.companionInstallation?.verified || !execution.companionDrag?.complete || execution.companionEvidence?.status !== 'completed')) issues.push('companion-install-drag-or-diagnostic-incomplete');
     const rendered = execution.rendererSamples?.flatMap(sample => sample.targets) ?? [];
     if (!execution.rendererSamples?.length) issues.push('renderer-recording-missing');
     if (scenario.name !== 'remote-idle' && !rendered.some(sample => sample.inputLatenciesMs?.length)) issues.push('actual-input-timing-not-observed');
@@ -219,6 +238,12 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
     return execution;
   } catch (error) { execution.cleanupUncertain ||= error.cleanupUncertain === true; execution.status = 'failed'; issues.push(`measurement-failed:${error.code ?? error.message}`); return execution; }
   finally {
+    if (companionTask) {
+      companionTask.cancel(); const task = await companionTask.join();
+      execution.companionInputTask = { phase: task.phase, settled: task.settled, released: task.result?.released ?? task.error?.pointerReleased ?? null };
+      execution.cleanupUncertain ||= task.error?.cleanupUncertain === true;
+      if (task.error) { execution.status = 'failed'; issues.push('companion-input-task-failed-or-cancelled'); }
+    }
     if (child && !exit && !timedOut) await stopTimedOut(child);
     try {
       await collector.close();

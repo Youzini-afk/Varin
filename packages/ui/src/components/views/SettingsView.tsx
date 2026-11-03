@@ -546,6 +546,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                           <button
                             type="button"
                             onClick={() => openPage(page.slug)}
+                            data-settings-page-link={page.slug}
                             aria-current={selected ? 'page' : undefined}
                             className={cn(
                               'relative flex h-11 w-full items-center gap-2.5 rounded-lg px-3 overflow-hidden sm:h-9 sm:gap-2.5 sm:px-2.5',
@@ -716,6 +717,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             <button
               type="button"
               onClick={() => onClose && requestSettingsNavigation(onClose)}
+              data-close-settings=""
               aria-label={t('settings.view.actions.closeSettings')}
               title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -744,6 +746,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <button
             type="button"
             onClick={() => onClose && requestSettingsNavigation(onClose)}
+            data-close-settings=""
             aria-label={t('settings.view.actions.closeSettings')}
             title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
