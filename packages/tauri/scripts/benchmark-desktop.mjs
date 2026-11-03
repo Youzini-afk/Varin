@@ -44,6 +44,21 @@ export function planTemplate() {
           ] : [] } })),
   };
 }
+export async function verifyTauriBenchmarkCandidate(candidateFile, identity) {
+  const value = await readJson(candidateFile);
+  if (value.schema !== 1 || value.sourceSha !== identity.sourceSha || value.version !== identity.version || value.target !== identity.target) throw new Error('Candidate source/version/target mismatch');
+  const runtime = await verifyRuntimeManifest(value.runtime, { platform: process.platform, architecture: process.arch });
+  if (runtime.sources?.sourceSha !== identity.sourceSha || runtime.sources?.sourceDirty !== false) throw new Error('Candidate runtime was not built from the same immutable source');
+  if (await hashFile(path.join(value.assets, value.runtimeManifest.name)) !== value.runtimeManifest.sha256
+    || await hashFile(path.join(value.assets, value.engineManifest.name)) !== value.engineManifest.sha256) throw new Error('Candidate manifests changed');
+  const engine = await readJson(path.join(value.assets, value.engineManifest.name));
+  if (hashJson(engine.files) !== hashJson(await engineInventory(value.payload, { exclude: process.platform === 'darwin' ? 'Contents/Resources/runtime' : process.platform === 'linux' ? 'usr/lib/Varin/runtime' : 'runtime' }))) throw new Error('Native engine payload differs from its exact candidate inventory');
+  const relative = path.relative(value.payload, executable(value)).replaceAll(path.sep, '/');
+  if (!engine.files?.some(file => file.path === relative && isHash(file.sha256))) throw new Error('Native executable is missing from its engine inventory');
+  const entry = engine.files.find(file => file.path === relative);
+  if (await hashFile(executable(value)) !== entry.sha256) throw new Error('Native executable differs from the qualified payload');
+  return value;
+}
 export async function preflight(plan) {
   const blockers = [], environment = environmentProbe();
   const check = async (code, fn) => { try { return await fn(); } catch (error) { blockers.push({ code, reason: error.code ?? error.message }); return null; } };
@@ -55,21 +70,7 @@ export async function preflight(plan) {
   if (!Number.isFinite(plan?.intervalMs) || plan.intervalMs <= 0 || !Number.isSafeInteger(plan?.repetitions) || plan.repetitions < 1) blockers.push({ code: 'invalid-sampling-plan', reason: 'Sampling interval and repetitions must be positive' });
   for (const field of ['gpu', 'display', 'powerMode', 'backgroundLoad']) if (typeof plan?.environment?.[field] !== 'string' || !plan.environment[field].trim()) blockers.push({ code: `missing-${field}`, reason: 'Record the actual measurement machine and conditions' });
   if (!Array.isArray(plan?.scenarios) || plan.scenarios.length !== performanceScenarios.length || new Set(plan.scenarios.map(s => s.name)).size !== performanceScenarios.length) blockers.push({ code: 'missing-scenarios', reason: 'The plan must retain all seven design scenarios; a run may select a subset explicitly' });
-  const candidate = await check('tauri-candidate-unavailable', async () => {
-    const value = await readJson(plan.tauri.candidate);
-    if (value.schema !== 1 || value.sourceSha !== plan.sourceSha || value.version !== plan.version || value.target !== plan.target) throw new Error('Candidate source/version/target mismatch');
-    const runtime = await verifyRuntimeManifest(value.runtime, { platform: process.platform, architecture: process.arch });
-    if (runtime.sources?.sourceSha !== plan.sourceSha || runtime.sources?.sourceDirty !== false) throw new Error('Candidate runtime was not built from the same immutable source');
-    if (await hashFile(path.join(value.assets, value.runtimeManifest.name)) !== value.runtimeManifest.sha256
-      || await hashFile(path.join(value.assets, value.engineManifest.name)) !== value.engineManifest.sha256) throw new Error('Candidate manifests changed');
-    const engine = await readJson(path.join(value.assets, value.engineManifest.name));
-    if (hashJson(engine.files) !== hashJson(await engineInventory(value.payload, { exclude: process.platform === 'darwin' ? 'Contents/Resources/runtime' : process.platform === 'linux' ? 'usr/lib/Varin/runtime' : 'runtime' }))) throw new Error('Native engine payload differs from its exact candidate inventory');
-    const relative = path.relative(value.payload, executable(value)).replaceAll(path.sep, '/');
-    if (!engine.files?.some(file => file.path === relative && isHash(file.sha256))) throw new Error('Native executable is missing from its engine inventory');
-    const entry = engine.files.find(file => file.path === relative);
-    if (await hashFile(executable(value)) !== entry.sha256) throw new Error('Native executable differs from the qualified payload');
-    return value;
-  });
+  const candidate = await check('tauri-candidate-unavailable', () => verifyTauriBenchmarkCandidate(plan.tauri.candidate, plan));
   const frontendSha256 = await check('frontend-parity-unavailable', async () => {
     const actualElectronDirectory = process.platform === 'darwin' ? path.resolve(path.dirname(plan.electron.executable), '../Resources/web-dist') : path.join(path.dirname(plan.electron.executable), 'resources/web-dist');
     if (await fs.realpath(plan.electron.frontendDirectory) !== await fs.realpath(actualElectronDirectory)) throw new Error('Frontend must be the actual installed Electron resources/web-dist, not an unrelated copy');
@@ -110,7 +111,7 @@ function launchEnvironment(root, candidate, shell) {
   const home = path.join(root, 'home'), env = { ...process.env, HOME: home, USERPROFILE: home, VARIN_DATA_DIR: path.join(root, 'data'),
     APPDATA: path.join(home, 'AppData/Roaming'), LOCALAPPDATA: path.join(home, 'AppData/Local'), XDG_CONFIG_HOME: path.join(home, '.config'),
     VARIN_ELECTRON_DEV: '', VARIN_ELECTRON_PROFILE: '' };
-  for (const key of ['NODE_OPTIONS', 'NODE_PATH', 'ELECTRON_RUN_AS_NODE', 'VARIN_DESKTOP_RUNTIME_DIR', 'APPDIR', 'VARIN_ELECTRON_LOAD_SERVER_UI', 'VARIN_SERVER_URL', 'VARIN_SKIP_LOCAL_SERVER', 'VARIN_WORKSPACE_ROOT']) delete env[key];
+  for (const key of ['NODE_OPTIONS', 'NODE_PATH', 'ELECTRON_RUN_AS_NODE', 'VARIN_DESKTOP_RUNTIME_DIR', 'APPDIR', 'VARIN_ELECTRON_LOAD_SERVER_UI', 'VARIN_SERVER_URL', 'VARIN_SKIP_LOCAL_SERVER', 'VARIN_WORKSPACE_ROOT', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[key];
   if (shell === 'tauri') { env.VARIN_DESKTOP_RUNTIME_DIR = candidate.runtime; if (process.platform === 'linux') env.APPDIR = candidate.payload; }
   return env;
 }

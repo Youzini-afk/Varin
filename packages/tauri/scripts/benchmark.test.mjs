@@ -6,7 +6,7 @@ import os from 'node:os';
 import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import { hashJson, hashDirectory, validateBenchmarkRequest, validateWorkload, readIsolatedRequest, summarizeRun } from './benchmark-contract.mjs';
-import { dispatchBenchmarkInput, publicRendererSample } from './benchmark-driver.mjs';
+import { dispatchBenchmarkInput, publicRendererSample, remoteTargetExpression } from './benchmark-driver.mjs';
 import { planTemplate, preflight, compareRuns, runBenchmark, measureRun } from './benchmark-desktop.mjs';
 
 const pageSource = await fs.readFile(new URL('./benchmark-page.js', import.meta.url), 'utf8');
@@ -267,4 +267,104 @@ test('measureRun retains isolated data when setup or teardown cannot prove servi
       assert.equal(comparison.retainedPrivateDirectories[0].path, copiedRoot); // Preserved even with an interrupted/missing pair.
     }
   }
+});
+
+test('file automation only selects the private fixture through Chromium, never an arbitrary DOM script', async () => {
+  const calls = [];
+  const send = async (method, params) => { calls.push({ method, params }); return method === 'DOM.getDocument' ? { root: { nodeId: 1 } } : { nodeId: 2 }; };
+  await dispatchBenchmarkInput(send, { id: 'fixture-upload', action: 'file' }, { uploadFile: '/private/benchmark-upload.txt' });
+  assert.deepEqual(calls.map(row => row.method), ['DOM.getDocument', 'DOM.querySelector', 'DOM.setFileInputFiles']);
+  assert.equal(calls[1].params.selector, '#upload-input');
+  assert.deepEqual(calls[2].params.files, ['/private/benchmark-upload.txt']);
+  await assert.rejects(dispatchBenchmarkInput(send, { id: 'fixture-upload', action: 'file' }), /not prepared/u);
+  assert.throws(() => validateWorkload(workload([{ id: 'arbitrary-file', action: 'file', selector: '#upload-input' }])), /confined/u);
+});
+
+test('local process completion and stop require original writer and operation receipts, not a terminal Run alone', async () => {
+  const h = browserHarness(); let processes = [], operations = [];
+  Object.assign(h.context, { URL, AbortSignal, __VARIN_API_BASE_URL__: 'http://127.0.0.1:1234', __VARIN_CLIENT_TOKEN__: 'synthetic' });
+  h.context.__VARIN_RUNTIME_APIS__.threads = { snapshot: async () => ({ activeRun: { id: 'run', state: 'completed' }, operations }) };
+  h.context.fetch = async () => ({ ok: true, json: async () => ({ processes }) });
+  h.api.start({ ...workload([{ id: 'exit-proof', action: 'wait', durationMs: 1, owner: 'process-completed' }, { id: 'stop-proof', action: 'wait', durationMs: 1, owner: 'process-stopped' }]),
+    name: 'local-hybrid-execution', ownerIdentity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, workspace: '/synthetic' });
+  h.api.poll(); h.advance(10); await h.api.observeOwner(); assert.equal(h.api.poll().stepIndex, 0);
+  processes = [{ processId: 'short', kernelEpoch: 'epoch', pid: 101, status: 'running', writerActive: true }];
+  await h.api.observeOwner(); assert.equal(h.api.poll().stepIndex, 0);
+  processes[0] = { ...processes[0], status: 'exited', exitCode: 0, writerActive: true };
+  await h.api.observeOwner(); assert.equal(h.api.poll().stepIndex, 0);
+  processes[0].writerActive = false; await h.api.observeOwner(); assert.equal(h.api.poll().stepIndex, 1);
+  processes.push({ processId: 'held', kernelEpoch: 'epoch', pid: 102, status: 'running', writerActive: true });
+  await h.api.observeOwner(); h.advance(10); assert.equal(h.api.poll().status, 'running');
+  operations = [{ id: 'original-job', managed_process: {}, phase: 'terminal', outcome: 'cancelled', cancel_requested: true }];
+  await h.api.observeOwner(); assert.equal(h.api.poll().status, 'running');
+  processes[1] = { ...processes[1], status: 'exited', writerActive: false, signal: 'SIGTERM' };
+  await h.api.observeOwner(); assert.equal(h.api.poll().status, 'completed');
+});
+
+test('Browser owner download proof requires native replay completion and exact completed-file bytes', async () => {
+  const { webcrypto, createHash } = await import('node:crypto');
+  const h = browserHarness(), expected = Buffer.from('expected download'); let state = 'progressing', bytes = Buffer.from('wrong download');
+  Object.assign(h.context, { URL, AbortSignal, crypto: webcrypto, Uint8Array, __VARIN_API_BASE_URL__: 'http://127.0.0.1:1234', __VARIN_CLIENT_TOKEN__: 'synthetic' });
+  h.context.fetch = async url => ({ ok: true, json: async () => url.pathname === '/api/browsers' ? { pages: [{ pageId: 'original-page', url: 'http://127.0.0.1:4321/site' }] }
+    : [{ downloadId: 'original-download', state, name: 'benchmark-download.txt' }], arrayBuffer: async () => bytes });
+  h.api.start({ ...workload([{ id: 'download-proof', action: 'wait', durationMs: 1, owner: 'browser-download-completed' }]), name: 'browser-interaction',
+    browser: { url: 'http://127.0.0.1:4321/site', downloadSha256: createHash('sha256').update(expected).digest('hex') } });
+  h.api.poll(); h.advance(10); await h.api.observeOwner(); assert.equal(h.api.poll().status, 'running');
+  state = 'completed'; await h.api.observeOwner(); assert.equal(h.api.poll().status, 'running');
+  bytes = expected; await h.api.observeOwner(); assert.equal(h.api.poll().status, 'running');
+  h.api.nativeCompletion(true); const completed = h.api.poll(); assert.equal(completed.status, 'completed');
+  assert.equal(completed.ownerObservation.pageId, 'original-page');
+  assert.equal(completed.ownerObservation.download.source, 'original-native-download-owner-completed-file-read');
+});
+
+test('remote terminal Run is read by its retained original ID after activeRun disappears', async () => {
+  const h = browserHarness(); let active = true;
+  Object.assign(h.context, { URL, AbortSignal, __VARIN_API_BASE_URL__: 'http://127.0.0.1:4321', __VARIN_CLIENT_TOKEN__: 'synthetic' });
+  const lookedUp = [];
+  h.context.__VARIN_RUNTIME_APIS__.threads = {
+    snapshot: async () => ({ activeRun: active ? { id: 'original-remote-run', state: 'running' } : null, operations: [] }),
+    run: async id => { lookedUp.push(id); return { id, state: 'cancelled' }; },
+  };
+  h.context.fetch = async () => ({ ok: true, json: async () => ({ processes: [] }) });
+  h.api.start({ ...workload([{ id: 'original-remote-stop', action: 'wait', durationMs: 1, owner: 'run-cancelled' }]),
+    ownerIdentity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' }, workspace: '/synthetic' });
+  h.api.poll(); h.advance(10); await h.api.observeOwner(); assert.equal(h.api.poll().status, 'running');
+  active = false; await h.api.observeOwner(); assert.equal(h.api.poll().status, 'completed');
+  assert.deepEqual(lookedUp, ['original-remote-run']);
+});
+
+
+test('remote native window binding normalizes trailing slash but never adopts another Host', () => {
+  const expression = remoteTargetExpression('http://127.0.0.1:4321');
+  const run = base => vm.runInNewContext(expression, { URL, window: { __VARIN_RUNTIME_APIS__: {}, __VARIN_API_BASE_URL__: base } });
+  assert.equal(run('http://127.0.0.1:4321/'), true);
+  assert.equal(run('http://127.0.0.1:4321'), true);
+  assert.equal(run('http://127.0.0.1:4322/'), false);
+  assert.equal(run(undefined), false);
+  assert.throws(() => remoteTargetExpression('https://example.com'), /loopback/u);
+});
+
+test('observer identity rejects passive-as-active and active restart never replays dispatched input', () => {
+  const passive = browserHarness();
+  passive.api.start({ passive: true });
+  const active = workload([{ id: 'click-once', action: 'click', selector: '#button', expect: [{ selector: '#done', visible: true }] }]);
+  assert.equal(passive.api.matchesWorkload(active), false);
+  assert.throws(() => passive.api.start(active), /workload changed/u);
+  assert.equal(passive.api.poll().status, 'observing');
+  const h = browserHarness(); h.elements.set('#button', h.element());
+  h.api.start(active);
+  h.api.poll();
+  h.advance(1);
+  const pending = h.api.poll().pendingAction;
+  assert.equal(pending.id, 'click-once');
+  h.api.dispatched(pending.id);
+  assert.equal(h.api.start(structuredClone(active)).resumed, true);
+  assert.equal(h.api.matchesWorkload(active), true);
+  assert.equal(h.api.poll().pendingAction, null);
+  h.emit('pointerdown'); h.elements.set('#done', h.element());
+  h.api.poll(); h.advance(1); h.api.poll();
+  assert.equal(h.api.start(active).resumed, true);
+  assert.equal(h.api.poll().status, 'completed');
+  h.api.stop(); assert.equal(h.api.matchesWorkload(active), false);
+  assert.throws(() => h.api.start(active), /ended/u);
 });

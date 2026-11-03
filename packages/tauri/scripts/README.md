@@ -154,8 +154,10 @@ Every payload retains CEF's original redistribution license and Chromium credits
 `download-cef` 3.0.0 removes the archive-root `LICENSE.txt` while flattening its cache;
 the original bytes from the pinned minimal archive are retained under `licenses/`
 and verified against `cef-runtime.lock.json` before staging. A conflicting SDK
-license is rejected rather than silently replaced. The native binary name is
-explicitly `varin`, independent of Cargo's package name.
+license is rejected rather than silently replaced. Cargo's default binary is
+explicitly `varin`; the CLI receives the `desktop` feature when selecting that
+feature-gated binary. Do not use `mainBinaryName` to rename it: the CLI's rename
+also runs for Windows `--lib`, where the real executable is CEF's bootstrap.
 
 - Windows uses the official CEF sandbox bootstrap and same-stem Rust DLL. The
   bootstrap receives the original Varin icon/version resources before signing. Original
@@ -178,6 +180,80 @@ portable launch can fail. The tests record that failure; they never disable sand
 change sysctls, or grant broad user-namespace access. A fixed-path system installation and
 administrator-approved policy/helper would require separate implementation and acceptance.
 See Chromium's [AppArmor guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
+
+## Installed candidate and synthetic legacy profile smoke
+
+`installer-smoke.mjs` is deliberately limited to an explicitly acknowledged,
+ephemeral **GitHub-hosted** Windows or Linux runner. It rejects self-hosted/local
+machines, a dirty or different source SHA, altered candidate assets, an existing
+original `Varin` profile, and any pre-existing Windows installation/registration.
+Run it immediately after building the same job's candidate, **before** any plain
+native smoke that could create the original OS profile. It runs the full native
+suite twice, so it can replace that target's plain native-smoke step.
+
+```sh
+# Explicit preparation using the existing official pinned Electron owner.
+# The acceptance command never downloads an engine implicitly.
+node packages/electron/scripts/ensure-electron.mjs
+
+# Windows, in the disposable runner's actual user/session:
+node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
+
+# Linux, with its already installed GTK/CEF/FUSE/display dependencies:
+dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
+
+node --test --test-concurrency=1 packages/tauri/scripts/installer-smoke.test.mjs packages/tauri/scripts/smoke-native.test.mjs packages/tauri/scripts/protocol-smoke.test.mjs
+```
+
+Windows executes the actual NSIS artifact with `/S /currentuser`, verifies the
+installed engine/runtime bytes, original install/uninstall registry identity,
+shortcuts and URL ownership, and launches the **installed** executable without a
+source runtime or working-directory fallback. Its native smoke also dispatches a
+warm URL through Windows. It then runs the same installer again, reopens the same
+target state, executes a byte-verified copy of the original installed uninstaller
+with `/KEEP_APP_DATA`, and checks removal of installed files, shortcuts and owned
+registrations. The normal quiet path does not install the optional WinFsp MSI or
+request elevation. A dialog, permission failure or timeout fails the observation.
+NSIS's trailing `/D=` and `_?=` paths remain unquoted as required by its
+[command-line contract](https://nsis.sourceforge.io/Docs/Chapter3.html).
+
+Linux has a portable AppImage, not a system installer/uninstaller. Its observation
+copies the exact actual AppImage to a private installation path, starts it through
+its real launcher, replaces it with the same candidate after native drain, reopens
+retained target state and removes the portable file. It does **not** claim desktop
+registration removal, a system installation or an installed setuid sandbox helper.
+FUSE, user-namespace or CEF sandbox failures are recorded; there is no automatic
+`--no-sandbox`, sysctl, AppArmor or permission workaround.
+
+`legacy-profile-smoke.cjs` uses the explicitly prepared original Electron engine
+to create a new profile at Electron's **native OS appData** location, then reopens
+it before migration. It writes only known synthetic records: a document-owner
+identity, one preference, all six legacy credential slots, an HttpOnly cookie and
+BrowserUse localStorage for an offline `.invalid` origin. No real credentials or
+user profile is read. The installed manifest-fixed private exporter performs the
+actual production handoff; no fixture writes migration-complete settings or a
+fake native receipt. Native CEF reads back the migrated values without exposing
+them in reports. A matching profile creation marker is checked against Tauri's
+native OS config directory **before** the old reader can run. Reopening the target
+requires the previous nonce-bound native migration and successful drain report.
+The original Electron owner reopens its unchanged source records after uninstall.
+
+Upload only `artifacts/tauri-installer-smoke/*.json`, not private profiles, the
+runner's AppData or retained temporary roots. Any unverified process/native exit
+retains its private data with `cleanupUncertain: true`; a timeout kill does not
+permit deletion or another installation attempt. Successful runs remove only the
+private target test directory, leaving the synthetic original OS profile to show
+uninstall retention until the ephemeral runner is discarded.
+
+These observations do not qualify signed releases, automatic updates, upgrades
+from a different released version, migration of a real user's profile, default
+Tauri data-root uninstall behavior, macOS installation, cold URL activation or
+physical desktop permissions. Same-version reinstall is recorded as replacement,
+not a cross-version upgrade. Kernel/Catalog historical-store conversion remains
+with its existing owner suites; these synthetic records do not prove every legacy
+data domain. A green tooling test proves only the script's refusal, integrity and
+process-observation behavior. Actual installation and migration remain unverified
+until these exact commands pass against the native candidate on their target OS.
 
 ## Signing and qualification
 

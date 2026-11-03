@@ -27,6 +27,9 @@ use tokio::{
     sync::{oneshot, watch},
 };
 type Reply = Result<Value, String>;
+#[path = "smoke/migration.rs"]
+mod smoke_observation;
+pub(crate) use smoke_observation::observe as observe_smoke;
 type Pending = Arc<Mutex<HashMap<i32, oneshot::Sender<Reply>>>>;
 const INERT: &str = "<!doctype html><html><head><meta charset='utf-8'><title>Varin private migration</title></head><body></body></html>";
 #[derive(Clone)]
@@ -503,6 +506,9 @@ pub async fn prepare(
     lease: &Lease,
 ) -> Reply {
     lease.verify()?;
+    // The acceptance fixture never inspects a pre-existing user's profile.
+    // Validate its native OS location and creation marker before the old reader.
+    smoke_observation::verify_source(app, data_dir)?;
     let existing = settings
         .call(
             runtime,

@@ -59,25 +59,38 @@ export async function prepareElectronBaseline({ output, sourceSha = sourceIdenti
   await verifyElectronBaseline(artifact, record);
   return { executable: payload.executable, frontendDirectory: payload.frontendDirectory, artifact };
 }
-export async function prepareBenchmarkPair({ output, cef = process.env.CEF_PATH } = {}) {
+export async function prepareBenchmarkPair({ output, cef = process.env.CEF_PATH, existingCandidate } = {}) {
   const sourceSha = sourceIdentity();
-  if (!cef) throw new Error('Use the same explicitly pinned CEF SDK/cache as the native candidate build');
+  if (!cef && !existingCandidate) throw new Error('Use the same explicitly pinned CEF SDK/cache as the native candidate build');
   output = path.resolve(output); await fs.mkdir(output, { recursive: false });
-  const frontend = await prepareFrontend();
+  let existing = null;
+  if (existingCandidate) {
+    const { verifyTauriBenchmarkCandidate } = await import('./benchmark-desktop.mjs');
+    const version = JSON.parse(await fs.readFile(path.join(repository, 'package.json'), 'utf8')).version;
+    existing = await verifyTauriBenchmarkCandidate(path.resolve(existingCandidate), { sourceSha, version, target: `${process.platform}-${process.arch}` });
+    const archive = existing.packaged?.update;
+    if (!archive || await hashFile(path.join(existing.assets, archive.name)) !== archive.sha256) throw new Error('Existing candidate update artifact is missing or changed');
+  }
+  const frontend = existing ? { directory: path.join(existing.runtime, 'frontend') } : await prepareFrontend();
   const electron = await prepareElectronBaseline({ output: path.join(output, 'electron'), sourceSha, frontendDirectory: frontend.directory });
-  const exporter = await prepareLegacyExporter(path.join(output, 'legacy-exporter'));
-  const nodeArchive = await fetchNodeArchive();
-  const runtime = path.join(output, 'runtime');
-  await stageDesktopRuntime({ destination: runtime, nodeArchive, frontendDirectory: frontend.directory, legacyElectronDirectory: exporter });
-  const tauri = await buildCandidate({ runtime, output: path.join(output, 'tauri'), cef, mode: 'electron-to-tauri' });
+  let tauri = existing;
+  if (!tauri) {
+    const exporter = await prepareLegacyExporter(path.join(output, 'legacy-exporter'));
+    const nodeArchive = await fetchNodeArchive();
+    const runtime = path.join(output, 'runtime');
+    await stageDesktopRuntime({ destination: runtime, nodeArchive, frontendDirectory: frontend.directory, legacyElectronDirectory: exporter });
+    tauri = await buildCandidate({ runtime, output: path.join(output, 'tauri'), cef, mode: 'electron-to-tauri' });
+  }
   if (tauri.sourceSha !== sourceSha || await hashDirectory(path.join(tauri.runtime, 'frontend')) !== await hashDirectory(electron.frontendDirectory)) throw new Error('A/B products do not bind the same immutable frontend and source');
   const pair = { schema: 1, product: 'varin-desktop-benchmark-pair', sourceSha, version: tauri.version, target: tauri.target, electron,
-    tauri: { candidate: path.join(output, 'tauri/candidate.json') }, runtime: tauri.runtime };
+    tauri: { candidate: existingCandidate ? path.resolve(existingCandidate) : path.join(output, 'tauri/candidate.json') }, runtime: tauri.runtime };
   await fs.writeFile(path.join(output, 'pair.json'), JSON.stringify(pair, null, 2) + '\n');
   return pair;
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2), i = args.indexOf('--output');
   if (i < 0 || !args[i + 1]) throw new Error('Usage: benchmark-build.mjs --output NEW-DIR (requires the installed native build toolchain and CEF_PATH)');
-  await prepareBenchmarkPair({ output: args[i + 1] });
+  const candidate = args.indexOf('--candidate');
+  if (candidate >= 0 && !args[candidate + 1]) throw new Error('--candidate requires the original candidate.json');
+  await prepareBenchmarkPair({ output: args[i + 1], existingCandidate: candidate < 0 ? undefined : args[candidate + 1] });
 }

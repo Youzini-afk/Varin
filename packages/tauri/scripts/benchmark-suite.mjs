@@ -38,7 +38,7 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
     provider = await worker(providerRoot, { mode: 'provider', nodePath: node });
     const seedRoot = await makeRoot(path.join(root, 'seed'));
     const workspace = path.join(seedRoot, 'home', 'workspace'); await fs.mkdir(workspace);
-    await fs.writeFile(path.join(workspace, 'benchmark-workload.mjs'), "const start=performance.now(); let total=0; while(performance.now()-start<5000){for(let i=0;i<10000;i++)total+=Math.sqrt(i)} process.stdout.write(JSON.stringify({completed:true,finite:Number.isFinite(total)})+'\\n');\n");
+    await fs.writeFile(path.join(workspace, 'benchmark-workload.mjs'), "const start=performance.now(); let total=0; while(performance.now()-start<(process.argv.includes('--hold')?60000:5000)){for(let i=0;i<10000;i++)total+=Math.sqrt(i)} process.stdout.write(JSON.stringify({completed:true,finite:Number.isFinite(total)})+'\\n');\n");
     await fs.writeFile(path.join(root, 'upload.txt'), 'Varin synthetic native-browser upload.\n');
     let host = await worker(seedRoot, { mode: 'host', providerOrigin: provider.origin });
     const remotePort = Number(new URL(host.origin).port), remoteOrigin = host.origin, credentials = host.credentials;
@@ -46,7 +46,7 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
     try { seeded = await seedProduct(fixtureApi(host.origin, credentials), provider.origin, { turns, workspace }); }
     finally { report.setup.push({ owner: 'seed-host', ...(await host.stop()) }); host = null; }
     report.seed = { turns: seeded.turns, completedTurns: seeded.completedTurns, identity: seeded.identity, source: seeded.source ? 'real-live-root' : null };
-    const workloads = productWorkloads(seeded.identity);
+    const workloads = productWorkloads(seeded.identity, { workspace, browserOrigin: provider.origin, remoteOrigin });
     const instructions = operatorInstructions(provider.origin);
     report.limitations.push(...instructions.limitations, 'Remote service CPU/memory is recorded separately and is not silently charged to one desktop shell.',
       'Fresh profiles are byte-identical; OS file caches are uncontrolled. These are not cold-versus-warm cache measurements.');
@@ -63,7 +63,8 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
       // The original Host is fully stopped before snapshotting its durable state.
       await fs.cp(path.join(seedRoot, 'data'), path.join(fixtureDirectory, 'data'), { recursive: true });
       await fs.cp(seedRoot, path.join(fixtureDirectory, 'remote'), { recursive: true });
-      const localHost = name === 'local-hybrid-execution';
+      await fs.writeFile(path.join(fixtureDirectory, 'data', 'benchmark-upload.txt'), 'Varin synthetic native-browser upload.\n');
+      const localHost = ['local-hybrid-execution', 'browser-interaction'].includes(name);
       const settings = await worker(fixtureDirectory, { mode: 'settings', operations: [
         { method: 'desktop_set_locale', args: { locale: 'en' } },
         { method: 'desktop_set_local_host_mode', args: { enabled: localHost } },
@@ -95,6 +96,7 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
         const delta = { completed: after.completed - services.before.completed, cancelled: after.cancelled - services.before.cancelled,
           logins: after.logins - services.before.logins, downloads: after.downloads - services.before.downloads, uploads: after.uploads.length - services.before.uploads.length };
         if (scenario.name === 'long-chat-stream' && delta.completed < 1) throw new Error('UI completion has no completed controlled provider response');
+        if (scenario.name === 'local-hybrid-execution' && (delta.completed < 3 || delta.cancelled < 1)) throw new Error('Local/remote task completions and original stream cancellation were not observed');
         if (scenario.name === 'browser-interaction' && (!delta.logins || !delta.uploads || !delta.downloads)) throw new Error('Native browser workload did not complete real fixture login/upload/download requests');
         return { remote, providerDelta: delta, externalServiceScope: 'separate-from-desktop-process-tree' };
       },
@@ -103,7 +105,11 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
     report.retainedRunDirectories = comparison.retainedPrivateDirectories ?? [];
     report.comparisonStatus = comparison.status;
     if (comparison.blockers) report.blockers = comparison.blockers;
-    for (const entry of report.scenarios) if (entry.status === 'prepared') entry.status = comparison.status === 'blocked' ? 'blocked-preflight' : 'executed-see-paired-receipts';
+    for (const entry of report.scenarios) if (entry.status === 'prepared') {
+      const measured = comparison.scenarios?.find(scenario => scenario.name === entry.name);
+      entry.status = comparison.status === 'blocked' ? 'blocked-preflight' : measured?.pairs.length ? 'executed-see-paired-receipts'
+        : comparison.retainedPrivateDirectories?.some(run => run.scenario === entry.name) ? 'interrupted-cleanup-unresolved' : 'not-executed-after-interruption';
+    }
     const failed = issue => ['missing-or-failed-bound-product-receipt', 'product-exit-not-successful', 'real-product-startup-not-observed', 'process-tree-did-not-drain-before-observation-deadline'].includes(issue)
       || issue.startsWith('measurement-failed:') || issue.startsWith('fixture-drain-failed:');
     report.status = cleanupUncertain ? 'failed-cleanup' : comparison.status === 'blocked' ? 'blocked' : comparison.scenarios?.some(s => s.pairs.some(p => [...(p.coverage?.electron ?? []), ...(p.coverage?.tauri ?? [])].some(failed)))

@@ -31,7 +31,7 @@ export function desktopArguments(command, cli, config, platform) {
   // Cargo's intentionally non-runnable build sentinel or relax the sandbox.
   return [cli, windows ? 'build' : command,
     ...(windows || command === 'build' ? ['--debug', '--no-bundle'] : ['--no-watch']),
-    '--config', JSON.stringify(config), ...(windows ? ['--', '--lib'] : [])];
+    '--features', 'desktop', '--config', JSON.stringify(config), ...(windows ? ['--', '--lib'] : [])];
 }
 
 async function execute(invocation) {

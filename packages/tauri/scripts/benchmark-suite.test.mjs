@@ -11,7 +11,7 @@ import { fixtureApi, awaitRun } from './benchmark-seed.mjs';
 import { runSuite } from './benchmark-suite.mjs';
 
 test('all seven actual product workloads are nonempty and physical operations are explicit', () => {
-  const workloads = productWorkloads({ runtime: 'agent', threadId: 'thread-fixture', branchId: 'branch-fixture' });
+  const workloads = productWorkloads({ runtime: 'agent', threadId: 'thread-fixture', branchId: 'branch-fixture' }, { workspace: os.tmpdir() });
   assert.equal(Object.keys(workloads).length, 7);
   for (const workload of Object.values(workloads)) {
     assert.equal(validateWorkload(workload), workload);
@@ -68,5 +68,15 @@ test('suite persists a missing-product blocker, never a substitute measured resu
     assert.equal(result.status, 'blocked'); assert.equal(result.qualification, 'not-accepted');
     assert.equal(result.scenarios.length, 0);
     assert.deepEqual(await fs.readdir(output), ['suite.json']);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('same-source candidate reuse rejects a different immutable source before touching runtime artifacts', async () => {
+  const { verifyTauriBenchmarkCandidate } = await import('./benchmark-desktop.mjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-candidate-reuse-test-'));
+  try {
+    const candidate = path.join(root, 'candidate.json');
+    await fs.writeFile(candidate, JSON.stringify({ schema: 1, sourceSha: 'a'.repeat(40), version: '1', target: `${process.platform}-${process.arch}`, runtime: path.join(root, 'never-read') }));
+    await assert.rejects(verifyTauriBenchmarkCandidate(candidate, { sourceSha: 'b'.repeat(40), version: '1', target: `${process.platform}-${process.arch}` }), /source\/version\/target mismatch/u);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

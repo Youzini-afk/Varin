@@ -448,9 +448,8 @@ impl HostProcess {
         let exit_shared = shared.clone();
         tokio::spawn(async move {
             let result = child.wait().await;
-            // Release Tokio's process and registered-wait handles before Job
-            // accounting. A terminated object can remain accounted while any
-            // process handle is held, even after wait() returned successfully.
+            // Release Tokio's registered waits; ProcessScope retains its own
+            // original Windows process handle through actual Job settlement.
             drop(child);
             let scope = exit_shared.scope.settle_after_node_exit(&result).await;
             // The last response can still be buffered when wait() finishes. Drain
@@ -466,7 +465,11 @@ impl HostProcess {
             exit_shared.snapshot.send_modify(|s| {
                 s.phase = HostPhase::Exited;
                 s.scope_ended = scope.is_ok();
-                if !scope.as_ref().is_ok_and(|scope| scope.clean) { s.error.get_or_insert_with(|| "Managed process scope required abnormal cleanup; effect outcomes remain unknown".into()); }
+                if let Err(error) = &scope {
+                    s.error.get_or_insert_with(|| error.clone());
+                } else if !scope.as_ref().is_ok_and(|scope| scope.clean) {
+                    s.error.get_or_insert_with(|| "Managed process scope required abnormal cleanup; effect outcomes remain unknown".into());
+                }
                 s.exit_code = scope.as_ref().ok().and_then(|scope| scope.code);
                 if result.is_err() {
                     s.error = Some("Desktop service termination could not be observed".into());

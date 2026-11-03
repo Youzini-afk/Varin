@@ -15,24 +15,48 @@ export function validateNativeSmoke(report,{nonce,platform=process.platform,arch
   for(const name of requiredCases)if(!names.has(name))throw new Error(`Missing native smoke case: ${name}`);
   return report;
 }
-export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWarm=false,installedExecutable,disposableUser=false}={}){
+export async function createSmokeSession(){
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-native-smoke-'));
+  const data=path.join(root,'data'),home=path.join(root,'home');
+  await fs.mkdir(data);await fs.mkdir(home);return{root,data,home};
+}
+export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWarm=false,installedExecutable,disposableUser=false,session,retainData=false,legacyFixtureNonce,restart=false,useOsProfile=false}={}){
+  if(useOsProfile&&!disposableUser)throw new Error('The original OS profile requires an explicit disposable OS user/session');
+  if(legacyFixtureNonce&&(!/^[0-9a-f-]{36}$/u.test(legacyFixtureNonce)||!disposableUser||!useOsProfile))throw new Error('Synthetic legacy smoke requires its nonce and an explicit disposable OS profile');
+  if(restart&&!session)throw new Error('Restart smoke requires the original private session');
   if(protocolWarm) {
     if(!disposableUser)throw new Error('OS URL activation requires a disposable OS user/session; subprocess HOME isolation alone is insufficient');
     if(!installedExecutable)throw new Error('Warm protocol smoke requires an explicit installed executable');
-    const source=process.platform==='linux'?path.join(candidate.assets,candidate.packaged.update.name):path.join(candidate.payload,process.platform==='darwin'?'Contents/MacOS/varin':'varin.exe');
-    if(await sha256(installedExecutable)!==await sha256(source))throw new Error('Installed executable differs from the candidate');
     await verifyProtocolRegistration(installedExecutable);
   }
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-native-smoke-'));const data=path.join(root,'data'),home=path.join(root,'home');
-  await fs.mkdir(data);await fs.mkdir(home);const nonce=randomUUID();
-  await fs.writeFile(path.join(data,'smoke-request.json'),JSON.stringify({schema:1,nonce,...(protocolWarm?{protocolActivation:'warm'}:{})})+'\n',{mode:0o600});
+  if(installedExecutable){
+    const source=process.platform==='linux'?path.join(candidate.assets,candidate.packaged.update.name):path.join(candidate.payload,process.platform==='darwin'?'Contents/MacOS/varin':'varin.exe');
+    if(await sha256(installedExecutable)!==await sha256(source))throw new Error('Installed executable differs from the candidate');
+  }
+  const {root,data,home}=session??await createSmokeSession();
+  const temporary=await fs.realpath(os.tmpdir()),resolved=await fs.realpath(root);
+  if(path.dirname(resolved)!==temporary||!path.basename(resolved).startsWith('varin-native-smoke-')||data!==path.join(root,'data')||home!==path.join(root,'home'))throw new Error('Native smoke session is not its own temporary directory');
+  for(const directory of [root,data,home])if(!(await fs.lstat(directory)).isDirectory()||await fs.realpath(directory)!==(directory===root?resolved:path.join(resolved,path.basename(directory))))throw new Error('Native smoke session contains a redirected directory');
+  let previousNonce;
+  if(restart){
+    const previous=JSON.parse(await fs.readFile(path.join(data,'smoke-report.json'),'utf8'));
+    validateNativeSmoke(previous,{nonce:previous.nonce,requiredCases:['native-drain',...(legacyFixtureNonce?['legacy-native-migration']:[])]});
+    previousNonce=previous.nonce;
+    // Previous native drain was verified above. Remove only its stale control
+    // observations, not browser/profile data or the prior report used by Rust.
+    for(const name of ['smoke-ready.json','smoke-protocol-activation.json'])await fs.rm(path.join(data,name),{force:true});
+  }
+  const nonce=randomUUID();
+  await fs.writeFile(path.join(data,'smoke-request.json'),JSON.stringify({schema:1,nonce,...(protocolWarm?{protocolActivation:'warm'}:{}),...(legacyFixtureNonce?{legacyFixtureNonce,disposableOsUser:true}:{}),...(restart?{previousNonce}:{})})+'\n',{mode:0o600});
   const executable=installedExecutable??path.join(candidate.payload,process.platform==='darwin'?'Contents/MacOS/varin':process.platform==='win32'?'varin.exe':'varin');
-  const env={...process.env,VARIN_DATA_DIR:data,VARIN_DESKTOP_RUNTIME_DIR:candidate.runtime,HOME:home,USERPROFILE:home,
-    APPDATA:path.join(home,'AppData/Roaming'),LOCALAPPDATA:path.join(home,'AppData/Local'),XDG_CONFIG_HOME:path.join(home,'.config'),
+  const env={...process.env,VARIN_DATA_DIR:data,VARIN_DESKTOP_RUNTIME_DIR:candidate.runtime,...(!useOsProfile?{HOME:home,USERPROFILE:home,
+    APPDATA:path.join(home,'AppData/Roaming'),LOCALAPPDATA:path.join(home,'AppData/Local'),XDG_CONFIG_HOME:path.join(home,'.config')}:{}),
     APPDIR:process.platform==='linux'?candidate.payload:'',VARIN_ELECTRON_DEV:'',VARIN_ELECTRON_PROFILE:''};
-  if(protocolWarm){delete env.VARIN_DESKTOP_RUNTIME_DIR;delete env.APPDIR;}
+  // Every installed launch must discover its own packaged runtime. A source-tree
+  // override would hide a broken installer even when URL activation is omitted.
+  if(installedExecutable){delete env.VARIN_DESKTOP_RUNTIME_DIR;delete env.APPDIR;}
   delete env.NODE_OPTIONS;delete env.NODE_PATH;delete env.ELECTRON_RUN_AS_NODE;
-  const child=spawn(executable,['--varin-desktop-smoke'],{cwd:candidate.payload,env,stdio:['ignore','pipe','pipe'],detached:process.platform!=='win32',windowsHide:false});
+  const child=spawn(executable,['--varin-desktop-smoke'],{cwd:installedExecutable?path.dirname(installedExecutable):candidate.payload,env,stdio:['ignore','pipe','pipe'],detached:process.platform!=='win32',windowsHide:false});
   for(const stream of [child.stdout,child.stderr])stream.resume(); // Never surface renderer/Host output as test evidence.
   let timer,timedOut=false,verified=false,evidence;
   const activationController=new AbortController();
@@ -54,7 +78,7 @@ export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWa
       runtimeManifestSha256:candidate.runtimeManifest.sha256,engineManifestSha256:candidate.engineManifest.sha256,status,timedOut,protocolActivation:protocolWarm?{isolation:'explicit-disposable-os-user',status:activationResult.error?'failed':'triggered',reason:activationResult.error?.message,ready:activationResult.ready}:null,report};
     if(timedOut||status.code!==0)throw new Error(`Native desktop smoke failed (${timedOut?'timeout':status.signal??status.code}); inspect its native receipt`);
     if(activationResult.error)throw activationResult.error;
-    validateNativeSmoke(report,{nonce,requiredCases:['application-bridge','browser-same-page','browser-authority-isolation','browser-context-isolation','browser-capture','browser-pending-close','browser-download-terminal','osr-alpha-composition','network-stream-cancel','renderer-sandbox','native-drain',...(protocolWarm?['protocol-warm-activation']:[])]});
+    validateNativeSmoke(report,{nonce,requiredCases:['application-bridge','browser-same-page','browser-authority-isolation','browser-context-isolation','browser-capture','browser-pending-close','browser-download-terminal','osr-alpha-composition','network-stream-cancel','renderer-sandbox','native-drain',...(protocolWarm?['protocol-warm-activation']:[]),...(legacyFixtureNonce?['legacy-native-migration']:[])]});
     verified=true;
     evidence.cleanupUncertain=false;
     if(output){await fs.mkdir(path.dirname(path.resolve(output)),{recursive:true});await fs.writeFile(output,JSON.stringify(evidence,null,2)+'\n');}
@@ -69,7 +93,7 @@ export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWa
     if(!verified)evidence.retainedPrivateDirectory=root;
     if(output){await fs.mkdir(path.dirname(path.resolve(output)),{recursive:true});await fs.writeFile(output,JSON.stringify(evidence,null,2)+'\n');}
     throw error;
-  }finally{activationController.abort();clearTimeout(timer);if(verified)await fs.rm(root,{recursive:true,force:true});}
+  }finally{activationController.abort();clearTimeout(timer);if(verified&&!retainData)await fs.rm(root,{recursive:true,force:true});}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const args=process.argv.slice(2),get=name=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};

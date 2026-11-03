@@ -250,6 +250,10 @@ fn run(args: Vec<OsString>) -> i32 {
                 return Ok(());
             }
         };
+        // Command owns a duplicate of an explicitly supplied Stdio descriptor.
+        // It must not keep the service stdout writer alive: macOS confirmation
+        // deliberately waits for the consumer's protocol EOF before accepting D.
+        drop(command);
         // Only the actual Node should retain the service's stdin read end.
         unsafe {
             libc::close(0);
@@ -693,7 +697,8 @@ process.stdout.write('verified');
         let mut command = Command::new(node);
         command
             .args(["--import", "tsx", "--input-type=module", "-e", &script])
-            .env("VARIN_TEST_LEASE_DIR", directory.path());
+            .env("VARIN_TEST_LEASE_DIR", directory.path())
+            .env("VARIN_TEST_GUARDIAN_REQUIRE_DRAIN", "1");
         let (mut child, guardian) = spawn(command, directory.path(), Stdio::null()).unwrap();
         tokio::io::AsyncWriteExt::write_all(child.stdin.as_mut().unwrap(), b"begin\n")
             .await
@@ -709,9 +714,7 @@ process.stdout.write('verified');
         .unwrap();
         assert_eq!(output, "verified");
         // The private protocol consumer has now observed EOF and its receipt.
-        if requires_owner_drain() {
-            guardian.confirm_drained().unwrap();
-        }
+        guardian.confirm_drained().unwrap();
         let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
             .await
             .unwrap()

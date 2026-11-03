@@ -76,7 +76,7 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
     data.stopConfirmed === false ? t('chat.tools.cancelAwaitingStop') : '',
     draining ? t('chat.tools.exitedOutputPending') : '');
   return <ToolDisclosure id={'tool:' + call.id} className="tool-process group" initiallyExpanded={expanded || status === 'error'}>
-    <summary className="tool-command-heading"><Icon name="terminal" className="size-3.5 shrink-0" />
+    <summary className="tool-command-heading" data-process-summary={operationId} data-process-live={live ? 'true' : 'false'}><Icon name="terminal" className="size-3.5 shrink-0" />
       <ToolHeadingText label={label} subject={subject} receipt={receipt} />
       <span className={status === 'success' && receipt ? 'sr-only' : undefined}><ToolStatus status={status} generating={generating} stopped={Boolean(live && (stopping || operation?.cancel_requested))} /></span>
       <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
@@ -100,7 +100,7 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
       <div className="tool-inline-actions">
         {!following && <button type="button" onClick={() => { follow.current = true; setFollowing(true); if (viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight; }}>{t('chat.tools.followOutput')} <Icon name="arrow-down-s" className="size-3" /></button>}
         {spawning && !generating && (operation?.managed_process || result?.status === 'background') && args.mode === 'pty' && operationId && conversation?.api.processes && !conversation.readOnly && <button type="button" disabled={opening} onClick={() => void terminal()}>{t('chat.timeline.tools.openTerminal')} <Icon name="external-link" className="size-3" /></button>}
-        {live && !conversation?.readOnly && <button type="button" disabled={stopping || operation?.cancel_requested} onClick={() => void stop()}>{t(waiting ? 'chat.tools.stopWaiting' : 'chat.tools.stopProcess')}</button>}
+        {live && !conversation?.readOnly && <button type="button" data-process-stop={operationId} disabled={stopping || operation?.cancel_requested} onClick={() => void stop()}>{t(waiting ? 'chat.tools.stopWaiting' : 'chat.tools.stopProcess')}</button>}
       </div>
       {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
       {call.name === 'process_write' && <p className="px-3 typography-meta text-muted-foreground">{t('chat.tools.inputReceiptHint')}</p>}

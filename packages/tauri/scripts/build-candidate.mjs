@@ -51,7 +51,7 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
   const reset={build:{frontendDist:path.join(runtime,'frontend')},bundle:{active:true,resources:[]}};
   const config={bundle:{resources:{[runtime+path.sep]:'runtime/'},macOS:{minimumSystemVersion:'13.0',infoPlist:path.join(packageRoot,'installer/Info.plist'),entitlements:path.join(repository,'packages/electron/resources/entitlements.mac.plist')}}};
   const configs=['--config',JSON.stringify(reset),'--config',JSON.stringify(config)];
-  run(process.execPath,[cli,'build','--no-bundle','--ci',...configs,...(process.platform==='win32'?['--','--lib']:[])]);
+  run(process.execPath,[cli,'build','--no-bundle','--ci','--features','desktop',...configs,...(process.platform==='win32'?['--','--lib']:[])]);
   const metadata=JSON.parse(run(process.env.CARGO||'cargo',['metadata','--no-deps','--format-version','1'],{cwd:path.join(packageRoot,'src-tauri'),stdio:'pipe',encoding:'utf8'}));
   const cargo=path.join(metadata.target_directory,...(process.env.CARGO_BUILD_TARGET?[process.env.CARGO_BUILD_TARGET]:[]),'release');
   const sdk=await discoverCef(path.resolve(cef),process.platform,process.arch);
@@ -69,7 +69,7 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
     await fs.copyFile(path.join(cargo,'varin'),path.join(payload,'varin'));await fs.chmod(path.join(payload,'varin'),0o755);
     await fs.cp(runtime,path.join(payload,'usr/lib/Varin/runtime'),{recursive:true});
   }else if(process.platform==='darwin'){
-    run(process.execPath,[cli,'bundle','--ci','--no-sign','--bundles','app',...configs]);
+    run(process.execPath,[cli,'bundle','--ci','--no-sign','--bundles','app','--features','desktop',...configs]);
     payload=path.join(output,'Varin.app');await fs.cp(path.join(cargo,'bundle/macos/Varin.app'),payload,{recursive:true,verbatimSymlinks:true});
     await fs.copyFile(await pinnedCefLicense(sdk),path.join(payload,'Contents/Resources/CEF-LICENSE.txt'));
     await fs.copyFile(path.join(sdk,'CREDITS.html'),path.join(payload,'Contents/Resources/CEF-CREDITS.html'));

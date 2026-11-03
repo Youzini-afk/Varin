@@ -1,5 +1,6 @@
 //! Fixed, opt-in native acceptance suite. Never a production remote-debug API.
-//! Runs only in an explicitly prepared empty temporary data directory.
+//! Runs only in an explicitly prepared temporary data directory. A fixture
+//! restart additionally requires the previous complete native drain receipt.
 mod fixture;
 mod http;
 mod http_body;
@@ -41,6 +42,7 @@ pub struct SmokeRequest {
     pub data_dir: PathBuf,
     pub nonce: String,
     pub protocol_warm: bool,
+    pub legacy_fixture_nonce: Option<String>,
 }
 pub fn requested() -> bool {
     std::env::args_os().any(|arg| arg == "--varin-desktop-smoke")
@@ -73,14 +75,9 @@ pub fn prepare() -> Result<Option<SmokeRequest>, String> {
         .map_err(|_| "Smoke directory cannot be inspected")?
         .collect::<Result<_, _>>()
         .map_err(|_| "Smoke directory entries cannot be inspected")?;
-    if entries.len() != 1
-        || entries[0].file_name() != "smoke-request.json"
-        || !entries[0]
-            .file_type()
-            .map_err(|_| "Smoke marker cannot be inspected")?
-            .is_file()
-    {
-        return Err("Smoke directory must contain only its request marker".into());
+    if !fs::symlink_metadata(data_dir.join("smoke-request.json"))
+        .map_err(|_| "Smoke marker cannot be inspected")?.is_file() {
+        return Err("Smoke request must be a regular file".into());
     }
     let marker =
         fs::read(data_dir.join("smoke-request.json")).map_err(|_| "Smoke marker cannot be read")?;
@@ -92,6 +89,43 @@ pub fn prepare() -> Result<Option<SmokeRequest>, String> {
     if marker["schema"] != 1 || uuid::Uuid::parse_str(nonce).is_err() {
         return Err("Invalid smoke marker identity".into());
     }
+    let legacy_fixture_nonce = match marker.get("legacyFixtureNonce") {
+        None => None,
+        Some(value) => {
+            let fixture = value.as_str().filter(|v| uuid::Uuid::parse_str(v).is_ok())
+                .ok_or("Invalid synthetic legacy fixture identity")?;
+            if marker["disposableOsUser"] != true
+                || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+                || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted") {
+                return Err("Legacy smoke requires an explicit disposable GitHub-hosted OS user".into());
+            }
+            Some(fixture.to_owned())
+        }
+    };
+    if let Some(previous) = marker.get("previousNonce") {
+        if legacy_fixture_nonce.is_none() {
+            return Err("Only the fixed legacy fixture can reopen a smoke data directory".into());
+        }
+        let file = data_dir.join("smoke-report.json");
+        let stat = fs::symlink_metadata(&file).map_err(|_| "Previous native report is unavailable")?;
+        if !stat.is_file() || stat.len() > 1024 * 1024 {
+            return Err("Previous native report is not a bounded regular file".into());
+        }
+        let prior: Value = serde_json::from_slice(&fs::read(file).map_err(|_| "Previous native report cannot be read")?)
+            .map_err(|_| "Previous native report is malformed")?;
+        let cases = prior["cases"].as_array().ok_or("Previous native cases are missing")?;
+        if prior["schema"] != 1 || prior["product"] != "varin-desktop-native-smoke"
+            || prior["nonce"] != *previous || prior["complete"] != true
+            || prior["legacyFixtureNonce"] != marker["legacyFixtureNonce"]
+            || prior["platform"] != crate::manifest::platform()
+            || prior["architecture"] != crate::manifest::architecture()
+            || cases.iter().any(|case| case["status"] != "passed")
+            || ["native-drain", "legacy-native-migration"].iter().any(|name| !cases.iter().any(|case| case["name"] == *name)) {
+            return Err("Previous fixture did not confirm successful native migration and drain".into());
+        }
+    } else if entries.len() != 1 || entries[0].file_name() != "smoke-request.json" {
+        return Err("Smoke directory must contain only its request marker".into());
+    }
     let protocol_warm = match marker.get("protocolActivation") {
         None => false,
         Some(value) if value == "warm" => true,
@@ -101,12 +135,13 @@ pub fn prepare() -> Result<Option<SmokeRequest>, String> {
         data_dir,
         nonce: nonce.into(),
         protocol_warm,
+        legacy_fixture_nonce,
     }))
 }
 fn report(request: &SmokeRequest, cases: &[Value], complete: bool) -> Result<(), String> {
     let output = json!({"schema":1,"product":"varin-desktop-native-smoke","platform":crate::manifest::platform(),
         "architecture":crate::manifest::architecture(),"version":env!("CARGO_PKG_VERSION"),"nonce":request.nonce,
-        "cases":cases,"complete":complete});
+        "legacyFixtureNonce":request.legacy_fixture_nonce,"cases":cases,"complete":complete});
     let temporary = request.data_dir.join(".smoke-report.tmp");
     fs::write(
         &temporary,
@@ -119,7 +154,8 @@ pub fn startup_failed(request: &SmokeRequest, error: &str) -> Result<(), String>
     let names = CASES
         .iter()
         .copied()
-        .chain(request.protocol_warm.then_some("protocol-warm-activation"));
+        .chain(request.protocol_warm.then_some("protocol-warm-activation"))
+        .chain(request.legacy_fixture_nonce.as_ref().map(|_| "legacy-native-migration"));
     let cases:Vec<_>=names.map(|name|json!({"name":name,"status":"failed","error":format!("Native startup did not complete: {error}")})).collect();
     report(request, &cases, false)
 }
@@ -246,6 +282,11 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }).await);
+    if let Some(nonce) = &request.legacy_fixture_nonce {
+        cases.push(checked("legacy-native-migration", crate::legacy_migration::observe_smoke(
+            &app, &request.data_dir, &main, &bootstrap["migration"], nonce,
+        )).await);
+    }
     let page = "native-smoke-page";
     cases.push(checked("browser-same-page",async{
         let present=|visible|json!({"pageId":page,"viewId":"native-smoke-view","url":"about:blank","visible":visible,"bounds":{"x":40,"y":80,"width":640,"height":480}});
@@ -398,7 +439,7 @@ pub async fn run(app: AppHandle, request: SmokeRequest, main: Session, bootstrap
         Err(error) => json!({"name":"native-drain","status":"failed","error":error}),
     });
     server.stop();
-    let passed = cases.len() == CASES.len() + usize::from(request.protocol_warm)
+    let passed = cases.len() == CASES.len() + usize::from(request.protocol_warm) + usize::from(request.legacy_fixture_nonce.is_some())
         && cases.iter().all(|c| c["status"] == "passed");
     report(&request, &cases, true).is_ok() && passed
 }

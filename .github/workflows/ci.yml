@@ -14,6 +14,10 @@ on:
         description: Exercise every existing native desktop architecture (six runners)
         type: boolean
         default: false
+      tauri_performance:
+        description: Observe same-source complete Electron/Tauri products on the disposable Linux virtual display
+        type: boolean
+        default: false
   schedule:
     # Complete qualification is owned here, not silently deferred forever.
     - cron: '17 3 * * *'
@@ -563,6 +567,7 @@ jobs:
     uses: ./.github/workflows/tauri-desktop.yml
     with:
       authorized_tools: true
+      performance: ${{ inputs.tauri_performance || false }}
       source_sha: ${{ inputs.source_sha || github.sha }}
       full: ${{ inputs.tauri_full || inputs.full || github.event_name == 'schedule' }}
 

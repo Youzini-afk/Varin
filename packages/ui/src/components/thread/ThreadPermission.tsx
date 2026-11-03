@@ -37,7 +37,7 @@ export function ThreadPermission({ operation, enabled, onDecide }: {
   const tool = String(persistent?.tool ?? call.name), args = record(call.arguments);
   const targets = Array.isArray(persistent?.targets) ? persistent.targets.map(record).filter((target): target is Record<string, unknown> => target !== null) : [];
   const subject = typeof args?.path === 'string' ? args.path : typeof args?.url === 'string' ? args.url : '';
-  return <section aria-label={t('chat.permission.title')} className="thread-permission">
+  return <section aria-label={t('chat.permission.title')} data-permission-tool={tool} className="thread-permission">
     <h3>{t('chat.permission.title')}</h3>
     <p className="thread-permission-subject">{tool}{subject && <> · {subject}</>}</p>
     {persistent && <p className="thread-permission-scope">{persistent.scope === 'targets' ? t('chat.permission.targetScope') : t('chat.permission.scope', { tool })}</p>}
@@ -54,7 +54,7 @@ export function ThreadPermission({ operation, enabled, onDecide }: {
       <span>{t(permission.decision === 'deny' ? 'chat.permission.denied' : permission.persisted_rule ? 'chat.permission.saved' : 'chat.permission.allowed')}</span>
       {Boolean(permission.persisted_rule) && <p>{t('chat.permission.revokeHint')}</p>}
     </div> : <div className="thread-permission-actions">
-      <Button size="sm" disabled={!ready || pending} onClick={() => void choose('allow_once')}>{t('chat.permission.once')}</Button>
+      <Button size="sm" data-permission-choice="allow_once" disabled={!ready || pending} onClick={() => void choose('allow_once')}>{t('chat.permission.once')}</Button>
       <Button size="sm" variant="outline" disabled={!ready || pending || persistent?.available !== true} onClick={() => void choose('allow_always')}>{t('chat.permission.always')}</Button>
       <Button size="sm" variant="ghost" disabled={!ready || pending} onClick={() => void choose('deny')}>{t('chat.permission.deny')}</Button>
       {pending && <Icon name="loader-4" className="size-3.5 animate-spin motion-reduce:animate-none" />}

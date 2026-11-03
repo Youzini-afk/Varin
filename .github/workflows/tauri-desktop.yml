@@ -14,6 +14,10 @@ on:
         description: Exercise all six existing native desktop targets
         type: boolean
         default: true
+      performance:
+        description: Collect complete same-source Linux desktop observations under a declared virtual display
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       authorized_tools:
@@ -26,6 +30,9 @@ on:
       full:
         type: boolean
         default: true
+      performance:
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -85,7 +92,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.frontend.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 100
+    timeout-minutes: ${{ inputs.performance && 180 || 100 }}
     env:
       CEF_PATH: ${{ github.workspace }}/artifacts/tauri-input/cef
       CARGO_TARGET_DIR: ${{ github.workspace }}/artifacts/tauri-cargo
@@ -121,14 +128,19 @@ jobs:
         run: |
           rustup toolchain install 1.95.0 --profile minimal
           rustup default 1.95.0
-      - uses: actions/cache@v6
+      - uses: actions/cache/restore@v6
+        id: native-inputs
         with:
           path: |
             ~/.bun/install/cache
             ~/.cargo/registry
             ~/.cargo/git
-            artifacts/tauri-input/cef
-          key: tauri-inputs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock', 'packages/tauri/src-tauri/Cargo.lock', 'packages/tauri/scripts/cef-runtime.lock.json') }}
+          key: tauri-sources-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock', 'packages/tauri/src-tauri/Cargo.lock') }}
+      - uses: actions/cache/restore@v6
+        id: cef-inputs
+        with:
+          path: artifacts/tauri-input/cef
+          key: tauri-cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/tauri/scripts/cef-runtime.lock.json') }}
       - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@v8
         with:
@@ -139,6 +151,7 @@ jobs:
       - name: Prepare shared runtime contracts for native integration tests
         run: bun run build:runtime-dependencies
       - name: Verify native owner logic
+        timeout-minutes: 15
         run: cargo test --manifest-path packages/tauri/src-tauri/Cargo.toml --no-default-features --locked
       - name: Build controlled old-engine reader
         run: node packages/tauri/scripts/prepare-exporter.mjs artifacts/tauri-input/exporter
@@ -150,13 +163,63 @@ jobs:
       - name: Exercise actual bundled Node, kernel, Knowledge and extension broker
         run: node packages/tauri/scripts/smoke-runtime.mjs artifacts/tauri-runtime
       - name: Build actual release-mode native shell and preserved installer
+        id: candidate
         run: node packages/tauri/scripts/build-candidate.mjs --runtime artifacts/tauri-runtime --output artifacts/tauri-candidate
-      - name: Exercise real CEF windows, browser, sandbox and native drain on Linux
+      - name: Prepare the explicit pinned old-engine fixture executor
+        if: matrix.platform != 'darwin'
+        run: node packages/electron/scripts/ensure-electron.mjs
+      # This must precede a bare native smoke: only a known fresh OS profile may
+      # be admitted for the synthetic old-engine fixture. The lifecycle driver
+      # itself runs the complete native suite twice from the installed product.
+      - name: Exercise real Linux portable lifecycle and native profile migration
         if: matrix.platform == 'linux'
-        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/smoke-native.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-native-smoke.json
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
+      - name: Exercise real Windows installation, migration, reinstall and uninstall
+        if: matrix.platform == 'win32'
+        run: node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
       - name: Exercise real CEF windows, browser, sandbox and native drain
-        if: matrix.platform != 'linux'
+        if: matrix.platform == 'darwin'
         run: node packages/tauri/scripts/smoke-native.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-native-smoke.json
+      - name: Build the complete same-source Electron performance baseline
+        if: inputs.performance && matrix.platform == 'linux' && matrix.architecture == 'x64'
+        run: node packages/tauri/scripts/benchmark-build.mjs --candidate artifacts/tauri-candidate/candidate.json --output artifacts/desktop-benchmark-products
+      - name: Observe complete products on a declared virtual display
+        if: inputs.performance && matrix.platform == 'linux' && matrix.architecture == 'x64'
+        env:
+          VARIN_BENCHMARK_DISPOSABLE_OS_USER: '1'
+          VARIN_BENCHMARK_VIRTUAL_DISPLAY: '1'
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/benchmark-suite.mjs --pair artifacts/desktop-benchmark-products/pair.json --output artifacts/desktop-benchmark-evidence
+      - name: Preserve measurements without synthetic profiles or credentials
+        if: always() && inputs.performance && matrix.platform == 'linux' && matrix.architecture == 'x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-benchmark-${{ matrix.platform }}-${{ matrix.architecture }}
+          path: |
+            artifacts/desktop-benchmark-evidence/**/preflight.json
+            artifacts/desktop-benchmark-evidence/**/comparison.json
+            artifacts/desktop-benchmark-evidence/**/probe.json
+            artifacts/desktop-benchmark-evidence/**/suite.json
+            artifacts/desktop-benchmark-evidence/measurements/**/*.json
+            artifacts/desktop-benchmark-evidence/measurements/**/*.jsonl
+          if-no-files-found: warn
+          retention-days: 14
+      # A failed native check must not force all six runners to download the
+      # exact same verified sources/SDK again. Keep executable build outputs out.
+      - name: Preserve downloaded build sources
+        if: ${{ !cancelled() && steps.native-inputs.outcome == 'success' && steps.native-inputs.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.native-inputs.outputs.cache-primary-key }}
+      - name: Preserve the completed fixed CEF SDK
+        if: ${{ !cancelled() && steps.cef-inputs.outcome == 'success' && steps.cef-inputs.outputs.cache-hit != 'true' && hashFiles('artifacts/tauri-input/cef/**/archive.json') != '' }}
+        uses: actions/cache/save@v6
+        with:
+          path: artifacts/tauri-input/cef
+          key: ${{ steps.cef-inputs.outputs.cache-primary-key }}
       - name: Preserve exact candidate and observed evidence (not release qualification)
         if: always()
         uses: actions/upload-artifact@v7
@@ -166,6 +229,7 @@ jobs:
             artifacts/tauri-candidate/assets/
             artifacts/tauri-candidate/candidate.json
             artifacts/tauri-native-smoke.json
+            artifacts/tauri-installer-smoke/*.json
           include-hidden-files: true
           if-no-files-found: warn
           compression-level: 0

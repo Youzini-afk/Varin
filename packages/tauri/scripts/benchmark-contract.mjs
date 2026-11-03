@@ -44,29 +44,48 @@ const text = value => typeof value === 'string' && value.length > 0;
 function condition(value) {
   if (!value || !text(value.selector) || value.selector.length > 2048) throw new Error('A commit condition needs a bounded DOM selector');
   const keys = Object.keys(value);
-  if (keys.some(key => !['selector', 'visible', 'attribute', 'equals', 'count', 'minTextLength', 'focused', 'textIncludes'].includes(key))) throw new Error('Unknown DOM observation');
-  if (value.textIncludes !== undefined && (typeof value.textIncludes !== 'string' || !value.textIncludes.length || value.textIncludes.length > 4096)
+  if (keys.some(key => !['selector', 'visible', 'attribute', 'equals', 'count', 'minTextLength', 'focused', 'textIncludes', 'value', 'fileCount', 'textEquals'].includes(key))) throw new Error('Unknown DOM observation');
+  if (value.textEquals !== undefined && (typeof value.textEquals !== 'string' || value.textEquals.length > 4096)
+    || value.fileCount !== undefined && (!Number.isSafeInteger(value.fileCount) || value.fileCount < 0)
+    || value.value !== undefined && (typeof value.value !== 'string' || value.value.length > 4096)
+    || value.textIncludes !== undefined && (typeof value.textIncludes !== 'string' || !value.textIncludes.length || value.textIncludes.length > 4096)
     || value.focused !== undefined && typeof value.focused !== 'boolean'
     || value.visible !== undefined && typeof value.visible !== 'boolean'
     || value.count !== undefined && (!Number.isSafeInteger(value.count) || value.count < 0)
     || value.minTextLength !== undefined && (!Number.isSafeInteger(value.minTextLength) || value.minTextLength < 0)
-    || value.attribute !== undefined && (!/^(aria-[a-z-]+|data-[a-z-]+|disabled|role)$/u.test(value.attribute) || typeof value.equals !== 'string')) throw new Error('Invalid DOM observation');
+    || value.attribute !== undefined && (!/^(aria-[a-z0-9-]+|data-[a-z0-9-]+|disabled|role)$/u.test(value.attribute) || typeof value.equals !== 'string')) throw new Error('Invalid DOM observation');
 }
 export function validateWorkload(workload) {
   if (!workload || !performanceScenarios.includes(workload.name) || workload.motion !== 'full'
     || !positive(workload.timeoutMs) || !positive(workload.readyTimeoutMs)
     || !Array.isArray(workload.ready) || !workload.ready.length
     || !Array.isArray(workload.steps) || !workload.steps.length) throw new Error('A complete full-motion workload and real readiness observations are required');
+  if (workload.ownerIdentity && (workload.ownerIdentity.runtime !== 'agent' || !text(workload.ownerIdentity.threadId) || !text(workload.ownerIdentity.branchId)
+    || !path.isAbsolute(workload.workspace ?? ''))) throw new Error('Owner observation needs the original Thread and an absolute synthetic workspace');
+  if (workload.remote) {
+    const endpoint = new URL(workload.remote.origin);
+    if (workload.name !== 'local-hybrid-execution' || workload.remote.remote || workload.remote.browser || endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1') throw new Error('Remote replay requires the same isolated loopback Host');
+    validateWorkload(workload.remote);
+  }
+  if (workload.browser) {
+    if (workload.name !== 'browser-interaction' || workload.browser.surface !== 'fixture-browser' || workload.browser.browser) throw new Error('Only one original Browser fixture surface is allowed');
+    const url = new URL(workload.browser.url);
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.pathname !== '/site' || url.search || url.hash || !isHash(workload.browser.downloadSha256)) throw new Error('Browser workload must bind the local synthetic fixture and download bytes');
+    validateWorkload(workload.browser);
+  }
   workload.ready.forEach(condition);
   const ids = new Set();
   for (const step of workload.steps) {
     if (!step || !text(step.id) || ids.has(step.id)
-      || !['wait', 'click', 'key', 'text', 'scroll', 'checkpoint', 'manual'].includes(step.action)) throw new Error('Every replay action needs one unique ID and a supported operation');
+      || !['wait', 'click', 'key', 'text', 'scroll', 'checkpoint', 'manual', 'file'].includes(step.action)) throw new Error('Every replay action needs one unique ID and a supported operation');
     ids.add(step.id);
-    if (Object.keys(step).some(key => !['id', 'action', 'selector', 'expect', 'timeoutMs', 'settleMs', 'durationMs', 'key', 'modifiers', 'text', 'deltaX', 'deltaY', 'cycle', 'milestone'].includes(key))) throw new Error('Unknown replay field; executable expressions are forbidden');
+    if (step.action === 'file' && (workload.surface !== 'fixture-browser' || step.selector !== '#upload-input')) throw new Error('File automation is confined to the synthetic Browser fixture');
+    if (step.optional !== undefined && (step.optional !== true || step.action !== 'click' || step.selector !== '[data-permission-tool="process_spawn"] [data-permission-choice="allow_once"]')) throw new Error('Only the bounded synthetic process permission may be conditionally acknowledged');
+    if (step.owner !== undefined && !['process-running', 'process-completed', 'process-stopped', 'run-completed', 'browser-download-completed', 'browser-page-opened', 'run-cancelled', 'remote-completed'].includes(step.owner)) throw new Error('Unknown read-only owner observation');
+    if (Object.keys(step).some(key => !['id', 'action', 'selector', 'expect', 'timeoutMs', 'settleMs', 'durationMs', 'key', 'modifiers', 'text', 'deltaX', 'deltaY', 'cycle', 'milestone', 'owner', 'optional'].includes(key))) throw new Error('Unknown replay field; executable expressions are forbidden');
     if (step.selector !== undefined && (!text(step.selector) || step.selector.length > 2048)) throw new Error('Invalid replay selector');
     if (['click', 'scroll'].includes(step.action) && !step.selector) throw new Error('Pointer replay requires an actual product element');
-    if (step.action === 'key' && !['Enter', 'Escape', 'Tab', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'PageDown', 'PageUp', 'Home', 'End', 'Backspace', 'Delete'].includes(step.key)) throw new Error('Unsupported replay key');
+    if (step.action === 'key' && !['Enter', 'Escape', 'Tab', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'PageDown', 'PageUp', 'Home', 'End', 'Backspace', 'Delete', 'a'].includes(step.key)) throw new Error('Unsupported replay key');
     if (step.modifiers !== undefined && (!Number.isInteger(step.modifiers) || step.modifiers < 0 || step.modifiers > 15)) throw new Error('Invalid key modifiers');
     if (step.action === 'text' && (!text(step.text) || step.text.length > 4096)) throw new Error('Only bounded synthetic fixture text is accepted');
     if (step.action === 'scroll' && ![step.deltaX ?? 0, step.deltaY].every(Number.isFinite)) throw new Error('Invalid scroll delta');
@@ -75,7 +94,7 @@ export function validateWorkload(workload) {
       || step.timeoutMs !== undefined && !positive(step.timeoutMs)) throw new Error('Invalid action timing');
     if (step.action === 'checkpoint' && (!Number.isSafeInteger(step.cycle) || step.cycle < 0)) throw new Error('Lifecycle checkpoint requires a cycle number');
     if (step.expect !== undefined) { if (!Array.isArray(step.expect)) throw new Error('Invalid commit conditions'); step.expect.forEach(condition); }
-    if (['click', 'key', 'text', 'manual'].includes(step.action) && !step.expect?.length) throw new Error('An input dispatch is not a commit: supply observable postconditions');
+    if (['click', 'key', 'text', 'manual', 'file'].includes(step.action) && !step.expect?.length) throw new Error('An input dispatch is not a commit: supply observable postconditions');
   }
   if (workload.name === 'repeated-lifecycle' && new Set(workload.steps.filter(step => step.action === 'checkpoint').map(step => step.cycle)).size < 3) throw new Error('Lifecycle measurement needs a baseline and at least two settled cycle checkpoints');
   return workload;
@@ -120,8 +139,8 @@ export function summarizeRun(run) {
   const targetSamples = run.rendererSamples?.filter(sample => sample.targets?.some(target => ['main', 'application:main'].includes(target.label) && ['running', 'completed'].includes(target.status))).flatMap(sample => sample.targets ?? []);
   const render = targetSamples ?? samples;
   const frames = render.flatMap(sample => sample.frameTimesMs ?? []), inputs = render.flatMap(sample => sample.inputLatenciesMs ?? []);
-  const byTarget = Object.fromEntries([...new Set((targetSamples ?? []).map(sample => sample.label))].map(label => {
-    const rows = targetSamples.filter(sample => sample.label === label), frame = rows.flatMap(sample => sample.frameTimesMs ?? []), input = rows.flatMap(sample => sample.inputLatenciesMs ?? []);
+  const byTarget = Object.fromEntries([...new Set((targetSamples ?? []).map(sample => sample.surfaceRole ?? sample.label))].map(label => {
+    const rows = targetSamples.filter(sample => (sample.surfaceRole ?? sample.label) === label), frame = rows.flatMap(sample => sample.frameTimesMs ?? []), input = rows.flatMap(sample => sample.inputLatenciesMs ?? []);
     return [label, { frames: frame.length, frameP95Ms: quantile(frame, .95), inputs: input.length, inputP95Ms: quantile(input, .95), unavailableSamples: rows.filter(row => row.status === 'document-ended-or-unavailable').length }];
   }));
   return { sampleCount: samples.length, observedProcessIdentities: seen.size, durationMs, cpuTimeMs: cpuComplete ? cpuMs : null,

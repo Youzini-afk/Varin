@@ -1,9 +1,7 @@
 //! OS scope for this shell's managed Node services, not user-opened applications.
 //! Scope termination is an OS fact only. It never turns an unknown effect into a
 //! successful business drain. Kernel native executors retain their own guardian.
-use std::{
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::process::{Child, Command};
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -18,6 +16,10 @@ pub struct ProcessScope {
     guardian: crate::host_guardian::Guardian,
     #[cfg(windows)]
     job: std::os::windows::io::OwnedHandle,
+    #[cfg(windows)]
+    original_process: std::os::windows::io::OwnedHandle,
+    #[cfg(windows)]
+    original_pid: u32,
     terminating: AtomicBool,
     ended: AtomicBool,
 }
@@ -27,11 +29,22 @@ impl ProcessScope {
         Self::spawn_with_stderr(command, data_dir, std::process::Stdio::inherit())
     }
     #[allow(unused_mut)]
-    pub fn spawn_with_stderr(mut command: Command, data_dir: &std::path::Path, stderr: std::process::Stdio) -> Result<(Child, Self), String> {
+    pub fn spawn_with_stderr(
+        mut command: Command,
+        data_dir: &std::path::Path,
+        stderr: std::process::Stdio,
+    ) -> Result<(Child, Self), String> {
         #[cfg(unix)]
         {
             let (child, guardian) = crate::host_guardian::spawn(command, data_dir, stderr)?;
-            Ok((child, Self { guardian, terminating: AtomicBool::new(false), ended: AtomicBool::new(false) }))
+            Ok((
+                child,
+                Self {
+                    guardian,
+                    terminating: AtomicBool::new(false),
+                    ended: AtomicBool::new(false),
+                },
+            ))
         }
         #[cfg(windows)]
         {
@@ -39,12 +52,16 @@ impl ProcessScope {
             command.stderr(stderr);
             // No Node instruction may run before it belongs to the kill-on-close Job.
             command.creation_flags(0x08000000 | 0x00000004);
-            let mut child = command.spawn().map_err(|_| "Bundled desktop service could not start")?;
+            let mut child = command
+                .spawn()
+                .map_err(|_| "Bundled desktop service could not start")?;
             match windows::attach(&child) {
                 Ok(scope) => Ok((child, scope)),
                 Err(error) => {
                     let _ = child.start_kill();
-                    tokio::spawn(async move { let _ = child.wait().await; });
+                    tokio::spawn(async move {
+                        let _ = child.wait().await;
+                    });
                     Err(error)
                 }
             }
@@ -92,7 +109,9 @@ impl ProcessScope {
             return Ok(true);
         }
         #[cfg(unix)]
-        { Ok(self.ended.load(Ordering::Acquire)) }
+        {
+            Ok(self.ended.load(Ordering::Acquire))
+        }
         #[cfg(windows)]
         {
             windows::empty(self)
@@ -101,11 +120,16 @@ impl ProcessScope {
     /// The Unix guardian reports the original Node result only after it has
     /// observed every original group member stopped and reaped Node. Windows
     /// keeps its kernel Job object until the same stop boundary is established.
-    pub async fn settle_after_node_exit(&self, status: &std::io::Result<std::process::ExitStatus>) -> Result<ScopeExit, String> {
+    pub async fn settle_after_node_exit(
+        &self,
+        status: &std::io::Result<std::process::ExitStatus>,
+    ) -> Result<ScopeExit, String> {
         #[cfg(unix)]
         {
             if !status.as_ref().is_ok_and(|status| status.success()) {
-                return Err("Managed service guardian exited without confirming its original scope".into());
+                return Err(
+                    "Managed service guardian exited without confirming its original scope".into(),
+                );
             }
             let result = self.guardian.finished()?;
             self.ended.store(true, Ordering::Release);
@@ -114,10 +138,18 @@ impl ProcessScope {
         #[cfg(windows)]
         {
             let clean = !self.terminating.load(Ordering::Acquire) && self.empty()?;
-            if !clean { self.terminate()?; }
+            if !clean {
+                self.terminate()?;
+            }
             self.wait_empty().await?;
-            let status = status.as_ref().map_err(|_| "Desktop service termination could not be observed")?;
-            Ok(ScopeExit { clean, code: status.code(), success: status.success() })
+            let status = status
+                .as_ref()
+                .map_err(|_| "Desktop service termination could not be observed")?;
+            Ok(ScopeExit {
+                clean,
+                code: status.code(),
+                success: status.success(),
+            })
         }
     }
     #[cfg(windows)]
@@ -135,23 +167,31 @@ mod windows {
     use super::*;
     use std::{
         mem::size_of,
-        os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
         ptr::{null, null_mut},
     };
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, INVALID_HANDLE_VALUE, ERROR_MORE_DATA, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0, WAIT_TIMEOUT},
+        Foundation::{
+            CloseHandle, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, INVALID_HANDLE_VALUE,
+            WAIT_OBJECT_0, WAIT_TIMEOUT,
+        },
         System::{
             Diagnostics::ToolHelp::{
                 CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
                 Thread32Next,
             },
             JobObjects::{
-                AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_PROCESS_ID_LIST, JobObjectBasicProcessIdList,
-                JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-                JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
-                QueryInformationJobObject, SetInformationJobObject,
+                AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob,
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+                JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
+                JobObjectExtendedLimitInformation, QueryInformationJobObject,
+                SetInformationJobObject,
             },
-            Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE},
+            Threading::{
+                OpenProcess, OpenThread, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+                ResumeThread, THREAD_SUSPEND_RESUME, WaitForSingleObject,
+            },
         },
     };
     pub fn attach(child: &Child) -> Result<ProcessScope, String> {
@@ -159,6 +199,12 @@ mod windows {
             .raw_handle()
             .ok_or("Managed service process handle is unavailable")?;
         let pid = child.id().ok_or("Managed service PID is unavailable")?;
+        // Retain the actual admitted process object through scope settlement.
+        // Closing Tokio's last handle and reopening its PID races kernel object
+        // deletion and Job bookkeeping, even after a successful wait().
+        let original_process = unsafe { BorrowedHandle::borrow_raw(process) }
+            .try_clone_to_owned()
+            .map_err(|_| "Original managed process handle could not be retained")?;
         unsafe {
             let handle = CreateJobObjectW(null(), null());
             if handle.is_null() {
@@ -202,6 +248,8 @@ mod windows {
             }
             Ok(ProcessScope {
                 job,
+                original_process,
+                original_pid: pid,
                 terminating: AtomicBool::new(false),
                 ended: AtomicBool::new(false),
             })
@@ -221,49 +269,98 @@ mod windows {
         if result == 0 {
             return Err("Managed process Job termination could not be observed".into());
         }
-        if accounting.ActiveProcesses == 0 { return Ok(true); }
+        if accounting.ActiveProcesses == 0 {
+            return Ok(true);
+        }
         // ActiveProcesses includes terminated objects retained by any external
         // handle. Inspect a complete Job list and the original kernel objects,
         // never infer termination from elapsed time or a bare reusable PID.
         let mut capacity = accounting.ActiveProcesses as usize;
-        loop {
+        'snapshot: loop {
             let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
             let word = size_of::<usize>();
-            let bytes = capacity.checked_mul(word).and_then(|size| size.checked_add(header))
-                .and_then(|size| u32::try_from(size).ok()).ok_or("Managed Job process list is too large")?;
+            let bytes = capacity
+                .checked_mul(word)
+                .and_then(|size| size.checked_add(header))
+                .and_then(|size| u32::try_from(size).ok())
+                .ok_or("Managed Job process list is too large")?;
             let mut buffer = vec![0usize; (bytes as usize).div_ceil(word)];
-            let ok = unsafe { QueryInformationJobObject(scope.job.as_raw_handle(), JobObjectBasicProcessIdList,
-                buffer.as_mut_ptr().cast(), bytes, null_mut()) };
-            if ok == 0 && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_MORE_DATA as i32) {
+            let ok = unsafe {
+                QueryInformationJobObject(
+                    scope.job.as_raw_handle(),
+                    JobObjectBasicProcessIdList,
+                    buffer.as_mut_ptr().cast(),
+                    bytes,
+                    null_mut(),
+                )
+            };
+            if ok == 0
+                && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_MORE_DATA as i32)
+            {
                 return Err("Managed Job members cannot be inspected".into());
             }
             let list = unsafe { &*(buffer.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST) };
             let count = list.NumberOfProcessIdsInList as usize;
             if ok == 0 || count < list.NumberOfAssignedProcesses as usize {
-                capacity = capacity.checked_mul(2).map(|value| value.max(list.NumberOfAssignedProcesses as usize))
+                capacity = capacity
+                    .checked_mul(2)
+                    .map(|value| value.max(list.NumberOfAssignedProcesses as usize))
                     .ok_or("Managed Job process list overflow")?;
                 continue;
             }
-            if count > capacity { return Err("Managed Job member list is invalid".into()); }
+            if count > capacity {
+                return Err("Managed Job member list is invalid".into());
+            }
             let ids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
             let mut handles = Vec::with_capacity(count);
             for &id in ids {
-                let pid = u32::try_from(id).ok().filter(|pid| *pid != 0).ok_or("Managed Job member identity is invalid")?;
-                let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE, 0, pid) };
+                let pid = u32::try_from(id)
+                    .ok()
+                    .filter(|pid| *pid != 0)
+                    .ok_or("Managed Job member identity is invalid")?;
+                if pid == scope.original_pid {
+                    match unsafe { WaitForSingleObject(scope.original_process.as_raw_handle(), 0) }
+                    {
+                        WAIT_OBJECT_0 => continue,
+                        WAIT_TIMEOUT => return Ok(false),
+                        _ => return Err("Original managed process termination is unknown".into()),
+                    }
+                }
+                let handle = unsafe {
+                    OpenProcess(
+                        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                        0,
+                        pid,
+                    )
+                };
                 if handle.is_null() {
-                    if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+                    if std::io::Error::last_os_error().raw_os_error()
+                        == Some(ERROR_INVALID_PARAMETER as i32)
+                    {
                         // It exited while taking the snapshot; ask for a fresh
                         // full membership set rather than assume this PID died.
-                        return empty(scope);
+                        continue 'snapshot;
                     }
-                    return Err("Managed Job process object cannot be opened".into());
+                    return Err(format!(
+                        "Managed Job process object cannot be opened (OS error {:?})",
+                        std::io::Error::last_os_error().raw_os_error()
+                    ));
                 }
                 let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
                 let mut belongs = 0;
-                if unsafe { IsProcessInJob(handle.as_raw_handle(), scope.job.as_raw_handle(), &mut belongs) } == 0 {
+                if unsafe {
+                    IsProcessInJob(
+                        handle.as_raw_handle(),
+                        scope.job.as_raw_handle(),
+                        &mut belongs,
+                    )
+                } == 0
+                {
                     return Err("Managed Job process membership is unknown".into());
                 }
-                if belongs == 0 { return empty(scope); }
+                if belongs == 0 {
+                    continue 'snapshot;
+                }
                 match unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) } {
                     WAIT_OBJECT_0 => handles.push(handle),
                     WAIT_TIMEOUT => return Ok(false),
@@ -275,5 +372,70 @@ mod windows {
             drop(handles);
             return Ok(true);
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::{os::windows::io::AsHandle, process::Stdio, time::Duration};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    #[tokio::test]
+    async fn clean_job_settlement_uses_original_object_after_tokio_child_is_dropped() {
+        let data = tempfile::tempdir().unwrap();
+        for _ in 0..24 {
+            let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
+            let mut command = Command::new(node);
+            command.args(["-e", "process.exit(0)"]);
+            let (mut child, scope) = ProcessScope::spawn(command, data.path()).unwrap();
+            let retained = scope
+                .original_process
+                .as_handle()
+                .try_clone_to_owned()
+                .unwrap();
+            let status = child.wait().await;
+            drop(child);
+            let ended = tokio::time::timeout(
+                Duration::from_secs(10),
+                scope.settle_after_node_exit(&status),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(ended.clean && ended.success);
+            assert!(scope.empty().unwrap());
+            drop(retained);
+        }
+    }
+    #[tokio::test]
+    async fn exited_original_process_does_not_certify_a_live_job_descendant() {
+        let data = tempfile::tempdir().unwrap();
+        let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
+        let mut command = Command::new(node);
+        command.args(["-e", "const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});process.stdout.write(c.pid+'\\n');c.unref();"])
+            .stdout(Stdio::piped());
+        let (mut child, scope) = ProcessScope::spawn(command, data.path()).unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .await
+            .unwrap();
+        assert!(line.trim().parse::<u32>().unwrap() > 0);
+        let status = child.wait().await;
+        drop(child);
+        assert!(
+            !scope.empty().unwrap(),
+            "root exit cannot release the Job's descendant"
+        );
+        let ended = tokio::time::timeout(
+            Duration::from_secs(10),
+            scope.settle_after_node_exit(&status),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(!ended.clean);
+        assert!(scope.empty().unwrap());
     }
 }

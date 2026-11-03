@@ -6,6 +6,7 @@ rust-version = "1.95"
 license = "AGPL-3.0-only"
 publish = false
 build = "build.rs"
+default-run = "varin"
 
 [lib]
 name = "varin_desktop"
