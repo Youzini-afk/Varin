@@ -10,8 +10,12 @@ import { desktopHostEnvelope, type DesktopHostFrame } from '../../desktop-host-p
 
 const roots: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
+const childClosed = new WeakMap<ChildProcessWithoutNullStreams, Promise<number | null>>();
 afterEach(async () => {
-  for (const child of children.splice(0)) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  for (const child of children.splice(0)) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await childClosed.get(child);
+  }
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 async function launch() {
@@ -42,12 +46,24 @@ async function launch() {
   let stderr = ''; child.stderr.on('data', data => { stderr += String(data); });
   const frames: DesktopHostFrame[] = [];
   let parseError: unknown;
-  createInterface({ input: child.stdout }).on('line', line => { try { frames.push(JSON.parse(line)); } catch (error) { parseError = error; } });
-  const exited = new Promise<number | null>(resolve => child.once('exit', resolve));
-  const ready = () => frames.find(frame => frame.kind === 'event' && frame.event === 'ready');
-  await expect.poll(() => ready() ?? (child.exitCode === null ? null : stderr)).toBeTruthy();
-  expect(ready(), stderr).toBeTruthy();
-  const payload = (ready() as { payload: { port: number; clientToken: string } }).payload;
+  // Wait for the actual protocol event, not Vitest's short polling default.
+  // Importing the real Browser/Host graph can legitimately take longer under
+  // the complete package suite. The enclosing test still owns its deadline.
+  let resolveReady!: (frame: DesktopHostFrame) => void;
+  let rejectReady!: (error: Error) => void;
+  const prepared = new Promise<DesktopHostFrame>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  const exited = new Promise<number | null>(resolve => child.once('close', resolve));
+  childClosed.set(child, exited);
+  child.once('error', error => rejectReady(error));
+  child.once('exit', (code, signal) => rejectReady(new Error(`Host exited before its ready event (${code ?? signal}): ${stderr}`)));
+  createInterface({ input: child.stdout }).on('line', line => {
+    try {
+      const frame = JSON.parse(line) as DesktopHostFrame; frames.push(frame);
+      if (frame.kind === 'event' && frame.event === 'ready') resolveReady(frame);
+    } catch (error) { parseError = error; rejectReady(new Error('Private Host pipe contained non-protocol data')); }
+  });
+  const ready = await prepared;
+  const payload = (ready as { payload: { port: number; clientToken: string } }).payload;
   return { root, child, frames, exited, payload, get stderr() { return stderr; }, get parseError() { return parseError; } };
 }
 async function exists(file: string) { try { await readFile(file); return true; } catch { return false; } }

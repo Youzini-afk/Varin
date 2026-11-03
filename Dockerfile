@@ -62,6 +62,7 @@ COPY packages/mobile/package.json ./packages/mobile/package.json
 COPY packages/protocol/package.json ./packages/protocol/package.json
 COPY packages/script-runtime/package.json ./packages/script-runtime/package.json
 COPY packages/settings-store/package.json ./packages/settings-store/package.json
+COPY packages/tauri/package.json ./packages/tauri/package.json
 COPY packages/ui/package.json ./packages/ui/package.json
 COPY packages/web/package.json ./packages/web/package.json
 RUN bun install --frozen-lockfile --ignore-scripts \
