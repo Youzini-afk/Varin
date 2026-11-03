@@ -3,7 +3,9 @@ import {
   type SurfaceContribution,
   type SurfaceRegistrySnapshot,
 } from '@varin/extension-surface';
-import type { JsonValue } from '@varin/extension-contract';
+import { parseVarinSettingsPageContributionData, type JsonValue } from '@varin/extension-contract';
+import { WorkbenchSurfaceContributionHost } from '@/lib/extensions/workbench-registry';
+import type { VarinSettingsPageMountPropsV1 } from '@varin/extension-sdk';
 import {
   createBuiltinSurfaceController,
   varinSurfaceRuntime,
@@ -55,6 +57,25 @@ const stringData = (data: Record<string, JsonValue>, key: string): string | unde
 const pageRegistration = (contribution: SurfaceContribution): SettingsPageRegistration | null => {
   if (contribution.descriptor.kind !== 'settings-page') return null;
   const data = contribution.descriptor.data;
+  const implementation = contribution.implementation as SettingsPageImplementation & { mount?: unknown; kind?: string };
+  if (data.title !== undefined && data.slug !== undefined
+    && (typeof implementation?.mount === 'function' || implementation?.kind === 'declarative')) {
+    let parsed: ReturnType<typeof parseVarinSettingsPageContributionData>;
+    try { parsed = parseVarinSettingsPageContributionData(data); }
+    catch { return null; } // Invalid v1 metadata rejects only this contribution; author diagnostics explain it.
+    const render = (props: VarinSettingsPageMountPropsV1) => React.createElement(WorkbenchSurfaceContributionHost, {
+      contribution, props, isolatedProps: { region: props.region },
+      fallback: React.createElement('div', { role: 'status' }, `${parsed.title} is not ready.`),
+      className: 'h-full min-h-0 w-full min-w-0',
+    });
+    return {
+      contributionId: contribution.descriptor.id,
+      meta: { ...parsed, group: parsed.group ?? 'general', kind: parsed.kind ?? 'single', icon: 'settings-3',
+        order: contribution.descriptor.placement?.order ?? 50 },
+      implementation: { renderContent: () => render({ region: 'content' }),
+        ...(parsed.kind === 'split' ? { renderSidebar: (options: { onItemSelect?(): void }) => render({ region: 'sidebar', ...options }) } : {}) },
+    };
+  }
   const slug = stringData(data, 'slug');
   const title = stringData(data, 'title');
   const titleKey = stringData(data, 'titleKey');
@@ -69,7 +90,6 @@ const pageRegistration = (contribution: SurfaceContribution): SettingsPageRegist
   const keywords = Array.isArray(data.keywords)
     ? data.keywords.filter((value): value is string => typeof value === 'string')
     : undefined;
-  const implementation = contribution.implementation as SettingsPageImplementation;
   if (!implementation || typeof implementation.renderContent !== 'function') return null;
   return {
     contributionId: contribution.descriptor.id,

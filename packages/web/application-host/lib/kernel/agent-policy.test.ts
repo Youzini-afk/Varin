@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import type { JsonValue, VarinAgentPolicyInput } from '@varin/extension-contract';
 import { afterEach, expect, it } from 'vitest';
 import { resolveVarinExtensionServiceRouting, canonicalServiceComposition } from '@varin/extension-contract';
-import { ApplicationExtensionRuntime, HostServiceRegistry } from '@varin/extension-host';
+import { ApplicationExtensionRuntime, HostBindingRestoreError, HostCompositionRestoreError, HostServiceRegistry } from '@varin/extension-host';
 import { AgentPolicyBridge, createAgentPolicy } from './agent-policy.js';
 import { leafHostComposition } from './host-composition.test-helper.js';
 
@@ -233,12 +233,19 @@ it('exact recovery binds the original installed artifact without consulting a ch
   expect(current!.binding.artifact.providerKey).toBe(other);
   const recovered = await f.prepare({ threadId: 'recover', requiredBinding });
   expect(recovered!.binding.artifact).toEqual(requiredBinding);
-  await expect(f.prepare({ threadId: 'recover', requiredBinding: { ...requiredBinding, configurationIdentity: 'changed' } })).rejects.toThrow('policy_exact_binding_unavailable');
+  await expect(f.prepare({ threadId: 'recover', requiredBinding: { ...requiredBinding, configurationIdentity: 'changed' } })).rejects.toMatchObject({
+    name: 'HostBindingRestoreError', code: 'policy_exact_binding_unavailable', kind: 'policy', reason: 'binding_changed',
+  });
   await expect(f.prepare({ threadId: 'recover', requiredBinding: { ...requiredBinding, artifactIntegrity: 'missing' } })).rejects.toThrow('policy_exact_binding_unavailable');
   expect((await first!.decide({ view: { run_id: 'original', state: 'runnable', history_count: 0, history_head_id: null, pending_tool_calls: 0, model_capabilities: [] }, event: { kind: 'started' }, state: null }, new AbortController().signal)).action.kind).toBe('complete');
   await f.runtime.setEnabled('review.policy-v4', false, (await f.runtime.state()).catalog.revision);
   expect(first!.revocationSignal.aborted).toBe(true);
-  await expect(f.prepare({ threadId: 'recover', requiredBinding })).rejects.toThrow('policy_exact_binding_unavailable');
+  const refused = await f.prepare({ threadId: 'recover', requiredBinding }).catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(HostBindingRestoreError);
+  expect(refused).toMatchObject({ code: 'policy_exact_binding_unavailable', kind: 'policy', reason: 'implementation_unavailable',
+    cause: { reason: 'extension_disabled', extensionId: 'review.policy-v4' } });
+  expect((refused as Error).cause).toBeInstanceOf(HostCompositionRestoreError);
+  expect((refused as Error).message).toContain('will not select another implementation or restore permissions automatically');
   recovered!.release(); current!.release(); first!.release();
 });
 

@@ -112,48 +112,42 @@ test('actual service preparation and its exact method query share the original d
   } finally { await h.close(); }
 });
 
-test('installed retrieval plans expose callable describe contracts before and after actual broker SDK registration', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'varin-retrieval-contract-'));
-  const runtime = await ApplicationExtensionRuntime.create({ dataDir: join(root, 'data'), varinVersion: '1.2.3',
-    brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.url)) });
+test('retired retrieval builtins do not return, and saved routing remains visible and unresolved', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'varin-retired-retrieval-'));
+  const options = { dataDir: join(root, 'data'), varinVersion: '1.2.3',
+    brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.url)) };
+  const runtime = await ApplicationExtensionRuntime.create(options);
+  const legacyService = 'varin.retrieval.plan';
+  const legacyProvider = 'varin.builtin.retrieval-keyword:host:varin.retrieval.plan@1';
+  const rule = { scope: { projectId: 'original-project' }, serviceId: legacyService, version: 1,
+    providerKeys: [legacyProvider], allowFallback: false };
+  let restarted: ApplicationExtensionRuntime | undefined;
   try {
     await runtime.start();
-    for (const [variant, structure, semantic] of [
-      ['structured', 'builtin', 'disabled'], ['semantic', 'builtin', 'builtin'], ['keyword', 'disabled', 'disabled'],
-    ] as const) {
-      const extensionId = `varin.builtin.retrieval-${variant}`;
-      const serviceId = 'varin.retrieval.plan';
-      const providerKey = `${extensionId}:host:${serviceId}@1`;
-      const routing = { projectId: 'retrieval-contract' };
-      await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision,
-        rule: { scope: routing, serviceId, version: 1, providerKeys: [providerKey], allowFallback: false } });
-      const request = { action: 'describe', kind: 'service', serviceId, version: 1, extensionId,
-        member: { kind: 'method', name: 'describe' } } as const;
-      // This is the same query owner used by runtime_contract, before the selected worker starts.
-      const cold = parseVarinRuntimeContractResult(await runtime.queryContracts(request, { routing }));
-      assert.ok(cold.action === 'describe' && cold.kind === 'service');
-      assert.equal(cold.status, 'found');
-      assert.equal(cold.service?.implementations.find(implementation => implementation.extensionId === extensionId)?.registration, 'declared');
-      assert.ok(cold.member?.kind === 'method');
-      assert.deepEqual(cold.member?.contract.inputSchema, { type: 'array', maxItems: 0 });
-      assert.equal(runtime.services.getSnapshot().providers.some(provider => provider.extensionId === extensionId), false);
-
-      const binding = await runtime.prepareService({ serviceId, version: 1, method: 'describe', args: [], routing });
-      try {
-        const plan = await binding.invoke('describe', []);
-        assert.ok(plan !== null && typeof plan === 'object' && !Array.isArray(plan));
-        assert.equal(typeof plan.configurationId, 'string');
-        assert.equal(plan.structure, structure);
-        assert.equal(plan.semantic, semantic);
-        const registered = parseVarinRuntimeContractResult(await runtime.queryContracts(request, { routing }));
-        assert.ok(registered.action === 'describe' && registered.kind === 'service');
-        assert.equal(registered.status, 'found');
-        assert.equal(registered.service?.implementations.find(implementation => implementation.extensionId === extensionId)?.registration, 'registered');
-        assert.deepEqual(registered.service?.selection.providerIds, [binding.providerId]);
-        assert.deepEqual(registered.member?.contract, cold.member?.contract);
-      } finally { binding.release(); }
-    }
-  } finally { await runtime.stop(); await rm(root, { recursive: true, force: true }); }
+    const legacyId = 'varin.builtin.retrieval-keyword';
+    const now = new Date().toISOString();
+    await runtime.catalog.upsert({
+      manifest: { schemaVersion: 1, id: legacyId, version: '1.0.0', engines: { varin: '*' },
+        entrypoints: { host: { file: 'host.cjs', mode: 'brokered', activation: ['service-request'] } },
+        provides: { services: [{ id: legacyService, version: 1, multiple: true }] } },
+      source: { kind: 'builtin', display: 'Varin', specifier: legacyId }, capabilityGrants: [],
+      desired: { enabled: true, revision: 1, updatedAt: now }, installedAt: now, updatedAt: now,
+      resolvedVersion: '1.0.0', selectedVersion: '1.0.0',
+    }, (await runtime.catalog.snapshot()).revision);
+    const legacyData = { extensionId: legacyId, scope: 'application' as const, key: 'state' };
+    await runtime.storage.update(legacyData, 0, 1, { retained: true });
+    await runtime.upsertServiceRoutingRule({ expectedRevision: (await runtime.routing.read()).document.revision, rule });
+    const before = (await runtime.routing.read()).document;
+    await runtime.stop();
+    restarted = await ApplicationExtensionRuntime.create(options);
+    const state = await restarted.start();
+    assert.deepEqual(state.routing.document, before, 'retirement must not delete or remap saved choices');
+    assert.deepEqual((await restarted.storage.read(legacyData)).document.data, { retained: true });
+    assert.equal(state.catalog.extensions.some(entry => entry.manifest.id.startsWith('varin.builtin.retrieval-')), false);
+    const result = parseVarinRuntimeContractResult(await restarted.queryContracts({ action: 'describe', kind: 'service', serviceId: legacyService, version: 1 }, { routing: rule.scope }));
+    assert.ok(result.action === 'describe' && result.status !== 'found');
+    await assert.rejects(restarted.prepareService({ serviceId: legacyService, version: 1, method: 'describe', args: [], routing: rule.scope }));
+  } finally { await restarted?.stop(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('undeclared metadata, disabled declarations and failed activation stay distinct without executing query callbacks', async () => {

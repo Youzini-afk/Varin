@@ -1,3 +1,5 @@
+import { useCodeTrustedProfileSelection, useExtensionCodeTrust } from './ExtensionCodeTrustDialog';
+import { captureExtensionCodeReview } from '@/lib/extensions/code-trust';
 import { SettingsTabs } from '../shared/SettingsTabs';
 import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import React from 'react';
@@ -49,18 +51,15 @@ import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import {
   VARIN_EDITOR_MONACO_SERVICE_ID,
   VARIN_EDITOR_MONACO_SERVICE_VERSION,
-  VARIN_RETRIEVAL_PLAN_SERVICE_ID,
-  VARIN_RETRIEVAL_PLAN_VERSION,
+  inspectVarinSurfaceContributions,
   resolveVarinExtensionServiceRouting,
   resolveVarinWorkbenchLayout,
   resolveVarinWorkbenchProfile,
   serviceRoutingScopeKey,
 } from '@varin/extension-contract';
-import { VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } from '@varin/extension-builtins';
 import { serviceRoutingComposition, serviceRoutingOptions } from '@/lib/extensions/service-routing-options';
 import { ServiceRoutingControl } from './ServiceRoutingControl';
 import {
-  selectActiveWorkbenchProfile,
   applyWorkbenchProfile,
   removeWorkbenchProfile,
   setWorkbenchReplacementSelection,
@@ -195,6 +194,8 @@ const WorkbenchProfileSection: React.FC = () => {
   const [removeOpen, setRemoveOpen] = React.useState(false);
   const [profileName, setProfileName] = React.useState('');
   const [profileBusy, setProfileBusy] = React.useState(false);
+  const codeTrust = useExtensionCodeTrust();
+  const profileTrust = useCodeTrustedProfileSelection();
   const workbench = catalog.snapshot?.workbench;
   if (!workbench?.authoritative || !catalog.snapshot) return null;
   const resolved = resolveVarinWorkbenchLayout(workbench.document, {
@@ -229,13 +230,25 @@ const WorkbenchProfileSection: React.FC = () => {
   const requestProfile = async (profileId: string): Promise<void> => {
     setProfileBusy(true);
     try {
-      await selectActiveWorkbenchProfile(profileId, workspaceId, { enableShell: true });
+      await profileTrust.selectProfile(profileId, workspaceId);
     } catch (error) {
       if (error instanceof WorkbenchShellTransitionAbortedError && error.reason === 'superseded') return;
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setProfileBusy(false);
     }
+  };
+  const applyExtensionSet = async (): Promise<void> => {
+    if (!catalog.snapshot) return;
+    const entries = installedExtensions.filter(item => !item.desired.enabled && item.source.kind !== 'builtin'
+      && profile.extensionIds?.includes(item.manifest.id));
+    const review = entries.length ? captureExtensionCodeReview(catalog.snapshot, entries) : undefined;
+    setProfileBusy(true);
+    try {
+      if (review && !await codeTrust.confirm({ artifacts: review.artifacts })) return;
+      await applyWorkbenchProfile(profile.id, review);
+    } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); }
+    finally { setProfileBusy(false); }
   };
   const updateExtensionSet = async (extensionId: string, enabled: boolean): Promise<void> => {
     const next = new Set(selectedExtensions);
@@ -337,10 +350,7 @@ const WorkbenchProfileSection: React.FC = () => {
               variant="outline"
               disabled={profileBusy || profile.extensionIds === undefined}
               onClick={() => {
-                setProfileBusy(true);
-                void applyWorkbenchProfile(profile.id).catch((error) => {
-                  toast.error(error instanceof Error ? error.message : String(error));
-                }).finally(() => setProfileBusy(false));
+                void applyExtensionSet();
               }}
             >
               {t('settings.varin.extensions.workbench.applyProfile')}
@@ -498,6 +508,8 @@ const WorkbenchProfileSection: React.FC = () => {
         })}
       </div>
 
+      {codeTrust.dialog}
+      {profileTrust.dialog}
       <Dialog open={createOpen} onOpenChange={(open) => !profileBusy && setCreateOpen(open)}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>{t('settings.varin.extensions.workbench.createProfile')}</DialogTitle></DialogHeader>
@@ -646,8 +658,6 @@ const ServiceRoutingSection: React.FC = () => {
             document: snapshot.routing.document,
             serviceId: id,
             version,
-            ...(id === VARIN_RETRIEVAL_PLAN_SERVICE_ID && version === VARIN_RETRIEVAL_PLAN_VERSION
-              ? { defaultProviderKey: VARIN_BUILTIN_RETRIEVAL_DEFAULT_PROVIDER_KEY } : {}),
           });
           const resolvedKeys = resolution.providerKeys ?? [];
           const allReady = resolvedKeys.length > 0 && resolvedKeys.every((providerKey) => (
@@ -656,8 +666,7 @@ const ServiceRoutingSection: React.FC = () => {
           return (
             <div key={key} className="grid gap-2 rounded-lg border border-border/60 px-3 py-3 @xl:grid-cols-[minmax(0,1fr)_minmax(14rem,0.8fr)] @xl:items-center">
               <div className="min-w-0">
-                <div className="typography-ui-label text-foreground">{id === VARIN_RETRIEVAL_PLAN_SERVICE_ID
-                  ? t('settings.varin.extensions.routing.retrieval') : serviceName(id)}</div>
+                <div className="typography-ui-label text-foreground">{serviceName(id)}</div>
                 <div className={resolution.status === 'resolved'
                   ? 'typography-micro text-muted-foreground'
                   : 'typography-micro text-[var(--status-warning)]'}>
@@ -700,6 +709,7 @@ const ExtensionCard: React.FC<{
 }> = ({ busy, composition, entry, hostState, surface }) => {
   const { t } = useI18n();
   const [inspectOpen, setInspectOpen] = React.useState(false);
+  const codeTrust = useExtensionCodeTrust();
   const [removeOpen, setRemoveOpen] = React.useState(false);
   const [deleteData, setDeleteData] = React.useState(false);
   const status = actualStatus(entry);
@@ -707,7 +717,31 @@ const ExtensionCard: React.FC<{
   const handoff = entry.restartHandoffs?.at(-1);
   const nativeUpdate = entry.desired.enabled && candidate?.manifest.entrypoints?.host && (candidate?.manifest.entrypoints?.host?.mode === 'native' || entry.manifest.entrypoints?.host?.mode === 'native');
   const handoffPending = handoff && !['applied', 'failed', 'restored'].includes(handoff.status);
-  const [restartConfirmation, setRestartConfirmation] = React.useState<'update' | 'recover' | null>(null);
+  const [restartConfirmation, setRestartConfirmation] = React.useState<{ handoffId: string; hostId: string } | null>(null);
+  const changeEnabled = async (enabled: boolean): Promise<void> => {
+    try {
+      if (!enabled || entry.source.kind === 'builtin') {
+        await setVarinExtensionEnabled(entry.manifest.id, enabled);
+        return;
+      }
+      if (!hostState) throw new Error('Varin extension catalog is unavailable');
+      const review = captureExtensionCodeReview(hostState, [entry]);
+      if (!await codeTrust.confirm({ artifacts: review.artifacts })) return;
+      await setVarinExtensionEnabled(entry.manifest.id, true, review);
+    } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); }
+  };
+  const applyCandidate = async (restart: boolean): Promise<void> => {
+    if (!candidate) return;
+    const expectedHostId = hostState?.catalog.hostId;
+    if (!expectedHostId) { toast.error('Varin extension catalog is unavailable'); return; }
+    const artifact = { extensionId: entry.manifest.id, version: candidate.resolvedVersion,
+      integrity: candidate.integrity, source: { ...candidate.source } };
+    if (!await codeTrust.confirm({ artifacts: [artifact], restart })) return;
+    try {
+      if (restart) await restartVarinExtensionCandidate(entry.manifest.id, artifact.integrity, expectedHostId);
+      else await selectVarinExtensionCandidate(entry.manifest.id, artifact.integrity, expectedHostId);
+    } catch { /* The catalog store owns the visible error. */ }
+  };
   const selectedCapabilities: VarinExtensionCapabilityReference[] = (["host", "surface"] as const).flatMap((realm) => (
     (entry.manifest.capabilities?.[realm] ?? []).map((capability) => ({ capability, realm }))
   ));
@@ -717,6 +751,9 @@ const ExtensionCard: React.FC<{
   const selectedCapabilitiesReviewed = entry.source.kind === 'builtin'
     || selectedCapabilities.every((reference) => selectedDecisions.has(capabilityKey(reference)));
   const liveContributions = surface.contributions.filter((item) => item.owner.extensionId === entry.manifest.id);
+  const authorContributions = new Map((entry.manifest.contributions ?? []).map(descriptor => [descriptor.id, descriptor]));
+  for (const contribution of liveContributions) authorContributions.set(contribution.descriptor.id, contribution.descriptor);
+  const authorDiagnostics = inspectVarinSurfaceContributions({ ...entry.manifest, contributions: [...authorContributions.values()] });
   const liveSurfaceServices = surface.services.filter((item) => item.owner.extensionId === entry.manifest.id);
   const liveHostServices = hostState?.services.providers.filter((item) => item.extensionId === entry.manifest.id) ?? [];
   const monacoServiceDeclared = (entry.manifest.requires?.services ?? []).some((service) => (
@@ -808,7 +845,7 @@ const ExtensionCard: React.FC<{
           checked={entry.desired.enabled}
           disabled={busy || (!entry.desired.enabled && !selectedCapabilitiesReviewed)}
           onCheckedChange={(enabled) => {
-            void setVarinExtensionEnabled(entry.manifest.id, enabled).catch(() => undefined);
+            void changeEnabled(enabled);
           }}
           aria-label={t('settings.varin.extensions.actions.activationAria', {
             name: workbenchExtensionDisplayName(entry, t),
@@ -816,22 +853,28 @@ const ExtensionCard: React.FC<{
         />
       </div>
 
+      {codeTrust.dialog}
+      {authorDiagnostics.length ? <details className="mt-3 typography-micro text-[var(--status-warning)]">
+        <summary>{t('settings.varin.extensions.codeTrust.authorDiagnostics')} ({authorDiagnostics.length})</summary>
+        {authorDiagnostics.map(item => <div key={`${item.contributionId}:${item.code}`} className="mt-2 break-all">
+          <code>{item.contributionId}</code> · {item.message}
+        </div>)}
+      </details> : null}
       {handoff ? <div className="mt-3 space-y-1 typography-meta" role="status">
         <p>{t(`settings.varin.extensions.restart.${handoff.status}`)}</p>
         {handoff.status === 'waiting-surface' ? <p>{handoff.surfaceEntrypoints.join(', ')}</p> : null}
         {handoff.status === 'failed' && handoff.failure ? <p className="text-[var(--status-error)]">{handoff.failure.message}</p> : null}
         {handoff.status === 'failed' ? <Button size="xs" variant="outline" disabled={busy}
-          onClick={() => setRestartConfirmation('recover')}>{t('settings.varin.extensions.restart.recover')}</Button> : null}
+          onClick={() => hostState && setRestartConfirmation({ handoffId: handoff.id, hostId: hostState.catalog.hostId })}>{t('settings.varin.extensions.restart.recover')}</Button> : null}
       </div> : null}
       <Dialog open={restartConfirmation !== null} onOpenChange={open => { if (!open) setRestartConfirmation(null); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>{t('settings.varin.extensions.restart.confirmTitle')}</DialogTitle>
             <DialogDescription>{t('settings.varin.extensions.restart.confirmDescription')}</DialogDescription></DialogHeader>
           <DialogFooter><Button disabled={busy} onClick={() => {
-            const action = restartConfirmation;
+            const recovery = restartConfirmation;
             setRestartConfirmation(null);
-            if (action === 'update' && candidate) void restartVarinExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
-            else if (action === 'recover' && handoff) void recoverVarinExtensionRestart(entry.manifest.id, handoff.id).catch(() => undefined);
+            if (recovery) void recoverVarinExtensionRestart(entry.manifest.id, recovery.handoffId, recovery.hostId).catch(() => undefined);
           }}>{t('settings.varin.extensions.restart.confirm')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
@@ -932,19 +975,19 @@ const ExtensionCard: React.FC<{
               {t('settings.varin.extensions.candidate.discard')}
             </Button>
             {nativeUpdate ? <Button type="button" size="xs" disabled={busy || !candidate.capabilitiesReviewed || Boolean(handoffPending)}
-              onClick={() => setRestartConfirmation('update')}>
+              onClick={() => { void applyCandidate(true); }}>
               {t(handoff?.status === 'failed' ? 'settings.varin.extensions.restart.retry' : 'settings.varin.extensions.restart.apply')}
             </Button> : null}
-            <Button
+            {!nativeUpdate ? <Button
               type="button"
               size="xs"
               disabled={busy || !candidate.capabilitiesReviewed || candidate.applyRequested || Boolean(handoffPending)}
               onClick={() => {
-                void selectVarinExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
+                void applyCandidate(false);
               }}
             >
               {t('settings.varin.extensions.candidate.apply')}
-            </Button>
+            </Button> : null}
           </div>
         </div>
       ) : null}
@@ -1221,18 +1264,24 @@ const ExtensionInstallSection: React.FC = () => {
   const state = useVarinExtensionCatalog();
   const [kind, setKind] = React.useState<'git' | 'local' | 'npm'>('npm');
   const [specifier, setSpecifier] = React.useState('');
+  const codeTrust = useExtensionCodeTrust();
   const install = async (): Promise<void> => {
     const normalized = specifier.trim();
     if (!normalized) return;
+    const expectedHostId = state.snapshot?.catalog.hostId;
+    if (!expectedHostId) { toast.error('Varin extension catalog is unavailable'); return; }
+    const source = { display: normalized, kind, specifier: normalized };
+    if (!await codeTrust.confirm({ artifacts: [{ source }] })) return;
     try {
-      await installVarinExtension({ display: normalized, kind, specifier: normalized });
-      setSpecifier('');
+      await installVarinExtension(source, expectedHostId);
+      setSpecifier(current => current.trim() === normalized ? '' : current);
     } catch {
       // The catalog store owns the visible error state.
     }
   };
   return (
     <SettingsSection title={t('settings.varin.extensions.install.title')} settingsItem="extensions.install">
+      {codeTrust.dialog}
       <div className="grid gap-2 @xl:grid-cols-[11rem_minmax(0,1fr)_auto]">
         <Select value={kind} onValueChange={(value) => setKind(value === 'git' || value === 'local' ? value : 'npm')}>
           <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1250,7 +1299,7 @@ const ExtensionInstallSection: React.FC = () => {
         />
         <Button
           type="button"
-          disabled={!specifier.trim() || state.busyExtensionId === '__install__'}
+          disabled={!state.snapshot || !specifier.trim() || state.busyExtensionId === '__install__'}
           onClick={() => { void install(); }}
         >
           {state.busyExtensionId === '__install__' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}

@@ -1,3 +1,4 @@
+import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -146,7 +147,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
 
   const [activityRevision, updateActivity] = React.useReducer(value => value + 1, 0);
   const preview = React.useContext(ConversationPreviewContext);
-  const messageRenderers = useWorkbenchMatchRenderers<{ cwd: string; entry: ChatSessionEntry; sessionId: string }>('message-renderer', 'chat.timeline.entries', !preview);
+  const messageRenderers = useWorkbenchMatchRenderers<{ cwd: string; entry: ChatSessionEntry; sessionId: string }>('message-renderer', VARIN_CONVERSATION_SLOTS.messages, !preview);
   const extensionPresentation = React.useMemo(() => {
     const rendered = new Map<string, () => React.ReactNode>();
     if (!preview && messageRenderers.length) for (const entry of projection.visibleEntries) {

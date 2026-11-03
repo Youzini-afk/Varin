@@ -126,26 +126,29 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
         `  ${item.id} (${item.kind} contractVersion ${item.contractVersion} is not supported; supported: ${item.supportedVersions.join(", ")})`
       ));
       const hasIncompatible = incompatibleLines.length > 0;
+      const authorLines = result.authorDiagnostics.map(item => `  ${item.contributionId}: ${item.message}`);
       cliOutput.success({
         human: [
-          hasIncompatible
+          hasIncompatible || authorLines.length
             ? `WARN: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`
             : `OK: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`,
           ...(hasIncompatible
             ? ["Incompatible contribution versions (parsed but not executable):", ...incompatibleLines]
             : []),
+          ...(authorLines.length ? ["Author guidance (registration is not a mounted product feature):", ...authorLines] : []),
         ],
         json: {
           command: "check",
           extensionId: result.project.manifest.id,
           incompatibleContributions: result.incompatibleContributions,
+          authorDiagnostics: result.authorDiagnostics,
           missingFiles: result.missingFiles,
           ok: !hasIncompatible,
           referencedFiles: result.referencedFiles,
           version: result.project.manifest.version,
           ...(hasIncompatible ? { warnings: incompatibleLines } : {}),
         },
-        quiet: `${hasIncompatible ? "warn" : "ok"} ${result.project.manifest.id}@${result.project.manifest.version} files:${result.referencedFiles.length}${hasIncompatible ? ` incompatible:${incompatibleLines.length}` : ""}`,
+        quiet: `${hasIncompatible || authorLines.length ? "warn" : "ok"} ${result.project.manifest.id}@${result.project.manifest.version} files:${result.referencedFiles.length}${hasIncompatible ? ` incompatible:${incompatibleLines.length}` : ""}${authorLines.length ? ` guidance:${authorLines.length}` : ""}`,
       });
       return hasIncompatible ? 1 : 0;
     }

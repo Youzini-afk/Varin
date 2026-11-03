@@ -1,3 +1,4 @@
+import { useCodeTrustedProfileSelection } from '@/components/sections/extensions/ExtensionCodeTrustDialog';
 import React from 'react';
 import type { VarinWorkbenchResolvedProfile } from '@varin/extension-contract';
 import { Button } from '@/components/ui/button';
@@ -8,7 +9,7 @@ import {
   useVarinExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
-import { selectActiveWorkbenchProfile, WorkbenchShellTransitionAbortedError } from '@/lib/extensions/workbench-shell-transition';
+import { WorkbenchShellTransitionAbortedError } from '@/lib/extensions/workbench-shell-transition';
 import { useUIStore } from '@/stores/useUIStore';
 
 export const WorkbenchRecoveryShell: React.FC<{
@@ -17,6 +18,7 @@ export const WorkbenchRecoveryShell: React.FC<{
 }> = ({ resolved, workspaceId }) => {
   const { t } = useI18n();
   const catalog = useVarinExtensionCatalog();
+  const codeTrust = useCodeTrustedProfileSelection();
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const [busy, setBusy] = React.useState(false);
@@ -36,6 +38,7 @@ export const WorkbenchRecoveryShell: React.FC<{
 
   return (
     <div className="flex h-full items-center justify-center bg-background px-6 text-foreground">
+      {codeTrust.dialog}
       <div className="flex max-w-md flex-col items-center gap-4 text-center">
         <div className="flex flex-col gap-2">
           <h1 className="typography-title text-foreground">{t('workbench.recovery.title')}</h1>
@@ -47,11 +50,7 @@ export const WorkbenchRecoveryShell: React.FC<{
               type="button"
               disabled={busy}
               onClick={() => {
-                void run(() => selectActiveWorkbenchProfile(
-                  resolved.profileId,
-                  workspaceId,
-                  { enableShell: true },
-                ));
+                void run(() => codeTrust.selectProfile(resolved.profileId, workspaceId));
               }}
             >
               {t('workbench.recovery.reenable')}
@@ -62,7 +61,7 @@ export const WorkbenchRecoveryShell: React.FC<{
               value={resolved.profileId}
               onValueChange={(profileId) => {
                 if (profileId === resolved.profileId) return;
-                void run(() => selectActiveWorkbenchProfile(profileId, workspaceId, { enableShell: true }));
+                void run(() => codeTrust.selectProfile(profileId, workspaceId));
               }}
             >
               <SelectTrigger aria-label={t('workbench.recovery.chooseProfile')} disabled={busy}>

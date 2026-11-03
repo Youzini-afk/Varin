@@ -201,6 +201,8 @@ function resolveSurfaceRequirement(requirement: VarinExtensionServiceRequirement
 
 interface ActiveEntrypoint {
   artifactIntegrity: string;
+  /** Admission adapter retained for retirement; confirmed owners keep their epoch-bound transport. */
+  host: SurfaceExtensionHost;
   capabilityBindings: string;
   mode: VarinExtensionSurfaceEntrypoint["mode"];
   moduleGeneration: number;
@@ -715,11 +717,17 @@ export class SurfaceExtensionLoader {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
+    options: { host?: SurfaceExtensionHost; expectedHostId?: string } = {},
   ): Promise<VarinExtensionCatalogSnapshot> {
+    // A confirmed operation keeps its original transport across every preparation/publication await.
+    const host = options.host ?? this.#host, expectedHostId = options.expectedHostId;
     const operation = async (): Promise<VarinExtensionCatalogSnapshot> => {
       if (this.#stopped) throw new Error("Surface extension loader is stopped");
-      const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+      const state = parseVarinExtensionHostStateSnapshot(await host.hostState());
       let snapshot = state.catalog;
+      if (expectedHostId !== undefined && snapshot.hostId !== expectedHostId) {
+        throw new Error("Application Host changed after candidate confirmation");
+      }
       if (!snapshot.authoritative) throw new Error("Cannot apply a candidate from a stale extension catalog");
       let entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
       if (!entry) throw new Error(`Varin extension is not installed: ${extensionId}`);
@@ -728,7 +736,7 @@ export class SurfaceExtensionLoader {
           throw new Error(`Extension catalog revision conflict: expected ${expectedRevision}, actual ${snapshot.revision}`);
         }
         explicitCandidateSelection(entry, candidateIntegrity);
-        snapshot = parseVarinExtensionCatalogSnapshot(await this.#host.requestCandidateApplication({
+        snapshot = parseVarinExtensionCatalogSnapshot(await host.requestCandidateApplication({
           candidateIntegrity, expectedRevision, extensionId,
         }));
         entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
@@ -748,17 +756,17 @@ export class SurfaceExtensionLoader {
       let committed: VarinExtensionCatalogSnapshot | null = null;
       try {
         if (!entry.desired.enabled) {
-          committed = parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
+          committed = parseVarinExtensionCatalogSnapshot(await host.selectCandidate({
             candidateIntegrity,
             expectedRevision: snapshot.revision,
             extensionId,
           }));
         } else if (plans.manifest || executablePlans.length > 0 || hasActiveOwners) {
-          committed = await this.#activatePlans(entry, selection, plans, executablePlans, executablePlans, snapshot);
+          committed = await this.#activatePlans(entry, selection, plans, executablePlans, executablePlans, snapshot, host);
           if (!committed && selection.slot === "selected") committed = snapshot;
         } else {
-          await this.#host.prepareCandidate(extensionId, candidateIntegrity);
-          committed = parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
+          await host.prepareCandidate(extensionId, candidateIntegrity);
+          committed = parseVarinExtensionCatalogSnapshot(await host.selectCandidate({
             candidateIntegrity,
             expectedRevision: snapshot.revision,
             extensionId,
@@ -773,7 +781,7 @@ export class SurfaceExtensionLoader {
           : []);
         for (const [key, active] of [...this.#active]) {
           if (!isGroupedCandidate(selection) && active.owner.extensionId === extensionId && !retained.has(key)) {
-            await this.#deactivate(active, entry.desired.revision);
+            await this.#deactivate(active, entry.desired.revision, host);
           }
         }
         this.#failedCandidates.delete(`${extensionId}\0${candidateIntegrity}\0${entry.desired.revision}`);
@@ -790,7 +798,7 @@ export class SurfaceExtensionLoader {
           this.#publish();
           return snapshot;
         }
-        await this.#host.discardPreparedCandidate(extensionId, candidateIntegrity).catch(() => undefined);
+        await host.discardPreparedCandidate(extensionId, candidateIntegrity).catch(() => undefined);
         this.#diagnose(
           extensionId,
           "candidate_application_failed",
@@ -1071,10 +1079,11 @@ export class SurfaceExtensionLoader {
     desiredExecutablePlans: SurfaceActivationPlan[],
     executablePlansToActivate: SurfaceActivationPlan[],
     snapshot: VarinExtensionCatalogSnapshot,
+    host: SurfaceExtensionHost = this.#host,
   ): Promise<VarinExtensionCatalogSnapshot | null> {
     const lifecycleEpoch = this.#lifecycleEpoch;
     const groupedCandidate = isGroupedCandidate(selection);
-    let currentHostState = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+    let currentHostState = parseVarinExtensionHostStateSnapshot(await host.hostState());
     const initialAccess = this.#accessContext(currentHostState);
     const preparation: PendingPreparation = {
       controller: new AbortController(),
@@ -1153,14 +1162,14 @@ export class SurfaceExtensionLoader {
             this.#diagnose(owner.extensionId, "service_lease_lost", error.message, { entrypointId: owner.entrypointId });
             void this.#enqueueOwner(owner.extensionId, () => this.#deactivate(active, owner.desiredRevision));
           }
-        });
+        }, host);
         serviceLeases.push(lease);
         preparedOwners.push({ plan, owner, moduleGeneration, lease });
       }
       // Scope owners precede group preparation; byte reads use the resulting authoritative slot.
       if (selection.slot === "candidate") {
-        prepared = parseVarinExtensionCandidatePreparationResult(await this.#host.prepareCandidate(entry.manifest.id, selection.integrity, signal));
-        const latest = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+        prepared = parseVarinExtensionCandidatePreparationResult(await host.prepareCandidate(entry.manifest.id, selection.integrity, signal));
+        const latest = parseVarinExtensionHostStateSnapshot(await host.hostState());
         currentHostState = latest;
         if (latest.catalog.extensions.some(value => value.manifest.id === entry.manifest.id && value.integrity === selection.integrity)) {
           selection = { ...selection, slot: "selected" };
@@ -1169,7 +1178,7 @@ export class SurfaceExtensionLoader {
       for (const { plan, owner, moduleGeneration, lease } of preparedOwners) {
         signal.throwIfAborted();
         let invocationSignal = signal;
-        const hostExternalServices = this.#externalServices(lease.providers, lease.identity, routing, lease.signal, () => invocationSignal);
+        const hostExternalServices = this.#externalServices(lease.providers, lease.identity, routing, lease.signal, () => invocationSignal, host);
         const exactProviderIds: Record<string, string[]> = {};
         for (const requirement of selection.manifest.requires?.services?.filter(requirement => requirement.realms.includes("surface")) ?? []) {
           exactProviderIds[`${requirement.id}@${requirement.version}`] = resolved
@@ -1228,7 +1237,7 @@ export class SurfaceExtensionLoader {
           activation = contributeDeclarative;
         } else {
           const entrypoint = plan.entrypoint;
-          const payload = parseVarinExtensionManagedEntrypointPayload(await this.#host.readManagedEntrypoint({
+          const payload = parseVarinExtensionManagedEntrypointPayload(await host.readManagedEntrypoint({
             entrypointId: entrypoint.id,
             extensionId: entry.manifest.id,
             integrity: selection.integrity,
@@ -1283,7 +1292,7 @@ export class SurfaceExtensionLoader {
                     ? (exactProviderIds[`${serviceId}@${version}`] ?? []).includes(providerId)
                     : stagingContext.useServices(serviceId, version).length > 0,
                   readAsset: async (path) => {
-                    const value = await this.#host.readAsset({
+                    const value = await host.readAsset({
                       extensionId: entry.manifest.id,
                       integrity: selection.integrity,
                       path,
@@ -1305,7 +1314,7 @@ export class SurfaceExtensionLoader {
             const resourceScope = new ModuleResourceScope({
               artifactIntegrity: selection.integrity,
               extensionId: entry.manifest.id,
-              host: this.#host,
+              host,
               slot: selection.slot,
               styleHost: this.#styleHost,
             });
@@ -1338,6 +1347,7 @@ export class SurfaceExtensionLoader {
         });
         activated.push({
           artifactIntegrity: selection.integrity,
+          host,
           capabilityBindings,
           mode: plan.mode,
           moduleGeneration,
@@ -1376,7 +1386,7 @@ export class SurfaceExtensionLoader {
                 }
               },
             });
-            activated.push({ ...manifestOwner, owner, moduleGeneration: generation });
+            activated.push({ ...manifestOwner, host, owner, moduleGeneration: generation });
           }
         }
       }
@@ -1401,6 +1411,7 @@ export class SurfaceExtensionLoader {
         requests.push({ activation: () => undefined, options: { owner, signal } });
         activated.push({
           artifactIntegrity: selection.integrity,
+          host,
           capabilityBindings,
           mode: active.mode,
           moduleGeneration,
@@ -1415,7 +1426,7 @@ export class SurfaceExtensionLoader {
           throw new Error("Surface activation was superseded by loader close or Host change");
         }
         if (selection.slot === "selected") {
-          const latest = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+          const latest = parseVarinExtensionHostStateSnapshot(await host.hostState());
           const latestEntry = latest.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
           if (
             !latest.catalog.authoritative
@@ -1429,7 +1440,7 @@ export class SurfaceExtensionLoader {
           }
         }
         if (selection.slot === "candidate") {
-          const latest = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
+          const latest = parseVarinExtensionHostStateSnapshot(await host.hostState());
           const latestEntry = latest.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
           if (!latest.catalog.authoritative || latest.catalog.hostId !== snapshot.hostId
             || !latestEntry?.desired.enabled || latestEntry.desired.revision !== entry.desired.revision
@@ -1457,7 +1468,7 @@ export class SurfaceExtensionLoader {
                   return { entrypointId, generation: member.owner.generation };
                 }),
               } } : {}),
-            }, publicationSignal, snapshot.hostId, entry.desired.revision);
+            }, publicationSignal, snapshot.hostId, entry.desired.revision, host);
           }
         } else {
           publicationSignal.throwIfAborted();
@@ -1474,7 +1485,7 @@ export class SurfaceExtensionLoader {
         }
       });
       for (const active of activated) this.#active.set(keyFor(active.owner.extensionId, active.owner.entrypointId), active);
-      await this.#reportActual(entry.manifest.id);
+      await this.#reportActual(entry.manifest.id, host, snapshot.hostId);
       return committedSnapshot;
     } catch (error) {
       for (const lease of serviceLeases) await lease.dispose();
@@ -1491,7 +1502,7 @@ export class SurfaceExtensionLoader {
           "Trusted-native Surface activation failed; reload this Surface before retrying the extension",
         );
       }
-      await this.#reportActual(entry.manifest.id);
+      await this.#reportActual(entry.manifest.id, host, snapshot.hostId);
       throw error;
     } finally {
       if (this.#preparations.get(entry.manifest.id) === preparation) this.#preparations.delete(entry.manifest.id);
@@ -1503,14 +1514,15 @@ export class SurfaceExtensionLoader {
     signal: AbortSignal,
     hostId: string,
     desiredRevision: number,
+    host: SurfaceExtensionHost = this.#host,
   ): Promise<VarinExtensionCatalogSnapshot> {
     try {
-      return parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate(request, signal));
+      return parseVarinExtensionCatalogSnapshot(await host.selectCandidate(request, signal));
     } catch (error) {
       // A closed fetch may have lost the response after the Host's durable CAS began. Confirm the
       // current selection through its existing authority; this is not a tool-operation receipt.
       let observed: VarinExtensionHostStateSnapshot;
-      try { observed = parseVarinExtensionHostStateSnapshot(await this.#host.hostState()); }
+      try { observed = parseVarinExtensionHostStateSnapshot(await host.hostState()); }
       catch (observationError) {
         this.#diagnose(request.extensionId, "candidate_selection_unconfirmed",
           `Candidate publication could not be confirmed: ${observationError instanceof Error ? observationError.message : String(observationError)}`,
@@ -1596,13 +1608,14 @@ export class SurfaceExtensionLoader {
   }
 
   #externalServices(providers: VarinExtensionServiceProviderSnapshot[], lease: VarinSurfaceServiceInvocationLease,
-    routing: VarinExtensionServiceRoutingContext, signal: AbortSignal, callSignal: () => AbortSignal): SurfaceExternalService[] {
+    routing: VarinExtensionServiceRoutingContext, signal: AbortSignal, callSignal: () => AbortSignal,
+    host: SurfaceExtensionHost = this.#host): SurfaceExternalService[] {
     return providers.map(provider => ({ descriptor: { ...provider.descriptor }, providerId: provider.providerId,
       implementation: new Proxy({}, {
         get: (_target, property) => property === "then" || typeof property !== "string" ? undefined
           : (...args: JsonValue[]) => {
             signal.throwIfAborted();
-            return this.#host.invokeService({ args, method: property, providerId: provider.providerId,
+            return host.invokeService({ args, method: property, providerId: provider.providerId,
               serviceId: provider.descriptor.id, version: provider.descriptor.version, routing, lease }, callSignal());
           },
       }),
@@ -1610,7 +1623,7 @@ export class SurfaceExtensionLoader {
   }
 
   async #openServiceLease(request: VarinSurfaceServiceLeaseRequest, preparationSignal: AbortSignal,
-    invalidated: (error: Error) => void): Promise<BoundSurfaceServiceLease> {
+    invalidated: (error: Error) => void, host: SurfaceExtensionHost = this.#host): Promise<BoundSurfaceServiceLease> {
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, preparationSignal]);
     let ready = false;
@@ -1628,7 +1641,7 @@ export class SurfaceExtensionLoader {
     };
     const aborted = (): void => fail(signal.reason ?? new Error("Surface service lease was cancelled"));
     signal.addEventListener("abort", aborted, { once: true });
-    const stream = Promise.resolve().then(() => this.#host.watchServiceLease(request, raw => {
+    const stream = Promise.resolve().then(() => host.watchServiceLease(request, raw => {
       if (closed) return;
       const event = parseVarinSurfaceServiceLeaseEvent(raw);
       if (event.kind !== "ready") { fail(new Error(event.kind === "error" ? event.message : `Surface service lease revoked: ${event.code}`)); return; }
@@ -1773,7 +1786,7 @@ export class SurfaceExtensionLoader {
     for (const key of this.#failedCandidates) if (key.startsWith(prefix)) this.#failedCandidates.delete(key);
   }
 
-  async #deactivate(active: ActiveEntrypoint, desiredRevision: number): Promise<void> {
+  async #deactivate(active: ActiveEntrypoint, desiredRevision: number, host: SurfaceExtensionHost = active.host): Promise<void> {
     const key = keyFor(active.owner.extensionId, active.owner.entrypointId);
     const owner = {
       ...active.owner,
@@ -1804,14 +1817,15 @@ export class SurfaceExtensionLoader {
       }
     }
     this.#active.delete(key);
-    await this.#reportActual(active.owner.extensionId);
+    await this.#reportActual(active.owner.extensionId, host, active.owner.hostId);
   }
 
-  async #reportActual(extensionId: string): Promise<void> {
+  async #reportActual(extensionId: string, host: SurfaceExtensionHost = this.#host, hostId?: string): Promise<void> {
     const states = this.#surfaceRuntime.getSnapshot().actual.filter((state) => (
       state.extensionId === extensionId && state.realmId === this.#realmId
+      && (hostId === undefined || state.hostId === hostId)
     ));
-    for (const state of states) await this.#host.reportActualState(extensionId, toReportedActual(state)).catch(() => undefined);
+    for (const state of states) await host.reportActualState(extensionId, toReportedActual(state)).catch(() => undefined);
   }
 
   #diagnose(

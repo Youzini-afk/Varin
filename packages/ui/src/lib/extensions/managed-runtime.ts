@@ -14,12 +14,14 @@ import { surfaceServiceRoutingContext } from './surface-routing-context';
 import { startBuiltinVarinExtensions } from './builtin-surface-manager';
 import { surfaceCapabilityRegistry } from './surface-capabilities';
 import { createMonacoExtensionExternalService } from '@/lib/monaco/extension-service';
+import { createSurfaceExtensionHost, captureSurfaceExtensionHost } from './surface-host-adapter';
 
 const runtimeExtensions = () => {
   const extensions = getRegisteredRuntimeAPIs()?.extensions;
   if (!extensions) throw new Error('Varin application-host extension API is unavailable');
   return extensions;
 };
+
 
 let activeProjectTrusted = false;
 
@@ -46,21 +48,7 @@ export const surfaceExtensionLoader = new SurfaceExtensionLoader({
       }),
     };
   },
-  host: {
-    activateExtension: (extensionId) => runtimeExtensions().activateExtension(extensionId),
-    catalog: () => runtimeExtensions().catalog(),
-    discardPreparedCandidate: (extensionId, candidateIntegrity) => runtimeExtensions().discardPreparedCandidate(extensionId, candidateIntegrity),
-    hostState: () => runtimeExtensions().hostState(),
-    invokeService: (request, signal) => runtimeExtensions().invokeService(request, signal),
-    watchServiceLease: (request, onEvent, signal) => runtimeExtensions().watchServiceLease(request, onEvent, signal),
-    prepareCandidate: (extensionId, candidateIntegrity, signal) => runtimeExtensions().prepareCandidate(extensionId, candidateIntegrity, signal),
-    requestCandidateApplication: (request) => runtimeExtensions().requestCandidateApplication(request),
-    readAsset: (request) => runtimeExtensions().readAsset(request),
-    readManagedEntrypoint: (request) => runtimeExtensions().readManagedEntrypoint(request),
-    reportActualState: (extensionId, state) => runtimeExtensions().reportActualState(extensionId, state),
-    selectCandidate: (request, signal) => runtimeExtensions().selectCandidate(request, signal),
-    waitForHostState: (request, signal) => runtimeExtensions().waitForHostState(request, signal),
-  },
+  host: createSurfaceExtensionHost(runtimeExtensions),
   capabilities: surfaceCapabilityRegistry,
   externalServiceFactories: varinSurfaceRuntime.surface === 'desktop' || varinSurfaceRuntime.surface === 'web'
     ? [{
@@ -76,6 +64,17 @@ export const surfaceExtensionLoader = new SurfaceExtensionLoader({
   surface: varinSurfaceRuntime.surface,
   surfaceRuntime: varinSurfaceRuntime,
 });
+
+/** One explicit update never retargets its intent, preparation, publication or cleanup to a new endpoint. */
+export const applySurfaceExtensionCandidate = (
+  extensionId: string, candidateIntegrity: string, expectedRevision: number,
+  expectedHostId?: string, extensions = runtimeExtensions(),
+) => {
+  const host = captureSurfaceExtensionHost(runtimeExtensions, getRuntimeEndpointGeneration, extensions);
+  return surfaceExtensionLoader.applyCandidate(extensionId, candidateIntegrity, expectedRevision, {
+    host, ...(expectedHostId ? { expectedHostId } : {}),
+  });
+};
 
 function reconcileSurfaceContext(): void {
   if (!getRegisteredRuntimeAPIs()?.extensions) return;

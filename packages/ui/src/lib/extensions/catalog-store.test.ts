@@ -1,4 +1,9 @@
-import { beforeEach, expect, test } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
+
+vi.doMock('@/hooks/useProviderLogo', () => ({
+  preloadProviderLogos: () => undefined,
+  useProviderLogo: () => ({ hasLogo: false, onError: () => undefined, src: null }),
+}));
 import type {
   VarinExtensionHostStateSnapshot,
   VarinExtensionServiceRoutingRuleRemoveRequest,
@@ -382,4 +387,84 @@ test('accepted restart intent is not reported as failed because the Host disconn
   expect(reads).toBe(1);
   expect(getVarinExtensionCatalogState().error).toBeNull();
   stopVarinExtensionCatalog();
+});
+
+test('queued enable rejects an artifact changed after code confirmation instead of enabling the new selection', async () => {
+  const { captureExtensionCodeReview } = await import('./code-trust');
+  let current = snapshot();
+  current.catalog.extensions[0]!.integrity = `sha256-${'a'.repeat(64)}`;
+  const review = captureExtensionCodeReview(current, current.catalog.extensions);
+  const calls: unknown[] = [];
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { __VARIN_RUNTIME_APIS__: { extensions: {
+    hostState: async () => current,
+    waitForHostState: () => new Promise(() => undefined),
+    setEnabled: async (extensionId: string, enabled: boolean, revision: number) => {
+      calls.push([extensionId, enabled, revision]);
+      await held;
+      current = withRevision(current, 2);
+      current.catalog.extensions[0] = { ...current.catalog.extensions[0]!, integrity: `sha256-${'b'.repeat(64)}` };
+      return current.catalog;
+    },
+  } } } });
+  const { setVarinExtensionEnabled, getVarinExtensionCatalogState } = await import('./catalog-store');
+  const first = setVarinExtensionEnabled('dev.example.removable', false);
+  const enabling = setVarinExtensionEnabled('dev.example.removable', true, review);
+  const rejected = expect(enabling).rejects.toThrow('Extension code changed after confirmation');
+  await waitUntil(() => calls.length === 1);
+  release(); await first; await rejected;
+  expect(calls).toEqual([['dev.example.removable', false, 1]]);
+  expect(getVarinExtensionCatalogState().error).toContain('Review the current version');
+});
+
+test('local reload stages reviewed new code without automatically applying it', async () => {
+  const current = snapshot();
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { __VARIN_RUNTIME_APIS__: { extensions: {
+    hostState: async () => current,
+    waitForHostState: () => new Promise(() => undefined),
+    reloadLocalSource: async () => ({ outcome: 'prepared', candidateIntegrity: 'new-code', snapshot: {
+      ...current.catalog, extensions: [{ ...current.catalog.extensions[0], candidate: { integrity: 'new-code', capabilitiesReviewed: true } }],
+    } }),
+  } } } });
+  const { reloadVarinExtensionLocalSource } = await import('./catalog-store');
+  // The test runtime's applyCandidate throws if invoked: capability review alone must not apply code.
+  await reloadVarinExtensionLocalSource('dev.example.removable');
+});
+
+test('an install confirmation for the previous Host cannot run against a new endpoint with a stale catalog on screen', async () => {
+  let current = snapshot();
+  const installed: unknown[] = [];
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { __VARIN_RUNTIME_APIS__: { extensions: {
+    hostState: async () => current, waitForHostState: () => new Promise(() => undefined),
+    install: async (request: unknown) => { installed.push(request); return current.catalog; },
+  } } } });
+  const { startVarinExtensionCatalog, installVarinExtension } = await import('./catalog-store');
+  await startVarinExtensionCatalog();
+  current = { ...current, catalog: { ...current.catalog, hostId: '8b17e019-6292-4d60-b3c0-e91952d54d6a' } };
+  await expect(installVarinExtension({ kind: 'npm', display: '@example/code@1', specifier: '@example/code@1' }, hostId))
+    .rejects.toThrow('Application Host changed after code confirmation');
+  expect(installed).toEqual([]);
+});
+
+
+test('applying a profile requires its exact external-code review and sends both owner revisions', async () => {
+  const current = snapshot();
+  current.workbench.document.profiles[0]!.extensionIds = ['dev.example.removable'];
+  const applied: unknown[] = [];
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener: () => undefined, removeEventListener: () => undefined, __VARIN_RUNTIME_APIS__: { extensions: {
+    hostState: async () => current, waitForHostState: () => new Promise(() => undefined),
+    applyWorkbenchProfile: async (request: unknown) => { applied.push(request); return current.catalog; },
+  } } } });
+  const { startVarinExtensionCatalog } = await import('./catalog-store');
+  const { captureExtensionCodeReview } = await import('./code-trust');
+  const { applyWorkbenchProfile } = await import('./workbench-registry');
+  await startVarinExtensionCatalog();
+  await expect(applyWorkbenchProfile('default')).rejects.toThrow('Review external extension code');
+  const review = captureExtensionCodeReview(current, current.catalog.extensions);
+  current.workbench.document.revision += 1;
+  await expect(applyWorkbenchProfile('default', review)).rejects.toThrow('Workbench profile changed');
+  expect(applied).toEqual([]);
+  await applyWorkbenchProfile('default', captureExtensionCodeReview(current, current.catalog.extensions));
+  expect(applied).toEqual([{ profileId: 'default', expectedCatalogRevision: 1, expectedWorkbenchRevision: 1 }]);
 });

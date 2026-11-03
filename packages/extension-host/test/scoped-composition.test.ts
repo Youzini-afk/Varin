@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ApplicationExtensionRuntime } from '../src/application-runtime.js';
 import type { HostServiceBinding } from '../src/service-registry.js';
+import { HostCompositionRestoreError } from '../src/errors.js';
 
 async function fixture(mode: 'brokered' | 'native' = 'brokered', reviewedDependency = false, rootBinding: 'selected' | 'all' | 'none' = 'selected') {
   const directory = await mkdtemp(join(tmpdir(), 'varin-scoped-composition-'));
@@ -54,6 +55,80 @@ for (const mode of ['brokered', 'native'] as const) test(`${mode}: activation ca
       'ordinary single-provider declaration permits multiple legal instances of the same implementation');
     assert.equal(p.composition?.nodes.length, 2); assert.deepEqual(p.composition, p2.composition);
   } finally { leases.forEach(lease => lease.release()); await f.close(); }
+});
+
+test('a restarted Host restores the original reviewed graph, not the current routing choice', { timeout: 30_000 }, async () => {
+  const f = await fixture(); let restarted: ApplicationExtensionRuntime | undefined;
+  let original: HostServiceBinding | undefined, restored: HostServiceBinding | undefined;
+  try {
+    await f.route('p', 'example.b'); original = await f.prepare('p', 'original');
+    const composition = original.composition!;
+    await f.route('p', 'example.c');
+    original.release(); await f.runtime.stop();
+    restarted = await ApplicationExtensionRuntime.create({ dataDir: join(f.directory, 'data'), varinVersion: '1.2.3',
+      brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.url)) });
+    await restarted.start();
+    restored = await restarted.prepareService({ serviceId: 'example.composed', version: 1, method: 'read', args: [],
+      routing: { projectId: 'p', threadId: 'original' } }, { frozenComposition: composition });
+    assert.deepEqual(restored.composition, composition);
+    assert.equal((await restored.invoke('read', []) as { dependency: { name: string } }).dependency.name, 'example.b');
+    assert(!restarted.services.getSnapshot().providers.some(provider => provider.extensionId === 'example.c'),
+      'restoration must not activate the newly routed alternative');
+  } finally { restored?.release(); original?.release(); await restarted?.stop(); await f.close(); }
+});
+
+test('a changed selected artifact permits its live original pin but cannot restore it after Host restart', { timeout: 30_000 }, async () => {
+  const f = await fixture(); let restarted: ApplicationExtensionRuntime | undefined;
+  let original: HostServiceBinding | undefined;
+  try {
+    await f.route('p', 'example.b'); original = await f.prepare('p', 'original');
+    const composition = original.composition!, pin = original.pin();
+    try {
+      const before = await pin.invoke('read', []);
+      const source = join(f.directory, 'example.b', 'host.cjs');
+      await writeFile(source, '// new selected artifact\n' + await readFile(source, 'utf8'));
+      const staged = await f.runtime.reloadLocalSource({ extensionId: 'example.b', expectedRevision: (await f.runtime.catalog.snapshot()).revision });
+      assert.equal(staged.outcome, 'staged'); if (staged.outcome !== 'staged') throw new Error('Missing candidate');
+      await f.runtime.requestCandidateApplication({ extensionId: 'example.b', candidateIntegrity: staged.candidateIntegrity, expectedRevision: (await f.runtime.catalog.snapshot()).revision });
+      await f.runtime.selectCandidate({ extensionId: 'example.b', candidateIntegrity: staged.candidateIntegrity, expectedRevision: (await f.runtime.catalog.snapshot()).revision });
+      assert.deepEqual(await pin.invoke('read', []), before, 'ordinary replacement retains the exact live callback owner');
+    } finally { pin.release(); }
+    original.release(); await f.runtime.stop();
+    restarted = await ApplicationExtensionRuntime.create({ dataDir: join(f.directory, 'data'), varinVersion: '1.2.3',
+      brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.url)) });
+    await restarted.start();
+    const before = await restarted.catalog.snapshot();
+    await assert.rejects(restarted.prepareService({ serviceId: 'example.composed', version: 1, method: 'read', args: [],
+      routing: { projectId: 'p', threadId: 'original' } }, { frozenComposition: composition }), (error: unknown) => {
+      assert(error instanceof HostCompositionRestoreError);
+      assert.equal(error.reason, 'artifact_changed'); assert.equal(error.extensionId, 'example.b');
+      assert.match(error.message, /will not select another implementation/); return true;
+    });
+    const after = await restarted.catalog.snapshot();
+    assert.equal(after.revision, before.revision, 'restore refusal cannot change the catalog revision');
+    assert.deepEqual(after.extensions, before.extensions, 'restore refusal cannot rewrite selection or grants');
+    assert(!restarted.services.getSnapshot().providers.some(provider => ['example.a', 'example.b'].includes(provider.extensionId)),
+      'the changed graph is refused before either worker starts');
+  } finally { original?.release(); await restarted?.stop(); await f.close(); }
+});
+
+test('revoked review, disabled and removed original dependencies have distinct restore failures', { timeout: 30_000 }, async () => {
+  const f = await fixture('brokered', true); let original: HostServiceBinding | undefined;
+  try {
+    await f.route('p', 'example.b'); original = await f.prepare('p', 'original');
+    const composition = original.composition!;
+    const restore = () => f.runtime.prepareService({ serviceId: 'example.composed', version: 1, method: 'read', args: [],
+      routing: { projectId: 'p', threadId: 'original' } }, { frozenComposition: composition });
+    await f.runtime.reviewCapabilities({ extensionId: 'example.b', expectedRevision: (await f.runtime.catalog.snapshot()).revision,
+      decisions: [{ capability: 'example.reviewed', realm: 'host', granted: false }] });
+    await assert.rejects(restore(), { name: 'HostCompositionRestoreError', reason: 'grants_changed', extensionId: 'example.b' });
+    await f.runtime.setEnabled('example.b', false, (await f.runtime.catalog.snapshot()).revision);
+    await assert.rejects(restore(), { name: 'HostCompositionRestoreError', reason: 'extension_disabled', extensionId: 'example.b' });
+    await f.runtime.removeExtension({ extensionId: 'example.b', expectedRevision: (await f.runtime.catalog.snapshot()).revision, deleteData: false });
+    await assert.rejects(restore(), { name: 'HostCompositionRestoreError', reason: 'extension_missing', extensionId: 'example.b' });
+    assert(!f.runtime.services.getSnapshot().providers.some(provider => provider.extensionId === 'example.c'),
+      'an available alternative never replaces a revoked or missing original dependency');
+  } finally { original?.release(); await f.close(); }
 });
 
 test('selected dependency uses the original whole-rule allowFallback result', { timeout: 30_000 }, async () => {

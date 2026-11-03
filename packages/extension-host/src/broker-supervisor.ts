@@ -28,7 +28,7 @@ import {
   canonicalServiceComposition,
 } from "@varin/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
-import { ExtensionCatalogStaleStateError } from "./errors.js";
+import { ExtensionCatalogStaleStateError, ExtensionStorageError } from "./errors.js";
 import type { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
 import { NativeHostTransport } from "./native-host-transport.js";
@@ -1110,10 +1110,10 @@ export class BrokeredHostSupervisor {
           }
         };
         validate();
-        const committed: BrokeredHostInstance[] = [];
+        let publicationId: string | undefined;
         let catalogCommitted = false;
         try {
-          for (const instance of group.instances) { await this.#assertCurrent(instance); await this.#commitInstanceStorage(instance); committed.push(instance); }
+          for (const instance of group.instances) await this.#assertCurrent(instance);
           for (const root of group.roots) {
             const fresh = await this.#plan(root.plan.root.node.extensionId, root.plan.scope, { extensionId, integrity });
             if (canonicalServiceComposition(fresh.composition) !== canonicalServiceComposition(root.plan.composition)) throw new Error('Host candidate composition changed');
@@ -1123,8 +1123,24 @@ export class BrokeredHostSupervisor {
           const handoff = current?.restartHandoffs?.at(-1);
           const restartCommit = handoff && ['preparing', 'waiting-surface'].includes(handoff.status)
             ? { id: handoff.id, processId: HOST_PROCESS_ID, ...(surfaceReadiness ? { surfaceReadiness } : {}) } : undefined;
-          const selected = await this.#packages.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision }, validate, restartCommit);
-          catalogCommitted = true;
+          const storageSessions = group.instances.flatMap(instance => [...instance.storages.values()].filter(session => session.transaction !== null));
+          const commitSelection = async (id?: string, snapshots: readonly VarinExtensionStorageSnapshot[] = []) => {
+            publicationId = id;
+            storageSessions.forEach((session, index) => { session.snapshot = snapshots[index] as VarinExtensionStorageSnapshot; });
+            for (const instance of group.instances) {
+              if ([...instance.storages.values()].some(session => session.transaction !== null)) await this.#syncInstanceStorage(instance);
+            }
+            const selected = await this.#packages.selectCandidate({ extensionId, candidateIntegrity: integrity, expectedRevision }, validate, restartCommit, id);
+            catalogCommitted = true;
+            return selected;
+          };
+          // Pure code/provider updates have no storage decision to journal or lock.
+          const selected = storageSessions.length === 0 ? await commitSelection() : await this.#storage.publishPrepared(
+            storageSessions.map(session => session.transaction as ExtensionStorageMigrationTransaction),
+            { extensionId, candidateIntegrity: integrity, ...(current?.integrity ? { previousIntegrity: current.integrity } : {}) },
+            commitSelection,
+            (publication, id) => this.#catalog.store.resolveStoragePublication(publication, id),
+          );
           validate(false);
           for (const instance of group.instances) {
             instance.slot = 'selected'; instance.published = true;
@@ -1147,8 +1163,13 @@ export class BrokeredHostSupervisor {
           await this.#reportOwner(extensionId);
           return selected;
         } catch (error) {
+          if (!catalogCommitted && publicationId) {
+            catalogCommitted = await this.#catalog.store.resolveStoragePublication(
+              { extensionId, candidateIntegrity: integrity, ...(current?.integrity ? { previousIntegrity: current.integrity } : {}) }, publicationId,
+            ) === "committed";
+          }
           if (!catalogCommitted) {
-            for (const instance of committed.reverse()) await this.#rollbackInstanceStorage(instance);
+            for (const instance of group.instances) await this.#rollbackInstanceStorage(instance);
             const handoff = current?.restartHandoffs?.at(-1);
             if (handoff && ['preparing', 'waiting-surface'].includes(handoff.status)) await this.#failRestartHandoff(extensionId, handoff.id, 'restart_publication_failed', error);
           }
@@ -1507,7 +1528,11 @@ export class BrokeredHostSupervisor {
       const request = parseVarinExtensionStorageOpenRequest(params);
       const session = await this.#openStorageSession(owner, request);
       if (session.phase !== "active") return asJsonValue(session.snapshot);
-      session.snapshot = await this.#storage.read(session.address);
+      const snapshot = await this.#storage.read(session.address);
+      if (snapshot.exists && snapshot.document.schemaVersion !== session.snapshot.document.schemaVersion) {
+        throw new ExtensionStorageError("storage_schema_changed", `Extension storage schema changed from ${session.snapshot.document.schemaVersion} to ${snapshot.document.schemaVersion}; this original storage client cannot read the new schema`);
+      }
+      session.snapshot = snapshot;
       return asJsonValue(session.snapshot);
     }
     if (method === "storage.update") {
@@ -1548,6 +1573,7 @@ export class BrokeredHostSupervisor {
         expectedRevision,
         session.schemaVersion,
         data,
+        session.snapshot.document.schemaVersion,
       );
       return asJsonValue(session.snapshot);
     }
@@ -1592,6 +1618,18 @@ export class BrokeredHostSupervisor {
       scope: requestValue.scope,
     };
     const snapshot = await this.#storage.read(address);
+    if (phase === "active" && snapshot.exists && requestValue.schemaVersion !== undefined
+      && requestValue.schemaVersion !== snapshot.document.schemaVersion) {
+      const instance = this.#instance(owner);
+      try {
+        if (!instance || instance.retiring) throw new Error("The original storage owner has retired");
+        // Catalog selection may already be committed while the supervisor is
+        // still publishing/retiring live owners. A lifecycle flag alone is late.
+        await this.#assertCurrent(instance);
+      } catch (cause) {
+        throw new ExtensionStorageError("storage_schema_changed", `Extension storage schema changed from ${requestValue.schemaVersion} to ${snapshot.document.schemaVersion}; this original generation cannot open the new schema`, { cause });
+      }
+    }
     const session: BrokerStorageSession = {
       address,
       phase,

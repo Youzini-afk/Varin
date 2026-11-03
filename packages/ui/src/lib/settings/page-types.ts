@@ -16,7 +16,7 @@ export interface SettingsRuntimeContext {
 export interface SettingsPageMeta {
   slug: SettingsPageSlug;
   title: string;
-  titleKey: I18nKey;
+  titleKey?: I18nKey;
   group: SettingsPageGroup;
   kind: 'single' | 'split';
   icon: IconName | 'mcp' | null;

@@ -33,6 +33,7 @@ export interface LoadedExtensionProject {
 }
 
 export interface CheckResult {
+  authorDiagnostics: import("@varin/extension-contract").VarinSurfaceAuthorDiagnostic[];
   project: LoadedExtensionProject;
   referencedFiles: string[];
   missingFiles: string[];

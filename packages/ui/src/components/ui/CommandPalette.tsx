@@ -160,7 +160,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
         const titleKey = isMobile && registration.meta.mobileTitleKey
           ? registration.meta.mobileTitleKey
           : registration.meta.titleKey;
-        const title = t(titleKey);
+        const title = titleKey ? t(titleKey) : registration.meta.title ?? registration.meta.commandId;
         return {
           id: registration.meta.commandId,
           title,
@@ -200,7 +200,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
       .map((page) => {
         const iconName = getSettingsNavIcon(page.slug) ?? 'settings-3';
         const keywords = (page.keywords ?? []).join(' ');
-        const title = t(page.titleKey);
+        const title = page.titleKey ? t(page.titleKey) : page.title;
         return {
           id: `settings:${page.slug}`,
           title,

@@ -27,6 +27,7 @@ import {
   type VarinExtensionCapabilityReviewRequest,
   type VarinExtensionCandidatePreparationResult,
   type VarinExtensionCatalogSnapshot,
+  type VarinWorkbenchProfileDocument,
   type VarinExtensionHostStateSnapshot,
   type VarinExtensionHostStateWaitRequest,
   type VarinExtensionLocalSourceReloadRequest,
@@ -174,6 +175,7 @@ export class ApplicationExtensionRuntime {
 
   async start(): Promise<VarinExtensionHostStateSnapshot> {
     await this.#mutate(async () => {
+      await this.storage.recoverPublications((publication, id) => this.catalog.store.resolveStoragePublication(publication, id));
       await this.catalog.reconcileBuiltins(
         VARIN_BUILTIN_EXTENSION_DEFINITIONS,
         VARIN_BUILTIN_EXTENSION_PREFIX,
@@ -370,7 +372,8 @@ export class ApplicationExtensionRuntime {
       if (entry.desired.enabled) throw new Error(`Disable the Varin extension before removing it: ${request.extensionId}`);
       try {
         let removed: VarinExtensionCatalogSnapshot | undefined;
-        await this.supervisor.deactivateExtension(request.extensionId, async () => {
+        await this.supervisor.deactivateExtension(request.extensionId, () => this.storage.recoverPublications(
+          (publication, id) => this.catalog.store.resolveStoragePublication(publication, id), async () => {
           removed = await this.catalog.remove(request.extensionId, request.expectedRevision);
           if (request.deleteData) {
             try {
@@ -383,7 +386,7 @@ export class ApplicationExtensionRuntime {
               );
             }
           }
-        });
+        }));
         if (!removed) throw new Error("Extension removal did not complete");
         await this.supervisor.reconcile(removed);
         return removed;
@@ -845,12 +848,20 @@ export class ApplicationExtensionRuntime {
   ): Promise<VarinExtensionCatalogSnapshot> {
     const request = parseVarinWorkbenchProfileApplyRequest(requestValue);
     return this.#mutateCatalog(async () => {
-      const workbench = await this.workbench.read();
-      if (!workbench.authoritative) throw new Error("Cannot apply a stale workbench profile");
-      const profile = workbench.document.profiles.find((candidate) => candidate.id === request.profileId);
-      if (!profile) throw new Error(`Workbench profile is not installed: ${request.profileId}`);
-      if (!profile.extensionIds) throw new Error(`Workbench profile does not define an extension set: ${request.profileId}`);
-      const snapshot = await this.catalog.setEnabledSet(profile.extensionIds, request.expectedCatalogRevision);
+      const apply = (document: VarinWorkbenchProfileDocument) => {
+        const profile = document.profiles.find((candidate) => candidate.id === request.profileId);
+        if (!profile) throw new Error(`Workbench profile is not installed: ${request.profileId}`);
+        if (!profile.extensionIds) throw new Error(`Workbench profile does not define an extension set: ${request.profileId}`);
+        return this.catalog.setEnabledSet(profile.extensionIds, request.expectedCatalogRevision);
+      };
+      const snapshot = request.expectedWorkbenchRevision === undefined
+        ? await (async () => {
+          const workbench = await this.workbench.read();
+          if (!workbench.authoritative) throw new Error("Cannot apply a stale workbench profile");
+          return apply(workbench.document);
+        })()
+        : await this.workbench.withRevision(request.expectedWorkbenchRevision, apply);
+      // Activation and retirement must never hold the profile document's read lease.
       await this.supervisor.reconcile(snapshot);
       return snapshot;
     });

@@ -1,3 +1,4 @@
+import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import { ChatViewedImages } from './ChatViewedImages';
 import { ChatContextNotice } from './ChatContextNotice';
 import type { ContextPhase } from '@/lib/contextPresentation';
@@ -380,7 +381,7 @@ const ChatToolCard: React.FC<{
     cwd: string;
     execution?: ChatToolExecutionState;
     result?: ChatToolResultMessage;
-  }>('tool-renderer', 'chat.timeline.tools', !preview);
+  }>('tool-renderer', VARIN_CONVERSATION_SLOTS.tools, !preview);
   const sessionId = React.useContext(TimelineSessionContext);
   const inFileTray = React.useContext(FileChangeTrayContext);
   const conversation = useOptionalConversationPresentation();
@@ -1047,7 +1048,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
     cwd: string;
     entry: ChatSessionEntry;
     sessionId: string;
-  }>('message-renderer', 'chat.timeline.entries', !preview && !extensionPresentation);
+  }>('message-renderer', VARIN_CONVERSATION_SLOTS.messages, !preview && !extensionPresentation);
   const previousProjection = React.useRef<ReturnType<typeof projectChatTimeline> | undefined>(undefined);
   const projection = React.useMemo(
     () => projectChatTimeline(entries, liveAssistant, undefined, previousProjection.current),
