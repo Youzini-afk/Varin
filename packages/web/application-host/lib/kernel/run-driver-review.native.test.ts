@@ -177,7 +177,9 @@ it('installed public driver overlaps real model requests with native file work a
       const request = await readContent(f.root, step.request.content_object) as { view: { origin: { kind: string } } };
       expect(request.view.origin.kind).toBe('driver');
     }
-    expect(db.prepare('SELECT count(*) AS count FROM policy_actions WHERE run_id=?').get(submitted.run_id)).toEqual({ count: 0 });
+    // Policy actions are original Operations, not a separate Catalog table. The only
+    // Operation here is the actual file read; no default-loop action may be hidden behind it.
+    expect(db.prepare('SELECT id FROM operations WHERE run_id=?').all(submitted.run_id)).toEqual([{ id: operationId }]);
   } finally { db.close(); }
   expect(events.some(event => event.kind === 'driver.tool_selected')).toBe(true);
 });
