@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { inspectPortableExecutable, stageWindowsBootstrap, windowsArchives, windowsBundleResources, installBootstrapForBundle } from './windows-bootstrap.mjs';
+import { inspectPortableExecutable, stageWindowsBootstrap, windowsArchives, windowsBundleResources, installBootstrapForBundle, resolveCefDirectory, discoverWindowsCef, cefVersion } from './windows-bootstrap.mjs';
 
 function pe({ machine = 0x8664, dll = false, exportName = 'RunWinMain' } = {}) {
   const bytes = Buffer.alloc(2048);
@@ -48,6 +48,28 @@ for (const architecture of ['x64', 'arm64']) test(`stages matching ${architectur
   assert.equal(resources[output.executable], undefined);
   await installBootstrapForBundle(output.directory, input.targetDirectory);
   assert.deepEqual(await fs.readFile(path.join(input.targetDirectory, 'varin.exe')), await fs.readFile(output.executable));
+});
+test('Windows SDK discovery uses the shared pin and bypasses stale cache generations', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-cef-cache-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const lock = JSON.parse(await fs.readFile(new URL('./cef-runtime.lock.json', import.meta.url), 'utf8'));
+  for (const architecture of ['x64', 'arm64']) {
+    const pin = lock.targets[`win32-${architecture}`];
+    const receipt = { name: `cef_binary_${lock.version}_${pin.upstream}_minimal.tar.bz2`, sha1: pin.sha1, type: 'minimal' };
+    const targetDirectory = path.join(root, architecture);
+    const cache = path.join(targetDirectory, 'build', 'cef-dll-sys-fixture', 'out');
+    const sdk = path.join(cache, cefVersion.split('+')[0], `cef_windows_${architecture === 'x64' ? 'x86_64' : 'aarch64'}`);
+    await fs.mkdir(sdk, { recursive: true });
+    await fs.writeFile(path.join(cache, 'archive.json'), JSON.stringify({ ...receipt, name: receipt.name.replace(lock.version, '154.0.34+g14c5a08+chromium-154.0.8037.98') }));
+    await assert.rejects(resolveCefDirectory(cache, architecture), /pinned/);
+    await fs.writeFile(path.join(sdk, 'archive.json'), JSON.stringify({ ...receipt, type: 'standard' }));
+    await assert.rejects(resolveCefDirectory(cache, architecture), /pinned/);
+    await fs.writeFile(path.join(sdk, 'archive.json'), JSON.stringify(receipt));
+    assert.equal(await resolveCefDirectory(cache, architecture), sdk);
+    assert.equal(await discoverWindowsCef({ targetDirectory, architecture }), sdk);
+    assert.equal(windowsArchives[architecture].name, receipt.name);
+    assert.equal(windowsArchives[architecture].sha1, receipt.sha1);
+  }
 });
 test('rejects a DLL without the genuine bootstrap entry rather than start without sandbox', async t => {
   const input = await fixture(t);

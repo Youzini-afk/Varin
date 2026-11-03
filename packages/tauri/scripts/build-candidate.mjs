@@ -18,7 +18,7 @@ export async function discoverCef(root,platform,architecture){
   const pin=lock.targets[`${platform}-${architecture}`];if(!pin)throw new Error('Unsupported CEF target');
   const name=`cef_binary_${lock.version}_${pin.upstream}_minimal.tar.bz2`;
   const suffix=`cef_${platform==='win32'?'windows':platform==='darwin'?'macos':'linux'}_${architecture==='x64'?'x86_64':'aarch64'}`;
-  for(const candidate of [root,path.join(root,'154.0.34',suffix),path.join(root,suffix),path.join(root,name.replace('.tar.bz2',''))]){
+  for(const candidate of [root,path.join(root,lock.version.split('+')[0],suffix),path.join(root,suffix),path.join(root,name.replace('.tar.bz2',''))]){
     const receipt=await fs.readFile(path.join(candidate,'archive.json'),'utf8').then(JSON.parse,error=>{if(error.code==='ENOENT')return null;throw error;});
     if(receipt&&receipt.name===name&&receipt.sha1===pin.sha1&&receipt.type==='minimal')return candidate;
   }

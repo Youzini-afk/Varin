@@ -30,6 +30,28 @@ test('candidate discovery accepts only the official target/version receipt', asy
   await fs.writeFile(path.join(root,'archive.json'),JSON.stringify({name:'different',type:'minimal',sha1:'0'.repeat(40)}));
   await assert.rejects(discoverCef(root,'linux','x64'),/receipt/);
 });
+test('upgraded SDK discovery follows the pinned versioned cache and rejects old or non-minimal SDKs', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-cef-upgrade-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const lock = JSON.parse(await fs.readFile(new URL('./cef-runtime.lock.json', import.meta.url), 'utf8'));
+  for (const [target, pin] of Object.entries(lock.targets)) {
+    const [platform, architecture] = target.split('-');
+    const receipt = { name: `cef_binary_${lock.version}_${pin.upstream}_minimal.tar.bz2`, type: 'minimal', sha1: pin.sha1 };
+    const cache = path.join(root, target);
+    const suffix = `cef_${platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux'}_${architecture === 'x64' ? 'x86_64' : 'aarch64'}`;
+    const sdk = path.join(cache, lock.version.split('+')[0], suffix);
+    await fs.mkdir(sdk, { recursive: true });
+    // A stale root receipt must not mask download-cef's new versioned generation.
+    await fs.writeFile(path.join(cache, 'archive.json'), JSON.stringify({ ...receipt, name: receipt.name.replace(lock.version, '154.0.34+g14c5a08+chromium-154.0.8037.98') }));
+    await assert.rejects(discoverCef(cache, platform, architecture), /receipt/);
+    await fs.writeFile(path.join(sdk, 'archive.json'), JSON.stringify({ ...receipt, type: 'standard' }));
+    await assert.rejects(discoverCef(cache, platform, architecture), /receipt/);
+    await fs.writeFile(path.join(sdk, 'archive.json'), JSON.stringify({ ...receipt, sha1: '0'.repeat(40) }));
+    await assert.rejects(discoverCef(cache, platform, architecture), /receipt/);
+    await fs.writeFile(path.join(sdk, 'archive.json'), JSON.stringify(receipt));
+    assert.equal(await discoverCef(cache, platform, architecture), sdk);
+  }
+});
 test('engine receipts hash actual bytes and permit only contained framework links', {skip:process.platform==='win32'}, async t => {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-engine-inventory-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const dir=path.join(root,'app');await fs.mkdir(path.join(dir,'runtime'),{recursive:true});

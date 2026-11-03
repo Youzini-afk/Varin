@@ -66,14 +66,14 @@ harness = false
 version = "0.22"
 
 [dependencies.cef]
-version = "=154.5.0"
+version = "=156.3.0"
 features = [
     "build-util",
     "linux-x11",
 ]
 
 [dependencies.cef-dll-sys]
-version = "=154.5.0"
+version = "=156.3.0"
 default-features = false
 
 [dependencies.dioxus-debug-cell]

@@ -8,7 +8,7 @@
 - UI 继续使用 `application-client` 的 HTTP、观察与 desktop 合同。只有 `src/native.ts` 导入 Tauri renderer API。每个工作台、Mini Chat 保留自己的 Host 与凭据。
 - 主界面、Browser Use、匿名网页渲染使用不同 CEF context。任意网站不接收 Tauri IPC、Host token 或桌面命令；桌宠装饰层也没有业务桥。
 - Browser Use 的自动化与用户介入是同一个原生页面，不通过截图或 iframe 冒充嵌入。页面关闭、下载取消、网络取消、更新退出都等待原操作或进程的真实回执。
-- 统一 CEF 为 `154.0.34` / Chromium `154.0.8037.98`，Rust binding `154.5.0+154.0.34`；Tauri `3.0.0-alpha.5`、CEF runtime `3.0.0-alpha.6`。补丁来源和范围在 `src-tauri/vendor/tauri-runtime-cef/VARIN-PATCH.md`。固定 SDK 摘要在 `scripts/cef-runtime.lock.json`。
+- 统一 CEF 为 `156.0.15` / Chromium `156.0.8078.80`，Rust binding `156.3.0+156.0.15`；Tauri `3.0.0-alpha.5`、CEF runtime `3.0.0-alpha.6`。补丁来源和范围在 `src-tauri/vendor/tauri-runtime-cef/VARIN-PATCH.md`。固定 SDK 摘要在 `scripts/cef-runtime.lock.json`。
 - 沙箱必须开启，远程调试端口关闭，系统 secret storage 不降级。Windows 使用官方 CEF sandbox bootstrap 与真实 broker；Linux 不添加 `--no-sandbox`，不全局改变 user namespace 或 AppArmor 策略。
 
 ## 开发与验证

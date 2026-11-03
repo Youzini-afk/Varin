@@ -15,10 +15,10 @@ CEF cache for both Cargo and staging, not an installed system Chrome.
 
 ## Fixed upstream contract
 
-- cef-rs: `cef 154.5.0+154.0.34`, `src/build_util/win/mod.rs`.
-- CEF: `154.0.34+g14c5a08+chromium-154.0.8037.98` minimal distributions.
-- x64 archive SHA-1: `be54bbaf3222191dec59ffd9c9ec7e8a7f44a26d`.
-- arm64 archive SHA-1: `09c6b6807da289b18704bc6d66f8c24e13562b6d`.
+- cef-rs: `cef 156.3.0+156.0.15`, `src/build_util/win/mod.rs`.
+- CEF: `156.0.15+gcf671c0+chromium-156.0.8078.80` minimal distributions.
+- x64 archive SHA-1: `b690e035689ee20ba9d2500ac8953815bc7ed46a`.
+- arm64 archive SHA-1: `446515cfaed802200749083ea64f8718e885c91f`.
 
 The official `build_util::win::build_bundle(app_path, executable_name, release)`
 invokes `cargo build -p executable_name --lib` and then
@@ -82,6 +82,6 @@ CEF's `tests/cefsimple/win/compatibility.manifest`. The bundled CEF SDK's own
 `LICENSE.txt` and `CREDITS.html` are mandatory staging inputs and are shipped.
 
 Official references:
-https://github.com/tauri-apps/cef-rs/blob/dev/cef/src/build_util/win/mod.rs
-https://github.com/tauri-apps/cef-rs/blob/dev/examples/cefsimple/src/win.rs
+https://github.com/tauri-apps/cef-rs/blob/224a785c7b41758b51821cbb7395ea57ba493a63/cef/src/build_util/win/mod.rs
+https://github.com/tauri-apps/cef-rs/blob/224a785c7b41758b51821cbb7395ea57ba493a63/examples/cefsimple/src/win.rs
 https://github.com/tauri-apps/tauri/tree/tauri-v3.0.0-alpha.5/crates/tauri-cli

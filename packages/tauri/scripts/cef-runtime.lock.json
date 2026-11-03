@@ -1,19 +1,19 @@
 {
   "schema": 1,
-  "version": "154.0.34+g14c5a08+chromium-154.0.8037.98",
+  "version": "156.0.15+gcf671c0+chromium-156.0.8078.80",
   "source": "https://cef-builds.spotifycdn.com/index.json",
   "license": {
     "file": "../licenses/CEF-LICENSE.txt",
     "sha256": "058c3827ffb827ff3edda471ae7e1bb1d1aa5931985f0126043ccd33409e792f",
-    "sourceArchive": "linux-x64",
-    "archivePath": "LICENSE.txt"
+    "archivePath": "LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/chromiumembedded/cef/cf671c072925b27823a61181152f4f288e8e4306/LICENSE.txt"
   },
   "targets": {
-    "linux-x64": {"upstream": "linux64", "sha1": "15c91ad767097217b2e82ba8b933fe30b134be69"},
-    "linux-arm64": {"upstream": "linuxarm64", "sha1": "fa85793519eef199e6b6fa8cc8d6f0eb45c6dac2"},
-    "darwin-x64": {"upstream": "macosx64", "sha1": "51d90349e24360b8e0daecc2d026ad150c620db5"},
-    "darwin-arm64": {"upstream": "macosarm64", "sha1": "b7081f6609e5edccf07be96b5d7977329fbe1bdf"},
-    "win32-x64": {"upstream": "windows64", "sha1": "be54bbaf3222191dec59ffd9c9ec7e8a7f44a26d"},
-    "win32-arm64": {"upstream": "windowsarm64", "sha1": "09c6b6807da289b18704bc6d66f8c24e13562b6d"}
+    "linux-x64": {"upstream": "linux64", "sha1": "09235427222e026a4f34399742df27c5d98a4f8a"},
+    "linux-arm64": {"upstream": "linuxarm64", "sha1": "85602db8e813ad824b45ae54218476aa3d91d561"},
+    "darwin-x64": {"upstream": "macosx64", "sha1": "13756e3029307720fe00898d54aef8a64c9b4043"},
+    "darwin-arm64": {"upstream": "macosarm64", "sha1": "bcdd1877edb300b0fb91d8f71c0b14aae256cd0f"},
+    "win32-x64": {"upstream": "windows64", "sha1": "b690e035689ee20ba9d2500ac8953815bc7ed46a"},
+    "win32-arm64": {"upstream": "windowsarm64", "sha1": "446515cfaed802200749083ea64f8718e885c91f"}
   }
 }

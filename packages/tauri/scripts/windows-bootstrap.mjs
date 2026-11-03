@@ -1,5 +1,5 @@
 /**
- * The official cef-rs 154.5.0 sandbox bundle layout, with our Cargo lib name
+ * The official cef-rs 156.3.0 sandbox bundle layout, with our Cargo lib name
  * explicitly mapped to the bootstrap executable's stem. No unsandboxed fallback.
  * Upstream: cef/src/build_util/win/mod.rs (MIT OR Apache-2.0).
  */
@@ -9,11 +9,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inventory, relativePath, sha256 } from './runtime-manifest.mjs';
 
-export const cefVersion = '154.0.34+g14c5a08+chromium-154.0.8037.98';
-export const windowsArchives = Object.freeze({
-  x64: { name: `cef_binary_${cefVersion}_windows64_minimal.tar.bz2`, sha1: 'be54bbaf3222191dec59ffd9c9ec7e8a7f44a26d', machine: 0x8664 },
-  arm64: { name: `cef_binary_${cefVersion}_windowsarm64_minimal.tar.bz2`, sha1: '09c6b6807da289b18704bc6d66f8c24e13562b6d', machine: 0xaa64 },
-});
+const cefLock = JSON.parse(await fs.readFile(new URL('./cef-runtime.lock.json', import.meta.url), 'utf8'));
+export const cefVersion = cefLock.version;
+export const windowsArchives = Object.freeze(Object.fromEntries(
+  [['x64', 0x8664], ['arm64', 0xaa64]].map(([architecture, machine]) => {
+    const pin = cefLock.targets[`win32-${architecture}`];
+    return [architecture, Object.freeze({ name: `cef_binary_${cefVersion}_${pin.upstream}_minimal.tar.bz2`, sha1: pin.sha1, machine })];
+  }),
+));
 
 const receiptName = 'cef-runtime-manifest.json';
 
@@ -73,10 +76,15 @@ export async function inspectPortableExecutable(file) {
 
 export async function resolveCefDirectory(configured, architecture) {
   if (!configured) throw new Error('CEF_PATH is required for the sandboxed Windows bootstrap stage');
+  const lock = windowsArchives[architecture];
+  if (!lock) throw new Error('Windows CEF supports only x64 and arm64');
   const root = path.resolve(configured);
-  const candidates = [root, path.join(root, '154.0.34', `cef_windows_${architecture === 'x64' ? 'x86_64' : 'aarch64'}`), path.join(root, `cef_windows_${architecture === 'x64' ? 'x86_64' : 'aarch64'}`)];
+  const candidates = [root, path.join(root, cefVersion.split('+')[0], `cef_windows_${architecture === 'x64' ? 'x86_64' : 'aarch64'}`), path.join(root, `cef_windows_${architecture === 'x64' ? 'x86_64' : 'aarch64'}`)];
   for (const candidate of candidates) {
-    try { if ((await fs.stat(path.join(candidate, 'archive.json'))).isFile()) return candidate; }
+    try {
+      const receipt = JSON.parse(await fs.readFile(path.join(candidate, 'archive.json'), 'utf8'));
+      if (receipt.name === lock.name && receipt.sha1 === lock.sha1 && receipt.type === 'minimal') return candidate;
+    }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
   throw new Error('CEF_PATH has no pinned download-cef archive receipt');

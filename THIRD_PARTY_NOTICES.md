@@ -14,7 +14,7 @@ are preserved in `packages/tauri/src-tauri/vendor/tauri-runtime-cef` and shipped
 with the native runtime as `legal/tauri-runtime-cef-LICENSE-MIT` and
 `legal/tauri-runtime-cef-source.md`.
 
-Chromium Embedded Framework 154.0.34 and its Chromium 154.0.8037.98 runtime
+Chromium Embedded Framework 156.0.15 and its Chromium 156.0.8078.80 runtime
 remain separately licensed components. The original CEF license is pinned in
 `packages/tauri/licenses/CEF-LICENSE.txt`; its full text and the matching SDK's
 `CREDITS.html` are included with every native platform payload. The macOS bundle
