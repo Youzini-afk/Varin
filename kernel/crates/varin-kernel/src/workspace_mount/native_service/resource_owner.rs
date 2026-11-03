@@ -111,6 +111,38 @@ mod tests {
             let _ = self.0.wait();
         }
     }
+    fn run_in_isolated_process(test: &str) -> bool {
+        const ISOLATED_TEST: &str = "VARIN_RESOURCE_OWNER_ISOLATED_TEST";
+        if std::env::var(ISOLATED_TEST).as_deref() == Ok(test) {
+            println!("resource-owner-isolated:{test}");
+            return false;
+        }
+        // Another parallel test's fork/posix_spawn can inherit our flock until
+        // exec closes its descriptors. A local drop is then not the last close.
+        // Keep each lifetime scenario in its own process, with only its intended
+        // children, rather than retrying an opportunistic cleanup assertion.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("workspace_mount::native_service::resource_owner::tests::{test}"),
+                "--nocapture",
+            ])
+            .env(ISOLATED_TEST, test)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains(&format!("resource-owner-isolated:{test}")),
+            "isolated test was not selected: {test}"
+        );
+        true
+    }
     fn subprocess(mode: &str, root: &Path) -> Command {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
@@ -141,6 +173,9 @@ mod tests {
 
     #[test]
     fn constructing_owner_excludes_cleanup_in_another_process() {
+        if run_in_isolated_process("constructing_owner_excludes_cleanup_in_another_process") {
+            return;
+        }
         let root = Root::new();
         let (path, owner) = create_with(&root.0, |path| {
             assert!(
@@ -156,6 +191,9 @@ mod tests {
 
     #[test]
     fn creator_crash_releases_construction_and_resource_ownership() {
+        if run_in_isolated_process("creator_crash_releases_construction_and_resource_ownership") {
+            return;
+        }
         let root = Root::new();
         let mut process = Process(
             subprocess("construct", &root.0)
@@ -185,6 +223,9 @@ mod tests {
 
     #[test]
     fn cleanup_claim_holds_only_its_original_resource() {
+        if run_in_isolated_process("cleanup_claim_holds_only_its_original_resource") {
+            return;
+        }
         let root = Root::new();
         let (first, owner) = create(&root.0).unwrap();
         drop(owner);
