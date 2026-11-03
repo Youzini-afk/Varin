@@ -36,6 +36,8 @@ pub(crate) mod native_menu;
 #[cfg(feature = "desktop")]
 mod power;
 pub mod security;
+#[cfg(any(feature = "desktop", test))]
+mod window_registry;
 #[cfg(feature = "desktop")]
 mod service;
 pub mod settings;

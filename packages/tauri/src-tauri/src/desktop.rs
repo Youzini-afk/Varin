@@ -25,17 +25,9 @@ use tauri_runtime_cef::WebviewWindowBuilderCefExt;
 use tokio::sync::watch;
 
 type Reply = Result<Value, String>;
-struct WindowRecord {
-    mini_thread: Option<(String, String)>,
-    document_nonce: String,
-    renderer_ready: bool,
-    navigation: Vec<Value>,
-    native_ready: watch::Sender<Option<Result<bool, String>>>,
-    origin: url::Url,
-    bootstrap: Option<Value>,
-    close: Option<crate::lifecycle::CloseReceipt>,
-    cdp: Option<crate::cdp::Session>,
-}
+type WindowRecord =
+    crate::window_registry::WindowRecord<crate::lifecycle::CloseReceipt, crate::cdp::Session>;
+
 struct DesktopState {
     runtime: OnceLock<Result<RuntimePaths, String>>,
     settings: settings::Owner,
@@ -94,13 +86,7 @@ impl DesktopState {
             .windows
             .lock()
             .map_err(|_| "Window registry unavailable")?;
-        let record = windows
-            .get(webview.label())
-            .ok_or("This webview has no desktop authority")?;
-        if !crate::security::same_application_origin(&url, &record.origin) {
-            return Err("Desktop commands are unavailable for this document".into());
-        }
-        Ok(())
+        crate::window_registry::authorize(&windows, webview.label(), &url).map(|_| ())
     }
     async fn bootstrap(&self, label: &str) -> Reply {
         let mut prepared = self
@@ -1258,43 +1244,16 @@ async fn varin_invoke(
                 .await
         }
         "desktop_browser_device" => {
-            let action = string(&args, "action")?;
-            if !matches!(action.as_str(), "status" | "connect" | "disconnect") {
-                return Err("Unsupported Browser device action".into());
-            }
-            if action != "status" {
-                let host_id = string(&args, "expectedHostId")?;
-                uuid::Uuid::parse_str(&host_id)
-                    .map_err(|_| "The original Browser Host identity is invalid")?;
-            }
-            if action == "connect" && args["shareInteractiveProfile"] != true {
-                return Err(
-                    "Sharing the interactive Browser profile requires explicit consent".into(),
-                );
-            }
-            // Resolve credentials from the caller's current, authoritative window
-            // ledger. Renderer-supplied URLs, tokens and target objects never
-            // cross this boundary. Node separately authenticates the actual Host
-            // UUID; a saved connection alias is not that identity.
-            let bootstrap = state.bootstrap(webview.label()).await?;
-            let target = json!({
-                "apiBaseUrl": bootstrap["apiBaseUrl"],
-                "clientToken": bootstrap["clientToken"],
-                "requestHeaders": bootstrap["requestHeaders"],
-                "relayHostId": bootstrap["relayHostId"],
-                "connectionId": bootstrap["bootOutcome"]["hostId"]
-            });
+            crate::window_registry::validate_browser_device_args(&args)?;
+            state.bootstrap(webview.label()).await?;
+            // Select the caller's original native record, never a label, target
+            // object or credentials supplied in renderer arguments.
+            let request = {
+                let windows = state.windows.lock().map_err(|_| "Window registry unavailable")?;
+                crate::window_registry::browser_device_request(&windows, webview.label(), args)?
+            };
             let service = browser_service(&app).await?;
-            service
-                .process
-                .request(
-                    "browserInvoke",
-                    json!({
-                        "command": command, "args": args,
-                        "windowLabel": webview.label(), "trustedTarget": target
-                    }),
-                )
-                .await
+            service.process.request("browserInvoke", request).await
         }
         command if command.starts_with("desktop_browser_") || command == "desktop_web_render" => {
             let service = browser_service(&app).await?;
