@@ -1,95 +1,83 @@
 import React from 'react';
-import type { ChannelModel, ChannelTypeInfo, DiscoveredModel, ModelCatalogField } from '@varin/application-client';
+import type { ChannelModel, ChannelTypeInfo, DiscoveredModel } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ModelLogo } from '@/components/ui/ModelLogo';
 import { Icon } from '@/components/icon/Icon';
-import { useI18n, type I18nKey } from '@/lib/i18n';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ModelCommonSettings } from './ModelCommonSettings';
+import { useI18n } from '@/lib/i18n';
+import { modelCandidates } from './model-edits';
 
-interface Props {
-  models: ChannelModel[]; type: ChannelTypeInfo; candidates: DiscoveredModel[]; busy: boolean;
-  onChange(models: ChannelModel[]): void;
-  onFollow?(id: string, field?: ModelCatalogField): void;
-  onConfigure(id: string): void;
-  onDiscover(): Promise<boolean>;
-  validity(modelId: string, field: string, valid: boolean): void;
-}
-export function ModelSelection({ models, type, candidates, busy, onChange, onFollow, onConfigure, onDiscover, validity }: Props) {
+/** Shared by the new-service flow and the existing service's add-model dialog. */
+export function ModelPicker({ available, initialIds = [], busy, onConfirm, confirmLabel }: {
+  available: DiscoveredModel[]; initialIds?: string[]; busy: boolean;
+  onConfirm(entries: DiscoveredModel[]): void; confirmLabel?: string;
+}) {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const [manual, setManual] = React.useState('');
-  const [picking, setPicking] = React.useState(false);
-  const [picked, setPicked] = React.useState<Set<string>>(() => new Set());
-  const available = [...candidates, ...(type.catalog ?? []).filter(model => !candidates.some(candidate => candidate.id === model.id))]
-    .filter(candidate => !models.some(model => model.id === candidate.id));
-  const matches = (model: { id: string; name: string }) => `${model.id} ${model.name}`.toLowerCase().includes(query.toLowerCase());
-  const filtered = available.filter(matches);
-  const selected = available.filter(model => picked.has(model.id));
-  const add = (entries: DiscoveredModel[]) => {
-    const seen = new Set(models.map(model => model.id));
-    const added: ChannelModel[] = [];
-    for (const entry of entries) {
-      const id = entry.id.trim(); if (!id || seen.has(id)) continue; seen.add(id);
-      const catalog = type.catalog?.find(model => model.id === id);
-      const operations = (entry.operations ?? catalog?.operations)?.filter(operation => type.operations.includes(operation));
-      const compat = { ...(type.id === 'deepseek' ? { thinkingFormat: 'deepseek' } : type.id === 'openrouter' ? { thinkingFormat: 'openrouter' } : {}), ...catalog?.compat, ...entry.compat };
-      added.push({ ...structuredClone(catalog), ...structuredClone(entry), id, name: entry.name && entry.name !== id ? entry.name : catalog?.name || entry.name || id, enabled: true,
-        operations: operations?.length ? operations : type.operations.includes('chat') ? ['chat'] : [type.operations[0]!],
-        ...(Object.keys(compat).length ? { compat } : {}),
-        ...(entry.catalog || catalog ? { catalog: { ...catalog?.catalog, ...entry.catalog, overrides: [] } } : {}),
-      });
-    }
-    onChange([...models, ...added]); setPicked(new Set()); setManual('');
+  const [picked, setPicked] = React.useState(() => new Set(initialIds));
+  const [manualModels, setManualModels] = React.useState<DiscoveredModel[]>([]);
+  const entries = [...available, ...manualModels.filter(model => !available.some(entry => entry.id === model.id))];
+  const filtered = entries.filter(model => `${model.id} ${model.name}`.toLowerCase().includes(query.toLowerCase()));
+  const toggle = (id: string, checked: boolean) => setPicked(previous => { const next = new Set(previous); if (checked) next.add(id); else next.delete(id); return next; });
+  const addManual = () => {
+    const ids = [...new Set(manual.split(/[,\n]/).map(id => id.trim()).filter(Boolean))];
+    setManualModels(previous => [...previous, ...ids.filter(id => !previous.some(model => model.id === id)).map(id => ({ id, name: id }))]);
+    setPicked(previous => new Set([...previous, ...ids])); setManual('');
   };
-  return <section className="mt-7 border-t border-border/60 pt-6">
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="typography-ui-label">{t('settings.models.models')} <span className="ml-1 text-muted-foreground">{models.length}</span></h2>
-      <div className="flex gap-2">{type.discovery ? <Button variant="outline" size="sm" disabled={busy} onClick={() => { void onDiscover().then(ok => { if (ok) { setPicking(true); setQuery(''); } }); }}><Icon name="refresh" className={busy ? 'size-3.5 animate-spin' : 'size-3.5'} />{t('settings.models.discover')}</Button> : null}
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => { setPicking(value => !value); setQuery(''); }}><Icon name="add" className="size-3.5" />{t('settings.models.addModel')}</Button>
+  const selected = entries.filter(model => picked.has(model.id));
+  return <div className="space-y-4">
+    <Input aria-label={t('settings.models.filterModels')} placeholder={t('settings.models.filterModels')} value={query} onChange={event => setQuery(event.target.value)} />
+    {entries.length ? <>
+      <div className="flex items-center justify-between gap-3"><label className="flex items-center gap-2 typography-meta"><Checkbox ariaLabel={t('settings.models.selectAll')} checked={filtered.length > 0 && filtered.every(model => picked.has(model.id))} disabled={busy || !filtered.length} onChange={checked => setPicked(previous => { const next = new Set(previous); filtered.forEach(model => checked ? next.add(model.id) : next.delete(model.id)); return next; })} />{t('settings.models.selectAll')}</label><span className="typography-micro text-muted-foreground">{filtered.length}</span></div>
+      <div className="max-h-[40dvh] overflow-y-auto divide-y divide-border/40">
+        {filtered.map(model => <label key={model.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-3 hover:bg-interactive-hover"><Checkbox ariaLabel={model.name || model.id} checked={picked.has(model.id)} disabled={busy} onChange={checked => toggle(model.id, checked)} /><ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} /><span className="min-w-0"><span className="block truncate typography-meta">{model.name || model.id}</span>{model.name !== model.id ? <span className="block truncate typography-micro text-muted-foreground">{model.id}</span> : null}</span></label>)}
+        {!filtered.length ? <p className="py-4 typography-meta text-muted-foreground">{t('settings.models.noMatches')}</p> : null}
+      </div>
+    </> : <p className="typography-meta text-muted-foreground">{t('settings.models.manualHint')}</p>}
+    <div className="flex gap-2 border-t border-border/50 pt-4"><Input aria-label={t('settings.models.modelId')} placeholder={t('settings.models.modelIdsPlaceholder')} value={manual} disabled={busy} onChange={event => setManual(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing && manual.trim()) { event.preventDefault(); addManual(); } }} /><Button variant="outline" disabled={busy || !manual.trim()} onClick={addManual}>{t('settings.models.addModel')}</Button></div>
+    <div className="flex justify-end"><Button disabled={busy} onClick={() => onConfirm(selected)}>{confirmLabel ?? t('settings.models.addSelected')} · {selected.length}</Button></div>
+  </div>;
+}
+
+export function ModelSelection({ models, type, candidates, busy, usages, onToggle, onAdd, onConfigure, onDiscover }: {
+  models: ChannelModel[]; type: ChannelTypeInfo; candidates: DiscoveredModel[]; busy: boolean;
+  usages: Record<string, string[]>;
+  onToggle(id: string, enabled: boolean): void; onAdd(entries: DiscoveredModel[]): Promise<boolean>;
+  onConfigure(id: string): void; onDiscover(): Promise<boolean>;
+}) {
+  const { t } = useI18n();
+  const [picking, setPicking] = React.useState(false);
+  const available = modelCandidates(type, candidates).filter(candidate => !models.some(model => model.id === candidate.id));
+  const missing = models.filter(model => model.enabled && model.operations.includes('chat') && !model.description?.trim()).length;
+  return <section className="mt-8 border-t border-border/60 pt-6">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><h2 className="typography-ui-label">{t('settings.models.models')} <span className="ml-1 text-muted-foreground">{models.length}</span></h2>
+      <div className="flex gap-2">{type.discovery ? <Button variant="outline" size="sm" disabled={busy} onClick={() => { void onDiscover().then(ok => { if (ok) setPicking(true); }); }}><Icon name="refresh" className="size-3.5" />{t('settings.models.discover')}</Button> : null}
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => setPicking(true)}><Icon name="add" className="size-3.5" />{t('settings.models.addModel')}</Button>
       </div>
     </div>
-    {picking ? <div className="mb-5 rounded-xl border border-border/60 bg-muted/15 p-4">
-      <div className="mb-3 flex items-center gap-2"><Input aria-label={t('settings.models.filterModels')} placeholder={t('settings.models.filterModels')} value={query} onChange={event => setQuery(event.target.value)} />
-        <Button variant="ghost" size="sm" onClick={() => setPicking(false)}>{t('settings.models.close')}</Button></div>
-      {available.length ? <>
-        <div className="mb-2 flex items-center justify-between gap-3"><label className="flex items-center gap-2 typography-meta"><Checkbox ariaLabel={t('settings.models.selectAll')} checked={filtered.length > 0 && filtered.every(model => picked.has(model.id))} disabled={busy || !filtered.length} onChange={checked => setPicked(previous => { const next = new Set(previous); filtered.forEach(model => checked ? next.add(model.id) : next.delete(model.id)); return next; })} />{t('settings.models.selectAll')}</label><span className="typography-micro text-muted-foreground">{filtered.length}</span></div>
-        <div className="max-h-72 overflow-y-auto divide-y divide-border/40 rounded-lg border border-border/50">
-          {filtered.map(model => <label key={model.id} className="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-interactive-hover"><Checkbox ariaLabel={model.name} checked={picked.has(model.id)} disabled={busy} onChange={checked => setPicked(previous => { const next = new Set(previous); if (checked) next.add(model.id); else next.delete(model.id); return next; })} /><ModelLogo modelId={model.id} displayName={model.name} /><span className="min-w-0"><span className="block truncate typography-meta">{model.name}</span>{model.name !== model.id ? <span className="block truncate typography-micro text-muted-foreground">{model.id}</span> : null}</span></label>)}
-          {!filtered.length ? <p className="p-4 typography-meta text-muted-foreground">{t('settings.models.noMatches')}</p> : null}
-        </div>
-        <div className="mt-3 flex justify-end"><Button size="sm" disabled={busy || !selected.length} onClick={() => add(selected)}>{t('settings.models.addSelected')} · {selected.length}</Button></div>
-      </> : <p className="mb-4 typography-meta text-muted-foreground">{t('settings.models.manualHint')}</p>}
-      <div className="mt-4 flex gap-2 border-t border-border/50 pt-4"><Input aria-label={t('settings.models.modelId')} placeholder={t('settings.models.modelIdsPlaceholder')} value={manual} disabled={busy} onChange={event => setManual(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && manual.trim()) { event.preventDefault(); add(manual.split(/[,\n]/).map(id => ({ id: id.trim(), name: id.trim() }))); } }} /><Button variant="outline" disabled={busy || !manual.trim()} onClick={() => add(manual.split(/[,\n]/).map(id => ({ id: id.trim(), name: id.trim() })))}>{t('settings.models.addModel')}</Button></div>
-    </div> : null}
+    <p className="mb-3 typography-micro text-muted-foreground">{t('settings.models.instantSave')}{missing ? ` · ${t('settings.models.missingDescriptions').replace('{count}', String(missing))}` : ''}</p>
     <div className="divide-y divide-border/60">
-      {models.map(model => <Collapsible key={model.id}>
-        <div className="flex items-center gap-4 py-2">
-          <CollapsibleTrigger aria-label={model.name || model.id} disabled={busy} className="group min-w-0 flex-1 justify-start gap-3 px-0 py-3">
-            <ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} />
-            <span className="min-w-0 flex-1"><span className="block truncate typography-ui-label">{model.name || model.id}</span>{model.name && model.name !== model.id ? <span className="mt-1 block truncate typography-micro text-muted-foreground">{model.id}</span> : null}</span>
-            <span className="hidden flex-wrap justify-end gap-1 @2xl:flex">{model.input?.includes('image') ? <span className="rounded bg-muted px-2 py-1 typography-micro text-muted-foreground">{t('settings.models.imageInput')}</span> : null}{model.reasoning ? <span className="rounded bg-muted px-2 py-1 typography-micro text-muted-foreground">{t('settings.models.reasoning')}</span> : null}{model.operations.filter(operation => operation !== 'chat').map(operation => <span key={operation} className="rounded bg-muted px-2 py-1 typography-micro text-muted-foreground">{t(`settings.models.operation.${operation}`)}</span>)}</span>
-            <Icon name="arrow-down-s" className="size-4 shrink-0 text-muted-foreground transition-transform duration-(--motion-dur-snap) ease-snap group-aria-expanded:rotate-180 motion-reduce:transition-none" />
-          </CollapsibleTrigger>
-          <Switch aria-label={`${t('settings.models.enabled')}: ${model.name || model.id}`} checked={model.enabled} disabled={busy} onCheckedChange={enabled => onChange(models.map(value => value.id === model.id ? { ...value, enabled } : value))} />
-        </div>
-        <CollapsibleContent className="h-[var(--collapsible-panel-height)] transition-[height,opacity] duration-(--motion-dur-glide) ease-glide data-[starting-style]:h-0 data-[starting-style]:opacity-0 data-[ending-style]:h-0 data-[ending-style]:opacity-0 motion-reduce:transition-none">
-          <div className="mb-4 space-y-4 rounded-xl border border-border/50 bg-muted/15 p-4 @xl:ml-8 @xl:p-5">
-            {type.catalog?.some(value => value.id === model.id) ? <div className="flex flex-wrap items-center justify-between gap-2 typography-micro text-muted-foreground">
-              <span>{t(model.catalog ? 'settings.models.directoryFollowing' : 'settings.models.directoryManual')}{model.catalog?.overrides.length ? ` · ${t('settings.models.directoryOverrides')} ${model.catalog.overrides.length}` : ''}</span>
-              {!model.catalog || model.catalog.overrides.length ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => onFollow?.(model.id)}><Icon name="refresh" className="size-3.5" />{t('settings.models.followDirectory')}</Button> : null}
-              {model.catalog?.overrides.map(field => <button key={field} type="button" disabled={busy} className="rounded border border-border/50 px-2 py-1 hover:text-foreground" onClick={() => onFollow?.(model.id, field)} title={t('settings.models.followDirectory')}>
-                {t(`settings.models.${({ description: 'modelDescription', contextWindow: 'context', maxOutputTokens: 'output', input: 'imageInput', thinking: 'thinkingMode', operations: 'capabilities', decision: 'parameter.decisionApi' } as Record<string, string>)[field] ?? field}` as I18nKey)} ↺
-              </button>)}
-            </div> : null}
-            <ModelCommonSettings model={model} disabled={busy} onChange={next => onChange(models.map(value => value.id === model.id ? next : value))} validity={(field, valid) => validity(model.id, field, valid)} />
-            <div className="flex justify-end"><Button variant="ghost" size="sm" disabled={busy} onClick={() => onConfigure(model.id)}>{t('settings.models.advanced')}<Icon name="arrow-right-s" className="size-4" /></Button></div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>)}
+      {models.map(model => <div key={model.id} className="flex items-center gap-3 py-1">
+        <button type="button" aria-label={model.name || model.id} onClick={() => onConfigure(model.id)} className="group flex min-w-0 flex-1 items-start gap-3 rounded-md py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} className="mt-0.5 shrink-0" />
+          <span className="min-w-0 flex-1"><span className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><span className="typography-ui-label">{model.name || model.id}</span>{model.name !== model.id ? <span className="truncate typography-micro text-muted-foreground">{model.id}</span> : null}</span>
+            {model.description?.trim() || model.enabled && model.operations.includes('chat') ? <span className="mt-1 block truncate typography-meta text-muted-foreground">{model.description?.trim() || t('settings.models.missingDescription')}</span> : null}
+            <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 typography-micro text-muted-foreground">{model.input?.includes('image') ? <span>{t('settings.models.imageInput')}</span> : null}{model.reasoning ? <span>{t('settings.models.reasoning')}</span> : null}{model.operations.filter(operation => operation !== 'chat').map(operation => <span key={operation}>{t(`settings.models.operation.${operation}`)}</span>)}</span>
+            {usages[model.id]?.length ? <span className="mt-1.5 block typography-micro text-muted-foreground">{t('settings.models.usedFor')} {usages[model.id].join(' / ')}</span> : null}
+          </span><Icon name="arrow-right-s" className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+        </button>
+        <Switch aria-label={`${t('settings.models.enabled')}: ${model.name || model.id}`} checked={model.enabled} onCheckedChange={enabled => onToggle(model.id, enabled)} />
+      </div>)}
       {!models.length ? <p className="py-5 typography-meta text-muted-foreground">{t('settings.models.noModels')}</p> : null}
     </div>
+    <Dialog open={picking} onOpenChange={setPicking}>
+      <DialogContent className="max-w-xl"><DialogTitle>{t('settings.models.addModel')}</DialogTitle>
+        <ModelPicker available={available} busy={busy} onConfirm={entries => { void onAdd(entries).then(ok => { if (ok) setPicking(false); }); }} />
+      </DialogContent>
+    </Dialog>
   </section>;
 }

@@ -6,8 +6,10 @@ import { mergeHarnessSettings, type HarnessSettingsInput } from '@varin/protocol
 import type { ModelChannel } from '@varin/application-client';
 import { patchHarnessSettings } from './harness-settings-state';
 import { DelegationModelSelectionSettings } from './DelegationModelSelectionSettings';
+import { useUIStore } from '@/stores/useUIStore';
 
 const fixture = vi.hoisted(() => ({ channels: [] as ModelChannel[], error: null as string | null }));
+vi.mock('@/lib/settings/drafts', () => ({ requestSettingsNavigation: (proceed: () => void) => proceed() }));
 vi.mock('./ConfigurationModels', () => ({ useModelChannels: () => fixture }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/select', () => ({
@@ -77,4 +79,20 @@ test('retains an unavailable saved choice instead of replacing it, and allows di
   await toggle();
   expect(latest.delegationModelSelection).toEqual({ enabled: false, model: { providerId: 'gone', modelId: 'saved' }, thinkingLevel: 'high' });
   expect(container.querySelector<HTMLButtonElement>('[role="switch"]')!.disabled).toBe(true);
+});
+
+test('candidate list matches enabled chat models and opens the exact model description', async () => {
+  fixture.channels[0]!.models.push({ id: 'decision-only', name: 'Decision only', enabled: true, operations: ['decision'] });
+  fixture.channels.push({ ...fixture.channels[0]!, id: 'off', name: 'Off channel', enabled: false });
+  fixture.channels[0]!.models[0]!.description = 'Good at investigating unfamiliar code';
+  await render();
+  const rows = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent?.includes('First account') || button.textContent?.includes('Second account'));
+  expect(rows).toHaveLength(3);
+  expect(rows.some(button => button.textContent?.includes('Decision only'))).toBe(false);
+  expect(rows[0]!.textContent).toContain('Good at investigating unfamiliar code');
+  expect(rows[1]!.textContent).toContain('settings.models.missingDescription');
+  await act(async () => rows[2]!.click());
+  expect(useUIStore.getState().settingsPage).toBe('model-connections');
+  expect(useUIStore.getState().settingsModelFocus).toEqual({ channelId: 'two', modelId: 'chat' });
+  useUIStore.setState({ settingsModelFocus: null });
 });

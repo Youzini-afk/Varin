@@ -539,6 +539,7 @@ interface UIStore {
 
   // Settings IA (new shell)
   settingsPage: string;
+  settingsModelFocus: { channelId: string; modelId: string } | null;
   settingsHasOpenedOnce: boolean;
   settingsProjectsSelectedId: string | null;
   settingsRemoteInstancesSelectedId: string | null;
@@ -705,6 +706,7 @@ interface UIStore {
   applyTheme: () => void;
   setSidebarSection: (section: SidebarSection) => void;
   setSettingsPage: (slug: string) => void;
+  setSettingsModelFocus: (focus: { channelId: string; modelId: string } | null) => void;
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
@@ -861,6 +863,7 @@ export const useUIStore = create<UIStore>()(
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
         settingsPage: 'home',
+        settingsModelFocus: null,
         settingsHasOpenedOnce: false,
         settingsProjectsSelectedId: null,
         settingsRemoteInstancesSelectedId: null,
@@ -1602,6 +1605,7 @@ export const useUIStore = create<UIStore>()(
         setSettingsPage: (slug) => {
           set({ settingsPage: slug });
         },
+        setSettingsModelFocus: (focus) => set({ settingsModelFocus: focus }),
 
         setSettingsProjectsSelectedId: (projectId) => {
           set({ settingsProjectsSelectedId: projectId });

@@ -3,6 +3,7 @@ import { accountSignInProviders } from './account-sign-in';
 import type { ModelChannel, ChannelTypeInfo, ModelConnectionOptions, ConnectionAuthentication, AuthorizationState } from '@varin/application-client';
 import type { JsonValue } from '@varin/protocol';
 import { SettingsSection, SettingsFieldRow } from '../shared/SettingsSection';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { AuthorizationPanel } from '../shared/AuthorizationPanel';
 import { JsonObjectField } from '../shared/JsonObjectField';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useI18n } from '@/lib/i18n';
 
 interface Props {
-  draft: ModelChannel; type: ChannelTypeInfo; busy: boolean; advanced: boolean; secret: string;
+  draft: ModelChannel; type: ChannelTypeInfo; busy: boolean; secret: string;
   authorization: AuthorizationState | null;
   edit(patch: Partial<ModelChannel>): void;
   editConnection(patch: Partial<ModelConnectionOptions>): void;
@@ -23,12 +24,12 @@ interface Props {
   onAuthorizationReply(value: string): Promise<void>;
   onAuthorizationCancel(): Promise<void>;
 }
-export function ConnectionSettings({ draft, type, busy, advanced, secret, authorization, edit, editConnection, validity, setSecret, cancelAuthorization, onSignIn, onSignOut, onAuthorizationReply, onAuthorizationCancel }: Props) {
+export function ConnectionSettings({ draft, type, busy, secret, authorization, edit, editConnection, validity, setSecret, cancelAuthorization, onSignIn, onSignOut, onAuthorizationReply, onAuthorizationCancel }: Props) {
   const { t } = useI18n();
   const signInProviders = accountSignInProviders(type);
   const labels: Record<string, string> = { deployment: t('settings.models.parameter.deployment'), apiVersion: t('settings.models.parameter.apiVersion'), project: t('settings.models.parameter.project'), location: t('settings.models.parameter.location'), region: t('settings.models.parameter.region') };
   return <>
-    <div hidden={advanced}>
+    <div>
       <SettingsSection title={t('settings.models.connection')} divider={false}>
           <SettingsFieldRow controlClassName="w-full @xl:flex-1 @xl:max-w-xl" label={t('settings.models.name')}><Input aria-label={t('settings.models.name')} value={draft.name} disabled={busy} onChange={event => edit({ name: event.target.value })} /></SettingsFieldRow>
           <SettingsFieldRow controlClassName="w-full @xl:flex-1 @xl:max-w-xl" label={t('settings.models.endpoint')}><Input aria-label={t('settings.models.endpoint')} value={draft.baseUrl} disabled={busy} onChange={event => edit({ baseUrl: event.target.value })} /></SettingsFieldRow>
@@ -62,9 +63,9 @@ export function ConnectionSettings({ draft, type, busy, advanced, secret, author
           </SettingsFieldRow>)}
       </SettingsSection>
     </div>
-    <div hidden={!advanced}>
-      <SettingsSection title={t('settings.models.advanced')} divider={false}>
-          <details className="space-y-3"><summary className="cursor-pointer typography-meta">{t('settings.models.network')}</summary>
+    <div>
+      <SettingsDisclosure title={t('settings.models.advanced')}>
+          <div className="space-y-3">
             <SettingsFieldRow controlClassName="w-full @xl:flex-1 @xl:max-w-xl" label={t('settings.models.proxy')}><Select value={draft.connection?.proxy?.mode ?? 'host'} disabled={busy} onValueChange={mode => editConnection({ proxy: mode === 'host' ? undefined : mode === 'direct' ? { mode } : { mode: 'proxy', url: '' } })}>
               <SelectTrigger size="settings" aria-label={t('settings.models.proxy')}><SelectValue /></SelectTrigger><SelectContent>
                 <SelectItem value="host">{t('settings.models.proxyHost')}</SelectItem><SelectItem value="direct">{t('settings.models.proxyDirect')}</SelectItem><SelectItem value="proxy">{t('settings.models.proxyCustom')}</SelectItem>
@@ -81,9 +82,9 @@ export function ConnectionSettings({ draft, type, busy, advanced, secret, author
               if (event.target.value) paths[operation] = event.target.value; else delete paths[operation];
               editConnection({ paths: Object.keys(paths).length ? paths : undefined });
             }} /></SettingsFieldRow>)}
-          </details>
-          <details><summary className="cursor-pointer typography-meta">{t('settings.models.parameters')}</summary><JsonObjectField value={draft.parameters} label={t('settings.models.parameters')} disabled={busy} onValidityChange={valid => validity('channel', valid)} onChange={parameters => edit({ parameters: parameters ?? {} })} /></details>
-      </SettingsSection>
+          </div>
+          <SettingsDisclosure title={t('settings.models.parameters')}><JsonObjectField value={draft.parameters} label={t('settings.models.parameters')} disabled={busy} onValidityChange={valid => validity('channel', valid)} onChange={parameters => edit({ parameters: parameters ?? {} })} /></SettingsDisclosure>
+      </SettingsDisclosure>
     </div>
   </>;
 }

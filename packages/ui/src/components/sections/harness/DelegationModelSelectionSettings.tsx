@@ -10,6 +10,8 @@ import { ModelThinkingSelect } from '../shared/ModelThinkingSelect';
 import { useModelChannels } from './ConfigurationModels';
 import { useWorkspaceHarnessSettings } from './useHarnessSettings';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
+import { useUIStore } from '@/stores/useUIStore';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 
 /** A purpose binding, not another Agent profile or conversation loop. */
 export function DelegationModelSelectionSettings({ harness, update }: HarnessSettingsPageProps) {
@@ -53,6 +55,19 @@ export function DelegationModelSelectionSettings({ harness, update }: HarnessSet
       <ModelThinkingSelect value={selection.thinkingLevel} levels={levels} label={t('settings.delegationModelSelection.thinking')}
         onChange={thinkingLevel => update({ delegationModelSelection: { thinkingLevel } })} />
     </SettingsFieldRow> : null}
+    <div className="mt-7 border-t border-border/60 pt-5">
+      <h3 className="typography-ui-label">{t('settings.delegationModelSelection.candidates')}</h3>
+      <p className="mt-1 typography-micro text-muted-foreground">{t('settings.delegationModelSelection.candidatesHint')}</p>
+      <div className="mt-3 divide-y divide-border/60">{candidates.filter(({ model }) => model.operations.includes('chat')).map(({ channel, model, key }) => <button key={key} type="button" className="flex w-full items-start gap-3 rounded-md py-4 text-left transition-colors hover:bg-interactive-hover" onClick={() => requestSettingsNavigation(() => {
+        const ui = useUIStore.getState();
+        ui.setSettingsModelFocus({ channelId: channel.id, modelId: model.id });
+        ui.setSettingsPage('model-connections');
+      })}>
+        <ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} className="mt-0.5 shrink-0" />
+        <span className="min-w-0 flex-1"><span className="block typography-meta">{model.name} <span className="text-muted-foreground">· {channel.name}</span></span><span className="mt-1 block whitespace-pre-wrap break-words typography-micro text-muted-foreground">{model.description?.trim() || t('settings.models.missingDescription')}</span></span>
+      </button>)}</div>
+      {!candidates.some(({ model }) => model.operations.includes('chat')) ? <p className="py-4 typography-meta text-muted-foreground">{t('settings.models.noModels')}</p> : null}
+    </div>
   </SettingsSection>;
 }
 
