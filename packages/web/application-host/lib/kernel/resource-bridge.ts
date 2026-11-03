@@ -58,11 +58,14 @@ export class ResourceBridge {
       try {
         result = !validQuery(query) ? resourceQueryFailure('invalid', 'Invalid resource query')
           : !owner ? resourceQueryFailure('unavailable', 'Resource owner is unavailable', query)
+            // The reply is also the native caller's drain receipt. Cancellation
+            // must wait for the original reader/transfer, not just stop observing it.
             : await owner(query, controller.signal);
       } catch {
         result = resourceQueryFailure(controller.signal.aborted ? 'cancelled' : 'unavailable',
           controller.signal.aborted ? 'Resource query was cancelled' : 'Resource owner could not read the bound view');
       }
+      if (controller.signal.aborted) result = resourceQueryFailure('cancelled', 'Resource query was cancelled');
       if (this.active.get(id) !== entry) return;
       this.active.delete(id);
       if (epoch !== this.currentEpoch()) return;
