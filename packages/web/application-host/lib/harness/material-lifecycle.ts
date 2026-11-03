@@ -18,6 +18,33 @@ const releaseRecord = async (
   );
 };
 
+// These are active request lifetimes, not durable byte ownership. Native records
+// remain the authority; deletion waits for admitted readers and writers to actually stop.
+const readers = new Map<string, { count: number; stopped: Array<() => void>; closing: number }>();
+const readerKey = (workspaceId: string, threadId: string) => JSON.stringify([workspaceId, threadId]);
+export function beginMaterialActivity(workspaceId: string, threadId: string): () => void {
+  const key = readerKey(workspaceId, threadId), state = readers.get(key) ?? { count: 0, stopped: [], closing: 0 };
+  if (state.closing) throw new Error('The original attachment recipient is being deleted');
+  state.count++; readers.set(key, state);
+  let released = false;
+  return () => {
+    if (released) return; released = true; state.count--;
+    if (!state.count) { for (const resolve of state.stopped.splice(0)) resolve(); if (!state.closing) readers.delete(key); }
+  };
+}
+export async function stopMaterialActivity(workspaceId: string, threadIds: readonly string[]): Promise<() => void> {
+  const states = threadIds.map(threadId => {
+    const key = readerKey(workspaceId, threadId), state = readers.get(key) ?? { count: 0, stopped: [], closing: 0 };
+    state.closing++; readers.set(key, state); return { key, state };
+  });
+  await Promise.all(states.map(({ state }) => state.count ? new Promise<void>(resolve => state.stopped.push(resolve)) : Promise.resolve()));
+  return () => { for (const { key, state } of states) { state.closing--; if (!state.count && !state.closing) readers.delete(key); } };
+}
+const withReadersStopped = async <T>(workspaceId: string, threadIds: readonly string[], action: () => Promise<T>): Promise<T> => {
+  const resume = await stopMaterialActivity(workspaceId, threadIds);
+  try { return await action(); } finally { resume(); }
+};
+
 const WEB_SNAPSHOT_RECORD_TYPE = "web.snapshot";
 const MATERIAL_COLLECTION_RECORD_TYPE = "material.collection";
 
@@ -51,7 +78,7 @@ const collectionIdOf = (record: RecordLike): string | undefined => {
 const bodyHashOf = (record: RecordLike): string | undefined => (
   // A PDF source record has an intentionally empty readable body. Its original
   // bytes, rather than the shared empty-string object, are its retention key.
-  (record.recordType === WEB_SNAPSHOT_RECORD_TYPE && record.references.some(reference => reference.slot === 'source')
+  ([WEB_SNAPSHOT_RECORD_TYPE, 'attachment.file'].includes(record.recordType) && record.references.some(reference => reference.slot === 'source')
     ? record.references.find((reference) => reference.slot === "source")?.objectHash
     : record.references.find((reference) => reference.slot === "body")?.objectHash)
 );
@@ -67,7 +94,7 @@ const referencedHashesOutside = async (
 ): Promise<Set<string>> => {
   const referenced = new Set<string>();
   for (const record of await context.records.list({})) {
-    if (candidateIds.has(record.recordId) || record.state === "released") continue;
+    if (candidateIds.has(record.recordId) || record.state === "released" || record.recordType === "file.object-view") continue;
     for (const reference of record.references) referenced.add(reference.objectHash);
   }
   return referenced;
@@ -99,7 +126,7 @@ export const createMaterialLifecycle = (
   const releaseThreadMaterials = async (workspaceId: string, threadIds: string | readonly string[]): Promise<void> => inKernel(
     workspaceId,
     "material-thread-release",
-    async (_store, context) => {
+    async (_store, context) => withReadersStopped(workspaceId, typeof threadIds === 'string' ? [threadIds] : threadIds, async () => {
       const deleted = new Set(typeof threadIds === 'string' ? [threadIds] : threadIds);
       const releasesGrant = (record: RecordLike): boolean => {
         if (deleted.has(record.threadId ?? '')) return true;
@@ -111,7 +138,7 @@ export const createMaterialLifecycle = (
       const records = await context.records.list({});
       const sharedCollections = sharedCollectionIds(records, record => !releasesGrant(record));
       for (const record of records) {
-        const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
+        const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE || record.recordType === 'attachment.file';
         const isCollection = record.recordType === MATERIAL_COLLECTION_RECORD_TYPE;
         const isGrant = record.recordType === "material.grant" || record.recordType === 'material.inheritance';
         if (record.state === 'released') continue;
@@ -119,7 +146,7 @@ export const createMaterialLifecycle = (
           isSnapshot
           || isCollection
           || isGrant
-          || record.recordType === 'media.resource'
+          || record.recordType === 'media.resource' || record.recordType === 'attachment.delivery'
         )) continue;
         if (isCollection && (persistedCollection(record) || sharedCollections.has(collectionIdOf(record) ?? ""))) continue;
         if (deleted.has(record.threadId ?? '') || isGrant && releasesGrant(record)) {
@@ -130,7 +157,7 @@ export const createMaterialLifecycle = (
         await releaseRecord(context, "thread-release", record);
       }
       await releaseSnapshots(context, snapshots, plain, "thread-release");
-    },
+    }),
   );
 
   return { releaseThreadMaterials };

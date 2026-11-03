@@ -1,7 +1,7 @@
 # Composer helpers and native input
 
 `components/thread/ThreadConversation.tsx` owns input delivery. `ThreadComposer` presents its draft
-through the shared CodeMirror editor, model/thinking controls, dictation, image/PDF attachments and
+through the shared CodeMirror editor, model/thinking controls, dictation, file attachments and
 editor context. This directory holds reusable attachment, text, language and editor helpers; the
 editor does not own Thread submission. Work controls live in the conversation's work overview.
 
@@ -14,7 +14,7 @@ not replace the running workspace. Settings events refresh the control across vi
 
 | Area | Owner |
 | --- | --- |
-| Draft text, images, material references, model choice and prepared source | `useThreadDraftStore` |
+| Draft text, original file Blobs, fixed attachment references, images, material references, model choice and prepared source | `useThreadDraftStore` |
 | Selected conversation and branch | `useThreadStore` and the native Thread Catalog |
 | Current Run, history, queue and model selection | `ThreadsAPI` and `ThreadProjection` |
 | Delivery observation and uncertain retry | `lib/agent-runtime/threadInputDelivery.ts` |
@@ -55,31 +55,37 @@ rejection can release the pending input. A real receipt clears only the original
 If separate Goal registration is still pending after submit acceptance, retry retains the accepted Run
 and does not submit the message again.
 
-## PDF and image attachments
+## File attachments
 
-The native picker, clipboard and drop target accept images and PDFs. Images remain explicit inline
-image inputs and require an image-capable model.
+Picker, paste and drop accept arbitrary files without a document-format allowlist. Native and external
+composers and the collaboration composer use the same in-memory selection model. Every selection keeps
+its original Blob and stable upload key; picking a file is not an upload or a delivery. The selected
+model does not prevent an image file from being handed off as a reference.
 
-Images keep stable message-local reference numbers. Thumbnails remain above the editor with a muted
-number button; clicking the thumbnail previews it, and clicking the number inserts a plain-text
-reference at the caret. Picker, paste and drop insert the reference at a tracked editor destination,
-so asynchronous decoding does not move it behind later typing. Removing a textual reference keeps the
-image; removing an image removes its references without renumbering other images or reusing its number
-in that draft. A confirmed send resets the draft's numbering. History recovery retains original numbers.
-The Host separates these numbers into `imageReferences` alongside native attachments; the Catalog retains
-them with the input and projects a numbered label immediately before each actual image for the model.
-Text-only queue edits preserve both attachments and their reference numbers.
+At send time `prepareThreadFiles` or the external owner's `prepareDraftFiles` adapter uploads original
+bytes through the authenticated binary API. The client never encodes these files into base64 JSON or
+parses their contents. A successful upload fixes a typed reference, scoped to its original Host and
+conversation. Repeated preparation reuses that receipt; another conversation or Host cannot inherit
+its authority. Preparation joins concurrent attempts for the same upload key.
 
-PDFs use `ThreadsAPI.materials.upload(identity, { filename, mimeType: 'application/pdf', data })`.
-The client encodes the original bytes as base64; the authenticated Host's document reader and
-MaterialStore retain them and return a fixed PDF snapshot. The composer keeps its `snapshotId`, filename
-and optional source hash. It does not upload into the workspace or extract PDF text in the browser.
+All selected files must prepare before submitting the message. Failure keeps text, each original
+Blob, successful references, and the failing file's error. Retrying reuses successful captures and
+the failed upload's key. The UI distinguishes selected, preparing, prepared-but-unsent, failed and
+accepted states. An uncertain delivery retains the original message key and complete selections;
+only a confirmed receipt removes the captured draft. Multi-recipient sends prepare once and retry
+only unconfirmed recipients with their original keys. Empty text with files is a valid message.
 
-Submit, all three queue modes and child continuation carry that same retained snapshot reference.
-An uncertain input locks further PDF upload/removal so a retry cannot silently replace its material.
-Removing a draft chip is a local draft change, not deletion of the retained material. `ThreadMaterials`
-provides the enclosing reader and region destination; selected regions return only to that guarded
-Thread/branch composer.
+`ThreadAttachments` renders typed file descriptors in history, queues, collaboration feeds and reports.
+Attachment actions remain outside the collapsed text region. Preview and download read the fixed
+original through the real enclosing native or external owner, not a guessed file path. Images and PDFs
+have browser previews; text is escaped, and other formats remain downloadable without a parser.
+Executable content is never opened under the application Blob origin. Unmounting an attachment view releases
+its client object URL, not the durable attachment. Closing its preview may keep the thumbnail cached. Copy-reference preserves the original file identity.
+
+Existing retained material references, image inputs, and editor selections remain readable through
+their original owners. Inline image selections keep their stable message-local reference numbers;
+text-only queue edits preserve original media and file references. Removing a local draft chip is
+not deletion of retained content.
 
 ## Verification
 

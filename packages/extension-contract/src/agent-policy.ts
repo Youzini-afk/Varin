@@ -126,7 +126,7 @@ const actionSchema = { oneOf: [
   objectSchema({ kind: { const: 'tool_graph' }, nodes: arraySchema(nodeSchema) }),
   objectSchema({ kind: { const: 'read_result' }, reference: referenceSchema, index: integerSchema }),
   objectSchema({ kind: { const: 'request_model_with_evidence' }, evidence: arraySchema(referenceSchema) }),
-  objectSchema({ kind: { const: 'deliver' }, output: objectSchema({ data: {}, parts: arraySchema({ oneOf: [objectSchema({ kind: { const: 'text' }, text: { type: 'string' } }), objectSchema({ kind: { const: 'media' }, media: objectSchema({ media_type: stringSchema, data_base64: stringSchema }) })] }) }) }),
+  objectSchema({ kind: { const: 'deliver' }, output: objectSchema({ data: {}, parts: arraySchema({ oneOf: [objectSchema({ kind: { const: 'text' }, text: { type: 'string' } }), objectSchema({ kind: { const: 'media' }, media: objectSchema({ media_type: stringSchema, data_base64: stringSchema }) }), objectSchema({ kind: { const: 'attachment' }, attachment: objectSchema({ ref: stringSchema, filename: stringSchema, mimeType: stringSchema, byteLength: integerSchema }) })] }) }) }),
   objectSchema({ kind: { const: 'pause' }, reason: { type: 'string' } }),
   objectSchema({ kind: { const: 'fail' }, reason: stringSchema }),
   objectSchema({ kind: { const: 'wait' }, wait_id: stringSchema }),

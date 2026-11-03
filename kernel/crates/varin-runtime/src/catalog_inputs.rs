@@ -271,6 +271,7 @@ impl Catalog {
         prepared: PreparedQueueInput,
     ) -> Result<QueuedInputAdmission> {
         let PreparedQueueInput {
+            attachments,
             title,
             identity: command,
             epoch,
@@ -523,12 +524,15 @@ impl Catalog {
             "INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)",
             params![input.id, encode(&history_content)?],
         )?;
+        super::attachments::publish(&tx, &super::attachments::AttachmentDelivery {
+            source_thread_id:None, source_branch_id:None, holder_kind:"input".into(), holder_id:command.input_id.clone(), thread_id:command.thread_id.clone(), branch_id:command.branch_id.clone(), attachments, input_ref:None,
+        })?;
         if immediate {
             let run: Run = record(&tx, "runs", &run_id)?;
             super::activation::bind_pending(&tx, &run)?;
             super::goals::bind_admission(&tx, &run)?;
             deliver(&tx, &run, &input)?;
-            tx.execute(
+        tx.execute(
                 "UPDATE branches SET active_run=?2 WHERE id=?1",
                 params![command.branch_id, run_id],
             )?;

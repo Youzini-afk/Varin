@@ -1000,7 +1000,7 @@ fn standalone_v82_selection_assets_upgrade_without_replaying_paid_work() {
         // Exact standalone82 layout, not a combined store with a different label.
         // These native child/inference APIs are the original82 owners; only Zone2
         // tables/indexes differ in83, and no Zone2 records have been fabricated.
-        raw.execute_batch("BEGIN;DROP INDEX model_steps_active;ALTER TABLE model_steps DROP COLUMN driver_id;CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id,coalesce(node_id,'')) WHERE state IN ('prepared','dispatched');DROP TABLE driver_calls;DROP TABLE driver_checkpoints;DROP TABLE run_drivers;DELETE FROM runtime_domains WHERE name='run_drivers';UPDATE run_launches SET body=json_remove(body,'$.selection.driver','$.selection.driver_models');UPDATE delegated_executions SET body=json_remove(body,'$.launch.driver','$.launch.driver_models');DROP TABLE context_observation_captures;DROP TABLE context_observation_imports;DROP INDEX context_observation_queue_cursor;DROP INDEX context_observation_queue_page;PRAGMA user_version=82;COMMIT;").unwrap();
+        raw.execute_batch("BEGIN;DROP TABLE attachment_deliveries;DROP INDEX model_steps_active;ALTER TABLE model_steps DROP COLUMN driver_id;CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id,coalesce(node_id,'')) WHERE state IN ('prepared','dispatched');DROP TABLE driver_calls;DROP TABLE driver_checkpoints;DROP TABLE run_drivers;DELETE FROM runtime_domains WHERE name='run_drivers';UPDATE run_launches SET body=json_remove(body,'$.selection.driver','$.selection.driver_models');UPDATE delegated_executions SET body=json_remove(body,'$.launch.driver','$.launch.driver_models');DROP TABLE context_observation_captures;DROP TABLE context_observation_imports;DROP INDEX context_observation_queue_cursor;DROP INDEX context_observation_queue_page;PRAGMA user_version=82;COMMIT;").unwrap();
         assert_eq!(inspect_catalog_format(&raw).unwrap(), 82);
         drop(raw);
         let mut db = f.open();
@@ -1071,6 +1071,6 @@ fn standalone_v82_selection_assets_upgrade_without_replaying_paid_work() {
                 .len(),
             1
         );
-        assert_eq!(db.db.query_row("SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=82 AND json_extract(data,'$.to')=84", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(db.db.query_row("SELECT count(*) FROM events WHERE kind='catalog.upgraded' AND json_extract(data,'$.from')=82 AND json_extract(data,'$.to')=?1", [FORMAT], |r| r.get::<_, i64>(0)).unwrap(), 1);
     }
 }

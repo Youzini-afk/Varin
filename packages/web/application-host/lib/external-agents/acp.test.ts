@@ -959,3 +959,20 @@ it('discovers target-model thinking options before validating the combined selec
   f.reply(f.latest('session/prompt'), { stopReason: 'end_turn' });
   await pending;
 });
+
+it('delivers original generic files as baseline resource links without requiring image support', async () => {
+  const f = fixture({ init: { protocolVersion: 1, agentCapabilities: {} } });
+  const connection = await connectAcp(f.peer, '/workspace');
+  const target = sink();
+  const pending = connection.prompt({ text: '', files: [{
+    attachment: { ref: 'attachment:stable', filename: 'data #1.csv', mimeType: 'text/csv', byteLength: 4 },
+    path: '/retained/data #1.csv',
+  }] }, target);
+  await vi.waitFor(() => expect(f.latest('session/prompt')).toBeTruthy());
+  expect(record(f.latest('session/prompt').params).prompt).toEqual([
+    { type: 'text', text: '' },
+    { type: 'resource_link', uri: 'file:///retained/data%20%231.csv', name: 'data #1.csv', mimeType: 'text/csv', size: 4 },
+  ]);
+  f.reply(f.latest('session/prompt'), { stopReason: 'end_turn' });
+  await expect(pending).resolves.toMatchObject({ status: 'completed' });
+});

@@ -449,6 +449,7 @@ fn admit_host_completion(
         } => {
             let parts=content.parts.into_iter().enumerate().map(|(index,part)|match part {
                 OutputPart::Text{text}=>OutputPart::Text{text},
+                OutputPart::Attachment{attachment}=>OutputPart::Attachment{attachment},
                 OutputPart::Media{media}=>match media.admit(source.clone()) {
                     Ok(media)=>OutputPart::Media{media},
                     Err(error)=>OutputPart::Text{text:format!("[output_media_rejected] Output part {index} was not admitted: {error}. Supply a valid MIME type and non-empty canonical base64 bytes. The original outcome and effect are unchanged.")},

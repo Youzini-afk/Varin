@@ -117,3 +117,21 @@ test('typed media admission validates canonical bytes before accepting policy or
     assert.throws(() => parseVarinAgentPolicyDecision({ action: { kind: 'deliver', output: { data: { unchanged: true }, parts: [part] } }, state: null }), /Invalid output part/);
   }
 });
+
+
+test('policy output preserves typed file descriptors without converting them to media or granting authority', () => {
+  const attachment = { ref: 'attachment:fixed-file', filename: 'results.csv', mimeType: 'text/csv', byteLength: 11 };
+  const action = { kind: 'deliver', output: { data: null, parts: [{ kind: 'attachment', attachment }] } };
+  const raw = { action, state: null };
+  assert.equal(validateDecision(raw), true, JSON.stringify(validateDecision.errors));
+  const parsed = parseVarinAgentPolicyDecision(raw);
+  assert.deepEqual(parsed, raw);
+  assert.notEqual(parsed.action, action);
+  for (const malformed of [
+    { ...attachment, byteLength: -1 }, { ...attachment, byteLength: 0.5 },
+    { ...attachment, mimeType: '' }, { ...attachment, ownerId: 'forged-owner' },
+    { ...attachment, ref: '' }, { ...attachment, filename: 'bad\0name' },
+  ]) {
+    assert.throws(() => parseVarinAgentPolicyDecision({ action: { ...action, output: { data: null, parts: [{ kind: 'attachment', attachment: malformed }] } }, state: null }));
+  }
+});

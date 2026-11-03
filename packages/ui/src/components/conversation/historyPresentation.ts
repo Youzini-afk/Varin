@@ -166,12 +166,20 @@ export class HistoryPresentation {
             ...(completion.kind === 'not_dispatched' ? { notDispatched: true } : {}),
             status: completion.kind === 'not_dispatched' ? 'error' : completion.kind === 'job_accepted' || gateway?.completion.kind === 'job_accepted' ? 'background' : outcomeStatus(completion.outcome),
             content: completion.kind === 'not_dispatched' ? [{ type: 'text', text: String(completion.reason ?? '') }] : outputParts(output),
+            attachments: output?.parts.flatMap(part => part.kind === 'attachment' ? [part.attachment] : []),
             imageParts: output?.parts.flatMap((part, partIndex) => part.kind === 'media' && part.media.media_type.startsWith('image/') ? [{ partIndex, media: part.media }] : []),
             ...(output?.data == null ? {} : { details: json(invocationData(output.data, calls.get(id))), originalDetails: json(output.data) }) } };
         } else if (content.kind === 'output' && item.source === 'agent' && object(object(content.output).data).kind === 'retrieval_result') {
           const output = content.output as OutputBody;
           entry = { ...base, type: 'custom_message', customType: 'retrieval-result', display: true,
             content: outputParts(output).slice(1), details: json(output.data) };
+        } else if (content.kind === 'output' && item.source === 'agent') {
+          const sender = object(envelope.provenance).thread_id;
+          entry = { ...base, type: 'custom_message', customType: 'thread-message', display: true,
+            content: outputParts(content.output as OutputBody), details: {
+              ...(typeof sender === 'string' ? { senderThreadId: sender } : {}), targetThreadId: item.thread_id,
+              ...(typeof envelope.id === 'string' ? { messageId: envelope.id } : {}),
+            } };
         } else if (content.kind === 'output') {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: item.source, display: true, timestamp: 0,
             content: outputParts(content.output as OutputBody) } };

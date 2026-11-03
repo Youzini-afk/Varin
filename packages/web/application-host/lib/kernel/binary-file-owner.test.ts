@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { createBinaryFileOwner } from './binary-file-owner.js';
+import { createBinaryFileOwner, writeSourceBinary } from './binary-file-owner.js';
 import type { ToolInvocationAuthority } from './tool-invocation.js';
 
 it('keeps a lost managed write response unknown and distinguishes rejection before dispatch', async () => {
@@ -21,4 +21,24 @@ it('keeps a lost managed write response unknown and distinguishes rejection befo
   rejected = true;
   await expect(owner.write(authority, { path: 'report.docx', bytes: Buffer.from('document'), expectedRevision: null }, signal)).rejects.toThrow('source authority unavailable');
   expect(service).toHaveBeenCalledTimes(1);
+});
+
+it('preserves the original attachment in fresh and response-loss reconciled binary receipts', async () => {
+  const attachment = { ref: 'attachment:original', filename: 'report.pdf', mimeType: 'application/pdf', byteLength: 3 };
+  const applied = { status: 'applied', stateJson: JSON.stringify({ kind: 'regular-file', objectHash: 'sha256-original', byteLength: 3 }), attachment };
+  const client = {
+    fileOperationReconcile: vi.fn().mockResolvedValueOnce({ status: 'missing' }).mockResolvedValue({ status: 'reconciled', result: applied }),
+    fileLeaseAcquire: vi.fn(async () => ({ status: 'acquired' })), fileLeaseRelease: vi.fn(async () => ({})),
+    fileCapture: vi.fn(async () => ({ path: 'report.pdf', stateJson: JSON.stringify({ kind: 'missing' }) })),
+    putBlob: vi.fn(async () => ({ ownerId: 'upload', hash: 'sha256-original', byteLength: 3 })),
+    fileApply: vi.fn(async () => applied), releaseBlob: vi.fn(async () => ({})),
+  };
+  const request = { client, rootId: 'root', source: { mode: 'live_root', workspace_id: 'workspace' },
+    operationId: 'write', tool: 'office_export', journal: {}, path: 'report.pdf', expectedRevision: null, bytes: Buffer.from('pdf') } as unknown as Parameters<typeof writeSourceBinary>[0];
+  expect((await writeSourceBinary(request)).attachment).toEqual(attachment);
+  expect((await writeSourceBinary({ ...request, bytes: Buffer.from('later source') })).attachment).toEqual(attachment);
+  expect(client.fileApply).toHaveBeenCalledTimes(1);
+  expect(client.putBlob).toHaveBeenCalledTimes(1);
+  client.fileOperationReconcile.mockResolvedValue({ status: 'reconciled', result: { ...applied, attachment: { ...attachment, byteLength: 4 } } });
+  expect(await writeSourceBinary(request)).toMatchObject({ status: 'unknown', executorStopped: false });
 });

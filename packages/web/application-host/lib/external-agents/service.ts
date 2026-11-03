@@ -19,6 +19,7 @@ import {
   type ExternalObservation,
   type ExternalObservationChange,
 } from '@varin/application-client';
+import { captureExternalFile, releaseExternalCaptures, restoreExternalCapture } from './attachment-capture.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { createKernelProcessService } from '../kernel/process-service.js';
 import { createPlatformEnvironmentRuntime } from '../platform/environment-runtime.js';
@@ -31,6 +32,7 @@ import { connectPi } from './pi.js';
 import { connectAcp } from './acp.js';
 import { connectClaude } from './claude.js';
 import type { ExternalChild } from '../kernel/protocol.generated.js';
+import { parseExternalAttachmentSelections, prepareHarnessInput, type AcceptedExternalInput, type ExternalAttachmentOwner } from './attachments.js';
 import type { createExternalSourceOwner } from './source.js';
 
 const defaults: ExternalAgentConfiguration[] = [
@@ -86,6 +88,31 @@ export class ExternalAgentsService {
   private childrenDirty = false;
   private childrenVersion = '';
   private readonly retiring = new Set<string>();
+  private attachments?: ExternalAttachmentOwner;
+  private readonly inputAdmissions = new Map<string, Set<{ controller: AbortController; work: Promise<unknown> }>>();
+  private readonly attachmentPreparations = new Map<string, { turnId: string; controller: AbortController }>();
+  bindAttachments(owner: ExternalAttachmentOwner) {
+    this.attachments = owner;
+    owner.bindExternalPathCapture?.(async (identity, key, selectedPath, signal) => {
+      const { conversation } = await this.read(identity.id, undefined, signal);
+      if (this.retiring.has(identity.id)) throw new ExternalAgentError('conversation_busy', 'The original conversation is being deleted');
+      const retained = await restoreExternalCapture(this.deps.kernel, conversation, key, selectedPath, signal);
+      if (retained) return retained;
+      const source = await this.executionSource(conversation, signal ?? new AbortController().signal);
+      const fallback = source.admittedSource ? undefined : await this.deps.resolveWorkspace(source.executionCwd);
+      let workspace: { workspaceId: string; executionWorkspaceId: string; canonicalRoot: string } = source.admittedSource ?? {
+        workspaceId: fallback!.workspaceId, executionWorkspaceId: fallback!.workspaceId, canonicalRoot: source.executionCwd,
+      };
+      if (path.isAbsolute(selectedPath)) {
+        const relative = path.relative(workspace.canonicalRoot, selectedPath);
+        if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+          const admitted = await this.deps.resolveWorkspace(path.dirname(selectedPath));
+          workspace = { workspaceId: admitted.workspaceId, executionWorkspaceId: admitted.workspaceId, canonicalRoot: admitted.root };
+        }
+      }
+      return captureExternalFile(this.deps.kernel, conversation, key, selectedPath, workspace, signal);
+    });
+  }
   private maintenance?: () => void;
   private cleanupWork: Promise<void> | undefined;
   private cleanupDirty = false;
@@ -579,6 +606,32 @@ export class ExternalAgentsService {
     this.connecting.set(id, opening);
     return opening;
   }
+  private async executionSource(c: ExternalConversation, signal: AbortSignal) {
+    let admittedSource:
+      { workspaceId: string; executionWorkspaceId: string; canonicalRoot: string } | undefined;
+    let executionCwd=c.cwd;
+    if (c.parent && this.sources && this.deps.spawnAdmitted) {
+      const child = (await this.children()).find(
+        (child) => child.operation_id === c.parent!.operationId && child.conversation_id === c.id,
+      );
+      if (!child) throw new Error('The original external delegation is unavailable');
+      const source = child.handoff
+        ? await this.sources.prepare(child, signal)
+        : { ...(await this.deps.resolveWorkspace(c.cwd)), cwd: c.cwd };
+      if (source.cwd !== c.cwd && record(record(source).nativeSource).mode!=='native_workspace') throw new Error('The external conversation source changed');
+      executionCwd=source.cwd;
+      admittedSource = {
+        workspaceId: source.workspaceId,
+        executionWorkspaceId: text(record(source).executionWorkspaceId) || source.workspaceId,
+        canonicalRoot: source.cwd,
+      };
+    } else if(c.nativeWorkspace){
+      const owner=this.deps.kernel.nativeWorkspaces;if(!owner||!this.deps.spawnAdmitted)throw new Error('Native external workspace admission is unavailable');
+      const entry=await owner.open(c.nativeWorkspace,signal),view=await owner.acquire(c.nativeWorkspace,entry.grant,signal);
+      executionCwd=view.path;admittedSource={workspaceId:c.nativeWorkspace.workspace_id,executionWorkspaceId:c.nativeWorkspace.execution_workspace_id,canonicalRoot:view.path};
+    }else await this.deps.resolveWorkspace(c.cwd);
+    return { executionCwd, admittedSource };
+  }
   private async open(
     id: string,
     signal: AbortSignal,
@@ -597,29 +650,7 @@ export class ExternalAgentsService {
       throw new ExternalAgentError('agent_disabled', 'Enable this external Agent to reconnect');
     if (config.harness !== c.harness)
       throw new ExternalAgentError('backend_changed', 'This configuration now points to another harness');
-    let admittedSource:
-      { workspaceId: string; executionWorkspaceId: string; canonicalRoot: string } | undefined;
-    let executionCwd=c.cwd;
-    if (c.parent && this.sources && this.deps.spawnAdmitted) {
-      const child = (await this.children()).find(
-        (child) => child.operation_id === c.parent!.operationId && child.conversation_id === id,
-      );
-      if (!child) throw new Error('The original external delegation is unavailable');
-      const source = child.handoff
-        ? await this.sources.prepare(child, signal)
-        : { ...(await this.deps.resolveWorkspace(c.cwd)), cwd: c.cwd };
-      if (source.cwd !== c.cwd && record(record(source).nativeSource).mode!=='native_workspace') throw new Error('The external conversation source changed');
-      executionCwd=source.cwd;
-      admittedSource = {
-        workspaceId: source.workspaceId,
-        executionWorkspaceId: text(record(source).executionWorkspaceId) || source.workspaceId,
-        canonicalRoot: source.cwd,
-      };
-    } else if(c.nativeWorkspace){
-      const owner=this.deps.kernel.nativeWorkspaces;if(!owner||!this.deps.spawnAdmitted)throw new Error('Native external workspace admission is unavailable');
-      const entry=await owner.open(c.nativeWorkspace,signal),view=await owner.acquire(c.nativeWorkspace,entry.grant,signal);
-      executionCwd=view.path;admittedSource={workspaceId:c.nativeWorkspace.workspace_id,executionWorkspaceId:c.nativeWorkspace.execution_workspace_id,canonicalRoot:view.path};
-    }else await this.deps.resolveWorkspace(c.cwd);
+    const { admittedSource, executionCwd } = await this.executionSource(c, signal);
     const launch = await this.executable(config);
     const version = config.harness === 'pi' ? await this.probeVersion(launch, signal) : undefined;
     const command = config.harness === 'claude' ? process.execPath : launch.command;
@@ -697,7 +728,7 @@ export class ExternalAgentsService {
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
     if (
-      Object.keys(input).some((key) => !['text', 'images', 'model', 'thinking', 'mode', 'config'].includes(key)) ||
+      Object.keys(input).some((key) => !['text', 'images', 'attachments', 'model', 'thinking', 'mode', 'config'].includes(key)) ||
       (input.config !== undefined && (!input.config || typeof input.config !== 'object' || Array.isArray(input.config) || Object.values(input.config).some((v) => typeof v !== 'string'))) ||
       ['model', 'thinking', 'mode'].some(
         (key) =>
@@ -715,17 +746,19 @@ export class ExternalAgentsService {
           )))
     )
       throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
-    if (!input || typeof input.text !== 'string' || (!input.text.trim() && !input.images?.length))
+    const selections = parseExternalAttachmentSelections(input.attachments);
+    if (!input || typeof input.text !== 'string' || (!input.text.trim() && !input.images?.length && !selections?.length))
       throw new ExternalAgentError('empty_input', 'Enter a message');
     const snapshot = await this.read(id);
     const previous = snapshot.turns.find((turn) => turn.key === key);
     if (previous) {
-      const { _launch: _frozen, ...original } = await this.command<ExternalInput & { _launch?: unknown }>({
+      const { _launch: _frozen, _attachmentSelections, attachments: frozenAttachments, ...saved } = await this.command<AcceptedExternalInput & { _launch?: unknown }>({
         action: 'input',
         id,
         turnId: previous.id,
         original: true,
       });
+      const original = { ...saved, ...(_attachmentSelections !== undefined ? { attachments: _attachmentSelections } : frozenAttachments !== undefined ? { attachments: frozenAttachments } : {}) };
       if (!isDeepStrictEqual(original, input))
         throw new ExternalAgentError(
           'input_changed',
@@ -743,15 +776,53 @@ export class ExternalAgentsService {
         'This conversation uses another harness; start a new conversation for the new backend',
       );
     if (this.retiring.has(id) || this.authenticating.has(id)) throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
-    const receipt = await this.command<ExternalTurn>({
-      action: 'admit',
-      id,
-      key,
-      input: { ...input, _launch: { command: config.command, args: config.args } },
+    return this.withInputAdmission(id, async signal => {
+      if (snapshot.conversation.deleted) throw new ExternalAgentError('conversation_deleted', 'This conversation no longer accepts input');
+      const prepared = selections?.length ? await this.requireAttachments().prepareExternal(snapshot.conversation, key, selections, signal) : undefined;
+      signal.throwIfAborted();
+      const receipt = await this.command<ExternalTurn>({
+        action: 'admit', id, key,
+        input: { ...input, ...(prepared ? { attachments: prepared, _attachmentSelections: selections } : {}), _launch: { command: config.command, args: config.args } },
+      });
+      this.notify(id, true);
+      this.advance(id);
+      return receipt;
     });
-    this.notify(id, true);
-    this.advance(id);
-    return receipt;
+  }
+  private withInputAdmission<T>(id: string, action: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (this.retiring.has(id) || this.stopping) return Promise.reject(new ExternalAgentError('conversation_busy', 'This conversation is closing'));
+    const pending = this.inputAdmissions.get(id) ?? new Set();
+    this.inputAdmissions.set(id, pending);
+    const controller = new AbortController();
+    const active = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const entry = { controller, work: Promise.resolve() as Promise<unknown> };
+    const work = Promise.resolve().then(() => { active.throwIfAborted(); return action(active); }).finally(() => {
+      pending.delete(entry);
+      if (!pending.size && this.inputAdmissions.get(id) === pending) this.inputAdmissions.delete(id);
+    });
+    entry.work = work; pending.add(entry);
+    return work;
+  }
+  private async drainInputAdmissions(id: string): Promise<void> {
+    const pending = [...this.inputAdmissions.get(id) ?? []];
+    for (const entry of pending) entry.controller.abort(new Error('The original conversation is closing'));
+    await Promise.allSettled(pending.map(entry => entry.work));
+  }
+  private requireAttachments() {
+    if (!this.attachments) throw new ExternalAgentError('attachments_unavailable', 'The original attachment owner is unavailable');
+    return this.attachments;
+  }
+  async uploadAttachment(id: string, metadata: { key: string; filename: string; mimeType: string; byteLength: number }, chunks: AsyncIterable<Uint8Array>, signal?: AbortSignal) {
+    return this.withInputAdmission(id, async active => {
+      const snapshot = await this.read(id, undefined, active);
+      if (snapshot.conversation.deleted) throw new ExternalAgentError('conversation_deleted', 'This conversation no longer accepts files');
+      return this.requireAttachments().uploadExternal(snapshot.conversation, metadata, chunks, active);
+    }, signal);
+  }
+  async readAttachment(id: string, ref: string, signal?: AbortSignal) {
+    const snapshot = await this.read(id, undefined, signal);
+    if (snapshot.conversation.deleted) throw new ExternalAgentError('conversation_deleted', 'This conversation was deleted');
+    return this.requireAttachments().readExternal(snapshot.conversation, ref, signal);
   }
   private advance(id: string) {
     if (this.running.has(id) || this.stopping || this.retiring.has(id) || this.authenticating.has(id)) return;
@@ -846,10 +917,10 @@ export class ExternalAgentsService {
       };
       try {
         const input = await this.command<
-          ExternalInput & {
+          AcceptedExternalInput & {
             task?: string;
             senderThreadId?: string;
-            messages?: Array<{ task: string; senderThreadId: string }>;
+            messages?: Array<{ task: string; senderThreadId: string; attachments?: import('@varin/protocol').Attachment[] }>;
             _launch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>;
           }
         >({ action: 'input', id, turnId: turn.id });
@@ -859,6 +930,7 @@ export class ExternalAgentsService {
             kind: 'notice',
             text: message.task,
             senderThreadId: message.senderThreadId,
+            ...(message.attachments?.length ? { attachments: message.attachments } : {}),
           });
         publish({
           id: 'user',
@@ -866,6 +938,7 @@ export class ExternalAgentsService {
           text: input.task ?? input.text,
           ...(input.senderThreadId ? { senderThreadId: input.senderThreadId } : {}),
           ...(input.images?.length ? { images: input.images } : {}),
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
         });
         await flush();
         if ((await this.read(id)).turns.find((t) => t.id === turn.id)?.status === 'stopping')
@@ -875,8 +948,17 @@ export class ExternalAgentsService {
           throw new Error('External Agent startup cancelled');
         if (input.images?.length && !live.connection.capabilities.images)
           throw new ExternalAgentError('images_unsupported', 'This Agent does not accept image input');
+        const { _launch: _launch, messages: _messages, task: _task, senderThreadId: _sender, ...admitted } = input;
+        const preparation = { turnId: turn.id, controller: new AbortController() };
+        this.attachmentPreparations.set(id, preparation);
+        let harnessInput: Awaited<ReturnType<typeof prepareHarnessInput>>;
+        try {
+          harnessInput = await prepareHarnessInput({ ...admitted, attachments: [...(input.messages ?? []).flatMap(message => message.attachments ?? []), ...(input.attachments ?? [])] }, snapshot.conversation, live.connection.capabilities, this.attachments, preparation.controller.signal);
+        } finally {
+          if (this.attachmentPreparations.get(id) === preparation) this.attachmentPreparations.delete(id);
+        }
         const generation = live.generation;
-        const result = await live.connection.prompt(input, {
+        const result = await live.connection.prompt(harnessInput, {
           beforeDispatch: async () => {
             if (dispatched) throw new Error('This external input has already been dispatched');
             if (this.connections.get(id)?.generation !== generation || live!.connection.failure)
@@ -992,6 +1074,12 @@ export class ExternalAgentsService {
     if (!active || ended(active)) return;
     if (latest.conversation.activeTurn !== turnId || this.connections.get(id) !== live)
       throw new ExternalAgentError('turn_changed', 'The original external turn is no longer active');
+    const preparing = this.attachmentPreparations.get(id);
+    if (preparing?.turnId === turnId) {
+      preparing.controller.abort(new Error('External attachment preparation was cancelled'));
+      this.notify(id);
+      return;
+    }
     this.cancelInteractions(live, turnId);
     if (force) {
       // Explicit termination joins the Rust-owned process tree. It does not claim that
@@ -1075,6 +1163,7 @@ export class ExternalAgentsService {
     if (this.retiring.has(id) || this.authenticating.has(id)) throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
     this.retiring.add(id);
     try {
+      await this.drainInputAdmissions(id);
       if ((await this.read(id)).conversation.activeTurn)
         throw new ExternalAgentError('turn_active', 'Stop this turn before deleting the conversation');
       await this.connecting.get(id);
@@ -1140,6 +1229,10 @@ export class ExternalAgentsService {
               await this.deps.kernel.revokeGrant(grant.grantId);
             }
           }
+          if (this.attachments) {
+            await this.attachments.releaseExternal(c);
+            await releaseExternalCaptures(this.deps.kernel, c.id);
+          }
           await this.command({ action: 'cleaned', id: c.id });
         }
       }
@@ -1152,6 +1245,8 @@ export class ExternalAgentsService {
   }
   async close() {
     this.stopping = true;
+    await Promise.all([...this.inputAdmissions.keys()].map(id => this.drainInputAdmissions(id)));
+    for (const preparation of this.attachmentPreparations.values()) preparation.controller.abort(new Error('Application Host is stopping'));
     this.removeChildrenListener?.();
     for (const task of this.childTasks.values()) task.controller.abort();
     for (const controller of this.connectionControllers.values())

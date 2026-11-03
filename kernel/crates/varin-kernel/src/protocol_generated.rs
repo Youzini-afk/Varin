@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 78;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 79;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2022,6 +2022,7 @@ pub(crate) struct KernelFileCaptureParams {
     pub(crate) path: String,
     pub(crate) store: bool,
     pub(crate) lease_id: Option<String>,
+    pub(crate) retention_record_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2121,6 +2122,26 @@ pub(crate) struct KernelFileMaterializeParams {
     pub(crate) path: String,
     pub(crate) source_root: String,
     pub(crate) lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelObjectViewPrepareParams {
+    pub(crate) workspace_id: String,
+    pub(crate) execution_workspace_id: String,
+    pub(crate) record_id: String,
+    pub(crate) slot: String,
+    pub(crate) view_id: String,
+    pub(crate) filename: String,
+    pub(crate) run_id: Option<String>,
+    pub(crate) external_conversation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelObjectViewParams {
+    pub(crate) workspace_id: String,
+    pub(crate) view_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3091,6 +3112,9 @@ pub(crate) struct MessageSendParams {
     pub(crate) reply_to: Option<String>,
     pub(crate) kind: varin_runtime::MessageKind,
     pub(crate) text: String,
+    pub(crate) attachments: Option<Vec<varin_runtime::catalog::attachments::AttachmentSelection>>,
+    pub(crate) prepared_attachments: Option<Vec<varin_runtime::catalog::attachments::Attachment>>,
+    pub(crate) prepared_attachment_media: Option<Vec<varin_runtime::output::IncomingMedia>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -5096,6 +5120,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "file.materialize" => serde_json::from_value::<KernelFileMaterializeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "file.objectView.prepare" => {
+            serde_json::from_value::<KernelObjectViewPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.objectView.release" => {
+            serde_json::from_value::<KernelObjectViewParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "file.materializedView.prepare" => {
             serde_json::from_value::<KernelMaterializedViewPrepareParams>(params.clone())
                 .map(|_| ())

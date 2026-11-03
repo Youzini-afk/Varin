@@ -12,15 +12,20 @@ const bodyText = (result: OfficeReadResult): string => (result.objects ?? []).ma
   : object.kind === 'table' && object.rows ? object.rows.map(row => row.cells.map(cell => cell.text).join('\t')).join('\n') : object.text ?? '').filter(Boolean).join('\n');
 
 export function createOfficeReader(options: { materials: Pick<WebMaterialStore, 'put' | 'read'>; pdf: DocumentReader; renderer: OfficeRenderer }) {
-  const load = async (input: Pick<OfficeReadRequest, 'path' | 'snapshotId'>, context: DocumentReaderContext,
+  const load = async (input: Pick<OfficeReadRequest, 'path' | 'snapshotId' | 'ref'>, context: DocumentReaderContext,
     sources: DocumentMaterialSources, captured?: DocumentIngestInput): Promise<{ package: OfficePackage; bytes: Buffer; snapshot: WebSnapshotRef }> => {
     context.signal?.throwIfAborted();
+    if (!captured && [input.path, input.snapshotId, input.ref].filter(Boolean).length !== 1) throw new Error('Choose exactly one Office ref, path or snapshotId');
     let source = captured;
     if (input.snapshotId) {
       const snapshot = await options.materials.read(context.workspaceId, input.snapshotId, context.authority, { includeSource: true, ...(context.signal ? { signal: context.signal } : {}) });
       if (!snapshot?.source) throw new Error('The original Office snapshot is unavailable to this task');
       if (!isOfficeFormat(snapshot.ref.document?.kind)) throw new Error('This snapshot is not an Office file; use document_read for PDF material');
       return { package: new OfficePackage(snapshot.source.bytes), bytes: snapshot.source.bytes, snapshot: snapshot.ref };
+    }
+    if (!source && input.ref) {
+      if (!sources.readRef) throw new Error('The original attachment reader is unavailable');
+      source = await sources.readRef(input.ref, context.signal);
     }
     if (!source) {
       if (!input.path || !sources.readPath) throw new Error('Choose exactly one Office file path or snapshotId from this task');
@@ -35,7 +40,7 @@ export function createOfficeReader(options: { materials: Pick<WebMaterialStore, 
     context.signal?.throwIfAborted();
     return { package: document, bytes: source.source, snapshot };
   };
-  const render = async (input: { path?: string; snapshotId?: string; page?: number; scale?: number }, context: DocumentReaderContext, sources: DocumentMaterialSources,
+  const render = async (input: { ref?: string; path?: string; snapshotId?: string; page?: number; scale?: number }, context: DocumentReaderContext, sources: DocumentMaterialSources,
     captured?: DocumentIngestInput): Promise<FetchResult> => {
     const original = await load(input, context, sources, captured);
     const converted = await options.renderer.convert(original.bytes, original.package.format, 'pdf', context.signal);

@@ -6,34 +6,42 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 pub(crate) struct TextInputProjection {
     items: BTreeMap<usize, (Arc<ConversationItem>, Arc<ConversationItem>)>,
-    settings: Option<(Option<bool>, Option<usize>, bool)>,
+    settings: Option<(Option<bool>, Option<usize>, bool, String)>,
 }
 const IMAGE_NOTICE: &str = "[Image omitted: the selected model accepts text input only.]";
+fn gif_attachment(content:&Content)->bool {
+    let output=match content {
+        Content::Output{output}=>Some(output),
+        Content::ToolResult{result}=>completion_output(&result.completion),_=>None,
+    };
+    output.is_some_and(|output|output.parts.iter().any(|part|matches!(part,OutputPart::Attachment{attachment} if attachment.mime_type=="image/gif")))
+}
 
-fn output_text(output: &OutputBody) -> OutputBody {
+
+fn output_text(output: &OutputBody, omitted: &dyn Fn(&crate::output::ResolvedMedia)->Option<&'static str>) -> OutputBody {
     OutputBody {
         data: output.data.clone(),
         parts: output.parts.iter().map(|part| match part {
-            OutputPart::Media { media } if media.media_type.starts_with("image/") =>
-                OutputPart::Text { text: IMAGE_NOTICE.into() },
+            OutputPart::Media { media } if omitted(media).is_some() =>
+                OutputPart::Text { text: omitted(media).expect("selected notice").into() },
             _ => part.clone(),
         }).collect(),
     }
 }
-fn text_content(content: &Content) -> Content {
+fn text_content(content: &Content, omitted: &dyn Fn(&crate::output::ResolvedMedia)->Option<&'static str>) -> Content {
     match content {
-        Content::Media { media } if media.media_type.starts_with("image/") =>
-            Content::Text { text: IMAGE_NOTICE.into() },
-        Content::Output { output } => Content::Output { output: output_text(output) },
+        Content::Media { media } if omitted(media).is_some() =>
+            Content::Text { text: omitted(media).expect("selected notice").into() },
+        Content::Output { output } => Content::Output { output: output_text(output, omitted) },
         Content::ToolResult { result } => Content::ToolResult { result: ToolResult {
             request_id: result.request_id.clone(), call_id: result.call_id.clone(),
             completion: match &result.completion {
                 ToolCompletion::Result { outcome, effect, content } => ToolCompletion::Result {
-                    outcome: *outcome, effect: *effect, content: output_text(content),
+                    outcome: *outcome, effect: *effect, content: output_text(content, omitted),
                 },
                 ToolCompletion::JobAccepted { operation_id, phase, effect, lifetime, content } => ToolCompletion::JobAccepted {
                     operation_id: operation_id.clone(), phase: phase.clone(), effect: *effect,
-                    lifetime: *lifetime, content: content.as_ref().map(output_text),
+                    lifetime: *lifetime, content: content.as_ref().map(|output|output_text(output, omitted)),
                 },
                 other => other.clone(),
             },
@@ -97,13 +105,23 @@ pub(super) fn model_input<'a>(view: &'a RequestView, connection: &Connection, re
 }
 
 fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<&mut RequestCompileReuse>) -> Cow<'a, RequestView> {
-    if connection.accepts_images != Some(false) && connection.tool_output_visible_bytes.is_none()
+    let google_gif=matches!(view.binding.provider_family.as_str(),google::FAMILY|google::VERTEX_FAMILY)
+        && view.history.iter().any(|item|gif_attachment(&item.content));
+    if !google_gif && connection.accepts_images != Some(false) && connection.tool_output_visible_bytes.is_none()
         && !view.history.iter().any(|item| matches!(&item.content, Content::ToolCall { call } if retrieval_preview_limit(call).is_some() || process_call(call))) { return Cow::Borrowed(view); }
     let mut cache = reuse.map(|reuse| &mut reuse.text_input);
     let can_read = view.binding.tools.iter().any(|tool| tool.name == crate::catalog::family::READ_TOOL);
-    let settings = (connection.accepts_images, connection.tool_output_visible_bytes, can_read);
+    let settings = (connection.accepts_images, connection.tool_output_visible_bytes, can_read,view.binding.provider_family.clone());
+    let mut user_gif_inputs=std::collections::BTreeSet::new();
+    if google_gif {
+        for item in &view.history {
+            if let Provenance::UserInstruction{input_id}=&item.provenance {
+                if gif_attachment(&item.content) {user_gif_inputs.insert(input_id.as_str());}
+            }
+        }
+    }
     if let Some(cache) = cache.as_mut() {
-        if cache.settings != Some(settings) { cache.items.clear(); cache.settings = Some(settings); }
+        if cache.settings.as_ref() != Some(&settings) { cache.items.clear(); cache.settings = Some(settings); }
     }
     let mut previous = cache.as_mut().map(|cache| std::mem::take(&mut cache.items)).unwrap_or_default();
     let mut current = BTreeMap::new();
@@ -124,8 +142,16 @@ fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<
                 .and_then(|budget| bounded_content(content.as_ref().unwrap_or(&source.content), budget, &source.id, can_read, snippet_limit)) {
                 content=Some(bounded);
             }
-            if connection.accepts_images == Some(false) && source.content.media().iter().any(|media| media.media_type.starts_with("image/")) {
-                content = Some(text_content(content.as_ref().unwrap_or(&source.content)));
+            let attached_gif=google_gif && (gif_attachment(&source.content) || match &source.provenance {
+                Provenance::UserInstruction{input_id}=>user_gif_inputs.contains(input_id.as_str()),_=>false,
+            });
+            let omitted=|media:&crate::output::ResolvedMedia| {
+                if connection.accepts_images==Some(false) && media.media_type.starts_with("image/"){Some(IMAGE_NOTICE)}
+                else if attached_gif && media.media_type=="image/gif" {Some("[Image omitted: this provider does not support direct GIF input. The original file attachment remains available.]")}
+                else {None}
+            };
+            if source.content.media().iter().any(|media|omitted(media).is_some()) {
+                content = Some(text_content(content.as_ref().unwrap_or(&source.content),&omitted));
             }
             content.map_or_else(|| source.clone(), |content| Arc::new(ConversationItem {
                 resource_activation: source.resource_activation.clone(), id: source.id.clone(), provenance: source.provenance.clone(),

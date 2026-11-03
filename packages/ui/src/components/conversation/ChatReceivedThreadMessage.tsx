@@ -5,6 +5,8 @@ import { useOptionalConversationPresentation } from './ConversationContext';
 import { ChildState } from './childPresentation';
 import { receivedAgentMessage } from './agentMessagePresentation';
 import { ChatAgentMessageBubble } from './ChatAgentMessageBubble';
+import { ThreadAttachments } from '../thread/ThreadAttachments';
+import { EntryExtras } from './EntryExtras';
 import { ThreadChildReport } from '../thread/ThreadChildReport';
 
 export function ChatReceivedThreadMessage({ id, entryId, content, senderThreadId, targetThreadId }: {
@@ -16,7 +18,7 @@ export function ChatReceivedThreadMessage({ id, entryId, content, senderThreadId
     targetThreadId: targetThreadId ?? conversation?.identity.threadId });
   const [fullReport, setFullReport] = React.useState(false);
   const report = message.report;
-  return <ChatAgentMessageBubble id={entryId} {...message}
+  return <ChatAgentMessageBubble id={entryId} {...message} attachments={<><EntryExtras itemId={entryId} />{conversation && <ThreadAttachments api={conversation.api} identity={conversation.identity} attachments={message.attachments} />}</>}
     targetBranchId={message.targetBranchId ?? (message.targetThreadId === conversation?.identity.threadId ? conversation?.identity.branchId : undefined)}
     status={message.outcome && message.outcome !== 'succeeded' ? <ChildState state={message.outcome} /> : undefined}>
     {fullReport && report && conversation ? report.itemIds.map(itemId => <ThreadChildReport key={itemId}

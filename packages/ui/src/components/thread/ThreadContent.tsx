@@ -2,16 +2,18 @@ import type { OutputMediaHolder } from '@varin/protocol';
 import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import type { ThreadContentPart } from '@/lib/agent-runtime/thread-content';
+import { ThreadAttachments } from './ThreadAttachments';
 import { ThreadMedia, ThreadOutput } from './ThreadMedia';
 import { useI18n } from '@/lib/i18n';
 
 export function ThreadContent({ api, identity, holder, parts, messageId }: {
-  api: Pick<ThreadsAPI, 'mediaRead'>; identity: ThreadIdentity; holder: OutputMediaHolder; parts: ThreadContentPart[]; messageId: string;
+  api: Pick<ThreadsAPI, 'mediaRead'> & Partial<Pick<ThreadsAPI, 'attachments'>>; identity: ThreadIdentity; holder: OutputMediaHolder; parts: ThreadContentPart[]; messageId: string;
 }) {
   const { t } = useI18n();
   return <>{parts.map((part, index) => {
     switch (part.kind) {
       case 'text': return <MarkdownRenderer key={index} messageId={`${messageId}:${index}`} content={part.text} />;
+      case 'attachment': return api.attachments ? <ThreadAttachments key={index} api={{ attachments: api.attachments }} identity={identity} attachments={[part.attachment]} /> : <p key={index}>{part.attachment.filename}</p>;
       case 'media': return <ThreadMedia key={index} api={api} identity={identity} holder={holder} media={part.media} partIndex={part.partIndex} imageReference={part.imageReference} />;
       case 'output': return <ThreadOutput key={index} api={api} identity={identity} holder={holder} output={part.output} messageId={messageId} />;
       case 'data': return <details key={index} className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t('chat.toolPart.showRawJson')}</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all pt-2">{JSON.stringify(part.data, null, 2)}</pre></details>;

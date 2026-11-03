@@ -9,6 +9,9 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildRelation {
+    /// Original legacy material relationships, converted once by the Catalog owner.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub material_snapshot_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub model_selection_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,6 +256,7 @@ pub(super) fn write_child_task(db: &Connection, child: &ChildTask) -> Result<()>
 }
 pub(super) fn insert_initial(db: &Connection, child: &ChildTask, model_selection_required: bool) -> Result<()> {
     let relation = ChildRelation {
+        material_snapshot_ids: Vec::new(),
         model_selection_required,
         model_selection_head: if model_selection_required { db.query_row("SELECT head FROM branches WHERE id=?1", [&child.parent_branch_id], |r| r.get(0))? } else { None },
         inherited_context: child.inherited_context.clone(),
@@ -1218,7 +1222,7 @@ impl Catalog {
                 effect: Effect::None,
             };
         }
-        execution.report = Some(ChildReport {
+        execution.report = Some(ChildReport { attachments: Vec::new(),
             error,
             outcome: Outcome::Failed,
             sender_thread_id: relation.child_thread_id,

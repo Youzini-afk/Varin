@@ -1,6 +1,9 @@
 /** Closed source services execute against the target's real admitted Storage handle.
  * The coordinator's Run is attribution; no target Catalog Run or ToolCall is created. */
 import { isDeepStrictEqual } from 'node:util';
+import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { attachmentMimeType } from '@varin/protocol';
 import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
 import type { ManagedSourceCleanupScope, ManagedSourceLocalScope, ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
 import type { StructureSource } from '../structure/types.js';
@@ -21,6 +24,11 @@ import { ManagedSourceDrainedError } from '../harness/managed-source-drain.js';
 import { waitWithSignal } from '../cancellation.js';
 import { createManagedResearchSource } from './managed-research-source.js';
 import { createManagedPackageSource } from './managed-package-source.js';
+import { copyRangeContent } from './file-content-transfer.js';
+import { restoreCapturedAttachment, type CapturedAttachmentFile } from './attachment-capture.js';
+
+const stableIdentity = (value: unknown): unknown => Array.isArray(value) ? value.map(stableIdentity)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stableIdentity(item)])) : value;
 
 export interface SourceQueryServiceOptions {
   kernel: KernelClient;
@@ -30,6 +38,7 @@ export interface SourceQueryServiceOptions {
   resourceOwners: Omit<ThreadResourceScopeOwners, 'remote' | 'targetAuthority'>;
   structureSource?(): StructureSource;
   languageSupervisor?: ReturnType<typeof createLanguageSupervisor>;
+  captureAbsoluteAttachment?(input: { threadId: string; operationId: string; ref: string; selectedPath: string; captureScope?: string }, signal?: AbortSignal): Promise<CapturedAttachmentFile>;
   onError?(error: Error): void;
 }
 export type SourceQueryService = ManagedSourceServiceHandler & {
@@ -154,6 +163,20 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     // No domain reader has been entered at this boundary.
     if (active.aborted) throw new ManagedSourceDrainedError(active.reason);
     const query = queryOf(scope), source = resourceThreadSource(scope.source)!;
+    const captureIdentity = (operationId: string, ref: string) => {
+      if (scope.scope.kind !== 'run') throw new Error('Attachment capture requires its original Run');
+      return createHash('sha256').update(JSON.stringify([scope.principal.principalId, scope.coordinatorHostId, stableIdentity(scope.source),
+        scope.scope.threadId, scope.scope.runId, operationId, ref])).digest('hex');
+    };
+    const verifyFileReceipt = async (operationId: string, attachment: unknown, sourceGrantId: unknown) => {
+      if (scope.scope.kind !== 'run' || typeof sourceGrantId !== 'string') throw new Error('Original file has no Source provenance');
+      const result = await options.kernel.sourceRequest<{ state?: string; grantId?: string; receipt?: { attachment?: unknown } }>('source.file.receipt', {
+        principalId: scope.principal.principalId, coordinatorHostId: scope.coordinatorHostId, source: scope.source,
+        threadId: scope.scope.threadId, runId: scope.scope.runId, operationId,
+      }, active);
+      if (result.state !== 'committed' || result.grantId !== sourceGrantId || !isDeepStrictEqual(result.receipt?.attachment, attachment))
+        throw new Error('Original file receipt differs from its Source owner');
+    };
     // These original metadata methods have no deferred capture/compute/process
     // worker. Their completed response (including failure) leaves no reader to
     // cancel. A lost kernel lifetime is still unknown, as are cleanup failures
@@ -173,6 +196,234 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
       }
     };
     switch (operation.kind) {
+      case 'attachment_recover': case 'attachment_capture': {
+        if (scope.scope.kind !== 'run' || !operation.operationId || !/^attachment:[a-zA-Z0-9_-]+$/.test(operation.ref)) throw new Error('Attachment capture requires its original Run and selection');
+        const client = options.kernel.scoped(scope.grant), workspaceId = scope.source.workspace_id;
+        const captureId = captureIdentity(operation.operationId, operation.ref);
+        const retainedId = `attachment.capture:${captureId}`;
+        const releaseCapture = () => client.releaseRecord(`attachment-capture-release:${captureId}`, workspaceId, retainedId);
+        const validateReceiptAuthority = () => options.kernel.assertGrantForScope(scope.grant);
+        const previous = await client.getRecord(workspaceId, operation.ref, active);
+        if (previous) {
+          // A retained selection is immutable: validate its original Source
+          // authority without looking up a mutable path again on retry.
+          await validateReceiptAuthority();
+          const saved = JSON.parse(previous.payloadJson) as { attachment: { ref: string; filename: string; mimeType: string; byteLength: number }; contentHash: string; operationId: string; path: string; captureId: string };
+          if (previous.recordType !== 'attachment.file' || previous.state === 'released' || previous.threadId !== scope.scope.threadId || previous.runId !== scope.scope.runId
+            || saved.attachment.ref !== operation.ref || saved.operationId !== operation.operationId || saved.path !== operation.path || saved.captureId !== captureId
+            || !previous.references.some(item => item.slot === 'source' && item.objectHash === saved.contentHash)) throw new Error('Original attachment capture identity changed');
+          if (await client.getRecord(workspaceId, retainedId)) await releaseCapture();
+          const staleIntent = `attachment.managed-capture-intent:${captureId}`;
+          if (await client.getRecord(workspaceId, staleIntent)) {
+            if (path.isAbsolute(operation.path)) {
+              const key = JSON.stringify(['absolute', `managed:${captureId}`, operation.operationId, operation.ref]);
+              const stale = await restoreCapturedAttachment(options.kernel, { id: scope.scope.threadId, captureScope: `managed:${captureId}` }, key, operation.path, active);
+              if (stale) await stale.release(true);
+            }
+            await client.releaseRecord(`attachment-intent-release:${captureId}`, workspaceId, staleIntent);
+          }
+          return { attachment: saved.attachment, contentHash: saved.contentHash };
+        }
+        const intentId = `attachment.managed-capture-intent:${captureId}`;
+        if (operation.kind === 'attachment_capture') {
+          await client.putRecord({ operationId: `attachment-intent:${captureId}`, recordId: intentId, workspaceId,
+            recordType: 'attachment.managed-capture-intent', state: 'temporary', threadId: scope.scope.threadId, runId: scope.scope.runId,
+            payloadJson: JSON.stringify({ captureId, operationId: operation.operationId, ref: operation.ref, path: operation.path }), ownerIds: [], references: [] }, active);
+        }
+        const retained = scope.source.mode === 'fixed_branch' ? null : await client.getRecord(workspaceId, retainedId, active);
+        const retainedPayload = retained && retained.state !== 'released' ? JSON.parse(retained.payloadJson) as { canonicalRoot?: string } : null;
+        const root = scope.physicalRoot?.canonicalRoot ?? retainedPayload?.canonicalRoot;
+        let selectedPath = operation.path;
+        if (path.isAbsolute(selectedPath)) {
+          const relative = root ? path.relative(root, selectedPath) : null;
+          const within = relative !== null && !!relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+          if (!within) {
+            await validateReceiptAuthority();
+            const captureScope = `managed:${captureId}`;
+            const key = JSON.stringify(['absolute', captureScope, operation.operationId, operation.ref]);
+            const captured = operation.kind === 'attachment_recover'
+              ? await restoreCapturedAttachment(options.kernel, { id: scope.scope.threadId, captureScope }, key, operation.path, active)
+              : await options.captureAbsoluteAttachment?.({ threadId: scope.scope.threadId, operationId: operation.operationId, ref: operation.ref, selectedPath: operation.path, captureScope }, active);
+            if (!captured) {
+              if (operation.kind === 'attachment_recover') return null;
+              throw new Error('The original Host cannot admit this absolute attachment path');
+            }
+            let committed = false;
+            let result: { attachment: import('@varin/protocol').Attachment; contentHash: string } | undefined;
+            try {
+              const object = captured.contentHash.startsWith('ranges-')
+                ? await copyRangeContent(client, captured.contentHash, captured.byteLength, (offset, length, view) => captured.readPage(offset, length, view), active)
+                : await client.putBlobStream(captured.chunks, { operationId: `attachment-absolute-blob:${randomUUID()}`, byteLength: captured.byteLength, expectedHash: captured.contentHash }, active);
+              const attachment = { ref: operation.ref, filename: captured.filename, mimeType: captured.mimeType, byteLength: captured.byteLength };
+              await client.putRecord({ operationId: `attachment-record:${captureId}`, recordId: operation.ref, workspaceId,
+                recordType: 'attachment.file', state: 'temporary', threadId: scope.scope.threadId, runId: scope.scope.runId,
+                payloadJson: JSON.stringify({ attachment, contentHash: object.hash, operationId: operation.operationId, path: operation.path, captureId }),
+                ownerIds: [object.ownerId], references: [{ slot: 'source', objectHash: object.hash }] }, active);
+              committed = true;
+              result = { attachment, contentHash: object.hash };
+            } finally { await captured.release(committed); }
+            await client.releaseRecord(`attachment-intent-release:${captureId}`, workspaceId, intentId);
+            return result;
+          }
+          selectedPath = relative!.replaceAll('\\', '/');
+        }
+        if (operation.kind === 'attachment_recover' && (!retained || retained.state === 'released')) return null;
+        if (retained && retained.state !== 'released') await validateReceiptAuthority();
+        else await owner.sources.checkPath(query, selectedPath, active);
+        let state: import('./protocol.generated.js').KernelBranchState;
+        let sourcePath = selectedPath;
+        if (scope.source.mode === 'fixed_branch') {
+          const read = await client.readBranch({ branchId: scope.source.branch_id!, revision: scope.source.revision!, paths: [sourcePath], includeEntries: true }, active);
+          state = read.entries[0]?.state ?? { kind: 'missing' };
+          sourcePath = read.entries[0]?.path ?? sourcePath;
+        } else {
+          if (retained && retained.state !== 'released') {
+            const saved = JSON.parse(retained.payloadJson) as { path: string; stateJson: string; operationId: string; executionWorkspaceId: string; canonicalRoot: string };
+            if (retained.recordType !== 'attachment.capture' || retained.threadId !== scope.scope.threadId || saved.path !== selectedPath
+              || saved.operationId !== `attachment-capture:${captureId}` || saved.executionWorkspaceId !== scope.source.execution_workspace_id
+              || scope.physicalRoot && saved.canonicalRoot !== scope.physicalRoot.canonicalRoot) throw new Error('Original retained attachment selection changed');
+            state = JSON.parse(saved.stateJson) as import('./protocol.generated.js').KernelBranchState;
+            if (state.kind === 'regular-file') {
+              const hash = state.objectHash;
+              if (!retained.references.some(item => item.slot === 'source' && item.objectHash === hash)) throw new Error('Original retained attachment content is unavailable');
+            }
+            sourcePath = saved.path;
+          } else {
+            if (!scope.physicalRoot) throw new Error('Original attachment execution root is unavailable');
+            const result = await client.fileCapture({ operationId: `attachment-capture:${captureId}`, workspaceId, rootId: scope.physicalRoot.rootId,
+              path: selectedPath, store: true, retentionRecordId: retainedId }, active);
+            if (typeof result.stateJson !== 'string' || typeof result.recordId !== 'string') throw new Error('Original attachment capture was not retained');
+            state = JSON.parse(result.stateJson) as import('./protocol.generated.js').KernelBranchState;
+            if (typeof result.path === 'string') sourcePath = result.path;
+          }
+        }
+        if (state.kind !== 'regular-file') throw new Error(`Selected attachment is ${state.kind}, not a regular file`);
+        const name = path.posix.basename(sourcePath.replaceAll('\\', '/'));
+        const attachment = { ref: operation.ref, filename: name, mimeType: attachmentMimeType(name), byteLength: state.byteLength };
+        await client.putRecord({ operationId: `attachment-record:${captureId}`, recordId: operation.ref, workspaceId,
+          recordType: 'attachment.file', state: 'temporary', threadId: scope.scope.threadId, runId: scope.scope.runId,
+          payloadJson: JSON.stringify({ attachment, contentHash: state.objectHash, operationId: operation.operationId, path: operation.path, captureId }),
+          ownerIds: [], references: [{ slot: 'source', objectHash: state.objectHash }] }, active);
+        if (scope.source.mode !== 'fixed_branch') await releaseCapture();
+        if (await client.getRecord(workspaceId, intentId)) await client.releaseRecord(`attachment-intent-release:${captureId}`, workspaceId, intentId);
+        return { attachment, contentHash: state.objectHash };
+      }
+      case 'attachment_describe': {
+        if (scope.scope.kind !== 'run' || !/^attachment:operation_[a-zA-Z0-9_-]+$/.test(operation.ref)) throw new Error('Invalid original file receipt');
+        const encoded = operation.ref.slice('attachment:operation_'.length), operationId = Buffer.from(encoded, 'base64url').toString('utf8');
+        if (!operationId || Buffer.from(operationId).toString('base64url') !== encoded) throw new Error('Invalid original file receipt');
+        const record = await options.kernel.scoped(scope.grant).getRecord(scope.source.workspace_id, operation.ref, active);
+        if (!record || record.recordType !== 'attachment.file' || record.state === 'released' || record.threadId !== scope.scope.threadId) throw new Error('Original file receipt is unavailable');
+        const value = JSON.parse(record.payloadJson) as { attachment: { ref: string }; contentHash: string; operationId: string; sourceGrantId?: string };
+        if (value.operationId !== operationId || value.attachment.ref !== operation.ref || !record.references.some(item => item.slot === 'source' && item.objectHash === value.contentHash)) throw new Error('Original file receipt is invalid');
+        await verifyFileReceipt(operationId, value.attachment, value.sourceGrantId);
+        return { attachment: value.attachment, contentHash: value.contentHash };
+      }
+      case 'attachment_discard': {
+        // Caller has confirmed the original operation ended without delivery
+        // and all its writers drained. Never infer this from a timeout.
+        if (scope.scope.kind !== 'run' || !operation.operationId || !operation.path || !/^attachment:[a-zA-Z0-9_-]+$/.test(operation.ref)
+          || operation.ref.startsWith('attachment:operation_')) throw new Error('Invalid original attachment discard');
+        const client = options.kernel.scoped(scope.grant), workspaceId = scope.source.workspace_id;
+        const id = captureIdentity(operation.operationId, operation.ref), intentId = `attachment.managed-capture-intent:${id}`;
+        const intent = await client.getRecord(workspaceId, intentId, active);
+        if (intent && intent.state !== 'released') {
+          const saved = JSON.parse(intent.payloadJson) as { captureId?: string; operationId?: string; ref?: string; path?: string };
+          if (intent.recordType !== 'attachment.managed-capture-intent' || intent.threadId !== scope.scope.threadId || intent.runId !== scope.scope.runId
+            || saved.captureId !== id || saved.operationId !== operation.operationId || saved.ref !== operation.ref || saved.path !== operation.path)
+            throw new Error('Original attachment discard intent changed');
+          if (path.isAbsolute(operation.path)) {
+            const key = JSON.stringify(['absolute', `managed:${id}`, operation.operationId, operation.ref]);
+            const original = await restoreCapturedAttachment(options.kernel, { id: scope.scope.threadId, captureScope: `managed:${id}` }, key, operation.path, active);
+            if (original) await original.release(true);
+          }
+          await client.releaseRecord(`attachment-discard-capture:${id}`, workspaceId, `attachment.capture:${id}`);
+        }
+        const formal = await client.getRecord(workspaceId, operation.ref, active);
+        if (formal && formal.state !== 'released') {
+          const saved = JSON.parse(formal.payloadJson) as { captureId?: string; operationId?: string; path?: string };
+          if (formal.recordType !== 'attachment.file' || formal.threadId !== scope.scope.threadId || formal.runId !== scope.scope.runId
+            || saved.captureId !== id || saved.operationId !== operation.operationId || saved.path !== operation.path) throw new Error('Original attachment discard owner changed');
+          await client.releaseRecord(`attachment-discard-file:${id}`, workspaceId, operation.ref);
+        }
+        if (intent && intent.state !== 'released') await client.releaseRecord(`attachment-discard-intent:${id}`, workspaceId, intentId);
+        return;
+      }
+      case 'attachment_cleanup': {
+        // The service admission requires a result authority. Its coordinator
+        // must first prove that the original Thread is deleted and its Source
+        // writers have drained; a mere grant retirement is not that proof.
+        if (scope.scope.kind !== 'run') throw new Error('Attachment cleanup requires the original Run');
+        const client = options.kernel.scoped(scope.grant), workspaceId = scope.source.workspace_id;
+        const authorities = await options.kernel.sourceRequest<Array<{ purpose: string; grantId: string; source: unknown }>>('source.authority.inspect_scope', {
+          principalId: scope.principal.principalId, coordinatorHostId: scope.coordinatorHostId,
+          threadId: scope.scope.threadId, runId: scope.scope.runId,
+        }, active);
+        const originalGrants = new Set(authorities.filter(value => value.purpose === 'source' && isDeepStrictEqual(value.source, scope.source)).map(value => value.grantId));
+        for (const recordType of ['attachment.managed-capture-intent', 'attachment.file']) {
+          let cursor: number | undefined;
+          const records: Array<{ recordId: string; captureId: string; operationId: string; ref: string; path?: string }> = [];
+          do {
+            const page = await client.listRecords({ workspaceId, recordType, threadId: scope.scope.threadId, ...(cursor === undefined ? {} : { cursor }) });
+            for (const record of page.records) {
+              if (record.state === 'released' || record.threadId !== scope.scope.threadId || record.runId && record.runId !== scope.scope.runId) continue;
+              const value = JSON.parse(record.payloadJson) as { captureId?: string; operationId?: string; ref?: string; path?: string; sourceGrantId?: string; attachment?: unknown };
+              const ref = recordType === 'attachment.file' ? record.recordId : value.ref;
+              if (!ref || !value.operationId) continue;
+              if (recordType === 'attachment.file' && value.sourceGrantId && originalGrants.has(value.sourceGrantId)
+                && ref === `attachment:operation_${Buffer.from(value.operationId).toString('base64url')}`) {
+                await verifyFileReceipt(value.operationId, value.attachment, value.sourceGrantId);
+                records.push({ recordId: record.recordId, captureId: '', operationId: value.operationId, ref });
+              } else if (value.captureId && value.captureId === captureIdentity(value.operationId, ref)) {
+                records.push({ recordId: record.recordId, captureId: value.captureId, operationId: value.operationId, ref, ...(value.path ? { path: value.path } : {}) });
+              }
+            }
+            cursor = page.nextCursor ?? undefined;
+          } while (cursor !== undefined);
+          // Native cursors are offsets into the current set. Complete the scan
+          // before releases remove entries, otherwise later pages are skipped.
+          for (const record of records) {
+            if (recordType === 'attachment.managed-capture-intent') {
+              if (record.path && path.isAbsolute(record.path)) {
+                const key = JSON.stringify(['absolute', `managed:${record.captureId}`, record.operationId, record.ref]);
+                const original = await restoreCapturedAttachment(options.kernel, { id: scope.scope.threadId, captureScope: `managed:${record.captureId}` }, key, record.path, active);
+                if (original) await original.release(true);
+              }
+              await client.releaseRecord(`attachment-thread-delete-capture:${record.captureId}`, workspaceId, `attachment.capture:${record.captureId}`);
+            }
+            const releaseId = createHash('sha256').update(JSON.stringify([workspaceId, scope.scope.threadId, record.recordId])).digest('hex');
+            await client.releaseRecord(`attachment-thread-delete:${releaseId}`, workspaceId, record.recordId);
+          }
+        }
+        return;
+      }
+      case 'attachment_release': {
+        if (scope.scope.kind !== 'run' || !/^attachment:[a-zA-Z0-9_-]+$/.test(operation.ref)) throw new Error('Invalid original attachment release');
+        const client = options.kernel.scoped(scope.grant);
+        const record = await client.getRecord(scope.source.workspace_id, operation.ref, active);
+        if (!record) return;
+        if (record.recordType !== 'attachment.file' || record.threadId !== scope.scope.threadId || record.runId !== scope.scope.runId) throw new Error('Original attachment release is outside its Run');
+        const value = JSON.parse(record.payloadJson) as { operationId?: string; captureId?: string };
+        if (!value.operationId || value.captureId !== captureIdentity(value.operationId, operation.ref)) throw new Error('Original attachment release changed its owner');
+        const releaseId = createHash('sha256').update(JSON.stringify([scope.source.workspace_id, scope.scope.threadId, scope.scope.runId, operation.ref])).digest('hex');
+        await client.releaseRecord(`attachment-release:${releaseId}`, scope.source.workspace_id, operation.ref);
+        return;
+      }
+      case 'attachment_read': {
+        if (scope.scope.kind !== 'run' || !/^attachment:[a-zA-Z0-9_-]+$/.test(operation.ref)
+          || !Number.isSafeInteger(operation.offset) || operation.offset < 0 || !Number.isSafeInteger(operation.length) || operation.length < 0 || operation.length > 256 * 1024) throw new Error('Invalid original attachment read');
+        const client = options.kernel.scoped(scope.grant);
+        const record = await client.getRecord(scope.source.workspace_id, operation.ref, active);
+        if (!record || record.recordType !== 'attachment.file' || record.state === 'released' || record.threadId !== scope.scope.threadId) throw new Error('Original attachment is unavailable');
+        const value = JSON.parse(record.payloadJson) as { attachment: { ref: string }; contentHash: string; operationId?: string; captureId?: string; sourceGrantId?: string };
+        const originalFile = operation.ref.startsWith('attachment:operation_') && typeof value.operationId === 'string'
+          && operation.ref === `attachment:operation_${Buffer.from(value.operationId).toString('base64url')}`;
+        if ((!originalFile && (record.runId !== scope.scope.runId || !value.operationId || value.captureId !== captureIdentity(value.operationId, operation.ref))) || value.attachment.ref !== operation.ref
+          || !record.references.some(item => item.slot === 'source' && item.objectHash === value.contentHash)) throw new Error('Original attachment receipt is invalid');
+        if (originalFile) await verifyFileReceipt(value.operationId!, value.attachment, value.sourceGrantId);
+        return client.getBlob(operation.rangeObject ?? value.contentHash, { recordId: operation.ref, slot: 'source' }, { offset: operation.offset, length: operation.length,
+          ...(operation.representation ? { representation: operation.representation } : {}), ...(operation.rangeObject ? { rangeRoot: value.contentHash } : {}), signal: active });
+      }
       case 'experiment_admit': case 'experiment_capture': case 'experiment_read':
         await metadata(signal => owner.sources.validate(query, signal));
         return research.handle(scope, operation, active);

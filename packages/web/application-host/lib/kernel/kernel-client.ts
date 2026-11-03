@@ -274,7 +274,7 @@ export class KernelScopedClient {
 
   putBlobStream(
     chunks: AsyncIterable<Uint8Array>,
-    input: { operationId: string; byteLength: number; expectedHash: string },
+    input: { operationId: string; byteLength: number; expectedHash?: string },
     signal?: AbortSignal,
   ): Promise<KernelPutBlobResult> {
     return this.owner.putBlobStream(chunks, input, this.grant, signal);
@@ -344,6 +344,12 @@ export class KernelScopedClient {
     return this.owner.fileMeasure(params, this.grant, signal);
   }
 
+  objectViewPrepare(params: KernelMethodParams["file.objectView.prepare"], signal?: AbortSignal): Promise<import('./protocol.generated.js').KernelObjectView> {
+    return this.owner.objectViewPrepare(params, this.grant, signal);
+  }
+  objectViewRelease(params: KernelMethodParams["file.objectView.release"], signal?: AbortSignal): Promise<{ released: boolean }> {
+    return this.owner.objectViewRelease(params, this.grant, signal);
+  }
   materializedViewPrepare(params: KernelMethodParams["file.materializedView.prepare"], signal?: AbortSignal): Promise<KernelMaterializedView> {
     return this.owner.materializedViewPrepare(params, this.grant, signal);
   }
@@ -1354,7 +1360,7 @@ export class KernelClient {
 
   async putBlobStream(
     chunks: AsyncIterable<Uint8Array>,
-    input: { operationId: string; byteLength: number; expectedHash: string },
+    input: { operationId: string; byteLength: number; expectedHash?: string },
     grant: KernelGrantHandle,
     signal?: AbortSignal,
   ): Promise<KernelPutBlobResult> {
@@ -1362,16 +1368,23 @@ export class KernelClient {
     if (!Number.isSafeInteger(input.byteLength) || input.byteLength < 0) {
       throw new Error("Blob stream byteLength must be a non-negative safe integer");
     }
-    const ranged = input.expectedHash.startsWith('ranges-');
-    if (!/^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(input.expectedHash)) {
+    const ranged = input.expectedHash?.startsWith('ranges-') ?? false;
+    if (input.expectedHash !== undefined && !/^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(input.expectedHash)) {
       throw new Error("Blob stream expectedHash must identify a content object or immutable file version");
     }
     const existing = await this.getOperation(input.operationId, scoped, signal).catch(() => null);
     if (existing?.state === "committed" && existing.result && typeof existing.result === "object") {
       const result = existing.result as Partial<KernelPutBlobResult>;
-      if (result.hash === input.expectedHash && (ranged || result.byteLength === input.byteLength) && typeof result.ownerId === "string") {
-        return result as KernelPutBlobResult;
+      if (typeof result.hash !== "string" || !/^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(result.hash)
+        || input.expectedHash !== undefined && result.hash !== input.expectedHash || !ranged && result.byteLength !== input.byteLength) {
+        throw new Error("Blob upload retry changed its original identity");
       }
+      // The durable receipt fixes content, not the lifetime of its temporary
+      // object owner. Grant retirement/restart may have released that owner.
+      // Re-stream with the first receipt's hash to acquire a fresh owner, never
+      // substitute later bytes for an upload whose original digest was unknown.
+      return this.putBlobStream(chunks, { operationId: `blob-retry:${randomUUID()}`,
+        byteLength: input.byteLength, expectedHash: result.hash }, scoped, signal);
     }
     const streamId = `blob-${randomUUID()}`;
     const digest = createHash("sha256");
@@ -1382,7 +1395,7 @@ export class KernelClient {
         operationId: input.operationId,
         streamId,
         byteLength: input.byteLength,
-        expectedHash: input.expectedHash,
+        ...(input.expectedHash === undefined ? {} : { expectedHash: input.expectedHash }),
         ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
       }, { signal, grant: scoped });
       if (begin.streamId !== streamId) throw new KernelClientError({ code: "kernel-stream-invalid", message: "Rust kernel returned a different upload stream identity", retryable: false });
@@ -1402,13 +1415,13 @@ export class KernelClient {
         }
       }
       const actualHash = `sha256-${digest.digest("hex")}`;
-      if (received !== input.byteLength || actualHash !== (ranged ? input.expectedHash.slice('ranges-'.length) : input.expectedHash)) {
+      if (received !== input.byteLength || input.expectedHash !== undefined && actualHash !== (ranged ? input.expectedHash.slice('ranges-'.length) : input.expectedHash)) {
         throw new Error("Blob stream content did not match its declared identity");
       }
       return await this.requestRaw<KernelPutBlobResult>("storage.putBlob.finish", {
         operationId: input.operationId,
         streamId,
-        expectedHash: input.expectedHash,
+        ...(input.expectedHash === undefined ? {} : { expectedHash: input.expectedHash }),
         ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
       }, { signal, grant: scoped });
     } catch (error) {
@@ -1583,6 +1596,12 @@ export class KernelClient {
     return this.requestRaw<KernelProcessSnapshot>("process.release", params, { signal, grant });
   }
 
+  async objectViewPrepare(params: KernelMethodParams["file.objectView.prepare"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<import('./protocol.generated.js').KernelObjectView> {
+    return this.requestRaw("file.objectView.prepare", params, { signal, grant, settleCancellation: true });
+  }
+  async objectViewRelease(params: KernelMethodParams["file.objectView.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ released: boolean }> {
+    return this.requestRaw("file.objectView.release", params, { signal, grant, settleCancellation: true });
+  }
   async materializedViewPrepare(params: KernelMethodParams["file.materializedView.prepare"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelMaterializedView> {
     return this.requestRaw<KernelMaterializedView>("file.materializedView.prepare", params, { signal, grant, settleCancellation: true });
   }

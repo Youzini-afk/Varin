@@ -399,7 +399,7 @@ export function createMcpTaskRuntime(options:{
       const view=await request<{operation:Operation;observation:unknown;result:OutputBody<ResolvedMedia>|null},'runtime.host_job.task.read'>('runtime.host_job.task.read',{runId:input.call.runId,targetOperationId:input.targetOperationId},input.signal);
       return {executor_stopped:true,completion:{kind:'result',outcome:'succeeded',effect:input.action==='cancel'?'confirmed':'none',content:{data:{operationId:input.targetOperationId,
         task:view.operation.host_job!.mcpTask,executorStopped:view.operation.external_receipt?.executor_stopped ?? false,cancelRequested:view.operation.cancel_requested,
-        observation:view.observation,result:view.result?.data ?? null},parts:(view.result?.parts ?? []).map(part=>part.kind==='text'?part:{kind:'media' as const,media:{media_type:part.media.media_type,data_base64:part.media.data_base64}})}}};
+        observation:view.observation,result:view.result?.data ?? null},parts:(view.result?.parts ?? []).map(part=>part.kind!=='media'?part:{kind:'media' as const,media:{media_type:part.media.media_type,data_base64:part.media.data_base64}})}}};
     },
     async dispose(){if(disposed)return;disposed=true;lifetime.abort();if(timer)clearTimeout(timer);for(const stop of removers.splice(0))stop();
       await Promise.allSettled([...(work?[work]:[]),...[...entries.values()].flatMap(entry=>[entry.serial,...(entry.acceptanceFlight?[entry.acceptanceFlight]:[]),...(entry.resultFlight?[entry.resultFlight]:[]),...(entry.pollFlight?[entry.pollFlight]:[]),...(entry.cancelFlight?[entry.cancelFlight]:[]),...(entry.recoveryFlight?[entry.recoveryFlight]:[])])]);

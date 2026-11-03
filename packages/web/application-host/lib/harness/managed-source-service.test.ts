@@ -67,13 +67,14 @@ function fixture() {
   const recovery = vi.fn(async () => ({ status: 'failed' as const,
     failure: { code: 'operation-not-found' as const, message: 'Original journal is unavailable', retryable: false } }));
   const readCodeExchange = vi.fn(async () => ({ operationId: 'exchange', sourceThreadId: 'sender', targetThreadId: 'target', state: 'applied', files: [] }));
+  const validateLiveSource = vi.fn(async () => {});
   const service = createManagedSourceService({ kernel, hostId: 'target', releaseMcpView, mcpInteractionContinuation, documents: {
     admitWorkspaceRegistration: async () => {
       events.push('registration'); if (!state.trusted) throw new Error('Trust withdrawn');
       return { workspaceId: 'workspace', canonicalPath: '/target/project', hostId: 'target' };
     },
-  } as never, validateLiveSource: async () => {}, prepareSource, serviceOperation, releaseSource, recovery, readCodeExchange });
-  return { service, kernel, state, events, sourceRequest, issueGrant, claimManagedChildSource, readBranch, fileMaterialize, fileRootRegister, prepareSource, serviceOperation, releaseSource, releaseMcpView, mcpInteractionContinuation, recovery, readCodeExchange };
+  } as never, validateLiveSource, prepareSource, serviceOperation, releaseSource, recovery, readCodeExchange });
+  return { service, kernel, state, events, validateLiveSource, sourceRequest, issueGrant, claimManagedChildSource, readBranch, fileMaterialize, fileRootRegister, prepareSource, serviceOperation, releaseSource, releaseMcpView, mcpInteractionContinuation, recovery, readCodeExchange };
 }
 
 async function bindMcp(f: ReturnType<typeof fixture>) {
@@ -483,4 +484,106 @@ describe('managed Source target admission orchestration', () => {
     expect(f.serviceOperation).toHaveBeenCalledTimes(1);
   });
 
+});
+
+
+it.each(['attachment_cleanup', 'attachment_discard'] as const)('requires write-capable result authority for destructive %s', async kind => {
+  const f = fixture();
+  const binding = await f.service.bind(principal, { ...request, scope: { kind: 'run', threadId: 'thread', runId: 'run', epoch: 1 }, purpose: 'source', retention: 'run' });
+  const input = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch,
+    requestId: 'cleanup-read-only', operation: kind === 'attachment_cleanup' ? { kind } : { kind, operationId: 'original-operation', ref: 'attachment:original', path: 'original.csv' } };
+  await expect(f.service.service(principal, input)).rejects.toThrow();
+  const writer = { ...principal, capabilities: ['filesystem:read', 'filesystem:write'] };
+  await expect(f.service.service(writer, { ...input, requestId: 'cleanup-wrong-purpose' })).rejects.toThrow();
+  expect(f.serviceOperation).not.toHaveBeenCalled();
+});
+
+
+it.each(['live_root', 'fixed_branch', 'materialized'] as const)('recalls result attachment metadata after the original %s content disappears, while retaining trust checks', async mode => {
+  const f = fixture();
+  f.validateLiveSource.mockRejectedValue(new Error('Original live directory was deleted'));
+  f.readBranch.mockRejectedValue(new Error('Original branch revision was collected'));
+  const selected: ThreadSource = mode === 'live_root' ? { resourceOwner: source.resourceOwner, workspaceId: 'workspace', executionWorkspaceId: 'workspace',
+    mode, liveRoot: { hostId: 'target', rootId: 'original-root', canonicalRoot: '/deleted/original' }, tools: [] } : { ...source, mode };
+  const binding = await f.service.bind(principal, { ...request, source: selected,
+    scope: { kind: 'run', threadId: 'thread', runId: 'original-run', epoch: 1 }, purpose: 'result', retention: 'run' });
+  f.serviceOperation.mockResolvedValue(null);
+  const input = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch,
+    requestId: 'recover', operation: { kind: 'attachment_recover' as const, operationId: 'original-operation', ref: 'attachment:original', path: 'original.csv' } };
+  expect(await f.service.service(principal, input)).toBeNull();
+  expect(f.validateLiveSource).not.toHaveBeenCalled();
+  expect(f.readBranch).not.toHaveBeenCalled();
+  expect(f.fileRootRegister).not.toHaveBeenCalled();
+  expect(f.serviceOperation).toHaveBeenCalledWith(expect.objectContaining({ scope: expect.objectContaining({ runId: 'original-run' }), physicalRoot: null }), input.operation, expect.any(AbortSignal));
+  await expect(f.service.service(principal, { ...input, requestId: 'capture', operation: { ...input.operation, kind: 'attachment_capture' } })).rejects.toThrow();
+  for (const operation of [{ kind: 'read' as const, path: 'secret.txt' }, { kind: 'document_read' as const, path: 'secret.docx', operationId: 'read' }, { kind: 'compute' as const, input: {} as never }]) {
+    await expect(f.service.service(principal, { ...input, requestId: operation.kind, operation })).rejects.toThrow();
+  }
+  f.state.trusted = false;
+  await expect(f.service.service(principal, { ...input, requestId: 'untrusted-recover' })).rejects.toThrow('Trust withdrawn');
+});
+
+it('keeps failed capture cleanup pending when no durable original writer drain is available', async () => {
+  const f = fixture();
+  const writer = { ...principal, capabilities: ['filesystem:read', 'filesystem:write'] };
+  const binding = await f.service.bind(writer, { ...request, scope: { kind: 'run', threadId: 'thread', runId: 'run', epoch: 1 }, purpose: 'result', retention: 'run' });
+  await expect(f.service.service(writer, { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch,
+    requestId: 'discard-failed-capture', operation: { kind: 'attachment_discard', operationId: 'terminal-operation', ref: 'attachment:original', path: 'original.csv' } }))
+    .rejects.toThrow('writer termination is unconfirmed');
+  expect(f.serviceOperation).not.toHaveBeenCalled();
+});
+
+it('discards only its completed original capture and fences late recapture without retiring the Run', async () => {
+  const f = fixture();
+  const writer = { ...principal, capabilities: ['filesystem:read', 'filesystem:write'] };
+  const scope = { kind: 'run' as const, threadId: 'thread', runId: 'run', epoch: 1 };
+  const captured = { operationId: 'handoff', ref: 'attachment:original', path: 'original.csv' };
+  const binding = await f.service.bind(writer, { ...request, scope, purpose: 'source', retention: 'run' });
+  const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
+  f.serviceOperation.mockResolvedValue({ attachment: { ref: captured.ref }, contentHash: 'original' });
+  await f.service.service(writer, { ...address, requestId: 'capture:original', operation: { kind: 'attachment_capture', ...captured } });
+  await f.service.bind(writer, { ...request, scope, purpose: 'result', retention: 'run' });
+  for (const change of [{ operationId: 'other' }, { path: 'other.csv' }, { ref: 'attachment:other' }]) {
+    await expect(f.service.service(writer, { ...address, requestId: JSON.stringify(change), operation: { kind: 'attachment_discard', ...captured, ...change } })).rejects.toThrow('writer termination is unconfirmed');
+  }
+  for (const changed of [{ actor: { ...writer, principalId: 'foreign' }, coordinatorHostId: 'coordinator' }, { actor: writer, coordinatorHostId: 'foreign' }]) {
+    await expect(f.service.service(changed.actor, { ...address, coordinatorHostId: changed.coordinatorHostId, requestId: `foreign:${changed.actor.principalId}:${changed.coordinatorHostId}`,
+      operation: { kind: 'attachment_discard', ...captured } })).rejects.toThrow('writer termination is unconfirmed');
+  }
+  const exactAuthority = f.state.authority!;
+  for (const changed of [{ scope: { ...scope, runId: 'other-run' } }, { scope: { ...scope, epoch: 2 } }, { source: { ...exactAuthority.source, revision: 1 } }]) {
+    f.state.authority = { ...exactAuthority, ...changed };
+    await expect(f.service.service(writer, { ...address, requestId: `scope:${JSON.stringify(changed)}`, operation: { kind: 'attachment_discard', ...captured } })).rejects.toThrow('writer termination is unconfirmed');
+  }
+  f.state.authority = exactAuthority;
+  f.serviceOperation.mockResolvedValue(undefined);
+  await f.service.service(writer, { ...address, requestId: 'discard:original', operation: { kind: 'attachment_discard', ...captured } });
+  expect(f.serviceOperation).toHaveBeenLastCalledWith(expect.objectContaining({ scope }), { kind: 'attachment_discard', ...captured }, expect.any(AbortSignal));
+  expect(f.sourceRequest.mock.calls.some(([method]) => method === 'source.authority.release_scope')).toBe(false);
+  await f.service.bind(writer, { ...request, scope, purpose: 'source', retention: 'run' });
+  await expect(f.service.service(writer, { ...address, requestId: 'late-capture', operation: { kind: 'attachment_capture', ...captured } })).rejects.toThrow('closed for cleanup');
+});
+
+it('waits for the exact original capture response and keeps uncertain termination pending', async () => {
+  const f = fixture();
+  const writer = { ...principal, capabilities: ['filesystem:read', 'filesystem:write'] };
+  const scope = { kind: 'run' as const, threadId: 'thread', runId: 'run', epoch: 1 };
+  const captured = { operationId: 'handoff', ref: 'attachment:original', path: 'original.csv' };
+  const binding = await f.service.bind(writer, { ...request, scope, purpose: 'source', retention: 'run' });
+  const address = { coordinatorHostId: 'coordinator', authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
+  let reject!: (error: Error) => void;
+  const original = new Promise<never>((_resolve, no) => { reject = no; });
+  f.serviceOperation.mockReturnValue(original);
+  const capturing = f.service.service(writer, { ...address, requestId: 'capture:original', operation: { kind: 'attachment_capture', ...captured } });
+  void capturing.catch(() => undefined);
+  await vi.waitFor(() => expect(f.serviceOperation).toHaveBeenCalledTimes(1));
+  await f.service.bind(writer, { ...request, scope, purpose: 'result', retention: 'run' });
+  const discarded = f.service.service(writer, { ...address, requestId: 'discard:original', operation: { kind: 'attachment_discard', ...captured } });
+  void discarded.catch(() => undefined);
+  await vi.waitFor(() => expect(f.serviceOperation.mock.calls[0]![2]!.aborted).toBe(true));
+  expect(f.serviceOperation).toHaveBeenCalledTimes(1);
+  reject(new Error('Original native capture reply was lost'));
+  await expect(capturing).rejects.toThrow('reply was lost');
+  await expect(discarded).rejects.toThrow('writer termination is unconfirmed');
+  expect(f.serviceOperation).toHaveBeenCalledTimes(1);
 });

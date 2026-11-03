@@ -10,11 +10,10 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
-import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, FetchResult } from '@varin/protocol';
+import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, Attachment } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
 import { ContextPanelContent } from '@/components/layout/ContextSidebarTab';
 import { dict as en } from '@/lib/i18n/messages/en';
-import { toast } from '@/components/ui';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
 import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
@@ -190,7 +189,7 @@ function fixture(active = false) {
   });
   const listeners = new Set<Parameters<ThreadsAPI['observe']>[1]>();
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { attachments: { upload: vi.fn(async (_identity, request) => ({ ref: 'attachment:retained-original', filename: request.filename, mimeType: request.mimeType, byteLength: request.data.size })), read: vi.fn(async () => new Blob(['original'])) }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
@@ -263,16 +262,9 @@ const button = (text: string) => {
   })!;
 };
 const pdfFile = (name = 'original.pdf') => new File(['%PDF-1.7\nOriginal PDF bytes\n%%EOF'], name, { type: 'application/pdf' });
-const uploadedPdf = (snapshotId = 'retained-original'): FetchResult => {
-  const sourceSnapshot = { snapshotId, sourceUrl: 'upload:original.pdf', finalUrl: 'upload:original.pdf', fetchedAt: 1,
-    contentHash: 'text-hash', representation: 'pdf-text', byteLength: 31,
-    document: { kind: 'pdf' as const, parser: 'native', source: { contentHash: 'original-byte-hash', byteLength: 31, contentType: 'application/pdf' } } };
-  return { status: 'ok', url: sourceSnapshot.sourceUrl, finalUrl: sourceSnapshot.finalUrl, contentType: 'application/pdf',
-    markdown: '', bytes: 31, rendered: false, fromCache: false, sourceSnapshot,
-    snapshot: { ...sourceSnapshot, snapshotId: 'derived-text-view' } };
-};
+const uploadedFile = (id = 'retained-original'): Attachment => ({ ref: `attachment:${id}`, filename: 'original.pdf', mimeType: 'application/pdf', byteLength: 31 });
 const choosePdfs = async (...files: File[]) => {
-  const picker = container.querySelector<HTMLInputElement>('[aria-label="chat.fileAttachment.actions.choosePdfs"]')!;
+  const picker = container.querySelector<HTMLInputElement>('[aria-label="chat.attachments.choose"]')!;
   await act(async () => {
     Object.defineProperty(picker, 'files', { configurable: true, value: files });
     picker.dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -667,7 +659,7 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   const cancelOperation = vi.fn<ThreadsAPI['cancelOperation']>(async () => observation);
   f.api.cancelOperation = cancelOperation;
   const readReport = vi.fn<NonNullable<ThreadsAPI['collaboration']>['readReport']>(async () => ({
-    format: 'text', operation_id: child.operation_id, execution_id: 'original-execution', item_id: 'original-report', offset: 0, next_offset: null, total_bytes: 14, text: 'Original bytes',
+    attachments: [], format: 'text', operation_id: child.operation_id, execution_id: 'original-execution', item_id: 'original-report', offset: 0, next_offset: null, total_bytes: 14, text: 'Original bytes',
   }));
   const cancelChild = vi.fn(async (_identity: ThreadIdentity, operationId: string) => ({ target: { kind: 'child' as const, operation_id: operationId }, cursor: 4, run_count: 1, child_count: 1, process_count: 1 }));
   const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
@@ -942,8 +934,8 @@ it.each(['any', 'all'] as const)('registers %s conditions as one retained intent
 
 it('opens a local draft and creates its canonical Thread only when the first message is sent', async () => {
   const f = fixture(); const create = vi.fn(f.api.create); f.api.create = create; runtimeState.api = f.api;
-  let upload!: (value: Awaited<ReturnType<ThreadsAPI['materials']['upload']>>) => void;
-  vi.mocked(f.api.materials.upload).mockImplementation(() => new Promise(resolve => { upload = resolve; }));
+  let upload!: (value: Awaited<ReturnType<ThreadsAPI['attachments']['upload']>>) => void;
+  vi.mocked(f.api.attachments.upload).mockImplementation(() => new Promise(resolve => { upload = resolve; }));
   let accept!: (value: Awaited<ReturnType<ThreadsAPI['submit']>>) => void;
   f.submit.mockImplementation(() => new Promise(resolve => { accept = resolve; }));
   f.api.prepareSource = vi.fn().mockResolvedValue({ path: '/chosen-project', source: { resourceOwner: { kind: 'local' }, workspaceId: 'chosen', executionWorkspaceId: 'chosen', mode: 'live_root',
@@ -960,15 +952,15 @@ it('opens a local draft and creates its canonical Thread only when the first mes
     await edit('[aria-label="Message thread"]', 'Explain the attached document');
     await choosePdfs(pdfFile());
     expect(create).not.toHaveBeenCalled();
-    expect(f.api.materials.upload).not.toHaveBeenCalled();
+    expect(f.api.attachments.upload).not.toHaveBeenCalled();
     await submitForm(composerForm());
     expect(create).toHaveBeenCalledOnce();
-    expect(f.api.materials.upload).toHaveBeenCalledOnce();
+    expect(f.api.attachments.upload).toHaveBeenCalledOnce();
     expect(container.querySelector('h1')).toBeNull();
     expect(container.querySelector('[data-conversation-user-message]')?.textContent).toContain('Explain the attached document');
     expect(container.querySelector('[data-conversation-submission-status]')?.getAttribute('data-conversation-submission-status')).toBe('preparing');
-    await act(async () => { upload(uploadedPdf()); });
-    expect(f.submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: 'Explain the attached document', materials: [{ snapshotId: 'retained-original' }] }));
+    await act(async () => { upload(uploadedFile()); });
+    expect(f.submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: 'Explain the attached document', attachments: [{ ref: 'attachment:retained-original' }] }));
     expect(container.querySelector('[data-conversation-submission-status]')?.getAttribute('data-conversation-submission-status')).toBe('dispatching');
     await act(async () => { accept({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', input_id: 'sent', cursor: 1 }); });
     expect(container.querySelector('h1')).toBeNull();
@@ -1014,7 +1006,7 @@ it('freezes editor and inline context on an unknown send and acknowledges only c
 it.each(['thread', 'branch', 'host'] as const)('a late accepted receipt clears only its original text and PDF draft after %s navigation', async changed => {
   const f = fixture(); let accept!: (value: Awaited<ReturnType<ThreadsAPI['submit']>>) => void;
   f.submit.mockImplementationOnce(() => new Promise(resolve => { accept = resolve; }));
-  vi.mocked(f.api.materials.upload).mockResolvedValueOnce(uploadedPdf('original-pdf')).mockResolvedValueOnce(uploadedPdf('new-pdf'));
+  vi.mocked(f.api.attachments.upload).mockResolvedValueOnce(uploadedFile('original-pdf')).mockResolvedValueOnce(uploadedFile('new-pdf'));
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   await edit('[aria-label="Message thread"]', 'accepted original');
@@ -1029,9 +1021,9 @@ it.each(['thread', 'branch', 'host'] as const)('a late accepted receipt clears o
   await act(async () => { accept({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'accepted', input_id: 'accepted', cursor: 2 }); });
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('keep fork draft');
   expect(useThreadDraftStore.getState().drafts[originalKey].text).toBe('');
-  expect(useThreadDraftStore.getState().drafts[originalKey].materials).toEqual([]);
+  expect(useThreadDraftStore.getState().drafts[originalKey].files).toEqual([]);
   expect(useThreadDraftStore.getState().drafts[originalKey].pendingInput).toBeUndefined();
-  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), fork)].materials.map(item => item.snapshotId)).toEqual(['new-pdf']);
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), fork)].files?.map(item => item.filename)).toEqual(['new.pdf']);
 });
 
 it('retains original text, image bytes and request identity across branch navigation after a lost receipt', async () => {
@@ -1053,190 +1045,107 @@ it('retains original text, image bytes and request identity across branch naviga
   expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), fork)].text).toBe('other draft');
 });
 
-it('shared file picker previews image-only input, retains bytes/key on failure, and supports removing a selected image', async () => {
+it('uploads original arbitrary bytes only on send and sends a fixed reference with a text-only model', async () => {
   const f = fixture();
-  f.submit.mockRejectedValueOnce(new ThreadRequestError(400, 'kernel-frame-too-large'));
-  f.submit.mockImplementationOnce(async input => {
-    f.view.history.push({ id: 'accepted-image', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content: { text: input.text, attachments: input.images?.map(() => storedImage) } });
-    f.view.historyPage.head = 'accepted-image'; f.view.thread.branches[0]!.head = 'accepted-image';
-    return { thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', input_id: 'sent', cursor: 1 };
-  });
-  const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
-  const file = new File([Uint8Array.from(Buffer.from(data, 'base64'))], 'fixture.png', { type: 'image/png' });
-  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
-  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
-  const choose = async () => {
-    const picker = container.querySelector<HTMLInputElement>('[aria-label="Choose image attachments"]')!;
-    await act(async () => {
-      Object.defineProperty(picker, 'files', { configurable: true, value: [file] });
-      picker.dispatchEvent(new window.Event('change', { bubbles: true }));
-      await new Promise(resolve => setTimeout(resolve, 0));
-    });
-  };
-  await choose();
-  expect(container.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
-  expect(button('Send').disabled).toBe(false);
-  await submitForm(container.querySelector('form')!);
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain('attachments are still here');
-  expect(container.querySelector('img')).not.toBeNull();
-  await submitForm(container.querySelector('form')!);
-  expect(f.submit.mock.calls[1]![0]).toEqual(f.submit.mock.calls[0]![0]);
-  expect(f.submit.mock.calls[0]![0]).toMatchObject({ text: '[Image 1]', images: [{ mimeType: 'image/png', data, reference: 1 }] });
-  expect(container.querySelector('form img')).toBeNull();
-  expect(container.querySelector('article img')).toBeNull();
-  await act(async () => button('View image').click());
-  expect(container.querySelector('article img')?.getAttribute('src')).toBe('blob:test-image');
-  await choose();
-  await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="chat.fileAttachment.actions.removeImage"]')!.click(); });
-  expect(container.querySelector('form img')).toBeNull();
-  expect(button('Send').disabled).toBe(true);
-});
-
-it('uploads original PDF bytes under the selected Thread and sends its retained source snapshot with a text-only model', async () => {
-  const f = fixture();
-  const errorToast = vi.spyOn(toast, 'error').mockReturnValue('missing-material');
   f.api.listModels = async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model', acceptsImages: false }];
-  const upload = vi.mocked(f.api.materials.upload).mockResolvedValue(uploadedPdf());
-  vi.mocked(f.api.materials.read).mockResolvedValue({ status: 'snapshot-missing', snapshotId: 'retained-original' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
-  expect(button('Attach images').disabled).toBe(true);
-  expect(button('chat.fileAttachment.actions.attachPdfs').disabled).toBe(false);
-  const file = pdfFile(); await choosePdfs(file);
-  expect(upload).toHaveBeenCalledExactlyOnceWith(identity, { filename: file.name, mimeType: 'application/pdf',
-    data: Buffer.from(await file.arrayBuffer()).toString('base64') }, expect.any(AbortSignal));
-  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')?.textContent).toContain(file.name);
-  await act(async () => button('harness.pdf.openReader · original.pdf').click());
-  expect(f.api.materials.read).toHaveBeenCalledWith(identity, { snapshotId: 'retained-original', view: 'overview' }, expect.any(AbortSignal));
-  // A missing retained material fails before mounting a PDF/Office reader,
-  // but its accepted attachment remains available for the original submission.
-  expect(errorToast).toHaveBeenCalledWith(expect.stringMatching(/unavailable/i));
-  expect(container.querySelector('[role="dialog"]')).toBeNull();
-  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')?.textContent).toContain(file.name);
+  const file = new File([new Uint8Array([0, 255, 1, 128])], 'weights.unknown', { type: 'application/octet-stream' });
+  await choosePdfs(file);
+  expect(f.api.attachments.upload).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('weights.unknown');
   expect(button('Send').disabled).toBe(false);
   await submitForm(composerForm());
-  expect(f.submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: '', images: [], materials: [{ snapshotId: 'retained-original' }] }));
-  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')).toBeNull();
-  expect(button('Send').disabled).toBe(true);
-  expect(upload).toHaveBeenCalledOnce();
+  const request = vi.mocked(f.api.attachments.upload).mock.calls[0]![1];
+  expect(request.data).toBe(file);
+  expect(new Uint8Array(await request.data.arrayBuffer())).toEqual(new Uint8Array([0, 255, 1, 128]));
+  expect(f.submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: '', images: [], attachments: [{ ref: 'attachment:retained-original' }] }));
+  expect(f.api.materials.upload).not.toHaveBeenCalled();
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)].files).toEqual([]);
 });
 
-it.each(['paste', 'drop'] as const)('accepts PDF and image files through %s while preserving their separate native attachment paths', async kind => {
-  const f = fixture(); const upload = vi.mocked(f.api.materials.upload).mockResolvedValue(uploadedPdf());
+it.each(['paste', 'drop'] as const)('selects mixed binary files through %s and delivers every original together', async kind => {
+  const f = fixture();
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
-  const pdf = new File(['%PDF-1.7\noriginal bytes'], 'browser.PDF', { type: kind === 'drop' ? 'application/octet-stream' : '' });
-  const image = new File([Buffer.from(imageData, 'base64')], 'image.png', { type: 'image/png' });
+  const files = [pdfFile(), new File([Buffer.from(imageData, 'base64')], 'image.png', { type: 'image/png' }), new File(['a,b\n1,2'], 'table.csv')];
   await act(async () => {
     const event = new window.Event(kind, { bubbles: true, cancelable: true });
-    Object.defineProperty(event, kind === 'paste' ? 'clipboardData' : 'dataTransfer', { value: { files: [pdf, image], types: ['Files'] } });
+    Object.defineProperty(event, kind === 'paste' ? 'clipboardData' : 'dataTransfer', { value: { files, types: ['Files'] } });
     container.querySelector('[aria-label="Message thread"]')!.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
-    await new Promise(resolve => setTimeout(resolve, 0));
   });
-  expect(upload).toHaveBeenCalledExactlyOnceWith(identity, { filename: 'browser.PDF', mimeType: 'application/pdf',
-    data: Buffer.from(await pdf.arrayBuffer()).toString('base64') }, expect.any(AbortSignal));
+  expect(f.api.attachments.upload).not.toHaveBeenCalled();
   await submitForm(composerForm());
-  expect(f.submit.mock.calls[0]![0]).toMatchObject({ images: [{ mimeType: 'image/png', data: imageData }], materials: [{ snapshotId: 'retained-original' }] });
+  expect(vi.mocked(f.api.attachments.upload).mock.calls.map(([, value]) => value.data)).toEqual(files);
+  expect(f.submit.mock.calls[0]![0].attachments).toHaveLength(3);
+  expect(f.submit.mock.calls[0]![0].text).toBe('');
 });
 
-it('joins repeated PDF selection and send clicks, then retries uncertain delivery with the same snapshots without another transfer', async () => {
+it('keeps all selections and text when a later file fails; retry reuses prepared content and the failed upload key', async () => {
   const f = fixture();
-  let retain!: (result: FetchResult) => void;
-  const upload = vi.mocked(f.api.materials.upload).mockImplementationOnce(() => new Promise(resolve => { retain = resolve; }));
-  let reject!: (error: Error) => void;
-  f.submit.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const upload = vi.mocked(f.api.attachments.upload).mockResolvedValueOnce(uploadedFile()).mockRejectedValueOnce(new Error('owner unavailable')).mockResolvedValueOnce(uploadedFile('second'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
-  await choosePdfs(pdfFile()); await choosePdfs(pdfFile());
-  expect(upload).toHaveBeenCalledOnce(); expect(button('Send').disabled).toBe(true);
-  await submitForm(composerForm()); expect(f.submit).not.toHaveBeenCalled();
-  await act(async () => retain(uploadedPdf()));
-  await act(async () => {
-    composerForm().dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-    composerForm().dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  });
-  expect(f.submit).toHaveBeenCalledOnce();
-  await act(async () => reject(new Error('Input receipt lost')));
-  await choosePdfs(pdfFile('newer.pdf')); expect(upload).toHaveBeenCalledOnce();
-  expect(button('chat.fileAttachment.actions.attachPdfs').disabled).toBe(true);
-  expect(container.querySelector<HTMLButtonElement>('[aria-label="chat.fileAttachment.actions.removeNamed"]')?.disabled).toBe(true);
-  const original = f.submit.mock.calls[0]![0];
-  const next = { ...identity, branchId: 'other-branch' };
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={next} />));
-  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')).toBeNull();
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await edit('[aria-label="Message thread"]', 'Keep this newer draft');
+  await edit('[aria-label="Message thread"]', 'Use both files');
+  await choosePdfs(pdfFile(), new File(['x'], 'archive.zip'));
   await submitForm(composerForm());
-  expect(f.submit.mock.calls[1]![0]).toEqual(original);
-  expect(original.materials).toEqual([{ snapshotId: 'retained-original' }]);
-  expect(upload).toHaveBeenCalledOnce();
-  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Keep this newer draft');
-  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')).toBeNull();
+  expect(f.submit).not.toHaveBeenCalled();
+  const draftKey = threadComposerKey(threadHostKey(), identity);
+  expect(useThreadDraftStore.getState().drafts[draftKey].text).toBe('Use both files');
+  expect(useThreadDraftStore.getState().drafts[draftKey].files?.map(file => file.status)).toEqual(['ready', 'failed']);
+  expect(container.textContent).toContain('archive.zip: owner unavailable');
+  const failed = upload.mock.calls[1]![1];
+  await submitForm(composerForm());
+  expect(upload).toHaveBeenCalledTimes(3);
+  expect(upload.mock.calls[2]![1]).toEqual(failed);
+  expect(f.submit.mock.calls[0]![0].attachments).toEqual([{ ref: 'attachment:retained-original' }, { ref: 'attachment:second' }]);
 });
 
-it('keeps retained PDFs after explicit pre-admission rejection and permits a corrected attachment without replaying the old upload', async () => {
+it('joins repeated send clicks and retains exact attachments after a lost delivery receipt', async () => {
+  const f = fixture(); let retain!: (value: Attachment) => void;
+  const upload = vi.mocked(f.api.attachments.upload).mockImplementationOnce(() => new Promise(resolve => { retain = resolve; }));
+  f.submit.mockRejectedValueOnce(new Error('Input receipt lost'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await choosePdfs(pdfFile());
+  await submitForm(composerForm()); await submitForm(composerForm());
+  expect(upload).toHaveBeenCalledOnce(); expect(f.submit).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('chat.attachments.preparing');
+  await act(async () => retain(uploadedFile()));
+  expect(f.submit).toHaveBeenCalledOnce();
+  await choosePdfs(pdfFile('newer.pdf'));
+  const captured = f.submit.mock.calls[0]![0];
+  await edit('[aria-label="Message thread"]', 'Keep this newer draft');
+  await submitForm(composerForm());
+  expect(f.submit.mock.calls[1]![0]).toEqual(captured);
+  expect(upload).toHaveBeenCalledOnce();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Keep this newer draft');
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)].files).toEqual([]);
+});
+
+it('permits removing a prepared attachment after explicit pre-admission rejection', async () => {
   const f = fixture();
-  const upload = vi.mocked(f.api.materials.upload).mockResolvedValueOnce(uploadedPdf()).mockResolvedValueOnce(uploadedPdf('replacement-pdf'));
-  f.submit.mockRejectedValueOnce(new ThreadRequestError(409, 'material-unavailable', 'not_started'));
+  const upload = vi.mocked(f.api.attachments.upload).mockResolvedValueOnce(uploadedFile()).mockResolvedValueOnce(uploadedFile('replacement'));
+  f.submit.mockRejectedValueOnce(new ThreadRequestError(409, 'attachment-unavailable', 'not_started'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   await choosePdfs(pdfFile()); await submitForm(composerForm());
-  expect(button('Send')).toBeDefined();
-  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')?.textContent).toContain('original.pdf');
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="chat.fileAttachment.actions.removeNamed"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="chat.attachments.remove"]')!.click());
   expect(button('Send').disabled).toBe(true);
   await choosePdfs(pdfFile('replacement.pdf')); await submitForm(composerForm());
   expect(upload).toHaveBeenCalledTimes(2);
   expect(f.submit.mock.calls[1]![0].key).not.toBe(f.submit.mock.calls[0]![0].key);
-  expect(f.submit.mock.calls[1]![0].materials).toEqual([{ snapshotId: 'replacement-pdf' }]);
+  expect(f.submit.mock.calls[1]![0].attachments).toEqual([{ ref: 'attachment:replacement' }]);
 });
 
-it.each(['thread', 'branch', 'host', 'unmount'] as const)('discards a late PDF upload after %s replacement without attaching it to the new draft', async changed => {
-  const f = fixture(); let retain!: (result: FetchResult) => void;
-  const upload = vi.mocked(f.api.materials.upload).mockImplementationOnce(() => new Promise(resolve => { retain = resolve; }))
-    .mockResolvedValue(uploadedPdf('new-snapshot'));
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await choosePdfs(pdfFile('old.pdf'));
-  const originalHost = threadHostKey(); const signal = upload.mock.calls[0]![2]!;
-  const next = changed === 'thread' ? { ...identity, threadId: 'other-thread' } : changed === 'branch' ? { ...identity, branchId: 'other-branch' } : identity;
-  if (changed === 'host') await act(async () => { endpoint.generation++; endpoint.hostKey = 'host-b'; endpoint.listeners.forEach(listener => listener()); });
-  if (changed === 'unmount') await act(async () => root.render(null));
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={next} />));
-  expect(signal.aborted).toBe(true);
-  await choosePdfs(pdfFile('new.pdf'));
-  await act(async () => retain(uploadedPdf('late-snapshot')));
-  const chips = container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')!;
-  expect(chips.textContent).toContain('new.pdf'); expect(chips.textContent).not.toContain('old.pdf');
-  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), next)].materials.map(item => item.snapshotId)).toEqual(['new-snapshot']);
-  if (threadComposerKey(originalHost, identity) !== threadComposerKey(threadHostKey(), next)) {
-    expect(useThreadDraftStore.getState().drafts[threadComposerKey(originalHost, identity)]?.materials ?? []).toEqual([]);
-  }
-  expect(upload).toHaveBeenCalledTimes(2); expect(f.submit).not.toHaveBeenCalled();
-});
-
-it.each(['steer', 'queue'] as const)('queues retained PDF input using the %s setting without sending upload bytes to the model request', async behavior => {
-  const f = fixture(true); const upload = vi.mocked(f.api.materials.upload).mockResolvedValue(uploadedPdf());
+it.each(['steer', 'queue'] as const)('queues attachment-only input with %s without passing original bytes into the input payload', async behavior => {
+  const f = fixture(true);
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await act(async () => useMessageQueueStore.setState({ followUpBehavior: behavior })); await choosePdfs(pdfFile());
   await submitForm(composerForm());
-  expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, text: '', images: [], mode: behavior === 'queue' ? 'next_run' : 'boundary', materials: [{ snapshotId: 'retained-original' }] }));
-  expect(upload).toHaveBeenCalledOnce(); expect(f.submit).not.toHaveBeenCalled();
-  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')).toBeNull();
-});
-
-it('keeps earlier retained PDFs when a later file fails and never claims success without a retained PDF snapshot', async () => {
-  const f = fixture(); const upload = vi.mocked(f.api.materials.upload).mockResolvedValueOnce(uploadedPdf())
-    .mockResolvedValueOnce({ status: 'ok', url: 'upload:failed.pdf', finalUrl: 'upload:failed.pdf', contentType: 'application/pdf', markdown: '', bytes: 0, rendered: false, fromCache: false });
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
-  await choosePdfs(pdfFile(), pdfFile('failed.pdf'));
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain('chat.fileAttachment.pdfNotRetained');
-  const chips = container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')!;
-  expect(chips.textContent).toContain('original.pdf'); expect(chips.textContent).not.toContain('failed.pdf');
-  expect(button('Send').disabled).toBe(false); await submitForm(composerForm());
-  expect(upload).toHaveBeenCalledTimes(2);
-  expect(f.submit.mock.calls[0]![0].materials).toEqual([{ snapshotId: 'retained-original' }]);
+  expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, text: '', images: [], mode: behavior === 'queue' ? 'next_run' : 'boundary', attachments: [{ ref: 'attachment:retained-original' }] }));
+  expect(f.api.attachments.upload).toHaveBeenCalledOnce(); expect(f.submit).not.toHaveBeenCalled();
 });
 
 
@@ -1456,18 +1365,18 @@ it('adds a hidden skill command and retains the draft and image through a resour
     await new Promise(resolve => setTimeout(resolve, 0));
   });
   await act(async () => { button('Add /skill:review-code to draft').click(); button('Add /skill:review-code to draft').click(); });
-  const text = `/skill:review-code ${draft}[Image 1]`;
+  const text = `/skill:review-code ${draft}`;
   expect(composer().value).toBe(text);
-  expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toMatch(/^blob:/);
   expect(f.submit).not.toHaveBeenCalled();
   expect(container.textContent).not.toContain('Private skill body');
   await submitForm(composer().closest('form')!);
   expect(f.submit).toHaveBeenCalledOnce();
-  expect(f.submit.mock.calls[0]![0]).toMatchObject({ ...identity, text, images: [{ mimeType: 'image/png', data }] });
+  expect(f.submit.mock.calls[0]![0]).toMatchObject({ ...identity, text, attachments: [{ ref: 'attachment:retained-original' }] });
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('has changed. Refresh instructions and skills');
   expect(container.textContent).not.toContain('/not-for-ui/secret.md');
   expect(composer().value).toBe(text);
-  expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toMatch(/^blob:/);
   expect(button('Send').disabled).toBe(false);
   expect(button('Add /skill:review-code to draft').disabled).toBe(false);
   // An unrelated context publication with the same frozen resources cannot clear the error.
@@ -2096,7 +2005,7 @@ it.each([
 
 it.each(['file-backed', 'source-free'] as const)('continues a completed %s child with its exact predecessor and retries an uncertain receipt without changing its model or old report', async sourceKind => {
   const f = fixture(true); pauseView(f.view);
-  const upload = vi.mocked(f.api.materials.upload).mockResolvedValue(uploadedPdf('child-input-pdf'));
+  const upload = vi.mocked(f.api.attachments.upload).mockResolvedValue(uploadedFile('child-input-pdf'));
   const sourceFree = sourceKind === 'source-free';
   const previous = { ...f.view.activeRun!, state: 'completed' as const };
   f.view.activeRun = null; f.view.thread.branches[0]!.active_run_id = null; f.view.thread.branches[0]!.latest_run = previous;
@@ -2122,7 +2031,7 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   }).mockRejectedValueOnce(new Error('uncertain continuation reply'));
   const reportBody = JSON.stringify({ data: { original: true }, parts: [{ kind: 'text', text: 'old evidence' }, { kind: 'media', media: storedImage }] });
   const readExecutionReport = vi.fn<NonNullable<ThreadsAPI['collaboration']>['readExecutionReport']>(async (_identity, executionId, itemId) => ({
-    format: 'output_body', operation_id: original.child_operation_id, execution_id: executionId, item_id: itemId, offset: 0, next_offset: null,
+    attachments: [], format: 'output_body', operation_id: original.child_operation_id, execution_id: executionId, item_id: itemId, offset: 0, next_offset: null,
     total_bytes: new TextEncoder().encode(reportBody).length, text: reportBody }));
   const cancelTree = vi.fn<NonNullable<ThreadsAPI['collaboration']>['cancelTree']>(async target => ({ target: { kind: 'thread', thread_id: target.threadId }, cursor: 15, run_count: 0, child_count: 1, process_count: 0 }));
   const unused = async (): Promise<never> => { throw new Error('unused collaboration control'); };
@@ -2141,9 +2050,9 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   await submitForm(form);
   expect(continueChild).toHaveBeenCalledTimes(2);
   expect(continueChild.mock.calls[1]![0]).toEqual(continueChild.mock.calls[0]![0]);
-  expect(continueChild.mock.calls[0]![0]).toMatchObject({ ...identity, previousRunId: previous.id, expectedHead: 'old-head', text: 'Keep the next user instruction', materials: [{ snapshotId: 'child-input-pdf' }] });
+  expect(continueChild.mock.calls[0]![0]).toMatchObject({ ...identity, previousRunId: previous.id, expectedHead: 'old-head', text: 'Keep the next user instruction', attachments: [{ ref: 'attachment:child-input-pdf' }] });
   expect(upload).toHaveBeenCalledOnce();
-  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')).toBeNull();
+  expect(container.querySelector('[aria-label="chat.attachments.files"]')).toBeNull();
   expect(continueChild.mock.calls[0]![0]).not.toHaveProperty('model');
   expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
   expect(container.textContent).toContain('Original report stays fixed');

@@ -34,3 +34,5 @@ export * from './model-retry.js';
 export * from './questions.js';
 export * from './browser.js';
 export * from './office.js';
+
+export * from './attachments.js';

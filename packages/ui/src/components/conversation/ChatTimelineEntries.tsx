@@ -91,6 +91,7 @@ import { ChatFollowupTool } from './ChatFollowupTool';
 import { ChatProcessTool } from './ChatProcessTool';
 import { ChatWorkTool, ChatArtifactTool } from './ChatWorkTools';
 import { workToolLabels } from './toolLabels';
+import { attachmentSize } from '@/lib/agent-runtime/fileAttachments';
 import { ThreadMedia } from '../thread/ThreadMedia';
 
 export interface ChatTimelineProps {
@@ -906,6 +907,7 @@ export const ChatTurnUserMessage: React.FC<{
     <article id={entry ? `conversation-entry-${entry.id}` : undefined} data-conversation-user-message data-conversation-message-role="user" data-conversation-entry-id={entry?.id} className="group/message ml-auto max-w-[85%]">
       <div className="rounded-xl bg-[var(--chat-user-message-bg)] px-4 py-3 text-[var(--chat-user-message)]">
         <ChatCollapsibleUserContent><ChatUserContentView content={message.content} messageId={messageId} plain={plain} /></ChatCollapsibleUserContent>
+        {message.pendingFiles?.map((file, index) => <p key={index} className="mt-2 break-words typography-meta">{file.filename} · {attachmentSize(file.byteLength)}</p>)}
       </div>
       {status ? (
         <div

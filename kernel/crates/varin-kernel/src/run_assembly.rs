@@ -393,6 +393,8 @@ impl RunAssembly {
             collaboration_source = Some(collaboration_binding);
         }
         if !is_context_job {
+            let existing=declarations.iter().position(|declaration|declaration.schema.name=="file_read").map(|index|declarations.remove(index));
+            declarations.push(crate::attachment_reads::declaration(existing,runtime.catalog(),self.resource.clone()));
             declarations.push(crate::agent_resources::declaration(
                 runtime.catalog(),
                 self.resource.clone(),
@@ -401,8 +403,8 @@ impl RunAssembly {
         if !is_context_job {
             declarations.push(crate::questions::declaration(runtime.catalog()));
             declarations.extend(crate::capability_tools::declarations(runtime.catalog()));
-            declarations.extend(crate::family_tools::declarations(runtime.catalog()));
-            declarations.push(crate::message_tools::declaration(runtime.catalog()));
+            declarations.extend(crate::family_tools::declarations_with_attachments(runtime.catalog(), self.resource.clone()));
+            declarations.push(crate::message_tools::declaration_with_attachments(runtime.catalog(), self.resource.clone()));
             if is_bot { declarations.push(crate::bot_work_tools::declaration(runtime.catalog())); }
             declarations.push(crate::followup_tools::declaration(
                 runtime.catalog(),
@@ -413,11 +415,12 @@ impl RunAssembly {
             if !is_child {
                 declarations.push(crate::agent_goals::declaration(runtime.catalog()));
             }
-            declarations.extend(crate::collaboration::declarations(
+            declarations.extend(crate::collaboration::declarations_with_attachments(
                 runtime.catalog(),
                 collaboration_source.clone(),
                 resources.clone(),
                 self.tools.bridge(),
+                self.resource.clone(),
             ));
             declarations.push(crate::child_cancel::declaration(crate::agent_runtime::control_commands::ControlCommands {
                 runtime: runtime.clone(), resources: resources.clone(), models: self.models.clone(), tools: self.tools.clone(),

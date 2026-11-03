@@ -20,6 +20,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Deleted conversation metadata retirement and surviving reference protection | [catalog_retention.rs](src/catalog_retention.rs) |
 | Worker lifecycle, cancellation, policy actions, model/tool settlement | [execution.rs](src/execution.rs), [supervisor.rs](src/supervisor.rs) |
 | History/request commit, safe restoration, explicit navigation | [catalog_execution.rs](src/catalog_execution.rs), [catalog_recovery.rs](src/catalog_recovery.rs), [catalog_navigation.rs](src/catalog_navigation.rs) |
+| Fixed attachment descriptors, delivery relations and retention | [catalog_attachments.rs](src/catalog_attachments.rs) |
 | Immutable bodies, media, publication and collection | [content.rs](src/content.rs), [output.rs](src/output.rs), [content_collection.rs](src/content_collection.rs) |
 | Scope-local bindings, tools and context transforms | [composition](src/composition.rs) |
 | Resource conflict/capacity admission and nested calls | [resource_admission.rs](src/resource_admission.rs), [execution_capacity.rs](src/execution_capacity.rs), [nested_tools.rs](src/nested_tools.rs) |
@@ -42,8 +43,8 @@ representation. Do not add parallel old-format execution/read paths or a second 
 
 - One `runtime.owner` lock protects `conversation.sqlite`. WAL/FULL transactions commit facts and
   events together. Read-only preflight identifies supported generations and rejects unknown/newer or
-  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83
-  and standalone 82 → 83. The first two steps initialize external-agent records and the usage ledger;
+  malformed stores before writable recovery. Supported upgrades are 78 → 79 → 80 → 81 → 83 → 84 → 85
+  and standalone 82 → 83 → 84 → 85. The first two steps initialize external-agent records and the usage ledger;
   old receipts lack settlement attribution and are not backfilled. The 80 → 81 step creates Zone2
   capture tables; 81 → 83 indexes original history text ranges without copying bodies. Standalone 82
   already contains those indexes but no Zone2 tables, so 82 → 83 initializes only that missing domain.
@@ -90,6 +91,28 @@ reachable. Small Thread/branch identities and deletion receipts remain for stabl
 ContentStore then collects unreferenced immutable bodies through its existing reader/publication fences.
 Inline metadata commands are not ContentStore roots. Active deleted conversations are reconsidered on
 durable execution events and Host restart; deletion does not cancel their original execution duties.
+
+## File handoff
+
+`dispatch` and `send` accept strict `AttachmentSelection` values: one existing `ref` or one
+sender-source `path`. The original Storage/material owner fixes content and retains the receiving
+scope using the original operation identity before Catalog admission. Catalog performs no source
+I/O under its lock and never resolves a hash, filename or text mention as read authority.
+`attachment_deliveries` records the ordered descriptors with the same transaction as the original
+message, queued input or dispatch. Retries compare both original intent and fixed descriptors.
+A message can contain only attachments; dispatch still requires a task.
+
+User `fileAttachments` and explicit `OutputPart::Attachment` parts survive history, queues,
+reports and provider projection. Image bytes retain the existing typed-media path; a text-only
+model gets an explicit notice and the file descriptor without changing the original image.
+Dispatch model preparation derives image requirements from owner-prepared MIME types.
+Command paths remain an on-demand resource-owner view, never durable attachment identity.
+
+Material maintenance exposes typed delivery edges and typed inherited parts. The 84 → 85 upgrade
+freezes legacy inherited material references once, with the format marker and existing receipts;
+new dispatches do not scan ordinary text for snapshot IDs. Shared historical holders and forwarded
+messages keep independent relationships until original Catalog retirement releases them. Bytes,
+execution paths and derived parser caches remain with their original resource owners.
 
 ## Request and context cost model
 

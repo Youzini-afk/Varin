@@ -814,6 +814,15 @@ pub(super) fn storage_rpc(
                     Ok(result)
                 };
             }
+            if method == "file.objectView.prepare" || method == "file.objectView.release" {
+                let tasks = if method == "file.objectView.prepare" {
+                    vec![storage.prepare_object_view(&params, &grant, Arc::new(AtomicBool::new(false)))?]
+                } else { storage.prepare_object_view_release(&params, &grant)? };
+                let result = (|| { let mut result = json!({"released":true});
+                    for task in &tasks { result = task.run_fixture(&mut storage)?; } Ok(result) })();
+                for task in tasks { storage.abandon_object_view(&task); }
+                return result;
+            }
             if method == "file.materializedView.release" {
                 let task = storage.prepare_materialized_view_release(&params, &grant)?;
                 drop(storage);

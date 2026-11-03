@@ -71,7 +71,7 @@ export function createMaterialReviewFixture(verifyGrant: (params: Record<string,
   };
   const kernel = transport as unknown as KernelClient;
   // Reuse original chunking and record/source methods, replacing only delivery.
-  for (const name of ['gc', 'putBlob', 'getBlob', 'getOperation', 'releaseBlob', 'getRecord', 'listRecords', 'putRecord', 'releaseRecord',
+  for (const name of ['gc', 'putBlob', 'putBlobStream', 'getBlob', 'getOperation', 'releaseBlob', 'getRecord', 'listRecords', 'putRecord', 'releaseRecord',
     'readBranch', 'createBranch', 'deleteBranch', 'pinBranch', 'unpinBranch', 'fileRootRegister', 'fileReadCheck',
     'fileCapture', 'fileMaterialize', 'fileLeaseAcquire', 'fileLeaseRelease', 'experimentArtifacts'] as const) {
     const method = KernelClient.prototype[name];

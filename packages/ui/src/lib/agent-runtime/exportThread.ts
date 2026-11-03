@@ -12,8 +12,9 @@ export async function exportThreadMarkdown(api: ThreadsAPI, identity: ThreadIden
   return [`# ${title}`, `Thread: ${identity.threadId}\nBranch: ${identity.branchId}`, ...items.map(item => {
     const content = historyParts(item.content, item.source).map(part => {
       if (part.kind === 'text' || part.kind === 'status') return part.text;
+      if (part.kind === 'attachment') return `[File: ${part.attachment.filename} (${part.attachment.byteLength} bytes)](${part.attachment.ref})`;
       if (part.kind === 'media') return `[Media: ${part.media.media_type}]`;
-      if (part.kind === 'output') return part.output.parts.map(value => value.kind === 'text' ? value.text : `[Media: ${value.media.media_type}]`).join('\n');
+      if (part.kind === 'output') return part.output.parts.map(value => value.kind === 'text' ? value.text : value.kind === 'attachment' ? `[File: ${value.attachment.filename} (${value.attachment.byteLength} bytes)](${value.attachment.ref})` : `[Media: ${value.media.media_type}]`).join('\n');
       return JSON.stringify(part.data, null, 2);
     }).join('\n\n');
     return `## ${item.source}\n\n${content}`;

@@ -83,7 +83,8 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.draft.put"
         | "working.draft.release" => "storage.write",
         "storage.record.workspaces" | "branch.objects"
-        | "file.materializedView.prepare" | "file.materializedView.release" => "storage.maintenance",
+        | "file.materializedView.prepare" | "file.materializedView.release"
+        | "file.objectView.prepare" | "file.objectView.release" => "storage.maintenance",
         "file.childEnvironment.settle" => "storage.write",
         "storage.gc" => "storage.gc",
         "storage.object.rebindOwner"

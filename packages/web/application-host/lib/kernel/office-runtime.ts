@@ -28,7 +28,8 @@ type WriteInput = { path: string } & (
 const receipt = (data: unknown, result?: BinaryFileWriteResult): ToolExecutionReceipt => ({
   executor_stopped: result?.executorStopped ?? true,
   completion: { kind: 'result', outcome: result?.status === 'unknown' ? 'indeterminate' : result?.status === 'conflict' ? 'failed' : 'succeeded',
-    effect: result?.status === 'applied' ? 'confirmed' : result?.status === 'unknown' ? 'unknown' : 'none', content: { data: parseVarinToolJson(data), parts: [] } },
+    effect: result?.status === 'applied' ? 'confirmed' : result?.status === 'unknown' ? 'unknown' : 'none', content: { data: parseVarinToolJson(data),
+      parts: result?.attachment ? [{ kind: 'attachment', attachment: result.attachment }] : [] } },
 });
 export function createOfficeRuntime(options: {
   runtime: Pick<AgentRuntimeClient, 'run' | 'familyList'>;
@@ -72,14 +73,20 @@ export function createOfficeRuntime(options: {
           return receipt({ ...written, ...changes, format }, written);
         }
         const context = await materialContext(invocation, call.signal);
-        if (method === 'read') return receipt(await options.reader.read(input as unknown as OfficeReadRequest, context, sources));
+        if (method === 'read') {
+          const read = await options.reader.read(input as unknown as OfficeReadRequest, context, sources);
+          const result = receipt(read);
+          const attachment = read.snapshotId ? await options.sources.attachment(invocation, read.snapshotId, call.signal) : undefined;
+          if (attachment && result.completion.kind === 'result') result.completion.content.parts.push({ kind: 'attachment', attachment });
+          return result;
+        }
         if (method === 'render') {
           const result = await options.reader.render(input as unknown as Parameters<OfficeReader['render']>[0], context, sources);
           return { executor_stopped: true, completion: { kind: 'result', outcome: result.status === 'ok' ? 'succeeded' : 'failed', effect: 'none', content: webOutput(result) } };
         }
-        const request = input as unknown as { sourcePath?: string; snapshotId?: string; path: string; expectedRevision?: string; format: OfficeExportFormat };
-        if (Number(!!request.sourcePath) + Number(!!request.snapshotId) !== 1) throw new Error('Export requires exactly one sourcePath or snapshotId');
-        const original = await options.reader.load({ ...(request.sourcePath ? { path: request.sourcePath } : {}), ...(request.snapshotId ? { snapshotId: request.snapshotId } : {}) }, context, sources);
+        const request = input as unknown as { ref?: string; sourcePath?: string; snapshotId?: string; path: string; expectedRevision?: string; format: OfficeExportFormat };
+        if (Number(!!request.ref) + Number(!!request.sourcePath) + Number(!!request.snapshotId) !== 1) throw new Error('Export requires exactly one ref, sourcePath or snapshotId');
+        const original = await options.reader.load({ ...(request.ref ? { ref: request.ref } : {}), ...(request.sourcePath ? { path: request.sourcePath } : {}), ...(request.snapshotId ? { snapshotId: request.snapshotId } : {}) }, context, sources);
         const converted = await options.renderer.convert(original.bytes, original.package.format, request.format, call.signal);
         const written = await options.files.write(invocation, { path: request.path, expectedRevision: request.expectedRevision ?? null, bytes: converted.bytes }, call.signal);
         return receipt({ ...written, format: converted.format, engine: converted.engine, recalculated: converted.recalculated }, written);

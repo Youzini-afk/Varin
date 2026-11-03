@@ -1,13 +1,16 @@
-import { waitWithSignal } from '../cancellation.js';
-import { validToolOrigin, type AgentResourceRequest } from './protocol.generated.js';
+import { validToolOrigin } from './protocol.generated.js';
 import { resourceQueryFailure, type ResourceQuery, type ResourceOwner, type ResourceToolResult } from './resource-owner.js';
 
 export interface PrivateResourceResponse { v: 1; kind: 'resource-response'; id: string; kernelEpoch: string; result: ResourceToolResult }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const keys = (value: Record<string, unknown>, allowed: string[]) => Object.keys(value).every(key => allowed.includes(key));
-const validRequest = (value: unknown): value is AgentResourceRequest => record(value) && (
-  value.kind === 'skill' && text(value.resourceId) && (value.activationId === undefined || text(value.activationId)) && keys(value, ['kind', 'resourceId', 'activationId'])
+const validRequest = (value: unknown): value is ResourceQuery['request'] => record(value) && (
+  value.kind === 'attachment_report' && Array.isArray(value.refs) && value.refs.every(text) && (value.sourceThreadId === undefined && value.sourceBranchId === undefined || text(value.sourceThreadId) && text(value.sourceBranchId)) && keys(value, ['kind', 'refs', 'sourceThreadId', 'sourceBranchId'])
+  || value.kind === 'attachment_prepare' && text(value.operationId) && text(value.targetThreadId) && (value.targetBranchId === undefined || typeof value.targetBranchId === 'string') && Array.isArray(value.attachments) && keys(value, ['kind', 'operationId', 'targetThreadId', 'targetBranchId', 'attachments'])
+  || value.kind === 'attachment_release' && text(value.operationId) && text(value.targetThreadId) && (value.targetBranchId === undefined || typeof value.targetBranchId === 'string') && keys(value, ['kind', 'operationId', 'targetThreadId', 'targetBranchId'])
+  || value.kind === 'attachment' && text(value.ref) && (value.view === undefined || ['path', 'bytes', 'content'].includes(String(value.view))) && ['offset', 'limit'].every(key => value[key] === undefined || Number.isSafeInteger(value[key]) && Number(value[key]) >= (key === 'offset' ? 0 : 1)) && keys(value, ['kind', 'ref', 'view', 'offset', 'limit'])
+  || value.kind === 'skill' && text(value.resourceId) && (value.activationId === undefined || text(value.activationId)) && keys(value, ['kind', 'resourceId', 'activationId'])
   || value.kind === 'skill-resource' && text(value.resourceId) && typeof value.relativePath === 'string'
     && (value.activationId === undefined || text(value.activationId)) && keys(value, ['kind', 'resourceId', 'relativePath', 'activationId'])
   || value.kind === 'instruction-scope' && typeof value.targetPath === 'string'
@@ -55,7 +58,7 @@ export class ResourceBridge {
       try {
         result = !validQuery(query) ? resourceQueryFailure('invalid', 'Invalid resource query')
           : !owner ? resourceQueryFailure('unavailable', 'Resource owner is unavailable', query)
-            : await waitWithSignal(owner(query, controller.signal), controller.signal);
+            : await owner(query, controller.signal);
       } catch {
         result = resourceQueryFailure(controller.signal.aborted ? 'cancelled' : 'unavailable',
           controller.signal.aborted ? 'Resource query was cancelled' : 'Resource owner could not read the bound view');

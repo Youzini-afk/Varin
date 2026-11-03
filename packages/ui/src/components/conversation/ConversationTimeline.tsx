@@ -12,6 +12,7 @@ import { contextTimelineEntries } from '@/lib/contextPresentation';
 import { openThreadContext } from '@/lib/openThreadContext';
 import { useTimelineViewStore } from './timelineViewStore';
 import { threadHostKey, threadComposerKey } from '@/stores/useThreadStore';
+import { ThreadAttachments } from '../thread/ThreadAttachments';
 import { ThreadContent } from '../thread/ThreadContent';
 import { ThreadSkillMaterials } from '../thread/ThreadSkillMaterials';
 import { ReviewTransferActions } from '../thread/ReviewTransferActions';
@@ -135,9 +136,9 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     const item = nativeItems.get(itemId); if (!item) return null;
     const parts = historyParts(item.content, item.source);
     return <>
-      <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId }} messageId={itemId} parts={parts.filter(part => part.kind === 'media' && !(options?.hideImages && part.media.media_type.startsWith('image/')))} />
+      <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId }} messageId={itemId} parts={parts.filter(part => part.kind === 'attachment' || part.kind === 'media' && !(options?.hideImages && part.media.media_type.startsWith('image/')))} />
       {parts.flatMap(part => part.kind !== 'output' ? [] : part.output.parts.flatMap((part, index) => part.kind === 'media' && !(options?.hideImages && part.media.media_type.startsWith('image/'))
-        ? [<ThreadMedia key={index} api={api} identity={identity} holder={{ kind: 'history', itemId }} media={part.media} partIndex={index} />] : []))}
+        ? [<ThreadMedia key={index} api={api} identity={identity} holder={{ kind: 'history', itemId }} media={part.media} partIndex={index} />] : part.kind === 'attachment' ? [<ThreadAttachments key={index} api={api} identity={identity} attachments={[part.attachment]} />] : []))}
       <ThreadSkillMaterials content={item.content} />
       {!readOnly && <ReviewTransferActions identity={identity} item={item} />}
     </>;

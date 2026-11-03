@@ -53,6 +53,7 @@ export type ChatUserContent = ChatTextContent | ChatImageContent;
 export type ChatAssistantContent = ChatTextContent | ChatThinkingContent | ChatToolCall;
 
 export interface ChatUserMessage {
+  pendingFiles?: Array<{ filename: string; byteLength: number }>;
   content: string | ChatUserContent[];
   role: "user";
   timestamp: number;
@@ -85,6 +86,7 @@ export interface ChatAssistantMessage {
 }
 
 export interface ChatToolResultMessage {
+  attachments?: import('@varin/protocol').Attachment[];
   /** Retained typed image parts, readable through historyId even after the Operation leaves the snapshot. */
   imageParts?: Array<{ partIndex: number; media: StoredMedia }>;
   originalDetails?: JsonValue;

@@ -196,7 +196,7 @@ pub(super) fn selected_launch(
             })
         })
         .transpose()?;
-    if source.is_none() && !kinds.is_empty() {
+    if source.is_none() && kinds.iter().any(|kind| *kind!=crate::tools::ToolKind::FileRead) {
         return Err(KernelError::Protocol(
             "selected tools require a source owner".into(),
         ));
@@ -252,7 +252,7 @@ pub(super) fn execute(
     match method {
         "runtime.messages.send" => {
             let p: MessageSendParams = serde_json::from_value(params)?;
-            let input = varin_runtime::catalog::messages::MessageInput { after_current: None,
+            let input = varin_runtime::catalog::messages::MessageInput { attachments: p.attachments.unwrap_or_default(), after_current: None,
                 source_agent: p.source_agent,
             name: p.name,
                 wait: None,
@@ -265,7 +265,9 @@ pub(super) fn execute(
             input.validate().map_err(domain)?;
             let preparation = catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
                 .prepare_user_message(p.key,p.sender_thread_id,p.sender_branch_id,input).map_err(domain)?;
-            let prepared = preparation.load().map_err(domain)?;
+            let source=varin_runtime::output::OutputSource::Conversation {provenance:varin_runtime::execution::Provenance::UserInstruction {input_id:preparation.identity().message_id.clone()}};
+            let media=p.prepared_attachment_media.unwrap_or_default().into_iter().map(|media|varin_runtime::output::ResolvedMedia {media_type:media.media_type,data_base64:media.data_base64,source:source.clone()}).collect();
+            let prepared = preparation.with_attachments(p.prepared_attachments.unwrap_or_default()).with_attachment_media(media).load().map_err(domain)?;
             let mut owner = catalog
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;

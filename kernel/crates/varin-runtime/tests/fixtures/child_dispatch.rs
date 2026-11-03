@@ -7,7 +7,7 @@ use input_admission::InputAdmission;
 mod service_composition;
 use serde_json::json;
 use varin_runtime::catalog::collaboration::{
-    ChildSourcePin, DispatchInput, DISPATCH_TOOL, WAIT_TOOL,
+    ChildSourcePin, DISPATCH_TOOL, DispatchInput, WAIT_TOOL,
 };
 use varin_runtime::catalog::launches::{LaunchSelection, SourceSelection};
 use varin_runtime::execution::*;
@@ -38,8 +38,50 @@ impl Fixture {
         Self::new_project_dispatch_with_tools(None)
     }
     pub(crate) fn new_project_dispatch_with_tools(tools: Option<Vec<String>>) -> Self {
-        Self::new_parent_custom(7,read_schema(),ToolSchema{requirements:None,name:DISPATCH_TOOL.into(),version:"1".into(),description:String::new(),schema:json!({"type":"object"}),output_schema:None,metadata:None},
-            false,false,false,|input,_| {input.project_id=Some("project-B".into());input.work_mode=Some(varin_runtime::catalog::dispatch::ChildWorkMode::Shared);input.tools=tools.clone();})
+        Self::new_parent_custom(
+            7,
+            read_schema(),
+            ToolSchema {
+                requirements: None,
+                name: DISPATCH_TOOL.into(),
+                version: "1".into(),
+                description: String::new(),
+                schema: json!({"type":"object"}),
+                output_schema: None,
+                metadata: None,
+            },
+            false,
+            false,
+            false,
+            |input, _| {
+                input.project_id = Some("project-B".into());
+                input.work_mode = Some(varin_runtime::catalog::dispatch::ChildWorkMode::Shared);
+                input.tools = tools.clone();
+            },
+        )
+    }
+    pub(crate) fn new_with_attachments(
+        attachments: Vec<varin_runtime::catalog::attachments::AttachmentSelection>,
+    ) -> Self {
+        Self::new_parent_custom(
+            7,
+            read_schema(),
+            ToolSchema {
+                requirements: None,
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
+                name: DISPATCH_TOOL.into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            },
+            false,
+            false,
+            false,
+            move |input, _| {
+                input.attachments = attachments.clone();
+            },
+        )
     }
     pub(crate) fn new() -> Self {
         Self::new_with_schemas(
@@ -59,16 +101,38 @@ impl Fixture {
     pub(crate) fn new_internal_retrieval() -> Self {
         Self::new_internal_retrieval_with_read(read_schema())
     }
-    pub(crate) fn new_internal_retrieval_with_read(read:ToolSchema) -> Self {
-        Self::new_parent_custom(7, read, ToolSchema {
-            requirements:None,description:String::new(),output_schema:None,metadata:None,
-            name:"code_retrieval".into(),version:"1".into(),schema:json!({"type":"object"}),
-        },false,false,false,|input,launch| {
-            *input=DispatchInput::from_tool_call("code_retrieval",&json!({"question":"Read the fixed file and report"})).unwrap();
-            let mut control = launch.tools.iter().find(|tool| tool.name == WAIT_TOOL).unwrap().clone();
-            control.name = varin_runtime::catalog::retrieval::CONTROL_TOOL.into();
-            launch.tools.push(control);
-        })
+    pub(crate) fn new_internal_retrieval_with_read(read: ToolSchema) -> Self {
+        Self::new_parent_custom(
+            7,
+            read,
+            ToolSchema {
+                requirements: None,
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
+                name: "code_retrieval".into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            },
+            false,
+            false,
+            false,
+            |input, launch| {
+                *input = DispatchInput::from_tool_call(
+                    "code_retrieval",
+                    &json!({"question":"Read the fixed file and report"}),
+                )
+                .unwrap();
+                let mut control = launch
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name == WAIT_TOOL)
+                    .unwrap()
+                    .clone();
+                control.name = varin_runtime::catalog::retrieval::CONTROL_TOOL.into();
+                launch.tools.push(control);
+            },
+        )
     }
     pub(crate) fn new_with_schemas(revision: i64, read: ToolSchema, dispatch: ToolSchema) -> Self {
         Self::new_parent(revision, read, dispatch, false, false, false)
@@ -316,31 +380,80 @@ impl Fixture {
             policy,
             false,
             false,
-            |input, _| { input.inherit_context = inherit; },
+            |input, _| {
+                input.inherit_context = inherit;
+            },
             Some("project-A"),
             None,
             Vec::new(),
         );
         if policy {
             fixture.context = fixture.admit_policy_call(ToolCall {
-                call_id: "dispatch-call".into(), name: DISPATCH_TOOL.into(), schema_version: "1".into(),
+                call_id: "dispatch-call".into(),
+                name: DISPATCH_TOOL.into(),
+                schema_version: "1".into(),
                 arguments: serde_json::to_value(&fixture.input).unwrap(),
             });
         }
         fixture
     }
     pub(crate) fn new_in_bot(bot: &str) -> Self {
-        Self::new_parent_scoped(7, read_schema(), ToolSchema { requirements:None, description:String::new(), output_schema:None, metadata:None, name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}) }, false, false, false, |_,_|{}, None, Some(bot), Vec::new())
+        Self::new_parent_scoped(
+            7,
+            read_schema(),
+            ToolSchema {
+                requirements: None,
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
+                name: DISPATCH_TOOL.into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            },
+            false,
+            false,
+            false,
+            |_, _| {},
+            None,
+            Some(bot),
+            Vec::new(),
+        )
     }
     pub(crate) fn new_with_media(inherit: bool, retrieval: bool) -> Self {
-        Self::new_parent_scoped(7, read_schema(), ToolSchema {
-            requirements: None, description: String::new(), output_schema: None, metadata: None,
-            name: if retrieval { "code_retrieval" } else { DISPATCH_TOOL }.into(),
-            version: "1".into(), schema: json!({"type":"object"}),
-        }, false, false, false, |input, _| {
-            if retrieval { *input = DispatchInput::from_tool_call("code_retrieval", &json!({"question":"Inspect the document"})).unwrap(); }
-            input.inherit_context = inherit;
-        }, None, None, vec![json!({"media_type":"image/png","data_base64":"b3JpZ2luYWwgbWVkaWE="})])
+        Self::new_parent_scoped(
+            7,
+            read_schema(),
+            ToolSchema {
+                requirements: None,
+                description: String::new(),
+                output_schema: None,
+                metadata: None,
+                name: if retrieval {
+                    "code_retrieval"
+                } else {
+                    DISPATCH_TOOL
+                }
+                .into(),
+                version: "1".into(),
+                schema: json!({"type":"object"}),
+            },
+            false,
+            false,
+            false,
+            |input, _| {
+                if retrieval {
+                    *input = DispatchInput::from_tool_call(
+                        "code_retrieval",
+                        &json!({"question":"Inspect the document"}),
+                    )
+                    .unwrap();
+                }
+                input.inherit_context = inherit;
+            },
+            None,
+            None,
+            vec![json!({"media_type":"image/png","data_base64":"b3JpZ2luYWwgbWVkaWE="})],
+        )
     }
     pub(crate) fn new_parent_scoped(
         revision: i64,
@@ -362,12 +475,28 @@ impl Fixture {
         ));
         let mut db = Catalog::open(&root).unwrap();
         if let Some(bot) = bot {
-            db.publish_bot_gate(varin_runtime::catalog::bot::BotGate { bot_id:bot.into(), profile_revision:1, activity_operation_id:Some("sleep".into()), permitted:true }).unwrap();
-            db.create_bot_thread("thread:parent", "branch:parent", bot).unwrap();
-        } else { db.create_thread("thread:parent", "branch:parent").unwrap(); }
-        let mut input = DispatchInput { model:None,thinking:None,input_types:Vec::new(),project_id:None, background:Vec::new(), source_path: None,
+            db.publish_bot_gate(varin_runtime::catalog::bot::BotGate {
+                bot_id: bot.into(),
+                profile_revision: 1,
+                activity_operation_id: Some("sleep".into()),
+                permitted: true,
+            })
+            .unwrap();
+            db.create_bot_thread("thread:parent", "branch:parent", bot)
+                .unwrap();
+        } else {
+            db.create_thread("thread:parent", "branch:parent").unwrap();
+        }
+        let mut input = DispatchInput {
+            attachments: Vec::new(),
+            model: None,
+            thinking: None,
+            input_types: Vec::new(),
+            project_id: None,
+            background: Vec::new(),
+            source_path: None,
             inherit_context: false,
-        source_agent: None,
+            source_agent: None,
             name: None,
             task: "Read the fixed file and report".into(),
             preset: None,
@@ -521,10 +650,16 @@ impl Fixture {
                 request_id: "parent-request".into(),
                 run_id: receipt.run_id.clone(),
                 origin: RequestOrigin::Conversation {
-                    compaction: None, step: 1,
+                    compaction: None,
+                    step: 1,
                     history_range: range.clone(),
                 },
-                binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+                binding: RequestBinding {
+                    pricing: None,
+                    tool_output_visible_bytes: None,
+                    mcp_tools: Vec::new(),
+                    execution_environment: None,
+                    direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,
@@ -545,8 +680,11 @@ impl Fixture {
                     environment_cursor: 0,
                     history_range: range,
                 },
-                history: db.prepare_context_read(&receipt.run_id, db.epoch(), Some(&receipt.input_id)).unwrap()
-                    .map(|read| read.load().unwrap().history).unwrap_or_else(|| db.execution_history(&receipt.branch_id).unwrap()),
+                history: db
+                    .prepare_context_read(&receipt.run_id, db.epoch(), Some(&receipt.input_id))
+                    .unwrap()
+                    .map(|read| read.load().unwrap().history)
+                    .unwrap_or_else(|| db.execution_history(&receipt.branch_id).unwrap()),
             },
             serialized: json!({}).into(),
         };
@@ -561,8 +699,14 @@ impl Fixture {
             },
         )
         .unwrap();
-        db.commit_execution(&run, epoch, &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() })
-            .unwrap();
+        db.commit_execution(
+            &run,
+            epoch,
+            &ExecutionRecord::RequestPrepared {
+                snapshot: snapshot.into(),
+            },
+        )
+        .unwrap();
         db.commit_execution(
             &run,
             epoch,
@@ -575,7 +719,11 @@ impl Fixture {
             call_id: "dispatch-call".into(),
             name: dispatch_name.clone(),
             schema_version: dispatch_version.clone(),
-            arguments: if internal {json!({"question":input.task})} else {serde_json::to_value(&input).unwrap()},
+            arguments: if internal {
+                json!({"question":input.task})
+            } else {
+                serde_json::to_value(&input).unwrap()
+            },
         };
         db.commit_execution(
             &run,
@@ -683,12 +831,33 @@ impl Fixture {
     }
     pub(crate) fn accept(&mut self) -> varin_runtime::catalog::collaboration::ChildTask {
         if self.input.project_id.is_some() {
-            let directory=self.db.capture_child_dispatch_invocation(&self.context).unwrap().load().unwrap();
-            let selected=directory.resolve(&self.input).unwrap();
-            let mut launch=self.launch.clone();
-            launch.tools=directory.frozen.allowed_delegation.iter().filter(|tool|selected.profile.tools.contains(&tool.name)).cloned().collect();
-            let launch=self.db.prepare_child_launch(&self.context.run_id,launch,selected).unwrap().load().unwrap();
-            let prepared=self.db.prepare_child_admission(&self.context,self.input.clone(),None,launch).unwrap().load().unwrap();
+            let directory = self
+                .db
+                .capture_child_dispatch_invocation(&self.context)
+                .unwrap()
+                .load()
+                .unwrap();
+            let selected = directory.resolve(&self.input).unwrap();
+            let mut launch = self.launch.clone();
+            launch.tools = directory
+                .frozen
+                .allowed_delegation
+                .iter()
+                .filter(|tool| selected.profile.tools.contains(&tool.name))
+                .cloned()
+                .collect();
+            let launch = self
+                .db
+                .prepare_child_launch(&self.context.run_id, launch, selected)
+                .unwrap()
+                .load()
+                .unwrap();
+            let prepared = self
+                .db
+                .prepare_child_admission(&self.context, self.input.clone(), None, launch)
+                .unwrap()
+                .load()
+                .unwrap();
             return self.db.accept_child_references(prepared).unwrap();
         }
         self.db
@@ -707,7 +876,8 @@ impl Fixture {
         self.admit_observation_waits(suffix, count, WAIT_TOOL)
     }
     pub(crate) fn admit_retrieval_wait(&mut self, suffix: &str) -> Wait {
-        self.admit_observation_waits(suffix, 1, varin_runtime::catalog::retrieval::CONTROL_TOOL).remove(0)
+        self.admit_observation_waits(suffix, 1, varin_runtime::catalog::retrieval::CONTROL_TOOL)
+            .remove(0)
     }
     fn admit_observation_waits(&mut self, suffix: &str, count: usize, tool: &str) -> Vec<Wait> {
         let request_id = format!("wait-request-{suffix}");
@@ -730,10 +900,16 @@ impl Fixture {
                 request_id: request_id.clone(),
                 run_id: self.context.run_id.clone(),
                 origin: RequestOrigin::Conversation {
-                    compaction: None, step: 2,
+                    compaction: None,
+                    step: 2,
                     history_range: range.clone(),
                 },
-                binding: RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+                binding: RequestBinding {
+                    pricing: None,
+                    tool_output_visible_bytes: None,
+                    mcp_tools: Vec::new(),
+                    execution_environment: None,
+                    direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,
@@ -767,7 +943,9 @@ impl Fixture {
             .commit_execution(
                 &self.context.run_id,
                 epoch,
-                &ExecutionRecord::RequestPrepared { snapshot: snapshot.into() },
+                &ExecutionRecord::RequestPrepared {
+                    snapshot: snapshot.into(),
+                },
             )
             .unwrap();
         self.db
@@ -786,7 +964,9 @@ impl Fixture {
                 schema_version: "1".into(),
                 arguments: if tool == varin_runtime::catalog::retrieval::CONTROL_TOOL {
                     json!({"operationId":self.context.operation_id,"action":"wait"})
-                } else { json!({"operationId":self.context.operation_id}) },
+                } else {
+                    json!({"operationId":self.context.operation_id})
+                },
             })
             .collect::<Vec<_>>();
         self.db
@@ -931,14 +1111,26 @@ impl Fixture {
             run_id: run_id.clone(),
         };
         let intent = PolicyGraphIntent::PolicyToolGraphV1 {
-            dispatch_history: Some(self.db.prepare_context_read(&run_id, epoch, boundary.history_range.leaf_id.as_deref()).unwrap()
-                .map(|read| read.load().unwrap().history).unwrap_or_else(|| self.db.execution_history(&boundary.history_range.branch_id).unwrap())),
+            dispatch_history: Some(
+                self.db
+                    .prepare_context_read(&run_id, epoch, boundary.history_range.leaf_id.as_deref())
+                    .unwrap()
+                    .map(|read| read.load().unwrap().history)
+                    .unwrap_or_else(|| {
+                        self.db
+                            .execution_history(&boundary.history_range.branch_id)
+                            .unwrap()
+                    }),
+            ),
             action_id,
             boundary,
             identity: launch.policy,
             state: json!({"stage": 1}),
             nodes: vec![PolicyAdmittedNode {
-                context: FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
+                context: FrozenToolContext {
+                    tool_output_visible_bytes: None,
+                    execution_environment: None,
+                    direct_tools: None,
                     child_dispatch: self
                         .db
                         .launch_metadata(&run_id)
@@ -997,13 +1189,17 @@ impl Fixture {
         let ToolOrigin::PolicyAction { action_id, node_id } = &context.origin else {
             panic!("policy call required")
         };
-        let completion = self.db.capture_call_completion(&context.operation_id).and_then(|read|read.load()).unwrap_or_else(|_|ToolCompletion::JobAccepted {
-            content: None,
-            operation_id: context.operation_id.clone(),
-            phase: phase.into(),
-            effect: Effect::None,
-            lifetime: Lifetime::Thread,
-        });
+        let completion = self
+            .db
+            .capture_call_completion(&context.operation_id)
+            .and_then(|read| read.load())
+            .unwrap_or_else(|_| ToolCompletion::JobAccepted {
+                content: None,
+                operation_id: context.operation_id.clone(),
+                phase: phase.into(),
+                effect: Effect::None,
+                lifetime: Lifetime::Thread,
+            });
         self.db
             .commit_execution(
                 &context.run_id,
@@ -1029,7 +1225,12 @@ impl Fixture {
         let result = ToolResult {
             request_id: "parent-request".into(),
             call_id: "dispatch-call".into(),
-            completion: self.db.capture_call_completion(&self.context.operation_id).unwrap().load().unwrap(),
+            completion: self
+                .db
+                .capture_call_completion(&self.context.operation_id)
+                .unwrap()
+                .load()
+                .unwrap(),
         };
         self.db
             .commit_execution(&self.context.run_id, self.db.epoch(), &{

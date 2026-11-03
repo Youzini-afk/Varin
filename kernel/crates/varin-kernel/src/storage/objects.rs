@@ -403,7 +403,26 @@ impl Storage {
                 for (dependency, length) in version.dependencies() {
                     let owned: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM object_owners WHERE blob_hash=?1 AND grant_id=?2)",
                         params![dependency,grant_id],|row|row.get(0))?;
-                    if !owned && !(grant.path_scopes.iter().any(String::is_empty) && self.blob_owned(&dependency, stream.workspace_id.as_deref())?) {
+                    // Managed attachment uploads are independent streaming requests. The
+                    // previous request consumed its temporary owner into this exact
+                    // import's durable record, never into workspace-wide hash authority.
+                    let imported = if grant.capabilities.contains("storage.maintenance") {
+                        if let (Some(intent), Some(workspace)) = (grant.operation_id.as_deref(), stream.workspace_id.as_deref()) {
+                            let record = self.domain_record_value(workspace, &format!("{intent}:{dependency}"))?;
+                            match record {
+                                Some(record) if record["recordType"] == "attachment.import" && record["state"] == "ready"
+                                    && record["threadId"].as_str() == grant.thread_id.as_deref()
+                                    && record["runId"].as_str() == grant.run_id.as_deref() => {
+                                    let payload: Value = serde_json::from_str(record["payloadJson"].as_str().unwrap_or("null"))?;
+                                    payload["contentHash"] == expected && payload["objectHash"] == dependency
+                                        && payload["byteLength"].as_u64() == Some(length)
+                                        && record["references"].as_array().is_some_and(|refs| refs.iter().any(|r| r["slot"] == "source" && r["objectHash"] == dependency))
+                                }
+                                _ => false,
+                            }
+                        } else { false }
+                    } else { false };
+                    if !owned && !imported && !(grant.path_scopes.iter().any(String::is_empty) && self.blob_owned(&dependency, stream.workspace_id.as_deref())?) {
                         return Err(KernelError::Authorization("A file version range has no admitted content owner".into()));
                     }
                     self.validate_blob_metadata(&PathState::RegularFile { object_hash:dependency, byte_length:length, mode:0 })?;

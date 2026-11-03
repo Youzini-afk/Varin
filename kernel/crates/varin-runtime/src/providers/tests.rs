@@ -3119,3 +3119,42 @@ fn chat_reasoning_details_survive_fragmented_stream_and_original_connection_repl
     let body = provider.serialize(&replay, None).unwrap().to_value();
     assert!(body["messages"][0].get("reasoning_details").is_none());
 }
+
+#[test]
+fn unsupported_provider_image_keeps_the_delivered_file_without_claiming_vision() {
+    for family in [google::FAMILY,google::VERTEX_FAMILY,chat::FAMILY] {
+        let mut request=paired_media_view(family,"image/gif");
+        let item=Arc::make_mut(request.history.iter_mut().find(|item|item.id=="result:first").unwrap());
+        let Content::ToolResult{result}=&mut item.content else {unreachable!()};
+        let ToolCompletion::Result{content,..}=&mut result.completion else {unreachable!()};
+        content.parts.push(crate::output::OutputPart::Attachment {attachment:crate::catalog::attachments::Attachment {
+            reference:"attachment:animated".into(),filename:"animated.gif".into(),mime_type:"image/gif".into(),byte_length:10,
+        }});
+        let original=request.clone();
+        let provider=media_provider(family,true);
+        let mut reuse=RequestCompileReuse::new();reuse.prepare(&request,1,None,1,None);
+        let first=provider.serialize(&request,Some(&mut reuse)).unwrap();
+        let warm=provider.serialize(&request,Some(&mut reuse)).unwrap();
+        assert_eq!(first.wire_bytes(),warm.wire_bytes());
+        let wire=first.to_value().to_string();
+        assert!(wire.contains("attachment:animated"));
+        if family==chat::FAMILY {assert!(wire.contains(MEDIA_PNG));}
+        else {assert!(!wire.contains(MEDIA_PNG));assert!(wire.contains("does not support direct GIF input"));}
+        assert_eq!(request,original);
+        let mut user=view(family);
+        let provenance=Provenance::UserInstruction{input_id:"file-input".into()};
+        let file=crate::catalog::attachments::Attachment {reference:"attachment:user-gif".into(),filename:"image.gif".into(),mime_type:"image/gif".into(),byte_length:10};
+        let media=crate::output::IncomingMedia {media_type:"image/gif".into(),data_base64:MEDIA_PNG.into()}
+            .admit(crate::output::OutputSource::Conversation{provenance:provenance.clone()}).unwrap();
+        for (index,content) in [
+            Content::Output {output:crate::output::OutputBody {data:Value::Null,parts:vec![crate::output::OutputPart::Attachment{attachment:file}]}},
+            Content::Media{media},
+        ].into_iter().enumerate() {
+            user.history.push(ConversationItem {id:format!("file-input:{index}"),provenance:provenance.clone(),content,opaque:None,resource_activation:None}.into());
+        }
+        let original=user.clone();let wire=provider.serialize(&user,None).unwrap().to_value().to_string();
+        assert!(wire.contains("attachment:user-gif"));
+        assert_eq!(wire.contains(MEDIA_PNG),family==chat::FAMILY);
+        assert_eq!(user,original);
+    }
+}

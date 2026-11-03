@@ -23,11 +23,19 @@ export function routerTransport(router: ReturnType<typeof express.Router>) {
         return this;
       },
     });
+    const requestHeaders = new Headers(init.headers);
+    const binary = requestHeaders.get('content-type') === 'application/octet-stream';
     const request = Object.assign(new EventEmitter(), {
       method: init.method ?? 'GET',
       url: target.pathname + target.search,
-      headers: Object.fromEntries(new Headers(init.headers)),
-      body: init.body ? JSON.parse(String(init.body)) : undefined,
+      headers: Object.fromEntries(requestHeaders),
+      header: (name: string) => requestHeaders.get(name) ?? undefined,
+      body: init.body && !binary ? JSON.parse(String(init.body)) : undefined,
+      async *[Symbol.asyncIterator]() {
+        if (binary && init.body && typeof (init.body as unknown as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === 'function')
+          yield* init.body as unknown as AsyncIterable<Uint8Array>;
+        else if (binary && init.body instanceof Uint8Array) yield init.body;
+      },
       aborted: false,
     });
     const exchange = { request, response, replied: false };

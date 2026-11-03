@@ -44,6 +44,7 @@ impl Storage {
             journalled["__recoveryTurn"] = turn;
             journalled["__recoveryBeforeOwner"] = json!(binding.before_owner_id);
             journalled["__recoveryTool"] = json!(binding.tool);
+            journalled["__artifactGrantId"] = json!(grant.grant_id);
             return Ok(Some(journalled));
         }
         let Some(operation)=input["reservationOperationId"].as_str() else {return Ok(None);};
@@ -278,6 +279,9 @@ mod tests {
             mutation
         };
         let first = write(&mut storage, "write-1", "B", &anchor);
+        let first_attachment=storage.operation_get(&json!({"operationId":"write-1"})).unwrap()["result"]["attachment"].clone();
+        assert_eq!(first_attachment["byteLength"],1);
+        let first_reference=first_attachment["ref"].as_str().expect("applied write produces a fixed attachment").to_owned();
         let again = storage
             .file_mutate(
                 "workspace",
@@ -317,8 +321,13 @@ mod tests {
             changes["changes"][1]["before"]["objectHash"],
             json!(format!("sha256-{}", hex::encode(Sha256::digest(b"D"))))
         );
+        let original_record=storage.domain_record_get(&json!({"workspaceId":"workspace","recordId":first_reference}),"actor").unwrap();
+        let original_hash=original_record["references"][0]["objectHash"].as_str().unwrap().to_owned();
+        assert_eq!(fs::read(super::object_path(&storage.root,&original_hash).unwrap()).unwrap(),b"B");
         drop(storage);
         let storage = Storage::open(&root.join("storage"), "host").unwrap();
+        assert_eq!(storage.domain_record_get(&json!({"workspaceId":"workspace","recordId":first_reference}),"actor").unwrap(),original_record);
+        assert_eq!(fs::read(super::object_path(&storage.root,&original_hash).unwrap()).unwrap(),b"B");
         assert_eq!(
             storage
                 .recovery_turn_value("workspace", "run:input-1")

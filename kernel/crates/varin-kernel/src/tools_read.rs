@@ -177,8 +177,10 @@ pub(super) fn schema() -> Value {
     let single = json!({"type":"object","additionalProperties":false,"properties":properties,"required":["path"]});
     let mut properties = properties;
     properties["files"] = json!({"type":"array","minItems":1,"items":single,"description":"Read multiple files or ranges. Results retain input order, versions and individual errors."});
-    json!({"type":"object","additionalProperties":false,"properties":properties,
-        "oneOf":[{"required":["path"],"not":{"required":["files"]}},{"required":["files"],"not":{"anyOf":[{"required":["path"]},{"required":["offset"]},{"required":["length"]},{"required":["startLine"]},{"required":["endLine"]},{"required":["unit"]}]}}]})
+    let path_reads = json!({"type":"object","additionalProperties":false,"properties":properties,
+        "oneOf":[{"required":["path"],"not":{"required":["files"]}},{"required":["files"],"not":{"anyOf":[{"required":["path"]},{"required":["offset"]},{"required":["length"]},{"required":["startLine"]},{"required":["endLine"]},{"required":["unit"]}]}}]});
+    json!({"type":"object","oneOf":[path_reads,{"type":"object","additionalProperties":false,
+        "properties":{"ref":{"type":"string","minLength":1},"offset":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":0,"default":65536}},"required":["ref"]}]})
 }
 
 impl KernelToolExecutor {

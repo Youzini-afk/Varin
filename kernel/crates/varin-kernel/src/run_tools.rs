@@ -174,8 +174,11 @@ pub(crate) fn builtin_definitions(
     include_goal: bool,
     bot: bool,
 ) -> Vec<BuiltinSchema> {
+    // Attachment reads are source-free. A selected physical source only adds the
+    // path executor; it is not required to read a delivered immutable file.
+    let mut readable=enabled.clone();readable.insert(crate::tools::ToolKind::FileRead);
     let mut tools = crate::process_wait::builtin_schemas(
-        crate::tools::KernelToolExecutor::selected_builtin_schemas(enabled),
+        crate::tools::KernelToolExecutor::selected_builtin_schemas(&readable),
     );
     tools = crate::questions::builtin_schemas(tools);
     tools.extend(crate::collaboration::builtin_schemas());

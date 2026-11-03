@@ -5,6 +5,7 @@ import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { parseThreadOutput } from '@/lib/agent-runtime/thread-content';
+import { ThreadAttachments } from './ThreadAttachments';
 import { ThreadOutput } from './ThreadMedia';
 import { useI18n } from '@/lib/i18n';
 
@@ -82,6 +83,7 @@ function ReportView({ api, identity, operationId, executionId, itemId, host, aut
     {page?.format === 'text' && <MarkdownRenderer messageId={`${page.execution_id}:${itemId}`} content={page.text} />}
     {page?.format === 'output_body' && output && <ThreadOutput api={api} identity={identity}
       holder={{ kind: 'child_report', operationId, executionId: page.execution_id, itemId }} output={output} messageId={`${page.execution_id}:${itemId}`} />}
+    {page && <ThreadAttachments api={api} identity={identity} attachments={page.attachments?.filter(attachment => !output?.parts.some(part => part.kind === 'attachment' && part.attachment.ref === attachment.ref))} />}
     {loading && <><p role="status">{t('common.loading')}{progress ? ` · ${Math.round(progress.bytes / progress.total * 100)}%` : ''}</p>
       <Button variant="ghost" size="sm" onClick={() => { request.current?.abort(); request.current = null; setLoading(false); setProgress(undefined); }}>{t('chat.plan.cancel')}</Button></>}
     {(!page || page.next_offset !== null) && <Button variant="ghost" size="sm" disabled={loading || !api.collaboration} onClick={() => void read()}>

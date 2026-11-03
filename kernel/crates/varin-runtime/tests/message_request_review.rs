@@ -18,7 +18,7 @@ fn send(f: &mut Fixture, key: &str) -> MessageReceipt {
             key.into(),
             child.child_thread_id,
             child.child_branch_id,
-            MessageInput { after_current: None,
+            MessageInput { attachments: Vec::new(), after_current: None,
                 source_agent: None,
             name: None,
                 wait: None,
@@ -70,7 +70,7 @@ fn user_message_from_collaboration_continues_the_same_main_thread() {
     f.settle_exchange();
     finish(&mut f, RunState::Completed);
     let original = f.db.launch_intent(&f.context.run_id).unwrap().unwrap();
-    let prepared = f.db.prepare_user_message("collaboration-main".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { after_current: None,
+    let prepared = f.db.prepare_user_message("collaboration-main".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { attachments: Vec::new(), after_current: None,
         source_agent: None, name: None, wait: None, target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
         reply_to: None, kind: MessageKind::Request, text: "Continue with these findings".into(),
     }).unwrap().load().unwrap();
@@ -88,7 +88,7 @@ fn user_message_from_collaboration_continues_the_same_main_thread() {
 fn separate_work_waits_for_the_current_execution_without_steering_it() {
     let mut f = Fixture::new();
     f.accept(); f.settle_exchange();
-    let prepared = f.db.prepare_user_message("queued-independent-work".into(), "thread:parent".into(), "branch:parent".into(), MessageInput {
+    let prepared = f.db.prepare_user_message("queued-independent-work".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { attachments: Vec::new(),
         after_current: Some(true), source_agent: None, name: None, wait: None,
         target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
         reply_to: None, kind: MessageKind::Request, text: "Handle this independent task after the current one".into(),

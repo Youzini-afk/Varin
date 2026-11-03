@@ -1,5 +1,5 @@
 import React from 'react';
-import { ThreadRequestError, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
+import { ThreadRequestError, getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
 import type { MessageFeedEntry } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
@@ -15,6 +15,8 @@ import {
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore, type ThreadDraft } from '@/stores/useThreadDraftStore';
 import { useI18n } from '@/lib/i18n';
 import type { CollaborationMember } from './collaborationFeed';
+import { prepareThreadFiles, selectThreadFiles } from '@/lib/agent-runtime/fileAttachments';
+import { ThreadFileDrafts } from './ThreadAttachments';
 
 export type CollaborationTarget = ThreadIdentity;
 export function CollaborationComposer({
@@ -61,11 +63,23 @@ export function CollaborationComposer({
     );
   };
   const input = React.useRef<HTMLTextAreaElement>(null);
+  const fileInput = React.useRef<HTMLInputElement>(null);
+  const [preparationError, setPreparationError] = React.useState<string>();
+  const host = getRuntimeEndpointGeneration();
+  const addFiles = (files: File[]) => {
+    const current = useThreadDraftStore.getState().drafts[draftKey]?.collaboration;
+    if (!current?.attempts && !current?.sending) selectThreadFiles(draftKey, files);
+  };
   const selected = (target: CollaborationTarget) =>
     targets.some((current) => current.threadId === target.threadId && current.branchId === target.branchId);
   const send = async () => {
     const current = useThreadDraftStore.getState().drafts[draftKey] ?? draft;
-    if (current.collaboration?.sending || !api.messages || !current.text.trim() || !targets.length) return;
+    if (current.collaboration?.sending || !api.messages || (!current.text.trim() && !current.files?.length) || !targets.length) return;
+    patch({ collaboration: { ...current.collaboration, targets, sending: true } }); setPreparationError(undefined);
+    let attachments;
+    try { attachments = current.collaboration?.attempts ? [] : await prepareThreadFiles(api, identity, draftKey, current.files ?? []); }
+    catch (failure) { patch({ collaboration: { ...current.collaboration, targets, sending: false } }); setPreparationError(failure instanceof Error ? failure.message : String(failure)); return; }
+    if (host !== getRuntimeEndpointGeneration()) { patch({ collaboration: { ...current.collaboration, targets, sending: false } }); return; }
     const attempts =
       current.collaboration?.attempts ??
       targets.map((target) => ({
@@ -73,6 +87,7 @@ export function CollaborationComposer({
           key: crypto.randomUUID(),
           kind: 'request' as const,
           text: current.text,
+          attachments: attachments.map(({ ref }) => ({ ref })),
           targetThreadId: target.threadId,
           targetBranchId: target.branchId,
           ...(current.collaboration?.reply ? { replyTo: current.collaboration.reply.messageId } : {}),
@@ -98,10 +113,11 @@ export function CollaborationComposer({
       }),
     );
     if (results.every((attempt) => 'receipt' in attempt && attempt.receipt)) {
-      patch({ text: '', collaboration: { targets } });
+      const latest = useThreadDraftStore.getState().drafts[draftKey];
+      patch({ text: latest?.text === current.text ? '' : latest?.text ?? '', files: latest?.files?.filter(file => !current.files?.some(selected => selected.id === file.id)), collaboration: { targets } });
     } else
       patch({ collaboration: { targets, reply: current.collaboration?.reply, attempts: results, sending: false } });
-    onSent();
+    if (host === getRuntimeEndpointGeneration()) onSent();
   };
   const reply: MessageFeedEntry | undefined = collaboration?.reply;
   React.useEffect(() => {
@@ -109,7 +125,13 @@ export function CollaborationComposer({
   }, [draftKey, reply]);
   return (
     <div className="collaboration-composer-wrap px-3 pb-3 pt-2">
-      <div className="rounded-xl border border-border/70 bg-[var(--surface-elevated)] p-3">
+      <div className="rounded-xl border border-border/70 bg-[var(--surface-elevated)] p-3"
+        onDragOver={event => { if (!busy && !retained && [...event.dataTransfer.items].some(item => item.kind === 'file')) event.preventDefault(); }}
+        onDrop={event => { event.preventDefault(); addFiles([...event.dataTransfer.files]); }}>
+        <input ref={fileInput} type="file" multiple hidden aria-label={t('chat.attachments.choose')} disabled={busy || retained}
+          onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; addFiles(files); }} />
+        <ThreadFileDrafts files={draft.files} locked={busy || retained} onRemove={id => patch({ files: draft.files?.filter(file => file.id !== id) })} />
+        {preparationError && <p role="alert" className="typography-micro text-destructive">{preparationError}</p>}
         {reply && (
           <div className="mb-2 flex items-center gap-2 border-b border-border/50 pb-2 typography-micro text-muted-foreground">
             <Icon name="reply" className="size-3.5 shrink-0" />
@@ -196,7 +218,8 @@ export function CollaborationComposer({
           simple
           ref={input}
           value={draft.text}
-          disabled={retained}
+          disabled={busy || retained}
+          onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); addFiles(files); } }}
           rows={2}
           aria-label={t('chat.messages.text')}
           placeholder={t(direct ? 'collaboration.directPlaceholder' : 'collaboration.placeholder')}
@@ -217,6 +240,7 @@ export function CollaborationComposer({
             </p>
           ))}
         <div className="flex items-center gap-2">
+          <button type="button" disabled={busy || retained} aria-label={t('chat.attachments.choose')} onClick={() => fileInput.current?.click()}><Icon name="attachment-2" className="size-4" /></button>
           <span className="flex-1 typography-micro text-muted-foreground">
             {t(direct ? 'collaboration.directHint' : 'collaboration.sendHint')}
           </span>
@@ -225,7 +249,7 @@ export function CollaborationComposer({
               type="button"
               disabled={busy}
               className="typography-micro text-muted-foreground"
-              onClick={() => patch({ text: '', collaboration: { targets } })}
+              onClick={() => patch({ text: '', files: [], collaboration: { targets } })}
             >
               {t('chat.messages.newDraft')}
             </button>
@@ -234,7 +258,7 @@ export function CollaborationComposer({
             type="button"
             size="icon"
             className="size-7 rounded-lg"
-            disabled={busy || !draft.text.trim() || !targets.length}
+            disabled={busy || (!draft.text.trim() && !draft.files?.length) || !targets.length}
             onClick={() => void send()}
             aria-label={t(pending ? 'chat.messages.retry' : 'collaboration.send')}
           >

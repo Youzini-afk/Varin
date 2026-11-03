@@ -2102,7 +2102,7 @@ export class AgentRuntimeClient {
     const run = await this.run(operation.run_id, signal);
     const parts: OutputPart<IncomingMedia>[] = [];
     for (const [partIndex, part] of body.parts.entries()) {
-      if (part.kind === 'text') { parts.push(part); continue; }
+      if (part.kind !== 'media') { parts.push(part); continue; }
       const chunks: Buffer[] = []; let count = 1; let total = 0;
       for (let chunkIndex = 0; chunkIndex < count; chunkIndex += 1) {
         const chunk = await this.mediaRead({ threadId: run.thread_id, branchId: run.branch_id,

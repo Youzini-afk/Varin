@@ -93,6 +93,13 @@ export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: '
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
 export type SourceServiceOperation =
+  | { kind: 'attachment_capture'; operationId: string; ref: string; path: string }
+  | { kind: 'attachment_recover'; operationId: string; ref: string; path: string }
+  | { kind: 'attachment_describe'; ref: string }
+  | { kind: 'attachment_read'; ref: string; offset: number; length: number; representation?: 'manifest'; rangeObject?: string }
+  | { kind: 'attachment_release'; ref: string }
+  | { kind: 'attachment_cleanup' }
+  | { kind: 'attachment_discard'; operationId: string; ref: string; path: string }
   | { kind: 'binary_write'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority; journal: RecoveryAnchor;
       path: string; expectedRevision: string | null; bytesBase64: string; byteLength: number }
   | {kind:'code_capture';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;baselineBranchId:string;baselineRevision:number;files?:import('../kernel/code-exchange.js').CodeSelection[];sourceThreadId:string;targetThreadId:string;mapping?:import('../kernel/source-path-map.js').SourcePathMap;baselineMapping?:import('../kernel/source-path-map.js').SourcePathMap}
@@ -162,6 +169,9 @@ export type ManagedSourceServiceHandler = (scope: ManagedSourceLocalScope, opera
 /** The target Host composes its existing Documents, WorkingState and native resource owners.
  * Network routes only supply authenticated principal and the closed request. */
 export interface ManagedSourceService {
+  attachmentBegin(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentRequest, signal?: AbortSignal): Promise<{ retained: true; complete: boolean }>;
+  attachmentPut(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentObjectRequest, body: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelPutBlobResult>;
+  attachmentPath(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelObjectView>;
   recovery(principal: ManagedSourcePrincipal, input: import('./managed-recovery-contract.js').ManagedRecoveryRequest, signal?: AbortSignal): Promise<import('./managed-recovery-contract.js').ManagedRecoveryReply>;
   scriptControl(principal: ManagedSourcePrincipal, input: ManagedScriptControlRequest, signal?: AbortSignal): Promise<ManagedScriptControlReceipt>;
   scriptBinding(principal: ManagedSourcePrincipal, input: ManagedScriptBindingRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').NodeBinding>;
@@ -196,6 +206,13 @@ export interface ManagedSourceService {
 }
 
 export interface SourceServiceResults {
+  attachment_capture: { attachment: import('@varin/protocol').Attachment; contentHash: string };
+  attachment_recover: { attachment: import('@varin/protocol').Attachment; contentHash: string } | null;
+  attachment_describe: { attachment: import('@varin/protocol').Attachment; contentHash: string };
+  attachment_read: import('../kernel/protocol.generated.js').KernelObjectSlice;
+  attachment_release: void;
+  attachment_cleanup: void;
+  attachment_discard: void;
   code_capture: import('./working-state/types.js').WorkingResult;
   code_apply: import('./working-state/integration-coordinator.js').IntegrationOperationReceipt;
   user_integration: import('../kernel/thread-integrations.js').UserIntegrationResult;
