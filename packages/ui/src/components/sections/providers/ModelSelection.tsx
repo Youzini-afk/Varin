@@ -9,6 +9,7 @@ import { ModelLogo } from '@/components/ui/ModelLogo';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { modelCandidates } from './model-edits';
+import './model-connections.css';
 
 /** Shared by the new-service flow and the existing service's add-model dialog. */
 export function ModelPicker({ available, initialIds = [], busy, onConfirm, confirmLabel }: {
@@ -60,18 +61,35 @@ export function ModelSelection({ models, type, candidates, busy, usages, onToggl
       </div>
     </div>
     <p className="mb-3 typography-micro text-muted-foreground">{t('settings.models.instantSave')}{missing ? ` · ${t('settings.models.missingDescriptions').replace('{count}', String(missing))}` : ''}</p>
-    <div className="divide-y divide-border/60">
-      {models.map(model => <div key={model.id} className="flex items-center gap-3 py-1">
-        <button type="button" aria-label={model.name || model.id} onClick={() => onConfigure(model.id)} className="group flex min-w-0 flex-1 items-start gap-3 rounded-md py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} className="mt-0.5 shrink-0" />
-          <span className="min-w-0 flex-1"><span className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><span className="typography-ui-label">{model.name || model.id}</span>{model.name !== model.id ? <span className="truncate typography-micro text-muted-foreground">{model.id}</span> : null}</span>
-            {model.description?.trim() || model.enabled && model.operations.includes('chat') ? <span className="mt-1 block truncate typography-meta text-muted-foreground">{model.description?.trim() || t('settings.models.missingDescription')}</span> : null}
-            <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 typography-micro text-muted-foreground">{model.input?.includes('image') ? <span>{t('settings.models.imageInput')}</span> : null}{model.reasoning ? <span>{t('settings.models.reasoning')}</span> : null}{model.operations.filter(operation => operation !== 'chat').map(operation => <span key={operation}>{t(`settings.models.operation.${operation}`)}</span>)}</span>
-            {usages[model.id]?.length ? <span className="mt-1.5 block typography-micro text-muted-foreground">{t('settings.models.usedFor')} {usages[model.id].join(' / ')}</span> : null}
-          </span><Icon name="arrow-right-s" className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-        </button>
-        <Switch aria-label={`${t('settings.models.enabled')}: ${model.name || model.id}`} checked={model.enabled} onCheckedChange={enabled => onToggle(model.id, enabled)} />
-      </div>)}
+    <div className="model-service-list divide-y divide-border/50">
+      {models.map(model => {
+        const description = model.description?.trim();
+        const operations = model.operations.filter(operation => operation !== 'chat');
+        const hasCapabilities = Boolean(model.input?.includes('image') || model.reasoning || operations.length);
+        const roles = usages[model.id] ?? [];
+        return <div key={model.id} data-enabled={model.enabled} className="model-service-row flex items-start gap-3">
+          <button type="button" aria-label={model.name || model.id} onClick={() => onConfigure(model.id)} className="model-service-row-main group flex min-w-0 flex-1 items-start gap-3 rounded-lg py-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} className="mt-0.5 shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1"><span className="model-service-row-name break-all typography-ui-label font-semibold">{model.name || model.id}</span>{model.name !== model.id ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{model.id}</span> : null}</span>
+              {description || model.enabled && model.operations.includes('chat') ? <span data-empty={!description} className="model-service-row-description mt-1.5 block truncate typography-meta">{description || t('settings.models.missingDescription')}</span> : null}
+              {hasCapabilities || roles.length ? <span className="model-service-row-meta mt-3 flex flex-wrap items-center gap-x-4 gap-y-2.5 typography-micro">
+                {hasCapabilities ? <span className="flex flex-wrap items-center gap-1.5">
+                  {model.input?.includes('image') ? <span className="model-capability" data-capability="vision"><Icon name="eye" className="size-3" />{t('settings.models.imageInput')}</span> : null}
+                  {model.reasoning ? <span className="model-capability" data-capability="reasoning"><Icon name="brain" className="size-3" />{t('settings.models.reasoning')}</span> : null}
+                  {operations.map(operation => <span key={operation} className="model-capability" data-capability="operation">{t(`settings.models.operation.${operation}`)}</span>)}
+                </span> : null}
+                {roles.length ? <span className="model-service-row-usage flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1.5">
+                  <span className="model-service-row-usage-label shrink-0">{t('settings.models.usedFor')}</span>
+                  {roles.map((role, index) => <span key={`${role}:${index}`} className="model-service-row-role">{role}</span>)}
+                </span> : null}
+              </span> : null}
+            </span>
+            <Icon name="arrow-right-s" className="model-service-row-arrow mt-0.5 size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+          </button>
+          <Switch className="mt-5 shrink-0" aria-label={`${t('settings.models.enabled')}: ${model.name || model.id}`} checked={model.enabled} onCheckedChange={enabled => onToggle(model.id, enabled)} />
+        </div>;
+      })}
       {!models.length ? <p className="py-5 typography-meta text-muted-foreground">{t('settings.models.noModels')}</p> : null}
     </div>
     <Dialog open={picking} onOpenChange={setPicking}>
