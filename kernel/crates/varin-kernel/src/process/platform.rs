@@ -7,7 +7,10 @@ mod windows {
     use super::*;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use windows_sys::Win32::{
-        Foundation::{ERROR_FILE_NOT_FOUND, HANDLE},
+        Foundation::{
+            CompareObjectHandles, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA,
+            HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        },
         System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob,
             JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
@@ -66,6 +69,10 @@ mod windows {
             active(self.raw()).map(|n| n == 0)
         }
     }
+    /// Exact process objects present before any user command may execute.
+    pub struct PtyInfrastructure {
+        processes: Vec<OwnedHandle>,
+    }
     pub struct WorkerJob {
         handle: OwnedHandle,
     }
@@ -82,75 +89,223 @@ mod windows {
                 handle: unsafe { OwnedHandle::from_raw_handle(handle as _) },
             })
         }
-        pub fn abort(&self) {
-            // Closing the Host/kernel pipe invalidates this entire managed tree.
-            unsafe {
-                TerminateJobObject(self.handle.as_raw_handle() as _, 1);
-            }
-        }
-        pub fn drain_descendants(&self) -> io::Result<bool> {
-            use windows_sys::Win32::System::Threading::{
-                OpenProcess, TerminateProcess, WaitForSingleObject,
-                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
-            };
-            let raw = self.handle.as_raw_handle() as _;
-            let count = active(raw)? as usize;
-            if count <= 1 {
-                return Ok(true);
-            }
-            let mut buffer = vec![0usize; count + 64];
-            let ok = unsafe {
-                QueryInformationJobObject(
-                    raw,
-                    JobObjectBasicProcessIdList,
-                    buffer.as_mut_ptr() as _,
-                    (buffer.len() * std::mem::size_of::<usize>()) as u32,
-                    std::ptr::null_mut(),
-                )
-            };
-            if ok == 0 {
+        pub fn abort(&self) -> io::Result<()> {
+            // A lost owner or failed native setup invalidates this entire tree.
+            if unsafe { TerminateJobObject(self.handle.as_raw_handle() as _, 1) } == 0 {
                 return Err(io::Error::last_os_error());
             }
-            let list = unsafe { &*(buffer.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST) };
-            let pids = unsafe {
-                std::slice::from_raw_parts(
-                    list.ProcessIdList.as_ptr(),
-                    list.NumberOfProcessIdsInList as usize,
-                )
+            Ok(())
+        }
+        /// Must run after openpty and before spawn_command. No image-name or
+        /// PID exemption can identify the original console host after user code runs.
+        pub fn capture_pty_infrastructure(&self) -> io::Result<PtyInfrastructure> {
+            use windows_sys::Win32::System::Threading::{
+                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
             };
-            for pid in pids
-                .iter()
-                .copied()
-                .filter(|pid| *pid != std::process::id() as usize)
-            {
-                let process = unsafe {
+            let processes = self
+                .members(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)?
+                .ok_or_else(|| {
+                    io::Error::other("Job membership changed during PTY infrastructure capture")
+                })?;
+            if !processes.iter().any(|process| is_guardian(process)) {
+                return Err(io::Error::other(
+                    "original Job does not contain its guardian",
+                ));
+            }
+            Ok(PtyInfrastructure { processes })
+        }
+        pub fn drain_pty_clients(&self, infrastructure: &PtyInfrastructure) -> io::Result<bool> {
+            self.drain_except(&infrastructure.processes)
+        }
+        pub fn drain_descendants(&self) -> io::Result<bool> {
+            self.drain_except(&[])
+        }
+        fn drain_except(&self, protected: &[OwnedHandle]) -> io::Result<bool> {
+            use windows_sys::Win32::System::Threading::{
+                GetProcessId, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+                PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+            };
+            let preserve = |process: &OwnedHandle| {
+                is_guardian(process)
+                    || protected.iter().any(|original| unsafe {
+                        CompareObjectHandles(
+                            process.as_raw_handle() as _,
+                            original.as_raw_handle() as _,
+                        ) != 0
+                    })
+            };
+            let Some(members) =
+                self.members(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)?
+            else {
+                return Ok(false);
+            };
+            for process in &members {
+                if preserve(process) || signaled(process)? {
+                    continue;
+                }
+                // Original infrastructure only needs query/wait rights. Obtain
+                // terminate access only after classifying a later process object.
+                let pid = unsafe { GetProcessId(process.as_raw_handle() as _) };
+                if pid == 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                let terminate = unsafe {
                     OpenProcess(
-                        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE,
+                        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
                         0,
-                        pid as u32,
+                        pid,
                     )
                 };
+                if terminate.is_null() {
+                    let error = io::Error::last_os_error();
+                    if signaled(process)? {
+                        continue;
+                    }
+                    return Err(error);
+                }
+                let terminate = unsafe { OwnedHandle::from_raw_handle(terminate as _) };
+                if unsafe {
+                    CompareObjectHandles(
+                        process.as_raw_handle() as _,
+                        terminate.as_raw_handle() as _,
+                    )
+                } == 0
+                {
+                    return Ok(false);
+                }
+                let mut belongs = 0;
+                if unsafe {
+                    IsProcessInJob(
+                        terminate.as_raw_handle() as _,
+                        self.handle.as_raw_handle() as _,
+                        &mut belongs,
+                    )
+                } == 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                if belongs == 0 {
+                    return Ok(false);
+                }
+                if unsafe { TerminateProcess(terminate.as_raw_handle() as _, 1) } == 0 {
+                    let error = io::Error::last_os_error();
+                    if error.raw_os_error() != Some(ERROR_ACCESS_DENIED as i32) {
+                        return Err(error);
+                    }
+                    // Termination can race an exiting process. Neither acceptance
+                    // nor access denied proves it exited; inspect the actual object.
+                }
+            }
+            for process in &members {
+                if !preserve(process) && !signaled(process)? {
+                    return Ok(false);
+                }
+            }
+            // Children can spawn during an earlier pass, and protected objects can
+            // exit. Only a fresh complete list proves quiescence, never count minus
+            // the number of originally captured infrastructure processes.
+            Ok(self
+                .members(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)?
+                .is_some_and(|members| members.iter().all(preserve)))
+        }
+        // None means membership changed during inspection, not an empty Job.
+        fn members(&self, access: u32) -> io::Result<Option<Vec<OwnedHandle>>> {
+            use windows_sys::Win32::System::Threading::OpenProcess;
+            let raw = self.handle.as_raw_handle() as _;
+            let mut members = Vec::new();
+            for pid in self.member_ids()? {
+                let process = unsafe { OpenProcess(access, 0, pid) };
                 if process.is_null() {
-                    continue;
-                } // The job count below, not this open, establishes exit.
+                    let error = io::Error::last_os_error();
+                    // A vanished PID is not an open failure we may silently call
+                    // empty. Requery this same Job to prove that it has left.
+                    if !self.member_ids()?.contains(&pid) {
+                        return Ok(None);
+                    }
+                    return Err(error);
+                }
                 let process = unsafe { OwnedHandle::from_raw_handle(process as _) };
                 let mut belongs = 0;
                 if unsafe { IsProcessInJob(process.as_raw_handle() as _, raw, &mut belongs) } == 0 {
                     return Err(io::Error::last_os_error());
                 }
-                if belongs != 0 && unsafe { TerminateProcess(process.as_raw_handle() as _, 1) } == 0
-                {
-                    let error = io::Error::last_os_error();
-                    if error.raw_os_error() != Some(5) {
-                        return Err(error);
-                    }
-                    // A granted terminate handle can race teardown before its
-                    // process object is signaled. Wait/recount; never treat the
-                    // access-denied result itself as proof of a completed exit.
-                    let _ = unsafe { WaitForSingleObject(process.as_raw_handle() as _, 10) };
+                if belongs == 0 {
+                    return Ok(None);
                 }
+                members.push(process);
             }
-            active(raw).map(|n| n <= 1)
+            Ok(Some(members))
+        }
+        fn member_ids(&self) -> io::Result<Vec<u32>> {
+            let raw = self.handle.as_raw_handle() as _;
+            let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
+            let word = std::mem::size_of::<usize>();
+            let mut capacity = (active(raw)? as usize).max(1);
+            loop {
+                let bytes = capacity
+                    .checked_mul(word)
+                    .and_then(|n| n.checked_add(header))
+                    .and_then(|n| u32::try_from(n).ok())
+                    .ok_or_else(|| {
+                        io::Error::other("Job process list exceeds Win32 buffer size")
+                    })?;
+                let mut buffer = Vec::<usize>::new();
+                let words = (bytes as usize).div_ceil(word);
+                buffer.try_reserve_exact(words).map_err(io::Error::other)?;
+                buffer.resize(words, 0);
+                let ok = unsafe {
+                    QueryInformationJobObject(
+                        raw,
+                        JobObjectBasicProcessIdList,
+                        buffer.as_mut_ptr() as _,
+                        bytes,
+                        std::ptr::null_mut(),
+                    )
+                };
+                let failure = (ok == 0).then(io::Error::last_os_error);
+                if let Some(error) = failure.as_ref() {
+                    if error.raw_os_error() != Some(ERROR_MORE_DATA as i32) {
+                        return Err(failure.expect("query failed"));
+                    }
+                }
+                let list = unsafe { &*(buffer.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST) };
+                let assigned = list.NumberOfAssignedProcesses as usize;
+                let listed = list.NumberOfProcessIdsInList as usize;
+                if ok == 0 || listed < assigned {
+                    capacity = capacity
+                        .checked_mul(2)
+                        .map(|n| n.max(assigned))
+                        .ok_or_else(|| io::Error::other("Job process list size overflow"))?;
+                    continue;
+                }
+                if listed > capacity {
+                    return Err(io::Error::other("Job process list exceeds its buffer"));
+                }
+                let pids =
+                    unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), listed) };
+                return pids
+                    .iter()
+                    .map(|&pid| {
+                        u32::try_from(pid)
+                            .ok()
+                            .filter(|pid| *pid != 0)
+                            .ok_or_else(|| io::Error::other("invalid Job process identity"))
+                    })
+                    .collect();
+            }
+        }
+    }
+    fn is_guardian(process: &OwnedHandle) -> bool {
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        unsafe { CompareObjectHandles(process.as_raw_handle() as _, GetCurrentProcess()) != 0 }
+    }
+    fn signaled(process: &OwnedHandle) -> io::Result<bool> {
+        use windows_sys::Win32::System::Threading::WaitForSingleObject;
+        match unsafe { WaitForSingleObject(process.as_raw_handle() as _, 0) } {
+            WAIT_OBJECT_0 => Ok(true),
+            WAIT_TIMEOUT => Ok(false),
+            WAIT_FAILED => Err(io::Error::last_os_error()),
+            _ => Err(io::Error::other("unexpected process wait result")),
         }
     }
     fn active(handle: HANDLE) -> io::Result<u32> {
@@ -184,7 +339,7 @@ mod windows {
     }
 }
 #[cfg(windows)]
-pub use windows::{prior_tree_gone, Containment, WorkerJob};
+pub use windows::{prior_tree_gone, Containment, PtyInfrastructure, WorkerJob};
 
 #[cfg(unix)]
 pub struct Containment;
