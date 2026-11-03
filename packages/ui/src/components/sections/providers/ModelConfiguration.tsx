@@ -38,7 +38,8 @@ export function ModelConfigurationDrawer({ open, onOpenChange, ...props }: Props
     onOpenChange(value);
   }}>
     <Dialog.Portal>
-      <Dialog.Backdrop className="motion-dialog-backdrop fixed inset-0 z-50 bg-black/30 dark:bg-black/55" />
+      {/* Settings is itself a dialog. Keep an owning backdrop above it for outside dismissal. */}
+      <Dialog.Backdrop forceRender className="motion-dialog-backdrop fixed inset-0 z-50 bg-black/30 dark:bg-black/55" />
       <Dialog.Popup data-slot="dialog-content" className="model-configuration-drawer fixed inset-y-0 right-0 z-50 flex w-full max-w-[520px] flex-col border-l border-border bg-background text-foreground shadow-xl"
         initialFocus={() => descriptionRef.current?.querySelector('textarea') ?? false}>
         <Dialog.Close render={<Button variant="ghost" size="icon" className="absolute top-4 right-4 z-10" aria-label={t('settings.models.close')} />}><Icon name="close" className="size-4" /></Dialog.Close>
