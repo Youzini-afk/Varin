@@ -6,3 +6,43 @@
 .model-configuration-drawer[data-ending-style] { transition-duration: var(--motion-dur-exit); transition-timing-function: var(--motion-ease-exit); }
 :root:is([data-motion="reduced"], [data-motion="off"]) .model-configuration-drawer { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); transform: none; }
 @media (prefers-reduced-motion: reduce) { .model-configuration-drawer { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); transform: none; } }
+
+/* Tint the information itself; the collection keeps its quiet, open row layout. */
+.model-service-list {
+  --model-description-ink: color-mix(in oklab, var(--foreground) 82%, var(--primary-base));
+  --model-description-empty-ink: color-mix(in oklab, var(--muted-foreground) 77%, var(--status-warning));
+  --model-vision-ink: color-mix(in oklab, var(--status-success) 65%, var(--foreground));
+  --model-reasoning-ink: color-mix(in oklab, var(--primary-base) 70%, var(--foreground));
+  --model-operation-ink: color-mix(in oklab, var(--status-info) 65%, var(--foreground));
+  --model-usage-ink: color-mix(in oklab, var(--primary-base) 68%, var(--foreground));
+}
+.model-service-row-main { transition: background-color var(--motion-dur-fade) var(--motion-ease-out); }
+.model-service-row-main:hover { background-color: color-mix(in srgb, var(--interactive-hover) 55%, transparent); }
+.model-service-row-description { color: var(--model-description-ink); line-height: 1.65; }
+.model-service-row-description[data-empty=true] { color: var(--model-description-empty-ink); }
+.model-capability {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  line-height: 1.3;
+}
+.model-capability[data-capability=vision] { color: var(--model-vision-ink); }
+.model-capability[data-capability=reasoning] { color: var(--model-reasoning-ink); }
+.model-capability[data-capability=operation] { color: var(--model-operation-ink); }
+.model-service-row-usage { color: var(--model-usage-ink); line-height: 1.65; }
+.model-service-row-usage-label { color: var(--muted-foreground); }
+.model-service-row-role { overflow-wrap: anywhere; }
+.model-service-row-role + .model-service-row-role::before {
+  content: '·';
+  margin-inline-end: 8px;
+  color: color-mix(in srgb, var(--model-usage-ink) 45%, transparent);
+}
+.model-service-row-arrow { color: var(--muted-foreground); opacity: .45; transition: transform var(--motion-dur-snap) var(--motion-ease-out), translate var(--motion-dur-snap) var(--motion-ease-out), opacity var(--motion-dur-fade) var(--motion-ease-out); }
+.model-service-row-main:is(:hover, :focus-visible) .model-service-row-arrow { opacity: 1; }
+.model-service-row[data-enabled=false] .model-service-row-name { color: var(--muted-foreground); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .model-service-row-main, .model-service-row-arrow { transition: none; } }
+:root:is([data-motion="reduced"], [data-motion="off"]) :is(.model-service-row-main, .model-service-row-arrow) { transition: none; }
