@@ -877,6 +877,7 @@ fn old_resume_receipt_does_not_quiesce_a_new_live_worker() {
         .start(
             &f.input.run_id,
             varin_runtime::supervisor::RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: f.input.binding.clone(),
                 policy_state: Value::Null,

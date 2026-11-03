@@ -896,6 +896,7 @@ fn run_case(scenario: Scenario) {
         })
     };
     let start = RunStart {
+        driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
         binding,
         policy_state: Value::Null,
         provider,

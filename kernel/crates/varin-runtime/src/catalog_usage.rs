@@ -185,6 +185,7 @@ impl ThreadUsageRead {
             check()?;
             let metadata = snapshot(&step.request)?;
             let kind = match metadata.view.origin {
+                RequestOrigin::Driver { .. } => "conversation",
                 RequestOrigin::Conversation { compaction: Some(_), .. } => "context",
                 RequestOrigin::Conversation { .. } if self.retrieval_runs.contains(&step.run_id) => "retrieval",
                 RequestOrigin::Conversation { .. } => "conversation",

@@ -9,6 +9,8 @@ import type {
 } from '@varin/extension-contract';
 import { parseVarinExtensionServiceRoutingRule, serviceRoutingRuleKey } from '@varin/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
+import { VARIN_AGENT_DRIVER_SERVICE_ID } from '@varin/extension-contract';
 
 export interface VarinExtensionCatalogStoreState {
   busyExtensionId: string | null;
@@ -315,32 +317,47 @@ export const setVarinExtensionServiceRoute = (
   version: number,
   scope: VarinExtensionServiceRoutingContext,
   selection: readonly string[] | null,
+  expectedHostId?: string,
 ): Promise<void> => {
   // Capture the user's ordered choice before it enters the shared mutation queue. Empty is an
   // explicit collection; only null removes the override and restores automatic routing.
   const selected = selection === null ? null : [...selection];
+  const originalScope = { ...scope };
+  const originalApi = expectedHostId ? extensionsApi() : undefined;
+  const originalEndpoint = getRuntimeEndpointGeneration();
   const operation = mutationQueue.then(async () => {
     await startVarinExtensionCatalog();
-    const current = state.snapshot;
+    const api = originalApi ?? extensionsApi();
+    const assertCurrent = () => {
+      if (originalApi && (getRuntimeEndpointGeneration() !== originalEndpoint || extensionsApi() !== originalApi)) {
+        throw new Error('Service routing Runtime changed before selection');
+      }
+    };
+    assertCurrent();
+    const current = originalApi ? await api.hostState() : state.snapshot;
+    assertCurrent();
     if (!current) throw new Error('Varin extension routing is unavailable');
+    if (expectedHostId && (!current.routing.authoritative || current.catalog.hostId !== expectedHostId)) {
+      throw new Error('Service routing Host changed before selection');
+    }
     const requestGeneration = generation;
-    const identity = serviceRoutingRuleKey({ scope, serviceId, version });
+    const identity = serviceRoutingRuleKey({ scope: originalScope, serviceId, version });
     const existing = current.routing.document.rules.find((rule) => serviceRoutingRuleKey(rule) === identity);
     if (selected === null) {
       if (!existing) return;
-      await extensionsApi().removeServiceRoutingRule({
+      await api.removeServiceRoutingRule({
         expectedRevision: current.routing.document.revision,
-        scope,
+        scope: originalScope,
         serviceId,
         version,
       });
     } else {
-      await extensionsApi().upsertServiceRoutingRule({
+      await api.upsertServiceRoutingRule({
         expectedRevision: current.routing.document.revision,
         rule: parseVarinExtensionServiceRoutingRule({
-          allowFallback: existing?.allowFallback ?? false,
+          allowFallback: serviceId === VARIN_AGENT_DRIVER_SERVICE_ID ? false : existing?.allowFallback ?? false,
           providerKeys: selected,
-          scope,
+          scope: originalScope,
           serviceId,
           version,
         }),

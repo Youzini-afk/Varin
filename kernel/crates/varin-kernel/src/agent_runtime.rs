@@ -277,6 +277,7 @@ pub(crate) fn spawn(
     resource_bridge: crate::host_query::OwnerChannel,
     plan_bridge: crate::plan_bridge::PlanBridge,
     policy_bridge: crate::policy::PolicyBridge,
+    driver_bridge: crate::driver_bridge::DriverBridge,
     responses: crate::transport::Sender,
     finished: impl Fn(&str) + Send + Sync + 'static,
     release_credit: impl Fn(&str, &str) + Send + Sync + 'static,
@@ -686,6 +687,8 @@ pub(crate) fn spawn(
                                 | "runtime.tools.invoke"
                                 | "runtime.launch.mcp.prepare"
                                 | "runtime.launch.policy.prepare"
+                                | "runtime.launch.driver.prepare"
+                                | "runtime.driver.wait" | "runtime.driver.context" | "runtime.driver.cancel" | "runtime.driver.model" | "runtime.driver.tool" | "runtime.driver.checkpoint" | "runtime.driver.deliver" | "runtime.driver.receipt"
                                 | "runtime.policy.ready"
                                 | "runtime.question.answer"
                                 | "runtime.permission.open"
@@ -728,6 +731,53 @@ pub(crate) fn spawn(
                                 })?;
                             deferred = true;
                             return Ok(Value::Null);
+                        }
+                        if method.starts_with("runtime.driver.") || method == "runtime.launch.driver.prepare" {
+                            let selected_method = method.to_string();
+                            let bridge = driver_bridge.clone();
+                            let driver_controls = control_commands::ControlCommands {
+                                runtime: runtime.clone(), resources: resources.clone(),
+                                models: run_models.as_ref().expect("initialized runtime models").clone(),
+                                tools: run_tools.as_ref().expect("initialized runtime tools").clone(),
+                            };
+                            let catalog = runtime.catalog();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            thread::spawn(move || {
+                                let result = (|| -> Result<Value, KernelError> {
+                                    if selected_method == "runtime.launch.driver.prepare" {
+                                        let p: DriverPrepareParams = serde_json::from_value(params)?;
+                                        let prepare = catalog.lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?.prepare_run_driver(&p.run_id,&p.selection,p.models).map_err(domain)?;
+                                        let prepared = prepare.load().map_err(domain)?;
+                                        let read = catalog.lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?.admit_run_driver(prepared).map_err(domain)?;
+                                        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+                                    }
+                                    let context = bridge.context(params.get("instanceId").and_then(Value::as_str).ok_or_else(||KernelError::Protocol("driver instance required".into()))?).map_err(|e|KernelError::Authorization(e.to_string()))?;
+                                    let failed = |error:varin_runtime::execution::ExecutionError| KernelError::Operation(error.to_string());
+                                    Ok(match selected_method.as_str() {
+                                        "runtime.driver.wait" => { let p:DriverWaitParams=serde_json::from_value(params)?; serde_json::to_value(context.wait(p.input).map_err(failed)?)? }
+                                        "runtime.driver.context" => { let p:DriverContextParams=serde_json::from_value(params)?; serde_json::to_value(context.context(p.input).map_err(failed)?)? }
+                                        "runtime.driver.cancel" => {
+                                            let p:DriverCancelParams=serde_json::from_value(params)?;
+                                            let receipt = context.cancel_work(p.input).map_err(failed)?;
+                                            if receipt.requested { if let Some(varin_runtime::driver::DriverReceipt::Tool { operation_id, phase: Some(_), .. }) = &receipt.receipt {
+                                                driver_controls.execute("runtime.operation.cancel", json!({"operationId":operation_id}), &AtomicBool::new(false))?;
+                                            } }
+                                            serde_json::to_value(receipt)?
+                                        }
+                                        "runtime.driver.model" => { let p:DriverModelParams=serde_json::from_value(params)?; serde_json::to_value(context.model(p.input).map_err(failed)?)? }
+                                        "runtime.driver.tool" => { let p:DriverToolParams=serde_json::from_value(params)?; serde_json::to_value(context.tool(p.input).map_err(failed)?)? }
+                                        "runtime.driver.checkpoint" => { let p:DriverCheckpointParams=serde_json::from_value(params)?; serde_json::to_value(context.checkpoint(p.input).map_err(failed)?)? }
+                                        "runtime.driver.deliver" => { let p:DriverDeliveryParams=serde_json::from_value(params)?; serde_json::to_value(context.deliver(p.input).map_err(failed)?)? }
+                                        "runtime.driver.receipt" => { let p:DriverReceiptParams=serde_json::from_value(params)?; serde_json::to_value(context.receipt(p.input).map_err(failed)?)? }
+                                        _ => return Err(KernelError::Protocol("unknown driver primitive".into())),
+                                    })
+                                })();
+                                let response = match result { Ok(value)=>response_ok(&response_id,value),Err(error)=>response_error(&response_id,&error) };
+                                done(&response_id); let _=response_sender.send(response);
+                            });
+                            deferred = true; return Ok(Value::Null);
                         }
                         if method == "runtime.retry.evaluate" {
                             let p: ModelRetryEvaluateParams = serde_json::from_value(params)?;
@@ -1782,6 +1832,7 @@ pub(crate) fn spawn(
                                     mcp_binding: None,
                                     extension_bindings: None,
                                     policy_binding: None,
+                                    driver_binding: None,
                                 }
                             } else {
                                 serde_json::from_value(params)?
@@ -1803,6 +1854,7 @@ pub(crate) fn spawn(
                                 resource: resource_bridge.clone(),
                                 plan: plan_bridge.clone(),
                                 policy: policy_bridge.clone(),
+                                driver: driver_bridge.clone(),
                                 models: run_models
                                     .as_ref()
                                     .expect("initialized runtime models")
@@ -2816,21 +2868,22 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             let p: AdmissionInspectParams = serde_json::from_value(params)?;
             let epoch = u64::try_from(p.owner_generation)
                 .map_err(|_| KernelError::Protocol("ownerGeneration must be nonnegative".into()))?;
-            let origin = match (p.request_id, p.action_id, p.node_id, p.parent_operation_id) {
-                (Some(request_id), None, None, None) => {
+            let origin = match (p.request_id, p.action_id, p.node_id, p.parent_operation_id, p.driver_invocation_id) {
+                (Some(request_id), None, None, None, None) => {
                     varin_runtime::execution::ToolOrigin::ModelStep { request_id }
                 }
-                (None, Some(action_id), Some(node_id), None) => {
+                (None, Some(action_id), Some(node_id), None, None) => {
                     varin_runtime::execution::ToolOrigin::PolicyAction { action_id, node_id }
                 }
-                (None, None, None, Some(parent_operation_id)) => {
+                (None, None, None, Some(parent_operation_id), None) => {
                     varin_runtime::execution::ToolOrigin::NestedCall {
                         parent_operation_id,
                     }
                 }
+                (None, None, None, None, Some(invocation_id)) => varin_runtime::execution::ToolOrigin::Driver { invocation_id },
                 _ => {
                     return Err(KernelError::Protocol(
-                        "specify one original model, policy or nested caller".into(),
+                        "specify one original model, policy, driver or nested caller".into(),
                     ));
                 }
             };
@@ -3232,6 +3285,8 @@ fn prepare_context_job_mode(
         }
         .map_err(|error| KernelError::Protocol(error.to_string()))?;
         varin_runtime::catalog::launches::LaunchSelection {
+            driver: varin_runtime::driver::DriverSelection::default(),
+            driver_models: Vec::new(),
             agent: None,
             child_dispatch: None,
             policy_models: Vec::new(),

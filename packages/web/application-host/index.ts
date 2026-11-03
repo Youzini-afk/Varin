@@ -105,6 +105,8 @@ import { createMcpSourceProcessAdmission } from './lib/kernel/mcp-process-admiss
 import { createContextComposition } from './lib/kernel/context-composition.js';
 import { createPolicyModelPreparer } from './lib/kernel/policy-models.js';
 import { createAgentPolicy } from './lib/kernel/agent-policy.js';
+import { createAgentDriver } from './lib/kernel/agent-driver.js';
+import { createRunDriverOwner, VARIN_AGENT_DRIVER_CAPABILITY } from './lib/kernel/run-driver-owner.js';
 import { RunObservers } from './lib/kernel/run-observers.js';
 
 import { McpAuthority, McpCompositions, composeMcpAuthorityLeases, StdioTransport, type McpCompositionScope } from './lib/mcp/authority.js';
@@ -1993,7 +1995,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const workspace=launch?.selection.source?.resource_owner.kind === 'local'?await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id):undefined;
     const cwd=workspace?.canonicalPath??VARIN_DATA_DIR;
     return agentMcpPolicy(cwd,Boolean(workspace) && await projectTrust.trusted(cwd));
-  }}), documentsAuthority.admitWorkspaceRegistration);
+  }}), documentsAuthority.admitWorkspaceRegistration, createAgentDriver(extensionRuntime));
   agentRuntime.bindManagedSources(managedRemoteTargets);
   agentRuntime.executionEnvironment = () => executionEnvironment.snapshot();
   let stopTokenizerCollection: (() => Promise<void>) | undefined;
@@ -2756,6 +2758,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     VARIN_RUNTIME_CONTRACTS_CAPABILITY, createRuntimeContractOwner({ extensions: extensionRuntime, kernel: kernelClient }),
   );
   const unregisterNestedToolCapability = extensionRuntime.capabilities.register(VARIN_RUNTIME_TOOLS_CAPABILITY, createNestedToolOwner(kernelClient));
+  const unregisterRunDriverCapability = extensionRuntime.capabilities.register(VARIN_AGENT_DRIVER_CAPABILITY, createRunDriverOwner(kernelClient));
   const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
   const unregisterSettingsCapability = extensionRuntime.capabilities.register(SETTINGS_CAPABILITY, createSettingsToolOwner({ service: settingsService, runtime: agentRuntime,
@@ -3037,6 +3040,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await shutdown.run('unregisterRuntimeContractCapability', () => unregisterRuntimeContractCapability());
       await shutdown.run('unregisterExtensionPackageCapability', () => unregisterExtensionPackageCapability());
       await shutdown.run('unregisterNestedToolCapability', () => unregisterNestedToolCapability());
+      await shutdown.run('unregisterRunDriverCapability', () => unregisterRunDriverCapability());
       await shutdown.run('unregisterComputerCapability', () => unregisterComputerCapability());
       await shutdown.run('unregisterSettingsCapability', () => unregisterSettingsCapability());
       await shutdown.run('unregisterEnvironmentForwardCapability', () => unregisterEnvironmentForwardCapability());

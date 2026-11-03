@@ -105,6 +105,7 @@ fn build(
     let BoundModel { binding, provider } =
         build_provider(configuration, credentials, credential_ref, identity)?;
     Ok(RunStart {
+        driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
         context_preparation: Arc::new(NoopContextPreparation),
         binding,
         policy_state: Value::Null,

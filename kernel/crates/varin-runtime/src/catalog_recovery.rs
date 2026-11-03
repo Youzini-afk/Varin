@@ -21,81 +21,90 @@ pub(super) struct ExecutionPreparation {
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
+/// Immutable ancestry/body loading shared by driver and default execution preparation.
+/// The captured owner/head is supplied by Catalog; this function runs off its control lock.
+pub(super) fn hydrate_execution_history(
+    run: &Run,
+    binding: &RequestBinding,
+    database: &std::path::Path,
+    content: &crate::content::ContentStore,
+    cancel: Option<&CancellationToken>,
+) -> Result<Option<Vec<HistoryItem>>> {
+    // History rows are immutable after publication. Traverse the captured ancestry through a
+    // separate read-only connection, so long history cannot occupy the Catalog control lock.
+    let mut database = Connection::open_with_flags(
+        database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let snapshot = database.transaction()?;
+    let mut cursor = binding.history_range.leaf_id.clone();
+    let mut metadata = Vec::new();
+    let mut visited = BTreeSet::new();
+    while let Some(key) = cursor {
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            return Ok(None);
+        }
+        if !visited.insert(key.clone()) {
+            return Err(RuntimeError::Invalid(
+                "history ancestry contains a cycle".into(),
+            ));
+        }
+        let (thread_id, parent, raw): (String, Option<String>, String) = snapshot.query_row(
+            "SELECT thread_id,parent,body FROM history WHERE id=?1",
+            [&key],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let item: HistoryItem = serde_json::from_str(&raw)?;
+        if item.id != key
+            || item.thread_id != thread_id
+            || item.parent != parent
+            || thread_id != run.thread_id
+        {
+            return Err(RuntimeError::Invalid(
+                "history metadata does not match its row".into(),
+            ));
+        }
+        cursor = parent;
+        metadata.push(item);
+    }
+    drop(snapshot);
+    metadata.reverse();
+    if binding
+        .history_range
+        .ancestor_id
+        .as_ref()
+        .is_some_and(|id| !metadata.iter().any(|item| &item.id == id))
+    {
+        return Err(RuntimeError::Conflict(
+            "request ancestor is not on the active branch".into(),
+        ));
+    }
+    let mut history = Vec::with_capacity(metadata.len());
+    for item in metadata {
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            return Ok(None);
+        }
+        let mut item = item;
+        let loaded = content
+            .load_history_payload_cancellable(&item.content, &|| {
+                cancel.is_some_and(CancellationToken::is_cancelled)
+            });
+        let (body, provider) = match loaded {
+            Err(RuntimeError::DispatchCancelled) => return Ok(None),
+            other => other?,
+        };
+        item.content = body;
+        item.provider = provider;
+        history.push(item);
+    }
+    Ok(Some(history))
+}
 impl ExecutionPreparation {
     fn hydrate_history(
         &self,
         cancel: Option<&CancellationToken>,
     ) -> Result<Option<Vec<HistoryItem>>> {
-        // History rows are immutable after publication. Traverse the captured ancestry through a
-        // separate read-only connection, so long history cannot occupy the Catalog control lock.
-        let mut database = Connection::open_with_flags(
-            &self.database,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        let snapshot = database.transaction()?;
-        let mut cursor = self.binding.history_range.leaf_id.clone();
-        let mut metadata = Vec::new();
-        let mut visited = BTreeSet::new();
-        while let Some(key) = cursor {
-            if cancel.is_some_and(CancellationToken::is_cancelled) {
-                return Ok(None);
-            }
-            if !visited.insert(key.clone()) {
-                return Err(RuntimeError::Invalid(
-                    "history ancestry contains a cycle".into(),
-                ));
-            }
-            let (thread_id, parent, raw): (String, Option<String>, String) = snapshot.query_row(
-                "SELECT thread_id,parent,body FROM history WHERE id=?1",
-                [&key],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )?;
-            let item: HistoryItem = serde_json::from_str(&raw)?;
-            if item.id != key
-                || item.thread_id != thread_id
-                || item.parent != parent
-                || thread_id != self.run.thread_id
-            {
-                return Err(RuntimeError::Invalid(
-                    "history metadata does not match its row".into(),
-                ));
-            }
-            cursor = parent;
-            metadata.push(item);
-        }
-        drop(snapshot);
-        metadata.reverse();
-        if self
-            .binding
-            .history_range
-            .ancestor_id
-            .as_ref()
-            .is_some_and(|id| !metadata.iter().any(|item| &item.id == id))
-        {
-            return Err(RuntimeError::Conflict(
-                "request ancestor is not on the active branch".into(),
-            ));
-        }
-        let mut history = Vec::with_capacity(metadata.len());
-        for item in metadata {
-            if cancel.is_some_and(CancellationToken::is_cancelled) {
-                return Ok(None);
-            }
-            let mut item = item;
-            let loaded = self
-                .content
-                .load_history_payload_cancellable(&item.content, &|| {
-                    cancel.is_some_and(CancellationToken::is_cancelled)
-                });
-            let (body, provider) = match loaded {
-                Err(RuntimeError::DispatchCancelled) => return Ok(None),
-                other => other?,
-            };
-            item.content = body;
-            item.provider = provider;
-            history.push(item);
-        }
-        Ok(Some(history))
+        hydrate_execution_history(&self.run, &self.binding, &self.database, &self.content, cancel)
     }
     fn input(&self, history: Vec<HistoryItem>) -> Result<ExecutionInput> {
         let database = Connection::open_with_flags(

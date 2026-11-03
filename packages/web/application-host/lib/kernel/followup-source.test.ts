@@ -57,7 +57,7 @@ function fixture(selected: LaunchSource) {
   const forbidden = () => { throw new Error('A must not acquire local file authority'); };
   const kernel = {
     handshake: { hostId: 'host-a' }, subscribeExit() {}, onToolReleased() {},
-    cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {},
+    cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {},
     issueGrant: forbidden, retireGrant: forbidden, revokeGrant: forbidden,
     async agentRuntimeRequest(method: string, request: FollowupRegisterAdmissionParams) {
       if (method === 'runtime.run.inspect') return { id: input.runId, thread_id: identity.threadId, branch_id: identity.branchId, state: 'completed' };

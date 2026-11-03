@@ -227,6 +227,7 @@ fn original_mcp_tasks_survive_run_completion_cancel_without_false_stop_and_reope
         .start(
             &submitted.run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(Model {
@@ -532,6 +533,7 @@ fn original_mcp_tasks_survive_run_completion_cancel_without_false_stop_and_reope
             .start(
                 &next.run_id,
                 RunStart {
+                    driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                     binding,
                     policy_state: Value::Null,
                     provider: Arc::new(Model {
@@ -899,6 +901,7 @@ fn acceptance_reply_case(committed: bool) {
         .start(
             &submitted.run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(LostAcceptance {

@@ -13,6 +13,8 @@ export interface PreparedPolicyModel {
 }
 export type PolicyModelPreparer = (input: {
   threadId: string; generation: number; requestedModelRoles: readonly 'agentPlanning'[];
+  /** Separate immutable driver bindings from replaceable policy generations. */
+  bindingNamespace?: 'policy' | 'driver';
   savedCapabilities?: readonly PolicyModelCapability[];
 }, signal?: AbortSignal) => Promise<PreparedPolicyModel[]>;
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -41,6 +43,7 @@ export function createPolicyModelPreparer(options: {
       if (input.savedCapabilities?.length) throw new Error('policy-model-requirements-changed');
       return [];
     }
+    const namespace = input.bindingNamespace ?? 'policy';
     const base: PolicyModelCapability = { capability_id: 'agentPlanning', purpose: 'planning', status: 'unconfigured',
       supported_operation: 'tool_free_text', binding_id: null, configuration_identity: null,
       binding: null, configuration: null, credential_scope: null };
@@ -54,7 +57,7 @@ export function createPolicyModelPreparer(options: {
       if (!previous.configuration || !previous.credential_scope) throw new Error('policy-model-selection-changed');
       const identity = configurationIdentity(previous.configuration, previous.credential_scope);
       if (previous.configuration_identity !== identity
-        || previous.binding_id !== `policy:${input.generation}:agentPlanning:${identity}`) throw new Error('policy-model-selection-changed');
+        || previous.binding_id !== `${namespace}:${input.generation}:agentPlanning:${identity}`) throw new Error('policy-model-selection-changed');
       // Restore the committed model directly. Current settings and routing are unrelated intent.
       const credentialOwner = await waitForModelBinding(options.models.rebindModel(previous.configuration, previous.credential_scope),
         owner => owner.release(), signal);
@@ -83,7 +86,7 @@ export function createPolicyModelPreparer(options: {
       try { scope = await waitWithSignal(resolved.credentialOwner.scope(), signal); }
       catch { signal?.throwIfAborted(); return unavailable('unavailable'); }
       const identity = configurationIdentity(resolved.configuration, scope);
-      const bindingId = `policy:${input.generation}:agentPlanning:${identity}`;
+      const bindingId = `${namespace}:${input.generation}:agentPlanning:${identity}`;
       const capability: PolicyModelCapability = { ...base, status: 'available', binding_id: bindingId,
         configuration_identity: identity, configuration: resolved.configuration, credential_scope: scope };
       transferred = true;

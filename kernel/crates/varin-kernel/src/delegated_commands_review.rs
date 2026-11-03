@@ -154,7 +154,7 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
         policy,
         models: crate::run_models::RunModels::new(catalog.clone(), credentials),
         tools: crate::run_tools::RunTools::new(catalog.clone(), bridge),
-        responses: output.into(),
+        driver: crate::driver_bridge::DriverBridge::new(output.clone()), responses: output.into(),
         epoch: "delegated-test".into(),
     };
     let params=serde_json::from_value(json!({"runId":run_id,"credentialScope":launch.selection.credential_scope,"toolBinding":{"resourceOwner":{"kind":"local"},"grantId":"fresh-source-grant","runId":run_id,"threadId":child.child_thread_id,"workspaceId":selected["workspace_id"],"executionWorkspaceId":selected["execution_workspace_id"],"sourceMode":"fixed_branch","fileSource":{"branchId":format!("child-source:{execution}"),"revision":0},"enabledTools":[]}})).unwrap();

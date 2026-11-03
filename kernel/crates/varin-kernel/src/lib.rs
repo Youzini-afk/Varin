@@ -31,6 +31,7 @@ mod observations;
 mod plan;
 mod plan_bridge;
 mod policy;
+mod driver_bridge;
 mod process;
 mod process_wait;
 mod shell_environment;
@@ -95,3 +96,9 @@ mod service_composition_fixture;
 
 #[cfg(test)]
 mod thread_recovery_review;
+
+#[cfg(test)]
+mod driver_question_review;
+
+#[cfg(test)]
+mod driver_assembly_review;

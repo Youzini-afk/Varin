@@ -4,7 +4,7 @@ import type { InferenceBinding, InferenceReceipt } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { ThreadOutput } from './ThreadMedia';
 import { useI18n } from '@/lib/i18n';
-import { canCancelOperation } from './threadOperations';
+import { canCancelOperation, type QuestionScope } from './threadOperations';
 
 const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
   if ((operation.intent as { kind?: string } | null)?.kind === 'inference_request_v1') return 'Stop inference request';
@@ -102,9 +102,9 @@ function McpResourceStatus({ operation }: { operation: ThreadSnapshot['operation
 }
 
 
-export function ThreadOperationDetails({ api, identity, operation, readOnly, pending, waitingOn, onCancel, onOpenTerminal }: {
+export function ThreadOperationDetails({ api, identity, operation, readOnly, pending, waitingOn, questionScope, onCancel, onOpenTerminal }: {
   api: ThreadsAPI; identity: ThreadIdentity; operation: ThreadSnapshot['operations'][number]; readOnly: boolean; pending: boolean;
-  waitingOn?: string | null; onCancel(): void; onOpenTerminal(): void;
+  waitingOn?: string | null; questionScope?: QuestionScope; onCancel(): void; onOpenTerminal(): void;
 }) {
   const { t } = useI18n();
   return <div className="space-y-3 break-words typography-meta">
@@ -119,6 +119,6 @@ export function ThreadOperationDetails({ api, identity, operation, readOnly, pen
     {operation.call_completion && operation.call_completion.kind !== 'not_dispatched' && operation.call_completion.content && <ThreadOutput api={api} identity={identity} holder={{ kind: 'operation', operationId: operation.id, output: 'completion' }} output={operation.call_completion.content} messageId={operation.id + ':completion'} />}
     {operation.result?.kind === 'output' && <ThreadOutput api={api} identity={identity} holder={{ kind: 'operation', operationId: operation.id, output: 'result' }} output={operation.result.output} messageId={operation.id + ':result'} />}
     {operation.external_receipt && <ThreadOutput api={api} identity={identity} holder={{ kind: 'operation', operationId: operation.id, output: 'external_receipt' }} output={operation.external_receipt.result} messageId={operation.id + ':receipt'} />}
-    {!readOnly && canCancelOperation(operation, waitingOn) && <Button variant="ghost" size="sm" disabled={pending} onClick={onCancel}>{operationCancelLabel(operation)}</Button>}
+    {!readOnly && canCancelOperation(operation, waitingOn, questionScope) && <Button variant="ghost" size="sm" disabled={pending} onClick={onCancel}>{operationCancelLabel(operation)}</Button>}
   </div>;
 }

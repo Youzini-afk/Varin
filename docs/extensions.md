@@ -174,6 +174,20 @@ Surface-local service 同样保留已绑定的原 owner。
 child 只能从仍被保留的原 binding 派生 pin。撤权沿实际依赖边传播，共享 activation context 不持有
 某一个 Run 的调用权限。
 
+## Driver 与策略不是同一个扩展点
+
+`varin.agent.driver@1` 注册真实执行算法，SDK 的 `provideAgentDriver` 给每次 callback 绑定原 Run 能力。
+它可以并发模型、交错工具、构造上下文、消费原 Inbox 和等待原事件；不是给 `policy@4` 改名。
+内置 Rust driver 仍消费已有 policy/context/tool service；第三方 driver 不被要求模仿默认循环的动作顺序。
+
+选择沿现有 scoped routing，安装不会自动选择；原 Run 的实现、依赖、配置和恢复声明一起冻结。
+`runtime.driver` grant 与运行 callback 的原 scope 缺一不可，并不代替每个工具的权限和资源准入。
+`describe` 的恢复声明由真实已激活 provider 读取，不从 manifest 猜测能否恢复；`checkpoint` 必须有显式
+`resume` 实现与完全相同的私有 schema。普通更换 provider 不会把旧 Run 移交给同名新代码。
+
+作者入口、示例与停止/恢复语义见 [SDK](../packages/extension-sdk/README.md#replaceable-run-drivers)、
+[parallel-driver](../examples/extensions/parallel-driver/README.md) 和[运行时](runtime.md#可替换的执行循环)。
+
 ## Rust Agent 组合与工具动作
 
 Rust Agent 通过 [CompositionRegistry 及 resolver](../kernel/crates/varin-runtime/src/composition.rs)

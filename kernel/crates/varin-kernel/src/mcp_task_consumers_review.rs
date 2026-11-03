@@ -192,6 +192,7 @@ fn source_less_child_and_installed_nested_extension_preserve_original_task_recei
         .start(
             &run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(ConsumerModel {

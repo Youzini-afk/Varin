@@ -229,6 +229,7 @@ pub(super) struct FrozenRequest {
 }
 pub(super) fn frozen_request<M>(view: &RequestView<M>) -> Option<FrozenRequest> {
     match &view.origin {
+        RequestOrigin::Driver { .. } => Some(FrozenRequest { compaction: false, attribution: UsageAttribution::of_binding(&view.binding) }),
         RequestOrigin::Conversation { compaction, .. } => Some(FrozenRequest {
             compaction: compaction.is_some(),
             attribution: UsageAttribution::of_binding(&view.binding),

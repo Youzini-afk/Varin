@@ -52,14 +52,14 @@ Web / Electron / mobile renderer
 | 语义向量与索引 | 独立派生存储进程 |
 | 外壳、布局和视图状态 | UI kernel 与选中扩展 |
 
-Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 83；Storage 的 format 为 22，
+Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 84；Storage 的 format 为 22，
 SQLite `user_version` 为 16。版本以各自源码为准；Catalog 的升级链不能套用于 Storage。
 Storage 当前只接受自己的现行格式及 schema fingerprint，不提供旧格式转换，见[打开入口](../kernel/crates/varin-kernel/src/storage/core.rs)。
 
 ## 受理、执行与观察
 
 Host 校验真实 Thread/branch 和输入，准备模型、凭据、Source、策略与扩展候选。Rust Catalog 耐久受理后固定本次
-Run/request 的配置与正文，执行引擎记录原始模型和工具工作。设置变化不会重写已受理请求、队列输入或原回执。
+Run/request 的配置与正文，Supervisor 调用冻结的 RunDriver，原执行 owner 记录真实模型和工具工作。内置 Rust 循环是默认 driver，可信扩展可以选择独立算法；权限、资源与记录并不因此变成另一个数据库。设置变化不会重写已受理请求、队列输入或原回执。
 
 UI 通过 `ThreadsAPI` 读快照与历史，`/api/threads/observe` 传输持久事件和临时进度。断线后按 durable cursor 追平；
 首次订阅与快照读取并行，进度携带 Thread、branch、Run 和 request 身份。文字、公开思考和工具参数增量在
@@ -92,10 +92,11 @@ Thread/worktree 保留，供核对和后续处理。
 ## 数据与交付
 
 内部结构可以继续演进，由原存储 owner 在打开时自动升级已支持的旧版本，业务读取与执行随后使用当前结构。
-Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80 → 81 → 83，以及独立格式 82 → 83；可从任一已支持的旧格式打开。
+Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80 → 81 → 83 → 84，以及独立格式 82 → 83 → 84；可从任一已支持的旧格式打开。
 78 → 79 初始化外部 Agent 记录，79 → 80 初始化用量账本及开始记账时间；旧回执缺少可靠结算时间与归属，不补造账本。
 80 → 81 初始化 Zone2 环境捕获表；81 → 83 为原历史引用建立稀疏文本范围索引，支持派发选择读取。
 独立格式 82 已有这些索引但没有 Zone2 表，82 → 83 只初始化缺少的捕获结构。预检查按真实版本区分两种布局，不以 `>=81` 猜测结构存在。
+83 → 84 将既有 Run 固定为历史内置 driver，并加入 driver 私有 checkpoint、调用记录及明确归属的并行模型索引。
 原正文对象、消息身份、环境捕获回执和已派发绑定不改变。
 转换、最终版本号与升级事件在同一事务中提交，然后才推进 epoch 和执行恢复；正文对象、会话身份、队列和原回执保留，不复制整库。
 事务提交前失败或进程中断时回滚未完成转换，下次打开重试；失败信息保留源版本、目标版本和原始原因。

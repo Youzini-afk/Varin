@@ -291,6 +291,7 @@ fn exercise(mode: Mode) {
     let supervisor = RunSupervisor::new(db);
     let start = configure_compaction_start(
         RunStart {
+            driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
             context_preparation: Arc::new(NoopContextPreparation),
             binding: binding(),
             policy_state: Value::Null,
@@ -608,6 +609,7 @@ fn automatic_summary_is_charged_to_goal_without_turning_objective_into_summary_i
         let supervisor = RunSupervisor::new(db);
         let start = configure_compaction_start(
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: binding(),
                 policy_state: Value::Null,
@@ -861,6 +863,7 @@ fn completed_original_job_wakes_a_successor_without_publishing_or_replaying() {
             &job.receipt.run_id,
             configure_compaction_start(
                 RunStart {
+                    driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                     context_preparation: Arc::new(NoopContextPreparation),
                     binding: binding(),
                     policy_state: Value::Null,
@@ -1051,6 +1054,7 @@ fn bot_summary_freezes_original_knowledge_and_publishes_only_its_baseline_with_g
     let supervisor = RunSupervisor::new(db);
     let start = configure_compaction_start(
         RunStart {
+            driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
             context_preparation: Arc::new(NoopContextPreparation),
             binding: binding(),
             policy_state: Value::Null,
@@ -1152,6 +1156,7 @@ fn bot_summary_freezes_original_knowledge_and_publishes_only_its_baseline_with_g
     let seen = Arc::new(Mutex::new(vec![]));
     let (tx, _rx) = mpsc::channel();
     let start = RunStart {
+        driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
         context_preparation: Arc::new(NoopContextPreparation),
         binding: binding(),
         policy_state: Value::Null,
@@ -1589,6 +1594,7 @@ fn nonlinear_summary_tree_uses_explicit_original_model_steps_and_exact_final_out
     let (merged, release) = mpsc::channel();
     let start = configure_compaction_start(
         RunStart {
+            driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
             context_preparation: Arc::new(NoopContextPreparation),
             binding: binding(),
             policy_state: Value::Null,
@@ -1792,6 +1798,7 @@ fn real_preview_quotes_prior_unicode_and_media_and_accepts_sdk_plan() {
         let seen = Arc::new(Mutex::new(vec![]));
         let start = configure_compaction_start(
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: binding(),
                 policy_state: Value::Null,
@@ -1853,6 +1860,7 @@ fn complete_summary_node_capacity_fails_before_a_paid_model_step() {
     let supervisor = RunSupervisor::new(db);
     let start = configure_compaction_start(
         RunStart {
+            driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
             context_preparation: Arc::new(NoopContextPreparation),
             binding: binding(),
             policy_state: Value::Null,
@@ -2157,6 +2165,7 @@ fn summary_plan_recovery_keeps_node_outputs_and_never_replays_dispatched_work() 
         let seen = Arc::new(Mutex::new(vec![]));
         let start = configure_compaction_start(
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: binding(),
                 policy_state: Value::Null,

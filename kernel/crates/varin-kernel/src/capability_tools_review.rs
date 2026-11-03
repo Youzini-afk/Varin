@@ -348,6 +348,7 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
             "instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":"branch","ancestor_id":null,"leaf_id":input.input_id}})).unwrap();
         let start = crate::questions::configure(
             varin_runtime::supervisor::RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding,
                 policy_state: Value::Null,

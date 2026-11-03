@@ -426,6 +426,7 @@ impl Fixture {
         ];
         declarations.extend(extra);
         let start = RunStart {
+            driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
             binding: self.binding.clone(),
             policy_state: self.initial.clone(),
             provider: if self.initial["model"].as_bool() == Some(true) {

@@ -591,6 +591,7 @@ fn original_web_search_fixed_pdf_and_public_reader_share_native_identity_and_sto
         .start(
             &submitted.run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(Model {

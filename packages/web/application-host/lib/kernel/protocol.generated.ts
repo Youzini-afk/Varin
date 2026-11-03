@@ -3,17 +3,26 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 76 as const;
+export const KERNEL_PROTOCOL_VERSION = 77 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.importSources","runtime.context.observations.receipt","runtime.context.observations.snapshot","runtime.context.observations.read","runtime.context.observations.importPosition","runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.sendNow","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.context.observations.importSources","runtime.context.observations.capture","runtime.context.observations.receipt","runtime.context.observations.snapshot","runtime.context.observations.importPosition","runtime.context.observations.import","runtime.context.observations.sources","runtime.context.observations.admit","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.usage.summary","runtime.operation.calls","runtime.model.presentations","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.work.pending","runtime.bot.work.admit","runtime.bot.matters.list","runtime.bot.matters.update","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.knowledge_inference.status","runtime.knowledge_inference.cancel","runtime.knowledge_inference.finish","runtime.model_text.admit","runtime.model_text.read","runtime.model_text.status","runtime.model_text.cancel","runtime.inference.generate","runtime.inference.receipt_pending","runtime.inference.admit","runtime.inference.dispatch","runtime.inference.status","runtime.inference.settle","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId","runtime.input.sendNow":"inputId"} as const;
-export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.context.observations.capture","runtime.context.observations.import","runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v76" as const;
+export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.driver.wait","runtime.driver.context","runtime.driver.cancel","runtime.driver.model","runtime.driver.tool","runtime.driver.checkpoint","runtime.driver.deliver","runtime.driver.receipt","runtime.context.observations.capture","runtime.context.observations.import","runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v77" as const;
 
 export type KernelMethod =
+  | "runtime.driver.wait"
+  | "runtime.driver.context"
+  | "runtime.driver.cancel"
+  | "runtime.launch.driver.prepare"
+  | "runtime.driver.model"
+  | "runtime.driver.tool"
+  | "runtime.driver.checkpoint"
+  | "runtime.driver.deliver"
+  | "runtime.driver.receipt"
   | "runtime.context.observations.importSources"
   | "runtime.context.observations.capture"
   | "runtime.context.observations.receipt"
@@ -686,6 +695,100 @@ export interface ModelAdaptersReleaseParams {
   leaseId: string;
 }
 
+export type DriverRecovery = 'none' | 'checkpoint';
+
+export interface DriverArtifact {providerKey:string;extensionId:string;extensionVersion:string;serviceId:'varin.agent.driver';serviceVersion:1;artifactIntegrity:string;composition:HostServiceComposition;configurationIdentity:string;identity:LaunchPolicy;modelRoles:string[];recovery:DriverRecovery;checkpointSchema:string|null}
+
+export type DriverSelection = {kind:'builtin';name:'varin.default';version:'1'} | {kind:'extension';artifact:DriverArtifact};
+
+export interface DriverBinding {reference:string;artifact:DriverArtifact}
+
+export interface DriverModelInput {id:string;capabilityId:string|null;history:ModelConversationItem[];instructions:string[];tools:string[]}
+
+export interface DriverModelFailure {code:string;message:string;tool_name?:string|null;retry_after_ms:number|null;provider_request_id:string|null}
+
+export interface DriverModelItem {id:string;content:ModelContent;opaque:ModelOpaqueItem|null}
+
+export interface DriverModelReceipt {id:string;requestId:string;outcome:'completed'|'interrupted'|'failed'|'cancelled';items:DriverModelItem[];usage:ModelUsageReceipt;finishReason:FinishReason|null;failure:DriverModelFailure|null}
+
+export interface DriverToolInput {id:string;name:string;arguments:unknown}
+
+export interface DriverToolReceipt {id:string;operationId:string;completion:ModelToolCompletion;executorStopped:boolean}
+
+export interface DriverCheckpointInput {expectedRevision:number;schema:string;state:unknown;operations:string[]}
+
+export interface DriverCheckpoint {revision:number;schema:string;state:unknown;operations:string[]}
+
+export interface DriverDeliveryInput {id:string;text:string}
+
+export interface DriverDeliveryReceipt {id:string;historyId:string}
+
+export interface DriverReceiptInput {id:string;kind:'model'|'tool'|'delivery'}
+
+export type DriverReceipt = {kind:'model';id:string;requestId:string;state:'prepared'|'dispatched'|'completed'|'not_dispatched'|'interrupted'|'failed'|'cancelled';receipt:DriverModelReceipt|null} | {kind:'tool';id:string;operationId:string;phase:'accepted'|'queued'|'preparing'|'running'|'waiting'|'terminal'|null;receipt:DriverToolReceipt|null} | {kind:'delivery';id:string;historyId:string};
+
+export interface DriverRunInput {runId:string;epoch:number;mode:'start'|'resume';history:ModelConversationItem[];tools:LaunchTool[];models:Array<{capabilityId:string;status:'available'|'disabled'|'unconfigured'|'invalid'|'unavailable'}>;checkpoint:DriverCheckpoint|null;receipts:DriverReceipt[]}
+
+export type DriverRunOutcome = {kind:'complete'} | {kind:'pause';reason:string} | {kind:'fail';error:ExecutionError};
+
+export interface DriverModelParams {
+  instanceId: string;
+  input: DriverModelInput;
+}
+
+export interface DriverToolParams {
+  instanceId: string;
+  input: DriverToolInput;
+}
+
+export interface DriverCheckpointParams {
+  instanceId: string;
+  input: DriverCheckpointInput;
+}
+
+export interface DriverDeliveryParams {
+  instanceId: string;
+  input: DriverDeliveryInput;
+}
+
+export interface DriverReceiptParams {
+  instanceId: string;
+  input: DriverReceiptInput;
+}
+
+export type DriverContextInput = Record<string,never>;
+
+export interface DriverContextReceipt {history:ModelConversationItem[];tools:LaunchTool[];inputIds:string[];activating:boolean}
+
+export interface DriverCancelInput {kind:'model'|'tool';id:string}
+
+export interface DriverCancelReceipt {requested:boolean;receipt:DriverReceipt|null}
+
+export interface DriverContextParams {
+  instanceId: string;
+  input: DriverContextInput;
+}
+
+export interface DriverCancelParams {
+  instanceId: string;
+  input: DriverCancelInput;
+}
+
+export interface DriverWaitInput {after:number|null;work:DriverReceiptInput[]}
+
+export interface DriverWaitReceipt {cursor:number;inputPending:boolean;receipts:DriverReceipt[]}
+
+export interface DriverWaitParams {
+  instanceId: string;
+  input: DriverWaitInput;
+}
+
+export interface DriverPrepareParams {
+  runId: string;
+  selection: DriverSelection;
+  models: PolicyModelCapability[];
+}
+
 export interface HistoryRange { branch_id:string; ancestor_id:string|null; leaf_id:string|null }
 
 export interface ModelOpaqueItem { connection_identity:string; family:string; adapter_version:string; value:unknown }
@@ -700,7 +803,7 @@ export interface ModelConversationItem { resource_activation?:ResourceActivation
 
 export interface RequestBinding {pricing?:UsagePricing;tool_output_visible_bytes?:number|null;execution_environment?:unknown;direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
 
-export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};
+export type RequestOrigin = {kind:'driver';driver_id:string;operation_id:string;input_identity:string} | {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};
 
 export interface RequestView { request_id:string; run_id:string; origin:RequestOrigin; binding:RequestBinding; history:ModelConversationItem[] }
 
@@ -2794,7 +2897,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 76; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 77; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3136,6 +3239,8 @@ export interface ToolReadyParams {
 }
 
 export interface LaunchSelection {
+  driver: DriverSelection;
+  driver_models: PolicyModelCapability[];
   agent?: AgentSelection;
   extension_bindings: ExtensionToolBinding[];
   policy_models: PolicyModelCapability[];
@@ -3153,6 +3258,7 @@ export interface LaunchSelection {
 }
 
 export interface LaunchIntent {
+  driver_preparable: boolean;
   policy_preparable: boolean;
   policy_generation: number;
   policy_target: PolicyTarget;
@@ -3260,10 +3366,11 @@ export interface QueuedInput {
   cursor: number;
 }
 
-export type ToolOrigin = {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string} | {kind: 'nested_call'; parent_operation_id: string};
+export type ToolOrigin = {kind:'driver';invocation_id:string} | {kind: 'model_step'; request_id: string} | {kind: 'policy_action'; action_id: string; node_id: string} | {kind: 'nested_call'; parent_operation_id: string};
 /** Canonical invocation identity shared by all public/Host consumers. */
 export function toolOperationId(origin: ToolOrigin, callId: string): string {
   switch (origin.kind) {
+    case 'driver': return origin.invocation_id;
     case 'model_step': return `${origin.request_id}:tool:${callId}`;
     case 'policy_action': return `${origin.action_id}:node:${origin.node_id}`;
     case 'nested_call': return `nested:${new TextEncoder().encode(origin.parent_operation_id).length}:${origin.parent_operation_id}:${callId}`;
@@ -3273,7 +3380,7 @@ export function validToolOrigin(value: unknown): value is ToolOrigin {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
   const text = (key: string) => typeof v[key] === 'string' && (v[key] as string).length > 0;
-  const keys = v.kind === 'model_step' ? ['kind', 'request_id'] : v.kind === 'policy_action' ? ['kind', 'action_id', 'node_id'] : v.kind === 'nested_call' ? ['kind', 'parent_operation_id'] : [];
+  const keys = v.kind === 'driver' ? ['kind', 'invocation_id'] : v.kind === 'model_step' ? ['kind', 'request_id'] : v.kind === 'policy_action' ? ['kind', 'action_id', 'node_id'] : v.kind === 'nested_call' ? ['kind', 'parent_operation_id'] : [];
   return keys.length > 0 && Object.keys(v).length === keys.length && Object.keys(v).every(key => keys.includes(key)) && keys.every(key => key === 'kind' || text(key));
 }
 
@@ -3420,6 +3527,7 @@ export interface RunModelSelections {
 }
 
 export interface RunStartParams {
+  driverBinding?: DriverBinding;
   extensionBindings?: LiveExtensionToolBinding[];
   policyBinding?: AgentPolicyBinding;
   mcpBinding?: LiveMcpBinding;
@@ -3773,6 +3881,7 @@ export interface ObserverDeliveryParams {
 }
 
 export interface AdmissionInspectParams {
+  driverInvocationId?: string;
   parentOperationId?: string;
   runId: string;
   ownerGeneration: number;
@@ -6821,6 +6930,15 @@ export type KernelMethodParams = {
   "runtime.launch.inspect": RunParams;
   "runtime.launch.list": KernelEmptyParams;
   "runtime.run.start": RunStartParams;
+  "runtime.launch.driver.prepare": DriverPrepareParams;
+  "runtime.driver.model": DriverModelParams;
+  "runtime.driver.tool": DriverToolParams;
+  "runtime.driver.checkpoint": DriverCheckpointParams;
+  "runtime.driver.deliver": DriverDeliveryParams;
+  "runtime.driver.receipt": DriverReceiptParams;
+  "runtime.driver.context": DriverContextParams;
+  "runtime.driver.wait": DriverWaitParams;
+  "runtime.driver.cancel": DriverCancelParams;
   "runtime.model.select": ModelSelectParams;
   "runtime.model.inspect": RunParams;
   "runtime.status": KernelEmptyParams;
@@ -8786,6 +8904,87 @@ export type KernelRequest =
       id: string;
       method: "runtime.run.start";
       params: RunStartParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.launch.driver.prepare";
+      params: DriverPrepareParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.driver.model";
+      params: DriverModelParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.driver.tool";
+      params: DriverToolParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.driver.checkpoint";
+      params: DriverCheckpointParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.driver.deliver";
+      params: DriverDeliveryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.driver.receipt";
+      params: DriverReceiptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.driver.context";
+      params: DriverContextParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.driver.wait";
+      params: DriverWaitParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.driver.cancel";
+      params: DriverCancelParams;
       epoch?: string;
       grantId?: string;
     }

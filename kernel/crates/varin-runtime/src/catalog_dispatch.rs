@@ -862,6 +862,15 @@ impl ChildInvocationRead {
         use crate::execution::{RequestSnapshot, ToolOrigin};
         let mut history = None;
         let reference = match &self.context.origin {
+            ToolOrigin::Driver { invocation_id } => {
+                let original: super::driver::DriverCallMetadata = serde_json::from_value(self.body.clone())?;
+                if original.id != *invocation_id || original.run_id != self.context.run_id { return Err(RuntimeError::Conflict("driver dispatch owner changed".into())); }
+                let frozen: crate::execution::FrozenToolContext = serde_json::from_value(self.content.load(&original.frozen_ref)?)?;
+                if inherit_history {
+                    if let Some(reference) = &original.dispatch_history { history = Some(self.content.load_items(reference, &|| false)?); }
+                }
+                frozen.child_dispatch
+            }
             ToolOrigin::ModelStep { request_id } => {
                 if !inherit_history && self.body.get("dispatch").is_some() {
                     let metadata = &self.body["dispatch"];
@@ -1011,6 +1020,12 @@ impl Catalog {
         use crate::execution::ToolOrigin;
         let context = super::tool_content::root_tool_context(&self.db, context, false)?;
         let body = match &context.origin {
+            ToolOrigin::Driver { invocation_id } => {
+                let original = super::driver::driver_call_metadata(&self.db, invocation_id)?;
+                if original.run_id != context.run_id { return Err(RuntimeError::Conflict("driver dispatch Run changed".into())); }
+                super::driver::require_driver(&self.db, &context.run_id, &original.driver_id)?;
+                serde_json::to_value(original)?
+            }
             ToolOrigin::ModelStep { request_id } => {
                 let step: ModelStep = record(&self.db, "model_steps", request_id)?;
                 if step.run_id != context.run_id {

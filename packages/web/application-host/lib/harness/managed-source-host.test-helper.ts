@@ -217,7 +217,7 @@ async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceC
     child_thread_id: `thread:child:${dispatch}`, child_branch_id: `branch:child:${dispatch}`, project_id: null,
     trigger: { kind: 'dispatch' }, input: { task: 'Change the private source' }, configuration: {},
     selected_profile: { preset_id: 'controlled-process-worker', catalog_identity: 'controlled-dispatch', work_mode: 'isolated_write', tools: childTools, instructions: '' },
-    launch: { extension_bindings: [], policy_models: [], mcp_binding: null, credential_scope: null,
+    launch: { extension_bindings: [], driver: { kind: 'builtin', name: 'varin.default', version: '1' }, driver_models: [], policy_models: [], mcp_binding: null, credential_scope: null,
       connection_identity: 'controlled', provider_family: 'controlled', model: 'controlled', configuration_generation: 1,
       tool_schema_generation: 1, tools: capabilities.tools, policy: { name: 'controlled', version: '1' }, source: parent.source, child_dispatch: null },
     policy_target: { kind: 'default' }, source_basis: null, source: { kind: 'pending', handoff }, code_result: { kind: 'pending' },

@@ -1,3 +1,4 @@
+import { canRespondToQuestion } from './threadOperations';
 import { THINKING_LEVELS, documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
 import { openThreadContext } from '@/lib/openThreadContext';
 import { toast } from '@/components/ui';
@@ -513,7 +514,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {empty && <div className="min-h-6 flex-1" />}
     {!readOnly && <div className="thread-composer-stack shrink-0 space-y-5 pb-4">
     {snapshot && <ThreadQuestions key={draftKey} scopeKey={draftKey} revealKey={questionReveal} revealOperationId={questionOperation} operations={snapshot.operations}
-      enabled={operation => !history.connecting && run?.state === 'waiting' && !run.cancel_requested && run.waiting_on === operation.waiting_on}
+      enabled={operation => !history.connecting && canRespondToQuestion(operation, { run, launch: snapshot.launch })}
       onRead={operation => api.operation(operation.id)} onCancel={operation => api.cancelOperation(operation.id)}
       onAnswer={(operation, answers) => api.answerQuestion({ ...identity, operationId: operation.id, answers })} />}
     {/* A send moves the title and starters out while the composer docks; loading history removes them at once. */}

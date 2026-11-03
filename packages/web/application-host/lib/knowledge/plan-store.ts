@@ -46,7 +46,9 @@ function originOf(value: PlanOrigin): PlanOrigin {
     ? { kind: admitted.kind, request_id: admitted.request_id }
     : admitted.kind === 'policy_action'
       ? { kind: admitted.kind, action_id: admitted.action_id, node_id: admitted.node_id }
-      : { kind: admitted.kind, parent_operation_id: admitted.parent_operation_id };
+      : admitted.kind === 'driver'
+        ? { kind: admitted.kind, invocation_id: admitted.invocation_id }
+        : { kind: admitted.kind, parent_operation_id: admitted.parent_operation_id };
   const origin: Extract<PlanOrigin, { kind: 'tool' }> = { kind: 'tool', operationId: text(value.operationId, 'Operation'),
     runId: text(value.runId, 'Run'), toolOrigin, callId: text(value.callId, 'call'), epoch: value.epoch };
   const operationId = toolOperationId(toolOrigin, origin.callId);

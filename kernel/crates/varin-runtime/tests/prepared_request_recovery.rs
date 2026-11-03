@@ -281,6 +281,7 @@ impl Fixture {
     }
     fn start(&self) -> RunStart {
         RunStart {
+            driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
             binding: self.binding.clone(),
             policy_state: json!(999),
             provider: self.provider.clone(),

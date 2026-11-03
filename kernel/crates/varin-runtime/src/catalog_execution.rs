@@ -878,6 +878,7 @@ pub(super) struct ExecutionBodyPreparation {
     has_goal: bool,
 }
 pub(super) struct PreparedExecutionBodies {
+    driver_request: bool,
     teammate_deliveries: Vec<(String,u64)>,
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
@@ -921,10 +922,12 @@ impl ExecutionBodyPreparation {
                     let tools: Vec<crate::execution::ToolSchema> =
                         serde_json::from_value(self.content.load(&launch.selection.tools_ref)?)?;
                     let allowed = launch.selection.agent.as_ref().and_then(|agent| agent.tools.as_deref());
-                    if snapshot.view.binding.tools != crate::tool_disclosure::request_tools(&tools, self.has_goal, allowed) {
+                    let available = crate::tool_disclosure::request_tools(&tools, self.has_goal, allowed);
+                    let driver = matches!(snapshot.view.origin, RequestOrigin::Driver { .. });
+                    if if driver { snapshot.view.binding.tools.iter().any(|tool| !available.contains(tool)) } else { snapshot.view.binding.tools != available } {
                         return Err(RuntimeError::Conflict("request differs from the admitted capability selection".into()));
                     }
-                    if snapshot.view.binding.direct_tools.is_some()
+                    if !driver && snapshot.view.binding.direct_tools.is_some()
                         && snapshot.view.binding.direct_tools != crate::tool_disclosure::direct_tools(&snapshot.view.binding.tools,
                             launch.selection.agent.as_ref().map(|agent| agent.work_focus.as_str()).unwrap_or("general")) {
                         return Err(RuntimeError::Conflict("request disclosure differs from the admitted work focus".into()));
@@ -985,6 +988,7 @@ impl ExecutionBodyPreparation {
             .as_ref()
             .map(|reference| self.content.load_snapshot(reference))
             .transpose()?;
+        let driver_request = snapshot.as_ref().is_some_and(|s| matches!(s.view.origin, RequestOrigin::Driver { .. }));
         let frozen_history_range = snapshot
             .as_ref()
             .map(|snapshot| snapshot.view.binding.history_range.clone());
@@ -1118,6 +1122,7 @@ impl ExecutionBodyPreparation {
             None
         };
         Ok(PreparedExecutionBodies {
+            driver_request,
             teammate_deliveries,
             _publication: self.publication,
             request,
@@ -1191,6 +1196,7 @@ impl Catalog {
         prepared: PreparedExecutionBodies,
     ) -> Result<()> {
         let PreparedExecutionBodies {
+            driver_request,
             teammate_deliveries,
             _publication,
             request: prepared_request,
@@ -1275,7 +1281,7 @@ impl Catalog {
             | ExecutionRecord::ToolDispatched { context, .. }
             | ExecutionRecord::ToolSettled { context, .. } => match &context.origin {
                 ToolOrigin::ModelStep { request_id } => Some(request_id.as_str()),
-                ToolOrigin::PolicyAction { .. } | ToolOrigin::NestedCall { .. } => None,
+                ToolOrigin::PolicyAction { .. } | ToolOrigin::NestedCall { .. } | ToolOrigin::Driver { .. } => None,
             },
             _ => None,
         };
@@ -1445,7 +1451,16 @@ impl Catalog {
                     return Err(RuntimeError::InputPending);
                 }
 
-                if !matches!(&snapshot.view.origin, RequestOrigin::Conversation{history_range,..} if history_range == &snapshot.view.binding.history_range)
+                let driver = match &snapshot.view.origin {
+                    RequestOrigin::Driver { driver_id, operation_id, .. } => {
+                        super::driver::require_driver(&tx, run_id, driver_id)?;
+                        if operation_id != &snapshot.view.request_id { return Err(RuntimeError::Conflict("driver model identity changed".into())); }
+                        true
+                    }
+                    RequestOrigin::Conversation { history_range, .. } if history_range == &snapshot.view.binding.history_range => false,
+                    _ => { return Err(RuntimeError::Invalid("request origin mismatch".into())); }
+                };
+                if !driver && !matches!(&snapshot.view.origin, RequestOrigin::Conversation{history_range,..} if history_range == &snapshot.view.binding.history_range)
                 {
                     return Err(RuntimeError::Invalid(
                         "conversation request origin mismatch".into(),
@@ -1464,7 +1479,7 @@ impl Catalog {
                     [&run.branch_id],
                     |r| r.get(0),
                 )?;
-                if head != snapshot.view.binding.history_range.leaf_id {
+                if !driver && head != snapshot.view.binding.history_range.leaf_id {
                     let summary: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM context_jobs WHERE run_id=?1)", [run_id], |row| row.get(0))?;
                     if !summary {
                         return Err(RuntimeError::Conflict("request history head changed".into()));
@@ -1488,13 +1503,13 @@ impl Catalog {
                     frozen_usage: None,
                 };
                 tx.execute(
-                    "INSERT INTO model_steps(id,run_id,state,body,node_id) VALUES(?1,?2,'prepared',?3,?4)",
+                    "INSERT INTO model_steps(id,run_id,state,body,node_id,driver_id) VALUES(?1,?2,'prepared',?3,?4,?5)",
                     params![step.id, run_id, encode(&step)?, match &snapshot.view.origin {
                         RequestOrigin::Conversation { compaction: Some(node), .. } => Some(&node.node_id),
                         _ => None,
-                    }],
+                    }, match &snapshot.view.origin { RequestOrigin::Driver { driver_id, .. } => Some(driver_id.as_str()), _ => None }],
                 )?;
-                super::context_jobs::record_step(&tx, run_id, snapshot)?;
+                if !driver { super::context_jobs::record_step(&tx, run_id, snapshot)?; }
             }
             ExecutionRecord::RequestNotDispatched { request_id, reason } => {
                 close_prepared_request(&tx, &run, request_id, *reason)?;
@@ -1564,7 +1579,7 @@ impl Catalog {
                     [&run.branch_id],
                     |r| r.get(0),
                 )?;
-                if *outcome == ModelOutcome::Completed && head != history_range.leaf_id {
+                if !driver_request && *outcome == ModelOutcome::Completed && head != history_range.leaf_id {
                     // Independent summary nodes quote their frozen inputs. Their audit outputs may
                     // arrive in either order; only the declared DAG edges constrain consumption.
                     let summary: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM context_job_steps WHERE run_id=?1 AND request_id=?2)", params![run_id, request_id], |row| row.get(0))?;
@@ -1597,8 +1612,9 @@ impl Catalog {
                     params![request_id, encode(&step.state)?.trim_matches('"')],
                 )?;
                 tx.execute("UPDATE context_job_steps SET is_final=?2 WHERE request_id=?1",params![request_id,*outcome==ModelOutcome::Completed && *finish_reason==Some(FinishReason::Stop)])?;
-                // Completion, original output, semantic history and unresolved call identities commit together.
-                if *outcome == ModelOutcome::Completed {
+                // Driver model work retains original output without imposing a linear conversation.
+                // Only explicit delivery appends driver output to the public branch.
+                if !driver_request && *outcome == ModelOutcome::Completed {
                     if items.iter().any(|item| match &item.content {
                         Content::Text { text } => !text.trim().is_empty(),
                         Content::Media { .. } => true,
@@ -1659,6 +1675,12 @@ impl Catalog {
                     .get(&tool.call.call_id)
                     .ok_or_else(|| RuntimeError::Invalid("prepared tool intent missing".into()))?;
                 let expected = match &context.origin {
+                    ToolOrigin::Driver { invocation_id } => {
+                        let original = super::driver::driver_call_metadata(&tx, invocation_id)?;
+                        if original.run_id != run_id || original.epoch != epoch || original.pre_dispatch_completion.is_some() { return Err(RuntimeError::Conflict("driver tool owner changed or original call already stopped before dispatch".into())); }
+                        super::driver::require_driver(&tx, run_id, &original.driver_id)?;
+                        encode(&original.call)?
+                    }
                     ToolOrigin::NestedCall { .. } => {
                         super::tool_content::root_tool_context(&tx, context, true)?;
                         let original = self.nested_tools.metadata(context).ok_or_else(|| {

@@ -643,6 +643,7 @@ mod waiting_tests {
         );
         let start = crate::questions::configure(
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding,
                 policy_state: Value::Null,

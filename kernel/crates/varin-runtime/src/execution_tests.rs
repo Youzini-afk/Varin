@@ -582,6 +582,7 @@ fn supervisor_control_reaches_provider_while_catalog_is_locked() {
         .start(
             &run_id,
             crate::supervisor::RunStart {
+                driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
@@ -634,6 +635,7 @@ fn cold_run_assembly_is_independent_and_cancellation_prevents_model_dispatch() {
     let catalog = Arc::try_unwrap(db).ok().unwrap().into_inner().unwrap();
     let supervisor = RunSupervisor::new(catalog);
     let make_start = |binding| RunStart {
+        driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
         binding,
         context_preparation: Arc::new(NoopContextPreparation),
         policy_state: Value::Null,
@@ -756,6 +758,7 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
         .start(
             &run_id,
             crate::supervisor::RunStart {
+                driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
@@ -1122,6 +1125,7 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
         .start(
             &input.run_id,
             crate::supervisor::RunStart {
+                driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
@@ -1322,6 +1326,7 @@ fn input_arriving_between_completion_decision_and_commit_is_not_lost() {
         .start(
             &run_id,
             crate::supervisor::RunStart {
+                driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,
@@ -1449,6 +1454,7 @@ fn interrupt_during_request_serialization(cooperative: bool) {
         .start(
             &run_id,
             crate::supervisor::RunStart {
+                driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,

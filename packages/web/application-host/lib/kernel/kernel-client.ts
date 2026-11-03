@@ -14,6 +14,7 @@ import type { ResourceOwner } from './resource-owner.js';
 import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
 import type { LanguageToolOwner } from './language-owner.js';
 import { AgentPolicyBridge, type AgentPolicyLease, type AgentPolicyBinding, type PrivatePolicyResponse } from './agent-policy.js';
+import { AgentDriverBridge, type AgentDriverLease, type PrivateDriverFrame } from './agent-driver.js';
 import { ToolBridge, type McpToolLease, type PrivateToolFrame } from './tool-bridge.js';
 import { CredentialBridge, type PrivateCredentialResponse } from "./credential-bridge.js";
 import type { ExistingHostCredentialOwner, CredentialScope } from "./credential-owner.js";
@@ -650,6 +651,7 @@ export class KernelClient {
   private readonly planBridge: PlanBridge;
   private readonly issuedGrants = new Map<string, KernelGrantHandle>();
   private readonly policyBridge: AgentPolicyBridge;
+  private readonly driverBridge: AgentDriverBridge;
   private readonly runPreparations = new Map<string, Set<{ controller: AbortController; settled: Promise<void> }>>();
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private controlWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
@@ -678,6 +680,9 @@ export class KernelClient {
     this.modelProtocolBridge = new ModelProtocolBridge(() => this.epoch, frame => this.write(frame), () => this.failAll(new KernelClientError({ code: 'model-protocol-channel-failed', message: 'Model protocol channel failed', retryable: false }), true));
     this.options = options;
     this.spawnProcess = options.spawnProcess ?? spawn;
+    this.driverBridge = new AgentDriverBridge(() => this.epoch, response => this.write(response),
+      runId => this.agentRuntimeRequest('runtime.run.cancel', { runId }),
+      () => this.failAll(new KernelClientError({ code: "driver-channel-failed", message: "Private Run driver channel failed", retryable: false }), true));
     this.policyBridge = new AgentPolicyBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "policy-channel-failed", message: "Private policy channel failed", retryable: false }), true));
     this.memoryBridge = new MemoryBridge(() => this.epoch, response => this.write(response),
@@ -694,7 +699,7 @@ export class KernelClient {
       () => this.failAll(new KernelClientError({ code: "language-channel-failed", message: "Private language channel failed", retryable: false }), true));
     this.toolBridge = new ToolBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "mcp-channel-failed", message: "Private MCP channel failed", retryable: false }), true),
-      (runId, terminal) => { if (terminal) this.credentialBridge.unregister(runId); void this.languageBridge.releaseSource({ runId }).catch(() => undefined); for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } }, undefined,
+      (runId, terminal) => { if (terminal) { this.credentialBridge.unregister(runId); this.driverBridge.release(runId); } void this.languageBridge.releaseSource({ runId }).catch(() => undefined); for (const listener of this.mcpReleaseListeners) { try { listener(runId); } catch { this.mcpReleaseListeners.delete(listener); } } }, undefined,
       { retain: (binding, model, selection) => this.credentialBridge.retainChildModel(binding, model, selection),
         release: (runId, operationId) => this.credentialBridge.releaseChildModel(runId, operationId),
         reconcile: children => this.credentialBridge.reconcileChildModels(children) });
@@ -878,6 +883,13 @@ export class KernelClient {
   policyBinding(runId: string, generation: number): AgentPolicyBinding | undefined { return this.policyBridge.binding(runId, generation); }
   unregisterPolicyOwner(runId: string, generation: number): void { this.policyBridge.unregister(runId, generation); }
   releaseRunPolicyOwners(runId: string): void { this.policyBridge.releaseRun(runId); }
+
+  async registerDriverOwner(runId: string, lease: AgentDriverLease): Promise<import('./protocol.generated.js').DriverBinding> {
+    if (!this.handshakeResult) await this.start();
+    return this.driverBridge.register(runId, lease);
+  }
+  driverBinding(runId: string): import('./protocol.generated.js').DriverBinding | undefined { return this.driverBridge.binding(runId); }
+  releaseRunDriverOwner(runId: string): void { this.driverBridge.release(runId); }
 
   get kernelEpoch(): string | null { return this.epoch; }
   get handshake(): KernelHandshakeResult | null { return this.handshakeResult; }
@@ -1088,7 +1100,7 @@ export class KernelClient {
         pending?.release();
         return;
       }
-      if (this.modelProtocolBridge.consume(response) || this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
+      if (this.modelProtocolBridge.consume(response) || this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response) || this.driverBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         const eventEpoch = this.epoch ?? (this.starting && response.stream === 'durable' ? this.transport?.kernelEpoch : null);
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== eventEpoch
@@ -1175,6 +1187,7 @@ export class KernelClient {
     this.planBridge.close();
     this.issuedGrants.clear();
     this.policyBridge.close();
+    this.driverBridge.close();
     for (const runId of this.runPreparations.keys()) this.cancelRunPreparation(runId);
     this.window.close(error);
     this.controlWindow.close(error);
@@ -1197,10 +1210,10 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: PrivateModelProtocolResponse | PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse): Promise<void> {
+  private async write(request: PrivateModelProtocolResponse | PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateDriverFrame | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
-    const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked" || request.kind === "file-observation-response"
+    const control = request.kind === "agent-driver-closing" || request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked" || request.kind === "file-observation-response"
       || (request.kind === "request" && CONTROL_METHODS.has(request.method));
     await transport.send(request as unknown as Record<string, unknown>, control ? "control" : "data");
   }
@@ -1960,6 +1973,7 @@ export class KernelClient {
     this.planBridge.close();
     this.issuedGrants.clear();
     this.policyBridge.close();
+    this.driverBridge.close();
     for (const runId of this.runPreparations.keys()) this.cancelRunPreparation(runId);
     this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
     this.controlWindow.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));

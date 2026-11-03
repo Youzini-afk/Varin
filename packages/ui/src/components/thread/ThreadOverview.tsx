@@ -22,7 +22,7 @@ import type { PlanSummary } from '@/lib/planSummary';
 import { ThreadPlan } from './ThreadPlan';
 import { WorkOverviewControl, type OverviewPeekSection } from './WorkOverviewControl';
 import { ThreadOperationDetails } from './ThreadOperationDetails';
-import { canCancelOperation } from './threadOperations';
+import { canCancelOperation, canRespondToQuestion } from './threadOperations';
 import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
 import { openThreadContext } from '@/lib/openThreadContext';
 import { contextPhaseLabels } from '@/lib/contextPresentation';
@@ -83,9 +83,9 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   const operations = snapshot?.operations ?? [];
   const background = operations.filter(operation => operation.executor !== 'dispatch' && operation.executor !== 'ask_user'
     && (operation.intent as { kind?: string } | null)?.kind !== 'inference_request_v1'
-    && operation.id !== snapshot?.launch?.pause?.action_id && !operation.waiting_on?.startsWith('permission:') && canCancelOperation(operation, run?.waiting_on));
+    && operation.id !== snapshot?.launch?.pause?.action_id && !operation.waiting_on?.startsWith('permission:') && canCancelOperation(operation, run?.waiting_on, { run, launch: snapshot?.launch }));
   const waiting = operations.find(operation => operation.waiting_on && operation.waiting_on === run?.waiting_on && operation.phase !== 'terminal');
-  const question = waiting?.executor === 'ask_user';
+  const question = operations.some(operation => canRespondToQuestion(operation, { run, launch: snapshot?.launch }));
   const permission = waiting?.waiting_on?.startsWith('permission:');
   const goal = snapshot?.goals.find(value => value.control !== 'complete' && value.control !== 'cancelled');
   const followups = snapshot?.followups.filter(pendingFollowup) ?? [];
@@ -187,7 +187,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
         {products.history.error && <button type="button" className="thread-overview-action typography-meta text-status-warning" onClick={() => void products.loadEarlier(true)}>{t('chat.context.retry')}</button>}<div ref={sentinel} className="h-px" />
       </>}
     </div>}
-    {detail === 'operations' && <div className="thread-overview-detail">{selectedOperation ? <><div className="mb-3 flex items-center justify-between gap-3 typography-meta"><span className="break-words">{operationLabel(selectedOperation)}</span><ChildState state={selectedOperation.phase === 'terminal' ? selectedOperation.outcome === 'succeeded' ? 'completed' : selectedOperation.outcome ?? 'unknown' : selectedOperation.phase} /></div><ThreadOperationDetails api={api} identity={identity} operation={selectedOperation} readOnly={readOnly} pending={pending} waitingOn={run?.waiting_on} onCancel={() => void act(() => api.cancelOperation(selectedOperation.id))} onOpenTerminal={() => void act(() => openProcess(selectedOperation.id))} /></>
+    {detail === 'operations' && <div className="thread-overview-detail">{selectedOperation ? <><div className="mb-3 flex items-center justify-between gap-3 typography-meta"><span className="break-words">{operationLabel(selectedOperation)}</span><ChildState state={selectedOperation.phase === 'terminal' ? selectedOperation.outcome === 'succeeded' ? 'completed' : selectedOperation.outcome ?? 'unknown' : selectedOperation.phase} /></div><ThreadOperationDetails api={api} identity={identity} operation={selectedOperation} readOnly={readOnly} pending={pending} waitingOn={run?.waiting_on} questionScope={{ run, launch: snapshot?.launch }} onCancel={() => void act(() => api.cancelOperation(selectedOperation.id))} onOpenTerminal={() => void act(() => openProcess(selectedOperation.id))} /></>
       : operations.map(operation => <button type="button" data-operation-id={operation.id} key={operation.id} className="thread-overview-action typography-meta" onClick={() => setOperationId(operation.id)}><span className="min-w-0 flex-1 truncate">{operationLabel(operation)}</span><ChildState state={operation.phase === 'terminal' ? operation.outcome === 'succeeded' ? 'completed' : operation.outcome ?? 'unknown' : operation.phase} /></button>)}</div>}
     {[...visited].filter(section => section !== 'plan' && section !== 'outputs' && section !== 'threads' && section !== 'operations').map(section => <div key={section} hidden={detail !== section} className="thread-overview-detail">
       {section === 'sources' && <p className="mb-3 break-all typography-meta">{workspacePath ?? t('harness.overview.chatOnly')}</p>}

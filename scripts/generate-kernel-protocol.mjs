@@ -9,6 +9,7 @@ const target = path.join(root, 'packages', 'web', 'application-host', 'lib', 'ke
 const rustTarget = path.join(root, 'kernel', 'crates', 'varin-kernel', 'src', 'protocol_generated.rs');
 const protocolTarget = path.join(root, 'packages', 'protocol', 'src', 'agent-runtime.generated.ts');
 const extensionModelsTarget = path.join(root, 'packages', 'extension-contract', 'src', 'model-protocol.generated.ts');
+const extensionDriversTarget = path.join(root, 'packages', 'extension-contract', 'src', 'run-driver.generated.ts');
 const extensionToolsTarget = path.join(root, 'packages', 'extension-contract', 'src', 'nested-tools.generated.ts');
 const runtimeTypesTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
 const structs = Object.entries(schema.runtimeStructs ?? {}).map(([name, spec]) => {
@@ -60,6 +61,8 @@ const extensionToolsGenerated = '// Generated from kernel/protocol/schema.json. 
   + extensionToolNames.map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const extensionModelsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nimport type { ExecutionError, Outcome, Effect, Lifetime, OutputBody, ResolvedMedia, ContentProvenance, LaunchTool } from \'./nested-tools.generated.js\';\n\n'
   + ["HistoryRange", "ModelOpaqueItem", "ModelToolCall", "ModelToolCompletion", "ModelContent", "ModelConversationItem", "RequestBinding", "RequestOrigin", "RequestView", "ModelUsageReceipt", "ProviderEvent", "FinishReason", "ModelProtocolCall", "ModelProtocolResult", "ModelSessionConfiguration", "UsagePricing", "UsageLongContextPricing", "TokenizerBinding", "ModelHttpConfiguration", "ResourceActivation", "AgentResourceReference"].map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
+const extensionDriversGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nimport type { ExecutionError, LaunchTool } from \'./nested-tools.generated.js\';\nimport type { ModelConversationItem, ModelContent, ModelOpaqueItem, ModelToolCompletion, ModelUsageReceipt, FinishReason } from \'./model-protocol.generated.js\';\n\n'
+  + ["DriverWaitInput", "DriverWaitReceipt", "DriverContextInput", "DriverContextReceipt", "DriverCancelInput", "DriverCancelReceipt", "DriverRecovery", "DriverModelInput", "DriverModelFailure", "DriverModelItem", "DriverModelReceipt", "DriverToolInput", "DriverToolReceipt", "DriverCheckpointInput", "DriverCheckpoint", "DriverDeliveryInput", "DriverDeliveryReceipt", "DriverReceiptInput", "DriverReceipt", "DriverRunInput", "DriverRunOutcome"].map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + avatarTypes + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
 const generated = `/**
  * Generated from \`kernel/protocol/schema.json\`.
@@ -170,14 +173,16 @@ if (checkOnly) {
   const existingTypes = fs.existsSync(runtimeTypesTarget) ? fs.readFileSync(runtimeTypesTarget, "utf8") : "";
   const existingProtocol = fs.existsSync(protocolTarget) ? fs.readFileSync(protocolTarget, 'utf8') : '';
   const existingExtensionModels = fs.existsSync(extensionModelsTarget) ? fs.readFileSync(extensionModelsTarget, 'utf8') : '';
+  const existingExtensionDrivers = fs.existsSync(extensionDriversTarget) ? fs.readFileSync(extensionDriversTarget, 'utf8') : '';
   const existingExtensionTools = fs.existsSync(extensionToolsTarget) ? fs.readFileSync(extensionToolsTarget, 'utf8') : '';
-  if (existingExtensionModels !== extensionModelsGenerated || existingExtensionTools !== extensionToolsGenerated || existing !== generated || existingRust !== rustGenerated || existingTypes !== runtimeTypesGenerated || existingProtocol !== protocolGenerated) {
-    const stale = [existingExtensionModels !== extensionModelsGenerated ? extensionModelsTarget : null, existingExtensionTools !== extensionToolsGenerated ? extensionToolsTarget : null, existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingTypes !== runtimeTypesGenerated ? runtimeTypesTarget : null, existingProtocol !== protocolGenerated ? protocolTarget : null].filter(Boolean);
+  if (existingExtensionDrivers !== extensionDriversGenerated || existingExtensionModels !== extensionModelsGenerated || existingExtensionTools !== extensionToolsGenerated || existing !== generated || existingRust !== rustGenerated || existingTypes !== runtimeTypesGenerated || existingProtocol !== protocolGenerated) {
+    const stale = [existingExtensionDrivers !== extensionDriversGenerated ? extensionDriversTarget : null,existingExtensionModels !== extensionModelsGenerated ? extensionModelsTarget : null, existingExtensionTools !== extensionToolsGenerated ? extensionToolsTarget : null, existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingTypes !== runtimeTypesGenerated ? runtimeTypesTarget : null, existingProtocol !== protocolGenerated ? protocolTarget : null].filter(Boolean);
     console.error(`Kernel protocol DTO is out of date: ${stale.map((entry) => path.relative(root, entry)).join(', ')}`);
     process.exit(1);
   }
   console.log(`Kernel protocol ${schema.protocolVersion} is up to date.`);
 } else {
+  fs.writeFileSync(extensionDriversTarget, extensionDriversGenerated);
   fs.writeFileSync(extensionModelsTarget, extensionModelsGenerated);
   fs.writeFileSync(extensionToolsTarget, extensionToolsGenerated);
   fs.writeFileSync(protocolTarget, protocolGenerated);

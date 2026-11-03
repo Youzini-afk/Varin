@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "lib": ["ES2023", "DOM"],
+    "paths": {
+      "@varin/extension-sdk": ["../../../packages/extension-sdk/dist/index.d.ts"],
+      "@varin/extension-contract": ["../../../packages/extension-contract/dist/index.d.ts"]
+    }
+  },
+  "include": ["host.ts"]
+}

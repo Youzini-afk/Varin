@@ -30,7 +30,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
     origin: { kind: 'model_step', request_id: 'original-request' }, call_id: 'original-call', project_id: null,
     trigger: { kind: 'dispatch' }, input: { task: 'Original work' }, configuration: {},
     selected_profile: { preset_id: null, catalog_identity: null, work_mode: 'isolated_write', tools: [], instructions: '' },
-    launch: { credential_scope: null, child_dispatch: null, policy_models: [], mcp_binding: null, extension_bindings: [],
+    launch: { credential_scope: null, child_dispatch: null, driver: { kind: 'builtin', name: 'varin.default', version: '1' }, driver_models: [], policy_models: [], mcp_binding: null, extension_bindings: [],
       connection_identity: 'original', provider_family: 'original', model: 'original', configuration_generation: 1,
       tool_schema_generation: 1, tools: [], policy: { name: 'default', version: '1' }, source },
     policy_target: { kind: 'default' }, source_basis: null,

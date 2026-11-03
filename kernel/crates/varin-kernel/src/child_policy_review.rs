@@ -318,7 +318,7 @@ impl Fixture {
             policy,
             models: crate::run_models::RunModels::new(runtime.catalog(), credentials),
             tools: crate::run_tools::RunTools::new(runtime.catalog(), tools),
-            responses: output.into(),
+            driver: crate::driver_bridge::DriverBridge::new(output.clone()), responses: output.into(),
             epoch: EPOCH.into(),
         };
         Self {

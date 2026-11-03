@@ -16,6 +16,7 @@ fn error(error: impl ToString) -> ExecutionError {
 }
 #[derive(Clone)]
 pub struct RunStart {
+    pub driver: Arc<dyn crate::driver::RunDriver>,
     pub context_preparation: Arc<dyn ContextPreparation>,
     pub binding: RequestBinding,
     pub policy_state: Value,
@@ -361,79 +362,10 @@ impl RunSupervisor {
                     if summary {
                         return crate::context_execution::run(catalog.clone(), &identity, start, cancel.clone());
                     }
-                    let binding = start.binding;
-                    let policy_state = start.policy_state;
-                    let engine = ExecutionEngine {
-                        persistence: catalog.clone(),
-                        context_preparation: start.context_preparation,
-                        provider: start.provider,
-                        tools: start.tools,
-                        policy: start.policy,
-                        progress: start.progress,
-                    };
-                    loop {
-                        if cancel.is_cancelled() {
-                            let settled = catalog
-                                .lock()
-                                .map_err(error)?
-                                .cancel_preparing_execution(&identity, epoch)
-                                .map_err(error)?;
-                            if let Some(run) = settled {
-                                return Ok(ExecutionReport {
-                                    state: run.state,
-                                    history: vec![],
-                                    policy_state,
-                                    model_steps: 0,
-                                    waiting_on: run.waiting_on,
-                                    failure: None,
-                                });
-                            }
-                        }
-                        let preparation = catalog
-                            .lock()
-                            .map_err(error)?
-                            .capture_recovered_execution(
-                                &identity,
-                                binding.clone(),
-                                engine.policy.identity(),
-                                policy_state.clone(),
-                                true,
-                            )
-                            .map_err(error)?;
-                        if preparation.cancel_requested() && !cancel.is_cancelled() {
-                            cancel.cancel();
-                            continue;
-                        }
-                        let boundary = preparation.identity();
-                        let cancelled_before_read = cancel.is_cancelled();
-                        // Immutable content reads, hashing and decoding belong to this Run.
-                        let prepared = match preparation.load(&cancel) {
-                            Ok(Some(prepared)) => prepared,
-                            Ok(None) => continue,
-                            Err(_) if !cancelled_before_read && cancel.is_cancelled() => continue,
-                            Err(failure) => {
-                                if !catalog
-                                    .lock()
-                                    .map_err(error)?
-                                    .preparation_is_current(&boundary)
-                                    .map_err(error)?
-                                {
-                                    continue;
-                                }
-                                return Err(error(failure));
-                            }
-                        };
-                        let launch = catalog
-                            .lock()
-                            .map_err(error)?
-                            .publish_recovered_execution(prepared)
-                            .map_err(error)?;
-                        let Some(launch) = launch else { continue };
-                        if launch.cancel_requested {
-                            cancel.cancel();
-                        }
-                        return engine.run_recovered(launch.input, cancel.clone(), launch.recovery);
-                    }
+                    let driver = start.driver.clone();
+                    let context = Arc::new(crate::driver::DriverContext::new(catalog.clone(), identity.clone(), epoch, start, cancel.clone()));
+                    driver.run(context)
+
                 }))
                 .unwrap_or_else(|_| {
                     Err(ExecutionError::new(
@@ -890,6 +822,9 @@ impl RunSupervisor {
     pub fn quiesce_question(&self, operation_id: &str) -> Result<()> {
         let run_id = {
             let catalog = self.catalog.lock().map_err(error)?;
+            // The default engine relinquishes its worker at a question wait. A live
+            // driver instead awaits this original event and must not be torn down.
+            if catalog.question_has_driver_owner(operation_id).map_err(error)? { return Ok(()); }
             let operation = catalog.operation(operation_id).map_err(error)?;
             let run = catalog.run(&operation.run_id).map_err(error)?;
             if run.state != RunState::Waiting

@@ -1,5 +1,5 @@
 /** Explicit research provenance and authorization. These are constructed by trusted owners only. */
-import type { ExecutorOwner, LaunchSource, ToolOrigin } from '../kernel/protocol.generated.js';
+import { validToolOrigin, type ExecutorOwner, type LaunchSource, type ToolOrigin } from '../kernel/protocol.generated.js';
 import type { KernelRecordResult } from '../kernel/protocol.generated.js';
 import { HarnessServiceError } from './service-error.js';
 export type ResearchOwner = {
@@ -71,10 +71,7 @@ const validActor = (actor: unknown): boolean => {
   if (!object(actor)) return false;
   if (actor.kind === 'user') return nonempty(actor.key);
   if (actor.kind !== 'tool' || !nonempty(actor.callId) || !nonempty(actor.toolName) || !nonempty(actor.schemaVersion) || !object(actor.origin)) return false;
-  const origin = actor.origin;
-  return origin.kind === 'model_step' ? nonempty(origin.request_id)
-    : origin.kind === 'policy_action' ? nonempty(origin.action_id) && nonempty(origin.node_id)
-    : origin.kind === 'nested_call' && nonempty(origin.parent_operation_id);
+  return validToolOrigin(actor.origin);
 };
 const validOwner = (owner: unknown): owner is ResearchOwner => object(owner) && owner.runtime === 'agent'
   && !('sessionId' in owner) && !('rootSessionId' in owner)

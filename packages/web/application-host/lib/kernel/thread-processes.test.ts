@@ -59,7 +59,7 @@ function fixture(processKind: 'process_job' | 'script_environment' = 'process_jo
     throw new Error(`Unexpected request ${method}`);
   });
   const kernel = { subscribeExit(listener: (error: Error) => void) { exits.add(listener); return () => exits.delete(listener); },
-    onToolReleased() {}, cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, agentRuntimeRequest: requests,
+    onToolReleased() {}, cancelRunPreparation() {}, unregisterCredentialOwner() {}, unregisterToolOwners() {}, releaseRunPolicyOwners() {}, releaseRunDriverOwner() {}, agentRuntimeRequest: requests,
     issueGrant: vi.fn(async (params: Record<string, unknown>) => ({ ...params, kernelEpoch: 'epoch' }) as unknown as KernelGrantHandle),
     revokeGrant: vi.fn(async () => {}), scoped: vi.fn(() => scoped),
   };

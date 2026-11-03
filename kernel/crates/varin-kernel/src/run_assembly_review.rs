@@ -59,7 +59,7 @@ fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_o
         policy: crate::policy::PolicyBridge::new(output.clone()),
         models: crate::run_models::RunModels::new(runtime.catalog(), credentials),
         tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge),
-        responses: output.into(),
+        driver: crate::driver_bridge::DriverBridge::new(output.clone()), responses: output.into(),
         epoch: "child-test".into(),
     };
     assembly.policy.initialize("child-test");

@@ -58,6 +58,7 @@ fn bot_scope_waits_for_real_provider_and_operation_workers_then_preserves_unknow
         .start(
             &run,
             RunStart {
+                driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
                 context_preparation: Arc::new(NoopContextPreparation),
                 binding: input.binding,
                 policy_state: Value::Null,

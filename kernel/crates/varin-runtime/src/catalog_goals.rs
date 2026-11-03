@@ -1142,6 +1142,7 @@ pub(super) fn origin_goal(
         origin
     };
     match origin {
+        crate::execution::ToolOrigin::Driver { invocation_id } => Ok(super::driver::driver_call_metadata(db, invocation_id)?.goal),
         crate::execution::ToolOrigin::NestedCall { .. } => unreachable!("resolved root invocation"),
         crate::execution::ToolOrigin::ModelStep { request_id } => {
             Ok(record::<ModelStep>(db, "model_steps", request_id)?.goal)
@@ -1284,6 +1285,7 @@ impl Catalog {
                 )?;
             }
             crate::execution::ToolOrigin::PolicyAction { .. }
+            | crate::execution::ToolOrigin::Driver { .. }
             | crate::execution::ToolOrigin::NestedCall { .. } => (), // The canonical Operation is the receipt; graph settlement projects it.
         }
         event(

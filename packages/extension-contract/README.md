@@ -178,3 +178,22 @@ The source-cut hash binds those exact quotations and `modelBudget`, not a model 
 The native create/Launch boundary separately fixes the full model configuration and credential scope
 for a `model_plan`. A direct `text` candidate needs no model credential/configuration resolution on
 initial admission or recovery; selecting the compaction Provider still uses ordinary service routing.
+
+`varin.agent.driver@1` is an execution consumer, distinct from the default loop's `policy@4`.
+`agent-driver.ts` owns its description, capability constant and scoped selection semantics;
+`run-driver.generated.ts` supplies primitive/input/receipt DTOs from the native protocol.
+The public envelope parsers do not duplicate native nested wire validation. Description fixes
+implementation identity, JSON configuration, prepared model roles and explicit checkpoint
+recovery/schema. A returned algorithm outcome is not an assertion of actual executor stop.
+The same call-scoped capability includes non-blocking `context` (consume the original Inbox
+and return compiled history plus the currently admitted tool cut), `wait` (observe original Run
+events and known work without consuming input), and `cancel` (request stop for an original
+instance's model/tool ID).
+Neither introduces another input queue; cancellation intent and actual work receipts stay distinct.
+
+`resolveVarinAgentDriverRouting` uses the existing routing document and precedence. No explicit
+choice selects the native default, not the only installed extension. The reserved choice
+`varin.builtin.agent-driver` lets a workspace explicitly override an inherited extension with
+the native driver; it is not a fake Host service registration. Removing the scope rule restores
+inheritance. Unavailable, empty, conflicting or unsupported-version explicit choices remain
+unavailable; legacy `allowFallback` does not authorize silently switching a Run's algorithm.

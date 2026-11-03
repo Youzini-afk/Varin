@@ -1,10 +1,10 @@
 # 可替换执行循环：Run Driver 设计
 
-状态：设计提案，尚未实现。日期：2026-11-02。源码基线：Varin `7b276502`；DeepSeek Harness 本体 `ce7073d51254c26cd63b22a60835b8f948deb447`。本文不以 `dsh-superagent-prototype` 为 Harness 架构依据。
+状态：实现与原生验收中；已落地合同见[运行时](../runtime.md#可替换的执行循环)。日期：2026-11-03。源码基线：Varin `7b276502`；DeepSeek Harness 本体 `ce7073d51254c26cd63b22a60835b8f948deb447`。本文不以 `dsh-superagent-prototype` 为 Harness 架构依据。
 
 **结论：执行循环可以成为可替换的 provider。现有 Rust 循环应是默认实现，而不是所有扩展必须遵循的算法。** 统一权限、资源与执行事实，不要求唯一的思考方式、上下文组织或模型/工具调度。
 
-本文界定目标与首个验证切口，不宣称下面的 API 已经存在。当前行为仍见[运行时](../runtime.md)、[扩展](../extensions.md)、[外部 Agent](../external-agents.md)。它与本轮扩展作者链、代码信任和升级恢复修复独立，不以完成大内核重写作为那些修复的前提。
+本文保留方案选择及边界理由；示意接口不替代已实现的版本化合同。当前行为见[运行时](../runtime.md)、[扩展](../extensions.md)、[外部 Agent](../external-agents.md)。它与本轮扩展作者链、代码信任和升级恢复修复独立，不以完成大内核重写作为那些修复的前提。
 
 ## 1. 用户获得的自由
 

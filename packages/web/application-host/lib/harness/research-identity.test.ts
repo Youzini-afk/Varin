@@ -22,6 +22,18 @@ describe('native research provenance', () => {
     expect(mayAccessResearch(maintenance, stored, true)).toBe(true);
   });
 
+  it('preserves a driver-origin research operation through the same native maintenance owner', () => {
+    const original = { ...caller.owner, actor: { kind: 'tool' as const, callId: 'research-call', toolName: 'research_submit',
+      schemaVersion: '1', origin: { kind: 'driver' as const, invocation_id: 'original-operation' } } };
+    const stored = { ...record(), payloadJson: JSON.stringify({ researchOwner: original, executionWorkspaceId: caller.executionWorkspaceId }) };
+    expect(researchOwner(stored)).toEqual(original);
+    const maintenance = researchMaintenanceCaller(caller.workspaceId, stored);
+    expect(requireResearchOwner(maintenance)).toEqual(original);
+    expect(mayAccessResearch(maintenance, stored, true)).toBe(true);
+    expect(() => researchOwner({ ...stored, payloadJson: JSON.stringify({ researchOwner: { ...original,
+      actor: { ...original.actor, origin: { kind: 'driver', invocation_id: '' } } }, executionWorkspaceId: caller.executionWorkspaceId }) })).toThrow();
+  });
+
   it('rejects legacy, malformed, reader and mismatched stored provenance without replacing it', () => {
     for (const update of [
       { runtime: 'pi', rootSessionId: 'old-session' },

@@ -365,6 +365,7 @@ fn current_catalog_and_frozen_sdk_tools_share_actual_model_policy_receipts_after
         .start(
             &submitted.run_id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(Model {
@@ -625,6 +626,7 @@ fn exercise_child(
         .unwrap();
     let resolved = selected.resolve(&parent.input).unwrap();
     let child_launch = LaunchSelection {
+        driver: Default::default(), driver_models: vec![],
         agent: None,
         child_dispatch: Some(selected.catalog.clone()),
         extension_bindings: resolved.extension_bindings.clone(),
@@ -714,6 +716,7 @@ fn exercise_child(
         .start(
             &run.id,
             RunStart {
+                driver: std::sync::Arc::new(varin_runtime::driver::DefaultRunDriver),
                 binding,
                 policy_state: Value::Null,
                 provider: Arc::new(ChildModel {
