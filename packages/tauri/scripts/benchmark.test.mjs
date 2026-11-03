@@ -176,6 +176,19 @@ test('unprepared full-product A/B persists explicit preflight blockers without l
 });
 async function readJson(file) { return JSON.parse(await fs.readFile(file, 'utf8')); }
 
+test('macOS owner remains explicitly unsupported before private preparation or desktop launch', async t => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...original, value: 'darwin' });
+  try {
+    const result = await preflight(planTemplate());
+    assert.ok(result.blockers.some(item => item.code === 'native-process-ownership-unsupported'));
+    let prepared = false;
+    await assert.rejects(measureRun({}, { scenarios: [{ name: 'remote-idle', inputs: { frontendSha256: 'a'.repeat(64) } }] },
+      { name: 'remote-idle' }, 'electron', 0, os.tmpdir(), { beforeRun() { prepared = true; } }), /unsupported/u);
+    assert.equal(prepared, false);
+  } finally { Object.defineProperty(process, 'platform', original); }
+});
+
 test('unpacked benchmark rejects inherited AppImage and sandbox overrides, including empty values', async t => {
   const keys = ['APPIMAGE', 'CHROME_DEVEL_SANDBOX'];
   const previous = keys.map(key => [key, process.env[key]]);
@@ -185,7 +198,7 @@ test('unpacked benchmark rejects inherited AppImage and sandbox overrides, inclu
     process.env[key] = value;
     const result = await preflight(planTemplate());
     assert.deepEqual(result.blockers.find(item => item.code === 'uncontrolled-launch-environment'), {
-      code: 'uncontrolled-launch-environment', reason: `Unpacked product benchmarks refuse inherited ${key}`,
+      code: 'uncontrolled-launch-environment', reason: 'operation-failed',
     });
     // A direct call must fail before copying profiles, starting services or spawning.
     let prepared = false;
@@ -257,7 +270,7 @@ test('Electron baseline verification binds every full-product file, not only the
 });
 
 
-test('measureRun retains isolated data when setup or teardown cannot prove service exit', async t => {
+test('measureRun retains isolated data when setup or teardown cannot prove service exit', { skip: !['linux', 'win32'].includes(process.platform) }, async t => {
   const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture');
   await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true });
   await fs.mkdir(path.join(fixtureDirectory, 'home'));
@@ -289,186 +302,290 @@ test('measureRun retains isolated data when setup or teardown cannot prove servi
   }
 });
 
-test('benchmark failures and an empty polling scope retain live original writers without numeric PID kills', { skip: process.platform !== 'linux', timeout: 60000 }, async t => {
-  const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture');
-  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true });
-  await fs.mkdir(path.join(fixtureDirectory, 'home'));
-  await fs.writeFile(path.join(fixtureDirectory, 'data', 'owner-state'), 'original scope still owns this profile');
-  const stopped = async pid => {
-    try { const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8'); return stat.slice(stat.lastIndexOf(')') + 2).startsWith('Z '); }
-    catch (error) { if (error.code === 'ENOENT') return true; throw error; }
-  };
-  for (const phase of ['observation-error', 'deadline', 'fork-between-polls']) {
-    const lateFork = phase === 'fork-between-polls';
-    const launcher = path.join(dir, `${phase}.mjs`);
-    // This is an actual controlled process tree, not product/performance evidence.
-    // The child writes through the original profile while its parent exits early.
-    // Cleanup uses the test writer's private stop protocol, never a recycled PID.
-    const writer = `const fs=require('node:fs'),path=require('node:path'); const data=process.env.VARIN_DATA_DIR;
-      fs.writeFileSync(path.join(data,'writer-pid'),String(process.pid));
-      setInterval(()=>{if(fs.existsSync(path.join(data,'stop-writer')))process.exit(0);fs.writeFileSync(path.join(data,'writer-progress'),String(Date.now()))},25);
-      setTimeout(()=>process.exit(0),90000);`;
-    await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs'; import path from 'node:path'; import {spawn} from 'node:child_process';
-      const data=process.env.VARIN_DATA_DIR;
-      fs.writeFileSync(path.join(data,'scope-pid'),String(process.pid));
-      setTimeout(()=>{spawn(process.execPath,['-e',${JSON.stringify(writer)}],{stdio:'ignore'}).unref();
-        setTimeout(()=>{${phase === 'observation-error' ? "fs.writeFileSync(path.join(data,'benchmark-live.json'),'invalid observer JSON');" : ''}process.exit(0)},${lateFork ? 250 : 1000});
-      },${lateFork ? 1000 : 0});
-    `, { mode: 0o700 });
-    const scenario = { name: 'remote-idle', fixtureDirectory,
-      workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle', readyTimeoutMs: 1, timeoutMs: 1 } };
-    const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: lateFork ? 4000 : 100, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
-    const bound = { name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) };
-    const checked = { scenarios: [bound], electronArtifact: { sha256: 'd'.repeat(64) } };
-    let copiedRoot;
-    t.after(async () => {
-      if (!copiedRoot) return;
-      const pid = await fs.readFile(path.join(copiedRoot, 'data', 'scope-pid'), 'utf8').then(Number, () => null);
-      const writerPid = await fs.readFile(path.join(copiedRoot, 'data', 'writer-pid'), 'utf8').then(Number, () => null);
-      await fs.writeFile(path.join(copiedRoot, 'data', 'stop-writer'), 'stop');
-      const until = performance.now() + 5000;
-      while (((writerPid && !await stopped(writerPid)) || (pid && !await stopped(pid))) && performance.now() < until) await new Promise(resolve => setTimeout(resolve, 25));
-      assert.ok(!pid || await stopped(pid), 'Test launcher must really stop before removing its retained profile');
-      assert.ok(!writerPid || await stopped(writerPid), 'Test writer must really stop before removing its retained profile');
-      await fs.rm(copiedRoot, { recursive: true, force: true });
-    });
-    const result = await measureRun(plan, checked, scenario, 'electron', phase, dir, { beforeRun({ root }) { copiedRoot = root; } });
-    const persisted = await readJson(path.join(dir, `electron-${phase}.json`));
-    const writerPid = Number(await fs.readFile(path.join(copiedRoot, 'data', 'writer-pid'), 'utf8'));
-    assert.equal(result.status, 'failed'); assert.equal(result.cleanupUncertain, true);
-    assert.equal(result.ownershipDrainConfirmed, false);
-    assert.equal(result.retainedPrivateDirectory, copiedRoot); assert.equal(persisted.cleanupUncertain, true);
-    assert.equal(await fs.readFile(path.join(copiedRoot, 'data', 'owner-state'), 'utf8'), 'original scope still owns this profile');
-    assert.ok(Number(await fs.readFile(path.join(copiedRoot, 'data', 'writer-progress'), 'utf8')) > 0);
-    assert.equal(await stopped(writerPid), false, 'The controller must not send an unbound PID/group kill');
-    assert.equal(result.samples.some(sample => sample.processes.some(row => row.pid === writerPid)), !lateFork,
-      'A writer forked and reparented between polls is absent from the observed counter scope');
-    assert.ok(result.coverage.includes('desktop-process-ownership-unresolved'));
-    if (phase === 'deadline') {
-      assert.equal(result.timedOut, true); assert.equal(result.exit.code, 0);
-      assert.ok(result.coverage.includes('process-tree-did-not-drain-before-observation-deadline'));
-    } else if (lateFork) {
-      assert.equal(result.observedCounterScopeEmpty, true); assert.equal(result.timedOut, false); assert.equal(result.exit.code, 0);
-      assert.deepEqual(result.samples.at(-1).processes, []); assert.equal(result.samples.at(-1).coverage.processCountersComplete, true);
-    } else assert.ok(result.coverage.some(issue => issue.startsWith('measurement-failed:')));
-    const comparison = compareRuns({ ...plan, repetitions: 1 }, checked, [{ ...result, scenario: scenario.name }]);
-    assert.equal(comparison.cleanupUncertain, true); assert.equal(comparison.retainedPrivateDirectories[0].path, copiedRoot);
-  }
-});
-
-test('report persistence failure preserves unresolved cleanup for the outer suite', async t => {
-  const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture'), blockedOutput = path.join(dir, 'not-a-directory');
-  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true }); await fs.mkdir(path.join(fixtureDirectory, 'home'));
-  await fs.writeFile(path.join(fixtureDirectory, 'data', 'owner-state'), 'retain while fixture ownership is unknown');
-  await fs.writeFile(blockedOutput, 'synthetic output failure');
-  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle' } };
-  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: 100, electron: { executable: process.execPath, frontendDirectory: fixtureDirectory } };
-  const checked = { scenarios: [{ name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) }], electronArtifact: { sha256: 'd'.repeat(64) } };
-  let copiedRoot, error;
-  t.after(async () => { if (copiedRoot) await fs.rm(copiedRoot, { recursive: true, force: true }); }); // No process is launched by this injection.
-  try {
-    await measureRun(plan, checked, scenario, 'electron', 0, blockedOutput, {
-      beforeRun({ root }) { copiedRoot = root; throw Object.assign(new Error('Unresolved fixture setup'), { cleanupUncertain: true }); },
-    });
-  } catch (failure) { error = failure; }
-  assert.ok(error); assert.equal(error.cleanupUncertain, true); assert.equal(error.retainedPrivateDirectory, copiedRoot);
-  assert.deepEqual(error.retainedPrivateDirectories, [{ scenario: scenario.name, shell: 'electron', iteration: 0, path: copiedRoot }]);
-  assert.equal(await fs.readFile(path.join(copiedRoot, 'data', 'owner-state'), 'utf8'), 'retain while fixture ownership is unknown');
-});
-
-test('a complete native receipt and clean root exit do not authorize profile deletion', { skip: process.platform !== 'linux' }, async t => {
+// These launch real native-owned processes, not substituted product evidence.
+// Positive release assertions always depend on the actual kernel owner receipt.
+async function ownedBenchmarkFixture(t, code, { intervalMs = 50, timeoutMs = 1 } = {}) {
   const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture'), launcher = path.join(dir, 'launcher.mjs');
   await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true }); await fs.mkdir(path.join(fixtureDirectory, 'home'));
-  await fs.writeFile(path.join(fixtureDirectory, 'data', 'owner-state'), 'original synthetic profile');
-  // This deliberately narrow nativeDrain field is not a whole-scope receipt.
-  await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
-    const data=process.env.VARIN_DATA_DIR, request=JSON.parse(fs.readFileSync(path.join(data,'benchmark-request.json'),'utf8'));
-    fs.writeFileSync(path.join(data,'benchmark-receipt.json'),JSON.stringify({...request,product:'varin-desktop-benchmark-receipt',complete:true,nativeDrain:true}));
-    setTimeout(()=>process.exit(0),250);`, { mode: 0o700 });
-  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle' } };
-  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: 100, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
+  await fs.writeFile(path.join(fixtureDirectory, 'data', 'owner-state'), 'immutable synthetic source');
+  await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs'; import path from 'node:path'; import {spawn} from 'node:child_process';
+    const data=process.env.VARIN_DATA_DIR; ${code}`, { mode: 0o700 });
+  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle', readyTimeoutMs: 1, timeoutMs } };
+  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
   const checked = { scenarios: [{ name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) }], electronArtifact: { sha256: 'd'.repeat(64) } };
-  let copiedRoot;
-  t.after(async () => { if (copiedRoot) await fs.rm(copiedRoot, { recursive: true, force: true }); }); // This launcher creates no child and exits before returning.
-  const result = await measureRun(plan, checked, scenario, 'electron', 0, dir, { beforeRun({ root }) { copiedRoot = root; } });
-  assert.equal(result.exit.code, 0); assert.equal(result.observedCounterScopeEmpty, true);
-  assert.equal(result.rendererReceipt.complete, true); assert.equal(result.rendererReceipt.nativeDrain, true);
-  assert.equal(result.ownershipDrainConfirmed, false); assert.equal(result.cleanupUncertain, true);
-  assert.equal(result.retainedPrivateDirectory, copiedRoot);
-  assert.equal(await fs.readFile(path.join(copiedRoot, 'data', 'owner-state'), 'utf8'), 'original synthetic profile');
+  return { dir, fixtureDirectory, launcher, scenario, plan, checked };
+}
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const nativeLinux = { skip: process.platform !== 'linux', timeout: 20_000 };
+
+test('late reparented writers outlive empty polls and product receipts; only native scope drain releases the copy', nativeLinux, async t => {
+  const grandchild = `const fs=require('node:fs'),path=require('node:path'),data=process.env.VARIN_DATA_DIR;
+    fs.writeFileSync(path.join(data,'late-writer-pid'),String(process.pid));
+    const timer=setInterval(()=>fs.appendFileSync(path.join(data,'late-writes'),'x'),15);
+    setTimeout(()=>{clearInterval(timer);fs.writeFileSync(path.join(data,'late-finished'),'done')},650);`;
+  const child = `const fs=require('node:fs'),path=require('node:path'),data=process.env.VARIN_DATA_DIR;
+    fs.writeFileSync(path.join(data,'writer-pid'),String(process.pid));
+    const timer=setInterval(()=>fs.appendFileSync(path.join(data,'writes'),'x'),15);
+    setTimeout(()=>{require('child_process').spawn(process.execPath,['-e',${JSON.stringify(grandchild)}],{detached:true,stdio:'ignore'}).unref();clearInterval(timer)},650);`;
+  const fixture = await ownedBenchmarkFixture(t, `
+    const request=JSON.parse(fs.readFileSync(path.join(data,'benchmark-request.json'),'utf8'));
+    fs.writeFileSync(path.join(data,'benchmark-receipt.json'),JSON.stringify({schema:1,product:'varin-desktop-benchmark-receipt',shell:'electron',nonce:request.nonce,sourceSha:request.sourceSha,version:request.version,scenarioSha256:request.scenarioSha256,inputs:request.inputs,complete:true,nativeDrain:true}));
+    setTimeout(()=>spawn(process.execPath,['-e',${JSON.stringify(child)}],{detached:true,stdio:'ignore'}).unref(),200);`, { intervalMs: 500 });
+  let copy, writerPid, latePid;
+  const started = performance.now();
+  const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, fixture.dir, {
+    beforeRun({ root }) { copy = root; },
+    async afterRun({ root }) {
+      writerPid = Number(await fs.readFile(path.join(root, 'data', 'writer-pid'), 'utf8'));
+      latePid = Number(await fs.readFile(path.join(root, 'data', 'late-writer-pid'), 'utf8'));
+      assert.equal(await fs.readFile(path.join(root, 'data', 'late-finished'), 'utf8'), 'done');
+      assert.ok((await fs.readFile(path.join(root, 'data', 'late-writes'), 'utf8')).length > 1);
+    },
+  });
+  assert.ok(performance.now() - started >= 1300);
+  assert.equal(result.exit.success, true); assert.equal(result.rendererReceipt.nativeDrain, true);
+  assert.equal(result.ownershipDrainConfirmed, true); assert.equal(result.processOwner.clean, true);
+  assert.equal(result.cleanupUncertain, false); assert.equal(result.observedCounterScopeEmpty, true);
+  assert.equal(result.samples.some(sample => sample.processes.some(row => [writerPid, latePid].includes(row.pid))), false);
+  assert.equal(result.samples.filter(sample => sample.coverage.rootState === 'exited').length >= 2, true);
+  await assert.rejects(fs.access(copy), { code: 'ENOENT' });
+  assert.equal(await hashDirectory(fixture.fixtureDirectory), fixture.checked.scenarios[0].inputs.dataSha256);
+  // Incomplete product metrics do not prevent a safe subsequent A/B launch.
+  const second = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 1, fixture.dir);
+  assert.equal(second.ownershipDrainConfirmed, true); assert.equal(second.cleanupUncertain, false);
+  assert.notEqual(result.rootPid, second.rootPid);
 });
 
-test('unresolved GUI child cannot hold the reporting controller alive through process or stdio references', { skip: process.platform !== 'linux', timeout: 15000 }, async t => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-benchmark-unref-test-'));
-  const fixtureDirectory = path.join(dir, 'fixture'), launcher = path.join(dir, 'launcher.mjs'), driver = path.join(dir, 'driver.mjs');
-  let copiedRoot, controller, controllerExit;
-  const stopped = async pid => fs.readFile(`/proc/${pid}/stat`, 'utf8').then(text => text.slice(text.lastIndexOf(')') + 2).startsWith('Z '), error => { if (error.code === 'ENOENT') return true; throw error; });
-  t.after(async () => {
-    copiedRoot ??= await fs.readFile(path.join(dir, 'copy.txt'), 'utf8').catch(() => null);
-    if (copiedRoot) {
-      await fs.writeFile(path.join(copiedRoot, 'data', 'stop-root'), 'stop');
-      const pid = await fs.readFile(path.join(copiedRoot, 'data', 'root-pid'), 'utf8').then(Number, () => null);
-      const deadline = performance.now() + 5000;
-      while (pid && !await stopped(pid) && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
-      assert.ok(!pid || await stopped(pid));
-      await fs.rm(copiedRoot, { recursive: true, force: true });
-    }
-    if (controller) await controllerExit;
-    await fs.rm(dir, { recursive: true, force: true });
+test('observation failure stops actual original writers and forced cleanup never passes the workload', nativeLinux, async t => {
+  const writer = `const fs=require('node:fs'),path=require('node:path'),data=process.env.VARIN_DATA_DIR;
+    process.on('SIGTERM',()=>{});fs.writeFileSync(path.join(data,'writer-pid'),String(process.pid));
+    setInterval(()=>fs.appendFileSync(path.join(data,'writes'),'x'),15);`;
+  const fixture = await ownedBenchmarkFixture(t, `spawn(process.execPath,['-e',${JSON.stringify(writer)}],{detached:true,stdio:'ignore'}).unref();
+    setTimeout(()=>{fs.writeFileSync(path.join(data,'benchmark-live.json'),'PRIVATE_OBSERVATION_CANARY');process.exit(0)},250);`);
+  let copy, writes;
+  const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, fixture.dir, {
+    beforeRun({ root }) { copy = root; },
+    async afterRun({ root }) { writes = await fs.readFile(path.join(root, 'data', 'writes'), 'utf8'); await wait(75); assert.equal(await fs.readFile(path.join(root, 'data', 'writes'), 'utf8'), writes); },
   });
-  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true }); await fs.mkdir(path.join(fixtureDirectory, 'home'));
-  await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
-    const data=process.env.VARIN_DATA_DIR;fs.writeFileSync(path.join(data,'root-pid'),String(process.pid));
-    fs.writeFileSync(path.join(data,'benchmark-live.json'),'invalid observation');
-    setInterval(()=>{if(fs.existsSync(path.join(data,'stop-root')))process.exit(0);process.stdout.write('synthetic output\\n');process.stderr.write('synthetic error\\n')},25);
-    setTimeout(()=>process.exit(0),10000);`, { mode: 0o700 });
-  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle' } };
-  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: 100, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
-  const checked = { scenarios: [{ name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) }], electronArtifact: { sha256: 'd'.repeat(64) } };
-  await fs.writeFile(driver, `import fs from 'node:fs/promises';import {measureRun} from ${JSON.stringify(new URL('./benchmark-desktop.mjs', import.meta.url).href)};
-    const result=await measureRun(${JSON.stringify(plan)},${JSON.stringify(checked)},${JSON.stringify(scenario)},'electron',0,${JSON.stringify(dir)},
-      {beforeRun:({root})=>fs.writeFile(${JSON.stringify(path.join(dir, 'copy.txt'))},root)});
-    console.log(JSON.stringify({root:result.retainedPrivateDirectory,pid:result.rootPid,cleanupUncertain:result.cleanupUncertain,exit:result.exit}));`);
-  controller = spawn(process.execPath, [driver], { stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.ok(writes.length > 0); assert.equal(result.status, 'failed');
+  assert.equal(result.ownershipDrainConfirmed, true); assert.equal(result.processOwner.forced, true);
+  assert.equal(result.cleanupUncertain, false); assert.ok(result.coverage.includes('measurement-failed:invalid-json'));
+  assert.ok(result.coverage.includes('measurement-failed:native-owner-workload-not-clean'));
+  assert.equal(JSON.stringify(result).includes('PRIVATE_OBSERVATION_CANARY'), false);
+  await assert.rejects(fs.access(copy), { code: 'ENOENT' });
+  assert.equal(await hashDirectory(fixture.fixtureDirectory), fixture.checked.scenarios[0].inputs.dataSha256);
+});
+
+test('observation deadline uses native control and preserves forced failure separately from proved release', { ...nativeLinux, timeout: 45_000 }, async t => {
+  const fixture = await ownedBenchmarkFixture(t, `process.on('SIGTERM',()=>{});setInterval(()=>fs.appendFileSync(path.join(data,'writes'),'x'),30);`, { intervalMs: 100 });
+  let copy;
+  const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, fixture.dir, { beforeRun({ root }) { copy = root; } });
+  assert.equal(result.timedOut, true); assert.equal(result.status, 'failed');
+  assert.equal(result.ownershipDrainConfirmed, true); assert.equal(result.processOwner.forced, true); assert.equal(result.cleanupUncertain, false);
+  assert.ok(result.coverage.includes('process-tree-did-not-drain-before-observation-deadline'));
+  await assert.rejects(fs.access(copy), { code: 'ENOENT' });
+});
+
+test('immediate root exit cannot adopt a reused identity and still permits proved native cleanup', nativeLinux, async t => {
+  const fixture = await ownedBenchmarkFixture(t, 'process.exit(0);');
+  fixture.plan.electron.executable = '/bin/true'; // Exits before /proc registration on many runs.
+  for (let iteration = 0; iteration < 3; iteration++) {
+    let copy;
+    const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', iteration, fixture.dir, { beforeRun({ root }) { copy = root; } });
+    assert.match(result.rootStartIdentity, /^linux:[0-9]+$/u);
+    assert.equal(result.ownershipDrainConfirmed, true); assert.equal(result.cleanupUncertain, false);
+    assert.equal(result.exit.success, true); assert.equal(result.processOwner.forced, false);
+    assert.notEqual(result.status, 'measured-awaiting-review');
+    await assert.rejects(fs.access(copy), { code: 'ENOENT' });
+  }
+});
+
+test('a root that immediately forks and exits cannot release a still-writing original descendant', nativeLinux, async t => {
+  const writer = `const fs=require('node:fs'),path=require('node:path'),data=process.env.VARIN_DATA_DIR;
+    process.on('SIGTERM',()=>{});const timer=setInterval(()=>fs.appendFileSync(path.join(data,'writes'),'x'),10);
+    setTimeout(()=>{clearInterval(timer);fs.writeFileSync(path.join(data,'finished'),'done')},350);`;
+  const fixture = await ownedBenchmarkFixture(t, `spawn(process.execPath,['-e',${JSON.stringify(writer)}],{detached:true,stdio:'ignore'}).unref();`, { intervalMs: 750 });
+  let copy;
+  const started = performance.now();
+  const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, fixture.dir, {
+    beforeRun({ root }) { copy = root; },
+    async afterRun({ root }) {
+      assert.equal(await fs.readFile(path.join(root, 'data', 'finished'), 'utf8'), 'done');
+      assert.ok((await fs.readFile(path.join(root, 'data', 'writes'), 'utf8')).length > 1);
+    },
+  });
+  assert.ok(performance.now() - started >= 350);
+  assert.equal(result.exit.success, true); assert.equal(result.ownershipDrainConfirmed, true);
+  assert.equal(result.processOwner.clean, !result.processOwner.forced); assert.equal(result.cleanupUncertain, false);
+  if (result.processOwner.forced) assert.equal(result.status, 'failed');
+  assert.notEqual(result.status, 'measured-awaiting-review');
+  await assert.rejects(fs.access(copy), { code: 'ENOENT' });
+  assert.equal(await hashDirectory(fixture.fixtureDirectory), fixture.checked.scenarios[0].inputs.dataSha256);
+});
+
+test('launch admission failure retains the copied profile and stops paired progression without publishing error data', nativeLinux, async t => {
+  const fixture = await ownedBenchmarkFixture(t, 'process.exit(0);');
+  fixture.plan.electron.executable = path.relative(process.cwd(), fixture.launcher); // Real file, invalid nonabsolute native launch.
+  let copy;
+  const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, fixture.dir, { beforeRun({ root }) { copy = root; } });
+  t.after(() => fs.rm(copy, { recursive: true, force: true })); // Admission validation ran before any process creation.
+  assert.equal(result.rootPid, null); assert.equal(result.cleanupUncertain, true); assert.equal(result.ownershipDrainConfirmed, false);
+  assert.equal(result.status, 'failed'); assert.equal(result.retainedPrivateDirectory, copy);
+  assert.equal(await fs.readFile(path.join(copy, 'data', 'owner-state'), 'utf8'), 'immutable synthetic source');
+  const comparison = compareRuns({ ...fixture.plan, repetitions: 1 }, fixture.checked, [result]);
+  assert.equal(comparison.cleanupUncertain, true); assert.equal(comparison.retainedPrivateDirectories[0].path, copy);
+  assert.equal(await hashDirectory(fixture.fixtureDirectory), fixture.checked.scenarios[0].inputs.dataSha256);
+});
+
+test('unavailable owner observations and failed launch-bound control retain copies despite actual eventual drainage', nativeLinux, async t => {
+  for (const fault of ['receipt-unavailable', 'control-unconfirmed']) {
+    const fixture = await ownedBenchmarkFixture(t, `fs.writeFileSync(path.join(data,'benchmark-live.json'),'invalid observation');setTimeout(()=>process.exit(0),500);`);
+    const driver = path.join(fixture.dir, 'controller.mjs');
+    await fs.writeFile(driver, `import {mock} from 'node:test';import * as actual from ${JSON.stringify(new URL('./native-process-owner.mjs', import.meta.url).href)};
+      let actualDrained=false;
+      mock.module(${JSON.stringify(new URL('./native-process-owner.mjs', import.meta.url).href)}, {namedExports:{
+        prepareNativeProcessOwner:actual.prepareNativeProcessOwner,
+        launchOwned:async(...args)=>{const owner=await actual.launchOwned(...args);return {
+          rootPid:owner.rootPid,rootStartIdentity:owner.rootStartIdentity,rootExit:owner.rootExit,
+          requestStop:async options=>{const result=await owner.requestStop(options);return ${JSON.stringify(fault)}==='control-unconfirmed'?{requested:false}:result},
+          settle:async options=>{const result=await owner.settle(options);actualDrained ||= result.ownershipDrainConfirmed;
+            if(${JSON.stringify(fault)}==='receipt-unavailable')throw new Error('PRIVATE_OWNER_ERROR_CANARY');return result},
+        }},
+      }});
+      const {measureRun}=await import(${JSON.stringify(new URL('./benchmark-desktop.mjs', import.meta.url).href)});
+      const result=await measureRun(${JSON.stringify(fixture.plan)},${JSON.stringify(fixture.checked)},${JSON.stringify(fixture.scenario)},'electron',0,${JSON.stringify(fixture.dir)});
+      console.log(JSON.stringify({result,actualDrained}));`);
+    const controller = spawn(process.execPath, ['--experimental-test-module-mocks', driver], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '', errors = '';
+    controller.stdout.on('data', bytes => { output += bytes; }); controller.stderr.on('data', bytes => { errors += bytes; });
+    const code = await new Promise((resolve, reject) => { controller.once('error', reject); controller.once('close', resolve); });
+    assert.equal(code, 0, errors);
+    const { result, actualDrained } = JSON.parse(output);
+    assert.equal(actualDrained, true, 'Test cleanup separately awaited the real kernel scope, never fabricated a positive receipt');
+    t.after(() => fs.rm(result.retainedPrivateDirectory, { recursive: true, force: true }));
+    assert.equal(result.status, 'failed'); assert.equal(result.cleanupUncertain, true);
+    assert.equal(result.ownershipDrainConfirmed, fault === 'control-unconfirmed');
+    assert.equal(await fs.readFile(path.join(result.retainedPrivateDirectory, 'data', 'owner-state'), 'utf8'), 'immutable synthetic source');
+    assert.equal(JSON.stringify(result).includes('PRIVATE_OWNER_ERROR_CANARY'), false);
+    assert.equal(await hashDirectory(fixture.fixtureDirectory), fixture.checked.scenarios[0].inputs.dataSha256);
+  }
+});
+
+test('controller alternates A/B only after real native scope proof and stops on control or evidence failure', { ...nativeLinux, timeout: 30_000 }, async t => {
+  const dir = await temporary(t), driver = path.join(dir, 'paired-controller.mjs');
+  // Runtime/artifact data here is deliberately synthetic. Only its validator is
+  // stubbed; positive native ownership and safe-copy release are never mocked.
+  const script = String.raw`import fs from 'node:fs/promises';import path from 'node:path';import {mock} from 'node:test';
+    import * as runtime from __runtime__;import * as native from __native__;
+    import {engineInventory} from __inventory__;import {hashFile,hashDirectory,hashJson} from __contract__;
+    const directory=__directory__,sourceSha='a'.repeat(40),version='1.2.3',target=process.platform+'-'+process.arch;
+    let mode,proofs=[];
+    mock.module(__runtime__,{namedExports:{...runtime,verifyRuntimeManifest:async()=>({sources:{sourceSha,sourceDirty:false}})}});
+    mock.module(__native__,{namedExports:{...native,launchOwned:async(...args)=>{
+      const owner=await native.launchOwned(...args),proof={drained:false};proofs.push(proof);
+      return {...owner,settle:async options=>{const value=await owner.settle(options);proof.drained ||= value.ownershipDrainConfirmed;if(value.ownershipDrainConfirmed)proof.clean=value.clean;return value},
+        requestStop:async options=>{const value=await owner.requestStop(options);return mode==='control-failure'?{requested:false}:value}};
+    }}});
+    const {planTemplate,runBenchmark}=await import(__desktop__);
+    process.env.DISPLAY=':synthetic-controller-no-gui';
+    const results=[];
+    for(mode of ['normal','control-failure','preflight-write-failure','run-write-failure','comparison-write-failure']){
+      proofs=[];
+      const root=path.join(directory,mode),payload=path.join(root,'tauri'),electron=path.join(root,'electron'),runtimeDir=path.join(root,'runtime'),assets=path.join(root,'assets'),fixture=path.join(root,'source'),output=path.join(root,'output');
+      const frontend=path.join(electron,'resources','web-dist');
+      for(const value of [payload,frontend,path.join(runtimeDir,'frontend'),assets,path.join(fixture,'data'),path.join(fixture,'home')])await fs.mkdir(value,{recursive:true});
+      await fs.writeFile(path.join(fixture,'data','source-marker'),'keep original source');
+      for(const folder of [frontend,path.join(runtimeDir,'frontend')])await fs.writeFile(path.join(folder,'index.html'),'synthetic frontend, not a product');
+      const writer="const fs=require('node:fs'),path=require('node:path');setTimeout(()=>fs.writeFileSync(path.join(process.env.VARIN_DATA_DIR,'finished'),'done'),350);";
+      const launcher='#!'+process.execPath+'\nimport fs from "node:fs";import path from "node:path";import {spawn} from "node:child_process";spawn(process.execPath,["-e",'+JSON.stringify(writer)+'],{detached:true,stdio:"ignore"}).unref();'+(mode==='control-failure'?'fs.writeFileSync(path.join(process.env.VARIN_DATA_DIR,"benchmark-live.json"),"invalid");':'');
+      const electronExecutable=path.join(electron,'varin'),tauriExecutable=path.join(payload,'varin');
+      await fs.writeFile(electronExecutable,launcher,{mode:0o700});await fs.writeFile(tauriExecutable,launcher,{mode:0o700});
+      await fs.writeFile(path.join(assets,'runtime.json'),'synthetic runtime');
+      await fs.writeFile(path.join(assets,'engine.json'),JSON.stringify({files:await engineInventory(payload)}));
+      await fs.writeFile(path.join(assets,'update.bin'),'synthetic update');
+      const artifact=path.join(root,'electron.json');
+      await fs.writeFile(artifact,JSON.stringify({schema:1,product:'varin-electron-benchmark-baseline',sourceSha,sourceDirty:false,version,target,buildMode:'normal-product-package-dir',payload:electron,executable:electronExecutable,frontendDirectory:frontend,executableSha256:await hashFile(electronExecutable),frontendSha256:await hashDirectory(frontend),files:await engineInventory(electron)}));
+      const candidate=path.join(root,'candidate.json');
+      await fs.writeFile(candidate,JSON.stringify({schema:1,sourceSha,version,target,payload,runtime:runtimeDir,assets,runtimeManifest:{name:'runtime.json',sha256:await hashFile(path.join(assets,'runtime.json'))},engineManifest:{name:'engine.json',sha256:await hashFile(path.join(assets,'engine.json'))},packaged:{update:{name:'update.bin',sha256:await hashFile(path.join(assets,'update.bin'))}}}));
+      const plan={...planTemplate(),sourceSha,version,target,repetitions:2,intervalMs:40,disposableOsUser:true,electron:{executable:electronExecutable,frontendDirectory:frontend,artifact},tauri:{candidate},environment:{gpu:'synthetic',display:'synthetic',powerMode:'synthetic',backgroundLoad:'synthetic'}};
+      for(const scenario of plan.scenarios){scenario.fixtureDirectory=fixture;scenario.workload={name:scenario.name,motion:'full',timeoutMs:1,readyTimeoutMs:1,ready:[{selector:'#synthetic',visible:true}],steps:scenario.name==='repeated-lifecycle'?[0,1,2].map(cycle=>({id:'checkpoint-'+cycle,action:'checkpoint',cycle})):[{id:'wait',action:'wait',durationMs:1}]};}
+      const sourceHash=await hashDirectory(fixture),calls=[],copies=[],completions=[];
+      const originalWrite=fs.writeFile;
+      if(mode==='preflight-write-failure')fs.writeFile=async(file,...args)=>{if(file===path.join(output,'preflight.json'))throw new Error('PRIVATE_WRITE_ERROR');return originalWrite(file,...args)};
+      let comparison,error;
+      try{comparison=await runBenchmark(plan,{output,selected:['remote-idle'],hooks:{
+        async beforeRun({root,shell,iteration}){for(const copy of copies){if(await fs.stat(copy).then(()=>true,()=>false))throw new Error('Previous original scope was not released');}copies.push(root);calls.push(shell+':'+iteration)},
+        async afterRun({root,shell,iteration}){
+          if(mode!=='control-failure'&&await fs.readFile(path.join(root,'data','finished'),'utf8')!=='done')throw new Error('Descendant has not completed');
+          if(mode!=='control-failure')completions.push(shell+':'+iteration);
+          if(mode==='run-write-failure')await fs.mkdir(path.join(output,'remote-idle',shell+'-'+iteration+'.json'));
+          if(mode==='comparison-write-failure'&&calls.length===4)await fs.mkdir(path.join(output,'comparison.json'));
+        },
+      }});}catch(value){error={message:value.message,cleanupUncertain:value.cleanupUncertain,ownershipDrainConfirmed:value.ownershipDrainConfirmed,retainedPrivateDirectories:value.retainedPrivateDirectories};}finally{fs.writeFile=originalWrite;}
+      results.push({mode,calls,copies,proofs,completions,comparison,error,sourceUnchanged:await hashDirectory(fixture)===sourceHash});
+    }
+    console.log(JSON.stringify(results));`;
+  const urls = { runtime: './runtime-manifest.mjs', native: './native-process-owner.mjs', inventory: './build-candidate.mjs', contract: './benchmark-contract.mjs', desktop: './benchmark-desktop.mjs' };
+  let source = script.replaceAll('__directory__', JSON.stringify(dir));
+  for (const [name, file] of Object.entries(urls)) source = source.replaceAll(`__${name}__`, JSON.stringify(new URL(file, import.meta.url).href));
+  await fs.writeFile(driver, source);
+  const controller = spawn(process.execPath, ['--experimental-test-module-mocks', driver], { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '', errors = '';
   controller.stdout.on('data', bytes => { output += bytes; }); controller.stderr.on('data', bytes => { errors += bytes; });
-  controllerExit = new Promise((resolve, reject) => { controller.once('error', reject); controller.once('close', code => resolve(code)); });
-  const code = await Promise.race([controllerExit, new Promise(resolve => setTimeout(() => resolve('still-running'), 3000).unref())]);
-  assert.equal(code, 0, `The controller must finish independently of its unresolved child: ${errors}`);
-  const result = JSON.parse(output); copiedRoot = result.root;
-  assert.equal(result.cleanupUncertain, true); assert.equal(result.exit, null);
-  assert.equal(await stopped(result.pid), false, 'Reporting must not terminate the original unresolved process');
+  const code = await new Promise((resolve, reject) => { controller.once('error', reject); controller.once('close', resolve); });
+  assert.equal(code, 0, errors);
+  const results = JSON.parse(output);
+  for (const result of results) {
+    assert.equal(result.sourceUnchanged, true);
+    assert.equal(result.proofs.every(proof => proof.drained), true, 'All test cleanup is backed by actual native scope exhaustion');
+    for (const copy of result.copies) t.after(() => fs.rm(copy, { recursive: true, force: true }));
+    if (result.mode !== 'control-failure') {
+      assert.deepEqual(result.completions, result.calls);
+      assert.equal(result.proofs.every(proof => proof.clean), true);
+    }
+    if (result.mode === 'normal' || result.mode === 'comparison-write-failure') assert.deepEqual(result.calls, ['electron:0', 'tauri:0', 'tauri:1', 'electron:1']);
+    else assert.deepEqual(result.calls, result.mode === 'preflight-write-failure' ? [] : ['electron:0']);
+    if (result.mode === 'normal') {
+      assert.equal(result.comparison.cleanupUncertain, false); assert.equal(result.comparison.status, 'not-qualified');
+      for (const copy of result.copies) await assert.rejects(fs.access(copy), { code: 'ENOENT' });
+    } else if (result.mode === 'control-failure') {
+      assert.equal(result.comparison.cleanupUncertain, true); assert.equal(result.comparison.retainedPrivateDirectories.length, 1);
+      assert.equal(await fs.readFile(path.join(result.copies[0], 'data', 'source-marker'), 'utf8'), 'keep original source');
+    } else {
+      assert.equal(result.error.cleanupUncertain, true);
+      assert.equal(result.error.message.includes('PRIVATE_WRITE_ERROR'), false);
+      if (result.mode === 'run-write-failure') assert.equal(result.error.ownershipDrainConfirmed, true);
+      assert.equal(result.error.retainedPrivateDirectories.length, result.mode === 'run-write-failure' ? 1 : 0);
+      if (result.mode === 'run-write-failure') await fs.access(result.copies[0]);
+    }
+  }
 });
 
-test('malformed private observations never leak parser excerpts or unvalidated recording bytes', { skip: process.platform !== 'linux', timeout: 15000 }, async t => {
-  const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture'), launcher = path.join(dir, 'launcher.mjs'), runs = [];
+test('report persistence failure retains private evidence even after actual native drain', nativeLinux, async t => {
+  const fixture = await ownedBenchmarkFixture(t, 'setTimeout(()=>process.exit(0),150);');
+  const blockedOutput = path.join(fixture.dir, 'not-a-directory'); await fs.writeFile(blockedOutput, 'synthetic output failure');
+  let copy, error;
+  try { await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, blockedOutput, { beforeRun({ root }) { copy = root; } }); }
+  catch (failure) { error = failure; }
+  t.after(() => fs.rm(copy, { recursive: true, force: true })); // Natural scope completion was awaited before failed report persistence.
+  assert.ok(error); assert.equal(error.cleanupUncertain, true); assert.equal(error.ownershipDrainConfirmed, true); assert.equal(error.retainedPrivateDirectory, copy);
+  assert.deepEqual(error.retainedPrivateDirectories, [{ scenario: fixture.scenario.name, shell: 'electron', iteration: 0, path: copy }]);
+  assert.equal(await fs.readFile(path.join(copy, 'data', 'owner-state'), 'utf8'), 'immutable synthetic source');
+  assert.equal(await hashDirectory(fixture.fixtureDirectory), fixture.checked.scenarios[0].inputs.dataSha256);
+});
+
+test('malformed private observations never leak parser excerpts or unvalidated recording bytes', nativeLinux, async t => {
   const canary = 'PRIVATE_PROMPT_AND_TOKEN_CANARY';
-  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true }); await fs.mkdir(path.join(fixtureDirectory, 'home'));
-  t.after(async () => {
-    for (const run of runs) {
-      const stopped = () => fs.readFile(`/proc/${run.rootPid}/stat`, 'utf8').then(text => text.slice(text.lastIndexOf(')') + 2).startsWith('Z '), error => { if (error.code === 'ENOENT') return true; throw error; });
-      const deadline = performance.now() + 5000;
-      while (!await stopped() && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
-      assert.equal(await stopped(), true); // These direct test launchers create no descendants.
-      await fs.rm(run.retainedPrivateDirectory, { recursive: true, force: true });
-    }
-  });
-  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle' } };
-  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: 100, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
-  const checked = { scenarios: [{ name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) }], electronArtifact: { sha256: 'd'.repeat(64) } };
   for (const name of ['benchmark-live.json', 'benchmark-receipt.json', 'benchmark-renderer.jsonl']) {
-    await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
-      const data=process.env.VARIN_DATA_DIR;fs.writeFileSync(path.join(data,${JSON.stringify(name)}),${JSON.stringify(canary)});
-      setTimeout(()=>process.exit(0),250);`, { mode: 0o700 });
-    const result = await measureRun(plan, checked, scenario, 'electron', name, dir); runs.push(result);
-    assert.equal(result.cleanupUncertain, true);
-    assert.ok(result.coverage.includes('measurement-failed:invalid-json'));
-    assert.equal(JSON.stringify(result).includes(canary), false);
+    const fixture = await ownedBenchmarkFixture(t, `fs.writeFileSync(path.join(data,${JSON.stringify(name)}),${JSON.stringify(canary)});setTimeout(()=>process.exit(0),250);`);
+    const result = await measureRun(fixture.plan, fixture.checked, fixture.scenario, 'electron', 0, fixture.dir);
+    assert.equal(result.ownershipDrainConfirmed, true); assert.equal(result.cleanupUncertain, false);
+    assert.ok(result.coverage.includes('measurement-failed:invalid-json')); assert.equal(JSON.stringify(result).includes(canary), false);
+    for (const file of (await fs.readdir(fixture.dir)).filter(value => /\.jsonl?$/u.test(value))) {
+      assert.equal((await fs.readFile(path.join(fixture.dir, file), 'utf8')).includes(canary), false);
+    }
+    await assert.rejects(fs.access(path.join(fixture.dir, 'electron-0-benchmark-renderer.jsonl')), { code: 'ENOENT' });
   }
-  for (const name of (await fs.readdir(dir)).filter(name => /\.jsonl?$/u.test(name))) {
-    assert.equal((await fs.readFile(path.join(dir, name), 'utf8')).includes(canary), false, 'No malformed observation belongs in report artifacts');
-  }
-  await assert.rejects(fs.access(path.join(dir, 'electron-benchmark-renderer.jsonl-benchmark-renderer.jsonl')), { code: 'ENOENT' });
 });
 
 test('file automation only selects the private fixture through Chromium, never an arbitrary DOM script', async () => {
