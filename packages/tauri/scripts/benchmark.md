@@ -22,6 +22,8 @@ node packages/tauri/scripts/benchmark-build.mjs --candidate /absolute/native-can
 
 输出目录必须尚不存在。默认四次交替 A/B 顺序。`--repetitions 1` 仅用于入口诊断。Linux 可显式在 `dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24'` 下运行，并设置 `VARIN_BENCHMARK_VIRTUAL_DISPLAY=1`；这不证明物理跨屏、GPU 合成或输入法。环境字段可用 `VARIN_BENCHMARK_GPU`、`VARIN_BENCHMARK_DISPLAY`、`VARIN_BENCHMARK_POWER_MODE`、`VARIN_BENCHMARK_BACKGROUND_LOAD` 记录实际条件；没有记录的条件明确标为 unreported/uncontrolled。
 
+未打包成 AppImage 的采集入口拒绝继承 `APPIMAGE` 或 `CHROME_DEVEL_SANDBOX`，包括空值；不会替调用者更改沙箱或配置 root/SUID。当前完整桌面进程作用域仍缺少与本次启动绑定的终止证明，因此首次实际桌面运行后保留其私有目录并停止后续 A/B。以下七类是已实现的工作负载，不是当前入口能自动完成全部配对的承诺。
+
 ## 工作负载与证据边界
 
 - Remote idle：真正认证远端 Host 的完整工作台空闲 30 秒。远端服务单独记录进程树，不偷偷计入某一外壳。当前是新 profile、OS cache 未控制，不代证冷/暖启动分组。
@@ -32,16 +34,22 @@ node packages/tauri/scripts/benchmark-build.mjs --candidate /absolute/native-can
 - Local/hybrid：自动从真实 Host switcher 打开同源远端新窗口。两边均用原 composer 提交：本地完成一个有界 CPU 任务，再通过原 process card Stop 取消长任务；远端完成一条 SSE 对话，再用 composer Stop 取消另一条。只读原 owner 的 Run/operation/process 回执，要求实际 writerActive=false 与原 job terminal/cancelled，不能把取消意图当停止。两个窗口分别保留输入与renderer观察；受控 provider 还须确认正常完成和被取消的原 SSE 请求。
 - Repeated lifecycle：五轮 IDE/Workbench 切换及真实 Settings modal 开关、六个 settled checkpoints，记录进程、handles、内存及可用 GPU。尚不代证全部窗口/任务/subscription/texture 无增长。
 
-默认尝试七个自动化场景。桌宠场景需要独立 Linux X11 display、`xdotool` 和 `openbox`（官方 apt 包）；suite 启动自己的 `openbox --sm-disable`，记录版本/pid并在结束时只停止自己的子进程，不替换已有WM。不可用时明确标记第七类 blocked 并继续其余六类。`--manual` 为兼容参数，不把物理验收改为自动通过。
+计划包含七个自动化场景，实际执行受下面的原进程清理证明约束。桌宠场景需要独立 Linux X11 display、`xdotool` 和 `openbox`（官方 apt 包）；suite 启动自己的 `openbox --sm-disable`，记录版本/pid并在结束时只停止自己的子进程，不替换已有WM。不可用时明确标记第七类 blocked，其余六类仍可选择。`--manual` 为兼容参数，不把物理验收改为自动通过。
 
-锁定素材来源为 `Youzini-afk/Varin-companion-assets` 提交 `ebfbcd3383b120b4427ce7820e5eda21e63e6b60` 的 `pack/varin/`。来源README说明角色/插画许可尚未确定，不能声称代码AGPL覆盖图片。这里仅测试现有产品下载到一次性私有profile，不把素材加入源码、安装包或上传artifact。只输出数值、动作/文件身份、coverage与缺失状态，不输出PNG、canvas像素或profile。数据、服务token、下载资源与诊断canvas均由本轮隔离生命周期清理。
+锁定素材来源为 `Youzini-afk/Varin-companion-assets` 提交 `ebfbcd3383b120b4427ce7820e5eda21e63e6b60` 的 `pack/varin/`。来源README说明角色/插画许可尚未确定，不能声称代码AGPL覆盖图片。这里仅测试现有产品下载到一次性私有profile，不把素材加入源码、安装包或上传artifact。只输出数值、动作/文件身份、coverage与缺失状态，不输出PNG、canvas像素或profile。数据、服务token、下载资源与诊断canvas由本轮隔离owner管理；未确认终止时保留私有数据，不把不确定的清理记为完成。
 
 重复运行会重复真实下载，网络和安装窗口单独标记；只有实际已绘制后的正常 idle 与系统指针输入窗口参与该场景的 CPU/内存与 renderer 汇总；两种阶段保留独立标签，合并值不称为纯 idle 成本。文件校验、下载与独立素材诊断均排除。累计 CPU 仅在相邻有效采样之间相减，不跨排除区间；renderer 仅采用采集器实际读到的对应序列，并排除阶段边界，未采到的记录不补作有效帧。独立诊断停止会等待未完成解码、释放 bitmap 后返回。原始记录保留对应阶段，且全部normal动作覆盖尚未完成。
 
 ## 失败与清理
 
-源 SHA、runtime inventory、完整 Electron 包 inventory、前端树、fixture 和 workload hash 都必须一致。旧 stage 或 dirty build 不接受。端口/token 在每次恢复 remote snapshot 时必须保持一致。先等 seed Host 真实停止再复制 durable 数据，每轮结束等待服务进程树退出；异常强杀不等于成功退出。若 setup/teardown 报告 `cleanupUncertain`，立即停止后续 A/B，保留该轮私有目录及共享 seed workspace；raw run、comparison 和 suite 标明保留路径，不在进程归属仍未解决时删除数据。
+源 SHA、runtime inventory、完整 Electron 包 inventory、前端树、fixture 和 workload hash 都必须一致。旧 stage 或 dirty build 不接受。端口/token 在每次恢复 remote snapshot 时必须保持一致。先等 seed Host 的原 `stop()` 完成并观察直接子进程退出，再复制 durable 数据；这个 fixture owner 合同不代证完整 GUI/CEF 作用域。
+
+`observedCounterScopeEmpty` 只表示一次采样未找到仍活动的已观察进程，不能证明 `ownershipDrainConfirmed`：子进程可能在两次采样间创建并脱离原父进程。Electron 的 benchmark receipt 写在正常退出前；Tauri 的 `nativeDrain` 覆盖受管 Host 与原生窗口 owner，但写在最终 CEF shutdown 前。两者都不是完整 Chromium 外部进程的终止回执。当前每个已启动桌面的 `ownershipDrainConfirmed` 保持 false，并报告 `cleanupUncertain`，保留该轮私有目录及共享 seed workspace，停止后续 A/B。即使根进程正常退出、计数归零或 workload 完成，也不删除目录或自动继续配对。
+
+观察失败或 deadline 到期时，不按数值 PID/PGID 调用 kill 或 taskkill，避免误杀复用身份的新进程；这也不意味着原进程已经停止。采集器释放自己的观察引用，不靠未完成子进程的 stdio 管道阻止失败报告退出。raw run、comparison 和 suite 保留可用的根进程退出事实、计数观察及未解决归属；报告写入失败仍向外传播清理不确定性。保留目录只能在原作用域确实终止后回收，不能根据轮询归零自动删除。
 
 `preflight.json`、每次 raw JSON/JSONL、`comparison.json` 和 `suite.json` 保留缺失/失败/未执行状态。空数据不转换为零成本；CPU/内存缺失、GPU不可用、输入阈值以下无样本、renderer观测缺口均保留 unknown/incomplete。采样与只读owner观测的开销包含在两边测量中；尚未单独校准其成本。原始target identity保留，汇总按main-workbench、remote-workbench、native-browser区分角色。RAF 不是屏幕呈现时间，Event Timing 不是无阈值端到端输入延迟。
 
-正常测量入口完成可以返回 0，但报告始终 `qualification: not-accepted`；启动、seed、原owner执行或退出失败返回非零。任何节省百分比与完整七场景通过结论都需要实际产品运行和额外 native evidence，不能从本文件或 Node harness tests 推断。
+损坏的私有 JSON 只报告 `invalid-json`，不保存解析器引用的原文片段；renderer JSONL 与 receipt 在校验原字节后才写入报告，不能先复制未经校验的内容再报错。
+
+报告始终 `qualification: not-accepted`。只有执行与清理均无未解决失败的 suite 才能返回 0；当前完整桌面启动缺少上述作用域终止证明，因此保留数据并返回非零。启动、seed、原owner执行或退出失败也返回非零。任何节省百分比与完整七场景通过结论都需要实际产品运行和额外 native evidence，不能从本文件或 Node harness tests 推断。

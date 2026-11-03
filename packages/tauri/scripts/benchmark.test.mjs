@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { hashJson, hashDirectory, validateBenchmarkRequest, validateWorkload, readIsolatedRequest, summarizeRun } from './benchmark-contract.mjs';
 import { dispatchBenchmarkInput, publicRendererSample, remoteTargetExpression } from './benchmark-driver.mjs';
 import { planTemplate, preflight, compareRuns, runBenchmark, measureRun } from './benchmark-desktop.mjs';
@@ -175,6 +176,25 @@ test('unprepared full-product A/B persists explicit preflight blockers without l
 });
 async function readJson(file) { return JSON.parse(await fs.readFile(file, 'utf8')); }
 
+test('unpacked benchmark rejects inherited AppImage and sandbox overrides, including empty values', async t => {
+  const keys = ['APPIMAGE', 'CHROME_DEVEL_SANDBOX'];
+  const previous = keys.map(key => [key, process.env[key]]);
+  t.after(() => { for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  for (const key of keys) delete process.env[key];
+  for (const key of keys) for (const value of ['', '/caller-selected-path']) {
+    process.env[key] = value;
+    const result = await preflight(planTemplate());
+    assert.deepEqual(result.blockers.find(item => item.code === 'uncontrolled-launch-environment'), {
+      code: 'uncontrolled-launch-environment', reason: `Unpacked product benchmarks refuse inherited ${key}`,
+    });
+    // A direct call must fail before copying profiles, starting services or spawning.
+    let prepared = false;
+    await assert.rejects(measureRun({}, {}, {}, 'electron', 0, os.tmpdir(), { beforeRun() { prepared = true; } }), new RegExp(key, 'u'));
+    assert.equal(prepared, false);
+    delete process.env[key];
+  }
+});
+
 
 test('empty, single-point and unreadable process windows cannot claim zero usage', () => {
   for (const samples of [[], [{ monotonicMs: 0, processes: [] }],
@@ -267,6 +287,188 @@ test('measureRun retains isolated data when setup or teardown cannot prove servi
       assert.equal(comparison.retainedPrivateDirectories[0].path, copiedRoot); // Preserved even with an interrupted/missing pair.
     }
   }
+});
+
+test('benchmark failures and an empty polling scope retain live original writers without numeric PID kills', { skip: process.platform !== 'linux', timeout: 60000 }, async t => {
+  const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture');
+  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true });
+  await fs.mkdir(path.join(fixtureDirectory, 'home'));
+  await fs.writeFile(path.join(fixtureDirectory, 'data', 'owner-state'), 'original scope still owns this profile');
+  const stopped = async pid => {
+    try { const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8'); return stat.slice(stat.lastIndexOf(')') + 2).startsWith('Z '); }
+    catch (error) { if (error.code === 'ENOENT') return true; throw error; }
+  };
+  for (const phase of ['observation-error', 'deadline', 'fork-between-polls']) {
+    const lateFork = phase === 'fork-between-polls';
+    const launcher = path.join(dir, `${phase}.mjs`);
+    // This is an actual controlled process tree, not product/performance evidence.
+    // The child writes through the original profile while its parent exits early.
+    // Cleanup uses the test writer's private stop protocol, never a recycled PID.
+    const writer = `const fs=require('node:fs'),path=require('node:path'); const data=process.env.VARIN_DATA_DIR;
+      fs.writeFileSync(path.join(data,'writer-pid'),String(process.pid));
+      setInterval(()=>{if(fs.existsSync(path.join(data,'stop-writer')))process.exit(0);fs.writeFileSync(path.join(data,'writer-progress'),String(Date.now()))},25);
+      setTimeout(()=>process.exit(0),90000);`;
+    await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs'; import path from 'node:path'; import {spawn} from 'node:child_process';
+      const data=process.env.VARIN_DATA_DIR;
+      fs.writeFileSync(path.join(data,'scope-pid'),String(process.pid));
+      setTimeout(()=>{spawn(process.execPath,['-e',${JSON.stringify(writer)}],{stdio:'ignore'}).unref();
+        setTimeout(()=>{${phase === 'observation-error' ? "fs.writeFileSync(path.join(data,'benchmark-live.json'),'invalid observer JSON');" : ''}process.exit(0)},${lateFork ? 250 : 1000});
+      },${lateFork ? 1000 : 0});
+    `, { mode: 0o700 });
+    const scenario = { name: 'remote-idle', fixtureDirectory,
+      workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle', readyTimeoutMs: 1, timeoutMs: 1 } };
+    const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: lateFork ? 4000 : 100, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
+    const bound = { name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) };
+    const checked = { scenarios: [bound], electronArtifact: { sha256: 'd'.repeat(64) } };
+    let copiedRoot;
+    t.after(async () => {
+      if (!copiedRoot) return;
+      const pid = await fs.readFile(path.join(copiedRoot, 'data', 'scope-pid'), 'utf8').then(Number, () => null);
+      const writerPid = await fs.readFile(path.join(copiedRoot, 'data', 'writer-pid'), 'utf8').then(Number, () => null);
+      await fs.writeFile(path.join(copiedRoot, 'data', 'stop-writer'), 'stop');
+      const until = performance.now() + 5000;
+      while (((writerPid && !await stopped(writerPid)) || (pid && !await stopped(pid))) && performance.now() < until) await new Promise(resolve => setTimeout(resolve, 25));
+      assert.ok(!pid || await stopped(pid), 'Test launcher must really stop before removing its retained profile');
+      assert.ok(!writerPid || await stopped(writerPid), 'Test writer must really stop before removing its retained profile');
+      await fs.rm(copiedRoot, { recursive: true, force: true });
+    });
+    const result = await measureRun(plan, checked, scenario, 'electron', phase, dir, { beforeRun({ root }) { copiedRoot = root; } });
+    const persisted = await readJson(path.join(dir, `electron-${phase}.json`));
+    const writerPid = Number(await fs.readFile(path.join(copiedRoot, 'data', 'writer-pid'), 'utf8'));
+    assert.equal(result.status, 'failed'); assert.equal(result.cleanupUncertain, true);
+    assert.equal(result.ownershipDrainConfirmed, false);
+    assert.equal(result.retainedPrivateDirectory, copiedRoot); assert.equal(persisted.cleanupUncertain, true);
+    assert.equal(await fs.readFile(path.join(copiedRoot, 'data', 'owner-state'), 'utf8'), 'original scope still owns this profile');
+    assert.ok(Number(await fs.readFile(path.join(copiedRoot, 'data', 'writer-progress'), 'utf8')) > 0);
+    assert.equal(await stopped(writerPid), false, 'The controller must not send an unbound PID/group kill');
+    assert.equal(result.samples.some(sample => sample.processes.some(row => row.pid === writerPid)), !lateFork,
+      'A writer forked and reparented between polls is absent from the observed counter scope');
+    assert.ok(result.coverage.includes('desktop-process-ownership-unresolved'));
+    if (phase === 'deadline') {
+      assert.equal(result.timedOut, true); assert.equal(result.exit.code, 0);
+      assert.ok(result.coverage.includes('process-tree-did-not-drain-before-observation-deadline'));
+    } else if (lateFork) {
+      assert.equal(result.observedCounterScopeEmpty, true); assert.equal(result.timedOut, false); assert.equal(result.exit.code, 0);
+      assert.deepEqual(result.samples.at(-1).processes, []); assert.equal(result.samples.at(-1).coverage.processCountersComplete, true);
+    } else assert.ok(result.coverage.some(issue => issue.startsWith('measurement-failed:')));
+    const comparison = compareRuns({ ...plan, repetitions: 1 }, checked, [{ ...result, scenario: scenario.name }]);
+    assert.equal(comparison.cleanupUncertain, true); assert.equal(comparison.retainedPrivateDirectories[0].path, copiedRoot);
+  }
+});
+
+test('report persistence failure preserves unresolved cleanup for the outer suite', async t => {
+  const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture'), blockedOutput = path.join(dir, 'not-a-directory');
+  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true }); await fs.mkdir(path.join(fixtureDirectory, 'home'));
+  await fs.writeFile(path.join(fixtureDirectory, 'data', 'owner-state'), 'retain while fixture ownership is unknown');
+  await fs.writeFile(blockedOutput, 'synthetic output failure');
+  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle' } };
+  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: 100, electron: { executable: process.execPath, frontendDirectory: fixtureDirectory } };
+  const checked = { scenarios: [{ name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) }], electronArtifact: { sha256: 'd'.repeat(64) } };
+  let copiedRoot, error;
+  t.after(async () => { if (copiedRoot) await fs.rm(copiedRoot, { recursive: true, force: true }); }); // No process is launched by this injection.
+  try {
+    await measureRun(plan, checked, scenario, 'electron', 0, blockedOutput, {
+      beforeRun({ root }) { copiedRoot = root; throw Object.assign(new Error('Unresolved fixture setup'), { cleanupUncertain: true }); },
+    });
+  } catch (failure) { error = failure; }
+  assert.ok(error); assert.equal(error.cleanupUncertain, true); assert.equal(error.retainedPrivateDirectory, copiedRoot);
+  assert.deepEqual(error.retainedPrivateDirectories, [{ scenario: scenario.name, shell: 'electron', iteration: 0, path: copiedRoot }]);
+  assert.equal(await fs.readFile(path.join(copiedRoot, 'data', 'owner-state'), 'utf8'), 'retain while fixture ownership is unknown');
+});
+
+test('a complete native receipt and clean root exit do not authorize profile deletion', { skip: process.platform !== 'linux' }, async t => {
+  const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture'), launcher = path.join(dir, 'launcher.mjs');
+  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true }); await fs.mkdir(path.join(fixtureDirectory, 'home'));
+  await fs.writeFile(path.join(fixtureDirectory, 'data', 'owner-state'), 'original synthetic profile');
+  // This deliberately narrow nativeDrain field is not a whole-scope receipt.
+  await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
+    const data=process.env.VARIN_DATA_DIR, request=JSON.parse(fs.readFileSync(path.join(data,'benchmark-request.json'),'utf8'));
+    fs.writeFileSync(path.join(data,'benchmark-receipt.json'),JSON.stringify({...request,product:'varin-desktop-benchmark-receipt',complete:true,nativeDrain:true}));
+    setTimeout(()=>process.exit(0),250);`, { mode: 0o700 });
+  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle' } };
+  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: 100, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
+  const checked = { scenarios: [{ name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) }], electronArtifact: { sha256: 'd'.repeat(64) } };
+  let copiedRoot;
+  t.after(async () => { if (copiedRoot) await fs.rm(copiedRoot, { recursive: true, force: true }); }); // This launcher creates no child and exits before returning.
+  const result = await measureRun(plan, checked, scenario, 'electron', 0, dir, { beforeRun({ root }) { copiedRoot = root; } });
+  assert.equal(result.exit.code, 0); assert.equal(result.observedCounterScopeEmpty, true);
+  assert.equal(result.rendererReceipt.complete, true); assert.equal(result.rendererReceipt.nativeDrain, true);
+  assert.equal(result.ownershipDrainConfirmed, false); assert.equal(result.cleanupUncertain, true);
+  assert.equal(result.retainedPrivateDirectory, copiedRoot);
+  assert.equal(await fs.readFile(path.join(copiedRoot, 'data', 'owner-state'), 'utf8'), 'original synthetic profile');
+});
+
+test('unresolved GUI child cannot hold the reporting controller alive through process or stdio references', { skip: process.platform !== 'linux', timeout: 15000 }, async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-benchmark-unref-test-'));
+  const fixtureDirectory = path.join(dir, 'fixture'), launcher = path.join(dir, 'launcher.mjs'), driver = path.join(dir, 'driver.mjs');
+  let copiedRoot, controller, controllerExit;
+  const stopped = async pid => fs.readFile(`/proc/${pid}/stat`, 'utf8').then(text => text.slice(text.lastIndexOf(')') + 2).startsWith('Z '), error => { if (error.code === 'ENOENT') return true; throw error; });
+  t.after(async () => {
+    copiedRoot ??= await fs.readFile(path.join(dir, 'copy.txt'), 'utf8').catch(() => null);
+    if (copiedRoot) {
+      await fs.writeFile(path.join(copiedRoot, 'data', 'stop-root'), 'stop');
+      const pid = await fs.readFile(path.join(copiedRoot, 'data', 'root-pid'), 'utf8').then(Number, () => null);
+      const deadline = performance.now() + 5000;
+      while (pid && !await stopped(pid) && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+      assert.ok(!pid || await stopped(pid));
+      await fs.rm(copiedRoot, { recursive: true, force: true });
+    }
+    if (controller) await controllerExit;
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true }); await fs.mkdir(path.join(fixtureDirectory, 'home'));
+  await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
+    const data=process.env.VARIN_DATA_DIR;fs.writeFileSync(path.join(data,'root-pid'),String(process.pid));
+    fs.writeFileSync(path.join(data,'benchmark-live.json'),'invalid observation');
+    setInterval(()=>{if(fs.existsSync(path.join(data,'stop-root')))process.exit(0);process.stdout.write('synthetic output\\n');process.stderr.write('synthetic error\\n')},25);
+    setTimeout(()=>process.exit(0),10000);`, { mode: 0o700 });
+  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle' } };
+  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: 100, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
+  const checked = { scenarios: [{ name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) }], electronArtifact: { sha256: 'd'.repeat(64) } };
+  await fs.writeFile(driver, `import fs from 'node:fs/promises';import {measureRun} from ${JSON.stringify(new URL('./benchmark-desktop.mjs', import.meta.url).href)};
+    const result=await measureRun(${JSON.stringify(plan)},${JSON.stringify(checked)},${JSON.stringify(scenario)},'electron',0,${JSON.stringify(dir)},
+      {beforeRun:({root})=>fs.writeFile(${JSON.stringify(path.join(dir, 'copy.txt'))},root)});
+    console.log(JSON.stringify({root:result.retainedPrivateDirectory,pid:result.rootPid,cleanupUncertain:result.cleanupUncertain,exit:result.exit}));`);
+  controller = spawn(process.execPath, [driver], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '', errors = '';
+  controller.stdout.on('data', bytes => { output += bytes; }); controller.stderr.on('data', bytes => { errors += bytes; });
+  controllerExit = new Promise((resolve, reject) => { controller.once('error', reject); controller.once('close', code => resolve(code)); });
+  const code = await Promise.race([controllerExit, new Promise(resolve => setTimeout(() => resolve('still-running'), 3000).unref())]);
+  assert.equal(code, 0, `The controller must finish independently of its unresolved child: ${errors}`);
+  const result = JSON.parse(output); copiedRoot = result.root;
+  assert.equal(result.cleanupUncertain, true); assert.equal(result.exit, null);
+  assert.equal(await stopped(result.pid), false, 'Reporting must not terminate the original unresolved process');
+});
+
+test('malformed private observations never leak parser excerpts or unvalidated recording bytes', { skip: process.platform !== 'linux', timeout: 15000 }, async t => {
+  const dir = await temporary(t), fixtureDirectory = path.join(dir, 'fixture'), launcher = path.join(dir, 'launcher.mjs'), runs = [];
+  const canary = 'PRIVATE_PROMPT_AND_TOKEN_CANARY';
+  await fs.mkdir(path.join(fixtureDirectory, 'data'), { recursive: true }); await fs.mkdir(path.join(fixtureDirectory, 'home'));
+  t.after(async () => {
+    for (const run of runs) {
+      const stopped = () => fs.readFile(`/proc/${run.rootPid}/stat`, 'utf8').then(text => text.slice(text.lastIndexOf(')') + 2).startsWith('Z '), error => { if (error.code === 'ENOENT') return true; throw error; });
+      const deadline = performance.now() + 5000;
+      while (!await stopped() && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(await stopped(), true); // These direct test launchers create no descendants.
+      await fs.rm(run.retainedPrivateDirectory, { recursive: true, force: true });
+    }
+  });
+  const scenario = { name: 'remote-idle', fixtureDirectory, workload: { ...workload([{ id: 'idle', action: 'wait', durationMs: 1 }]), name: 'remote-idle' } };
+  const plan = { sourceSha: 'a'.repeat(40), version: '1.2.3', intervalMs: 100, electron: { executable: launcher, frontendDirectory: fixtureDirectory } };
+  const checked = { scenarios: [{ name: scenario.name, inputs: { frontendSha256: 'b'.repeat(64), dataSha256: await hashDirectory(fixtureDirectory), configurationSha256: 'c'.repeat(64) }, scenarioSha256: hashJson(scenario.workload) }], electronArtifact: { sha256: 'd'.repeat(64) } };
+  for (const name of ['benchmark-live.json', 'benchmark-receipt.json', 'benchmark-renderer.jsonl']) {
+    await fs.writeFile(launcher, `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
+      const data=process.env.VARIN_DATA_DIR;fs.writeFileSync(path.join(data,${JSON.stringify(name)}),${JSON.stringify(canary)});
+      setTimeout(()=>process.exit(0),250);`, { mode: 0o700 });
+    const result = await measureRun(plan, checked, scenario, 'electron', name, dir); runs.push(result);
+    assert.equal(result.cleanupUncertain, true);
+    assert.ok(result.coverage.includes('measurement-failed:invalid-json'));
+    assert.equal(JSON.stringify(result).includes(canary), false);
+  }
+  for (const name of (await fs.readdir(dir)).filter(name => /\.jsonl?$/u.test(name))) {
+    assert.equal((await fs.readFile(path.join(dir, name), 'utf8')).includes(canary), false, 'No malformed observation belongs in report artifacts');
+  }
+  await assert.rejects(fs.access(path.join(dir, 'electron-benchmark-renderer.jsonl-benchmark-renderer.jsonl')), { code: 'ENOENT' });
 });
 
 test('file automation only selects the private fixture through Chromium, never an arbitrary DOM script', async () => {

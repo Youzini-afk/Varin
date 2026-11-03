@@ -48,8 +48,70 @@ test('fixture process waits for original owner stop and observed process-tree ex
   const response = await fetch(worker.origin + '/v1/models'); assert.equal(response.status, 200); await response.text();
   const observed = await worker.sample(); assert.ok(observed.processes.some(p => p.pid === worker.pid));
   const result = await worker.stop();
-  assert.equal(result.drained, true); assert.equal(result.forced, false); assert.equal(result.exit.code, 0); assert.equal(result.final.processes.length, 0);
+  assert.equal(result.drained, true); assert.equal(result.forced, false); assert.equal(result.ownerStopAcknowledged, true);
+  assert.equal(result.exit.code, 0); assert.equal(result.final.processes.length, 0);
   await assert.rejects(fetch(worker.origin));
+});
+
+test('fixture setup and stop failures retain unresolved writers without unbound process-tree kills', { timeout: 20000 }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-fixture-lifetime-test-'));
+  const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const exists = file => fs.access(file).then(() => true, () => false);
+  const until = async (check, description) => {
+    const deadline = performance.now() + 10000;
+    while (!await check() && performance.now() < deadline) await pause(25);
+    assert.ok(await check(), description);
+  };
+  t.after(async () => {
+    for (const phase of ['setup', 'stop']) {
+      const directory = path.join(root, phase);
+      if (!await exists(path.join(directory, 'writer-ready'))) continue;
+      await fs.writeFile(path.join(directory, 'stop-writer'), 'stop');
+      await until(() => exists(path.join(directory, 'writer-closed')), 'Original test writer closed its file before cleanup');
+      await until(() => exists(path.join(directory, 'root-closed')), 'Original test worker reached its explicit exit');
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  for (const phase of ['setup', 'stop']) {
+    const directory = path.join(root, phase), runtime = path.join(directory, 'runtime');
+    const server = path.join(runtime, 'host/node_modules/@varin/web/server');
+    await fs.mkdir(server, { recursive: true });
+    await fs.writeFile(path.join(server, 'package.json'), '{"type":"module"}');
+    await fs.writeFile(path.join(directory, 'original-state'), 'original worker owns this data');
+    // A real process fixture, not a substitute Host or product acceptance.
+    // The writer is born only after initial process registration and must keep
+    // its existing file after setup/stop reports an unconfirmed outcome.
+    const writer = `const fs=require('node:fs'),path=require('node:path'),root=process.env.VARIN_DATA_DIR;
+      const file=fs.openSync(path.join(root,'writer-progress'),'a');let ticks=0;
+      fs.writeFileSync(path.join(root,'writer-ready'),'ready');
+      const timer=setInterval(()=>{fs.writeSync(file,String(++ticks)+'\\n');
+        if(fs.existsSync(path.join(root,'stop-writer'))||ticks>400){clearInterval(timer);fs.closeSync(file);fs.writeFileSync(path.join(root,'writer-closed'),'closed');}},25);`;
+    await fs.writeFile(path.join(server, 'index.js'), `import fs from 'node:fs/promises';import path from 'node:path';import {spawn} from 'node:child_process';
+      const root=process.env.VARIN_DATA_DIR;
+      async function fail(){const child=spawn(process.execPath,['-e',${JSON.stringify(writer)}],{stdio:'ignore'});child.unref();
+        while(!await fs.access(path.join(root,'writer-ready')).then(()=>true,()=>false))await new Promise(r=>setTimeout(r,10));
+        setTimeout(async()=>{await fs.writeFile(path.join(root,'root-closed'),'closed');process.exit(0)},500);
+        throw new Error('Controlled original owner failure');}
+      export async function startWebUiServer(){${phase === 'setup' ? 'await fail();' : ''}
+        return {getPort:()=>1,getDesktopLocalCredentials:async()=>({clientToken:'synthetic'}),isReady:()=>true,stop:fail};}
+    `);
+    let failure;
+    try {
+      const worker = await startFixtureWorker({ node: process.execPath,
+        env: { ...process.env, VARIN_DATA_DIR: directory }, configuration: { mode: 'host', runtime, providerOrigin: 'http://127.0.0.1:1' }, timeoutMs: 10000 });
+      await worker.stop();
+    } catch (error) { failure = error; }
+    assert.ok(failure, 'The controlled owner must fail');
+    assert.equal(failure.cleanupUncertain, true);
+    assert.equal(failure.fixtureCleanup.drained, false);
+    assert.equal(failure.fixtureCleanup.forced, false);
+    assert.equal(failure.fixtureCleanup.ownerStopAcknowledged, false);
+    await until(() => exists(path.join(directory, 'writer-progress')), 'Original writer started');
+    const first = (await fs.stat(path.join(directory, 'writer-progress'))).size;
+    await pause(100);
+    assert.ok((await fs.stat(path.join(directory, 'writer-progress'))).size > first, 'No numeric PID/group kill may terminate the unresolved writer');
+    assert.equal(await fs.readFile(path.join(directory, 'original-state'), 'utf8'), 'original worker owns this data');
+  }
 });
 
 test('seed accepts only an actual completed Run and refuses external credential destinations', async () => {

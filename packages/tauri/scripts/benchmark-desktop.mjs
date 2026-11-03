@@ -4,7 +4,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +18,16 @@ import { engineInventory } from './build-candidate.mjs';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const readJson = async file => JSON.parse(await fs.readFile(file, 'utf8'));
 const readOptional = async file => fs.readFile(file, 'utf8').then(JSON.parse, error => { if (error.code === 'ENOENT') return null; throw error; });
+const failureReason = error => error instanceof SyntaxError ? 'invalid-json' : error.code ?? error.message;
 async function save(file, value) { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); }
 function executable(candidate) { return path.join(candidate.payload, process.platform === 'darwin' ? 'Contents/MacOS/varin' : process.platform === 'win32' ? 'varin.exe' : 'varin'); }
+function requireControlledLaunchEnvironment() {
+  // These runs launch unpacked products, not an AppImage or a caller-selected
+  // sandbox. Even an empty CHROME_DEVEL_SANDBOX changes Chromium's behavior.
+  for (const key of ['APPIMAGE', 'CHROME_DEVEL_SANDBOX']) {
+    if (Object.hasOwn(process.env, key)) throw new Error(`Unpacked product benchmarks refuse inherited ${key}`);
+  }
+}
 export function environmentProbe() {
   const cpus = os.cpus();
   return { os: process.platform, osVersion: os.release(), architecture: process.arch, cpu: cpus[0]?.model ?? 'unavailable',
@@ -62,7 +70,8 @@ export async function verifyTauriBenchmarkCandidate(candidateFile, identity) {
 }
 export async function preflight(plan) {
   const blockers = [], environment = environmentProbe();
-  const check = async (code, fn) => { try { return await fn(); } catch (error) { blockers.push({ code, reason: error.code ?? error.message }); return null; } };
+  const check = async (code, fn) => { try { return await fn(); } catch (error) { blockers.push({ code, reason: failureReason(error) }); return null; } };
+  await check('uncontrolled-launch-environment', requireControlledLaunchEnvironment);
   if (!environment.displayAvailable) blockers.push({ code: 'native-display-unavailable', reason: 'No DISPLAY or WAYLAND_DISPLAY; no GUI launch or substitute display is attempted' });
   if (plan?.disposableOsUser !== true) blockers.push({ code: 'disposable-os-user-required', reason: 'The full product can register OS handlers. HOME isolation alone is insufficient on macOS/Windows' });
   if (plan?.schema !== 1 || plan.product !== 'varin-desktop-benchmark-plan') blockers.push({ code: 'invalid-plan', reason: 'Use a versioned benchmark plan' });
@@ -109,6 +118,7 @@ export async function preflight(plan) {
     candidate, electronArtifact, tauriArtifact, scenarios, qualification: 'not-accepted' };
 }
 function launchEnvironment(root, candidate, shell) {
+  requireControlledLaunchEnvironment();
   const home = path.join(root, 'home'), env = { ...process.env, HOME: home, USERPROFILE: home, VARIN_DATA_DIR: path.join(root, 'data'),
     APPDATA: path.join(home, 'AppData/Roaming'), LOCALAPPDATA: path.join(home, 'AppData/Local'), XDG_CONFIG_HOME: path.join(home, '.config'),
     VARIN_ELECTRON_DEV: '', VARIN_ELECTRON_PROFILE: '' };
@@ -116,14 +126,8 @@ function launchEnvironment(root, candidate, shell) {
   if (shell === 'tauri') { env.VARIN_DESKTOP_RUNTIME_DIR = candidate.runtime; if (process.platform === 'linux') env.APPDIR = candidate.payload; }
   return env;
 }
-async function stopTimedOut(child) {
-  // Only the newly launched isolated benchmark group. Forced termination is
-  // always a failure and never evidence of normal lifecycle cleanup.
-  if (process.platform === 'win32') {
-    try { execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch { child.kill(); }
-  } else { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } }
-}
 export async function measureRun(plan, preflightResult, scenario, shell, iteration, directory, hooks = {}) {
+  requireControlledLaunchEnvironment();
   const bound = preflightResult.scenarios.find(item => item.name === scenario.name);
   if (!bound || !isHash(bound.inputs.frontendSha256)) throw new Error('Scenario inputs were not verified');
   const collector = await createProcessCollector(); // Prepare native helper before the launch clock.
@@ -132,7 +136,7 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
   catch (error) { await collector.close(); throw error; }
   const nonce = randomUUID(), request = { schema: 1, product: 'varin-desktop-benchmark-request', nonce, sourceSha: plan.sourceSha, frontendDirectory: shell === 'electron' ? plan.electron.frontendDirectory : path.join(preflightResult.candidate.runtime, 'frontend'),
     version: plan.version, inputs: bound.inputs, scenarioSha256: bound.scenarioSha256, sampleIntervalMs: plan.intervalMs, workload: scenario.workload };
-  const samples = [], issues = [], lifecycle = []; let child, exit = null, timedOut = false, startupMs = null, receipt = null, productComplete = false;
+  const samples = [], issues = [], lifecycle = []; let child, exit = null, timedOut = false, observedCounterScopeEmpty = false, startupMs = null, receipt = null, productComplete = false;
   let rendererSequence = -1, companionTask = null, companionAcknowledged = false, lastCompanion = null;
   let services;
   const execution = { shell, scenario: scenario.name, sourceSha: plan.sourceSha, version: plan.version, inputs: bound.inputs, scenarioSha256: bound.scenarioSha256,
@@ -150,11 +154,10 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
     const started = performance.now();
     child = spawn(shell === 'electron' ? plan.electron.executable : executable(preflightResult.candidate), ['--varin-desktop-benchmark'], {
       cwd: shell === 'electron' ? path.dirname(plan.electron.executable) : preflightResult.candidate.payload,
-      env: launchEnvironment(root, preflightResult.candidate, shell), stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: false,
+      env: launchEnvironment(root, preflightResult.candidate, shell), stdio: 'ignore', detached: process.platform !== 'win32', windowsHide: false,
     });
-    // Application output may contain prompt bodies or local paths. Do not copy it
-    // into a performance report. Numeric native receipts are a separate protocol.
-    child.stdout.resume(); child.stderr.resume();
+    // Discard application output, which may contain prompt bodies or local
+    // paths. Do not keep the controller alive through an unresolved child's pipes.
     let spawnError;
     child.once('error', error => { spawnError = error; });
     child.once('exit', (code, signal) => { exit = { code, signal, elapsedMs: performance.now() - started }; });
@@ -197,11 +200,12 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
         await fs.rename(temporary, path.join(data, 'benchmark-companion-drag.json')); companionAcknowledged = true;
       }
       receipt = await readOptional(path.join(data, 'benchmark-receipt.json'));
-      if (exit && !observed.processes.length && observed.coverage?.rootState === 'exited' && observed.coverage?.processCountersComplete) break;
+      if (exit && !observed.processes.length && observed.coverage?.rootState === 'exited' && observed.coverage?.processCountersComplete) { observedCounterScopeEmpty = true; break; }
       await sleep(Math.max(0, plan.intervalMs - (performance.now() - sampledAt)));
     }
-    if (!exit || samples.at(-1)?.processes.length || samples.at(-1)?.coverage?.rootState !== 'exited' || !samples.at(-1)?.coverage?.processCountersComplete) {
-      timedOut = true; issues.push('process-tree-did-not-drain-before-observation-deadline'); await stopTimedOut(child);
+    if (!observedCounterScopeEmpty) {
+      timedOut = true;
+      issues.push('process-tree-did-not-drain-before-observation-deadline');
     }
     execution.startupMs = startupMs; execution.exit = exit; execution.timedOut = timedOut; execution.lifecycle = lifecycle;
     execution.rendererReceipt = receipt;
@@ -218,12 +222,16 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
     for (const name of ['benchmark-renderer.jsonl', 'benchmark-receipt.json']) {
       try {
         const destination = path.join(directory, `${shell}-${iteration}-${name}`);
-        await fs.copyFile(path.join(data, name), destination);
-        execution.recordings[name] = { name: path.basename(destination), sha256: await hashFile(destination) };
+        // Validate the same bytes that will be published. Copying first could
+        // publish arbitrary malformed content even when JSON parsing rejects it.
+        const content = await fs.readFile(path.join(data, name), 'utf8');
         if (name.endsWith('.jsonl')) {
-          execution.rendererSamples = (await fs.readFile(destination, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
-          if (execution.rendererSamples.some((sample, index) => sample.nonce !== nonce || sample.sequence !== index)) throw new Error('Renderer stream identity or sequence is incomplete');
-        }
+          const records = content.trim().split('\n').filter(Boolean).map(JSON.parse);
+          if (records.some((sample, index) => sample.nonce !== nonce || sample.sequence !== index)) throw new Error('Renderer stream identity or sequence is incomplete');
+          execution.rendererSamples = records;
+        } else if (hashJson(JSON.parse(content)) !== hashJson(receipt)) throw new Error('Product receipt changed after observation');
+        await fs.writeFile(destination, content, { mode: 0o600 });
+        execution.recordings[name] = { name: path.basename(destination), sha256: await hashFile(destination) };
       } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
     if (scenario.workload.companion) execution.companionEvidence = execution.rendererSamples?.flatMap(record => record.targets ?? []).map(target => target.companion).filter(value => value?.diagnostic).at(-1) ?? execution.companionEvidence;
@@ -236,26 +244,48 @@ export async function measureRun(plan, preflightResult, scenario, shell, iterati
     execution.status = issues.length ? 'incomplete' : 'measured-awaiting-review';
     if (await hashDirectory(scenario.fixtureDirectory) !== bound.inputs.dataSha256) throw new Error('Source fixture was changed during the run');
     return execution;
-  } catch (error) { execution.cleanupUncertain ||= error.cleanupUncertain === true; execution.status = 'failed'; issues.push(`measurement-failed:${error.code ?? error.message}`); return execution; }
+  } catch (error) { execution.cleanupUncertain ||= error.cleanupUncertain === true; execution.status = 'failed'; issues.push(`measurement-failed:${failureReason(error)}`); return execution; }
   finally {
-    if (companionTask) {
-      companionTask.cancel(); const task = await companionTask.join();
-      execution.companionInputTask = { phase: task.phase, settled: task.settled, released: task.result?.released ?? task.error?.pointerReleased ?? null };
-      execution.cleanupUncertain ||= task.error?.cleanupUncertain === true;
-      if (task.error) { execution.status = 'failed'; issues.push('companion-input-task-failed-or-cancelled'); }
+    // Polling may miss a child that forks and reparents between samples. Neither
+    // an empty counter scope nor the current nativeDrain receipts prove that all
+    // original CEF/Chromium descendants stopped. Until a launch-bound owner can
+    // provide that proof, every launched profile remains owned and later A/B
+    // runs must stop. A recycled numeric PID/PGID must never become a kill target.
+    execution.observedCounterScopeEmpty = observedCounterScopeEmpty;
+    execution.ownershipDrainConfirmed = false;
+    execution.startupMs = startupMs; execution.exit = exit; execution.timedOut = timedOut; execution.lifecycle = lifecycle;
+    if (child?.pid) {
+      execution.rootPid = child.pid;
+      execution.cleanupUncertain = true;
+      execution.retainedPrivateDirectory = root;
+      issues.push('desktop-process-ownership-unresolved');
+      child.unref(); // Retain observation facts without pretending this stops it.
     }
-    if (child && !exit && !timedOut) await stopTimedOut(child);
     try {
-      await collector.close();
+      if (companionTask) {
+        companionTask.cancel(); const task = await companionTask.join();
+        execution.companionInputTask = { phase: task.phase, settled: task.settled, released: task.result?.released ?? task.error?.pointerReleased ?? null };
+        execution.cleanupUncertain ||= task.error?.cleanupUncertain === true;
+        if (task.error) { execution.status = 'failed'; issues.push('companion-input-task-failed-or-cancelled'); }
+      }
+      try { await collector.close(); }
+      catch (error) { execution.cleanupUncertain = true; issues.push(`collector-close-failed:${failureReason(error)}`); }
       try { execution.fixtureServices = await hooks.afterRun?.({ services, root, scenario, shell, iteration }); }
-      catch (error) { execution.cleanupUncertain ||= error.cleanupUncertain === true; execution.status = 'failed'; issues.push(`fixture-drain-failed:${error.code ?? error.message}`); }
+      catch (error) { execution.cleanupUncertain ||= error.cleanupUncertain === true; execution.status = 'failed'; issues.push(`fixture-drain-failed:${failureReason(error)}`); }
       if (execution.cleanupUncertain) {
         execution.status = 'failed';
         execution.retainedPrivateDirectory = root;
         issues.push('fixture-process-ownership-unresolved-private-directory-retained');
       }
+      execution.exit = exit; // A direct-child exit may arrive while other owners finish teardown.
       execution.summary = summarizeRun(execution);
       await save(path.join(directory, `${shell}-${iteration}.json`), execution);
+    } catch (error) {
+      // A failed report write must not erase the outer suite's obligation to
+      // preserve its shared seed workspace while the original scope may live.
+      if (execution.cleanupUncertain) Object.assign(error, { cleanupUncertain: true, retainedPrivateDirectory: root,
+        retainedPrivateDirectories: [{ scenario: scenario.name, shell, iteration, path: root }] });
+      throw error;
     } finally {
       // These are only newly created private benchmark copies, never source data.
       if (!execution.cleanupUncertain) await fs.rm(root, { recursive: true, force: true });
@@ -281,9 +311,15 @@ export async function runBenchmark(plan, { output, selected = performanceScenari
       }
     }
   }
-  const comparison = compareRuns(plan, checked, runs);
-  await save(path.join(output, 'comparison.json'), comparison);
-  return comparison;
+  try {
+    const comparison = compareRuns(plan, checked, runs);
+    await save(path.join(output, 'comparison.json'), comparison);
+    return comparison;
+  } catch (error) {
+    if (runs.some(run => run.cleanupUncertain)) Object.assign(error, { cleanupUncertain: true,
+      retainedPrivateDirectories: runs.filter(run => run.retainedPrivateDirectory).map(run => ({ scenario: run.scenario, shell: run.shell, iteration: run.iteration, path: run.retainedPrivateDirectory })) });
+    throw error;
+  }
 }
 export function compareRuns(plan, checked, runs) {
   const issues = [], scenarios = [];

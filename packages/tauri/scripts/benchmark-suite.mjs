@@ -117,13 +117,25 @@ export async function runSuite({ pairFile, output, repetitions = 4, manual = fal
       || issue.startsWith('measurement-failed:') || issue.startsWith('fixture-drain-failed:');
     report.status = cleanupUncertain ? 'failed-cleanup' : comparison.status === 'blocked' ? 'blocked' : comparison.scenarios?.some(s => s.pairs.some(p => [...(p.coverage?.electron ?? []), ...(p.coverage?.tauri ?? [])].some(failed)))
       ? 'failed-measurement' : 'observed-not-qualified';
-  } catch (error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'blocked'; report.failure = { code: error.code ?? 'suite-owner-operation-failed', reason: error.message }; }
+  } catch (error) {
+    cleanupUncertain ||= error.cleanupUncertain === true;
+    if (error.retainedPrivateDirectories?.length) report.retainedRunDirectories = error.retainedPrivateDirectories;
+    else if (error.retainedPrivateDirectory) report.retainedRunDirectories = [{ path: error.retainedPrivateDirectory }];
+    report.status = cleanupUncertain ? 'failed-cleanup' : 'blocked';
+    report.failure = { code: error.code ?? 'suite-owner-operation-failed', reason: error instanceof SyntaxError ? 'invalid-json' : error.message };
+  }
   finally {
     if (windowManager) { try { report.cleanup.push({ owner: 'window-manager', ...(await windowManager.stop()) }); } catch(error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'failed-cleanup'; report.cleanup.push({ owner: 'window-manager', reason: error.message }); } }
     if (provider) { try { report.cleanup.push({ owner: 'provider', ...(await provider.stop()) }); } catch (error) { cleanupUncertain ||= error.cleanupUncertain === true; report.status = 'failed-cleanup'; report.cleanup.push({ owner: 'provider', error: error.message, ...error.fixtureCleanup }); } }
     if (root && !cleanupUncertain) await fs.rm(root, { recursive: true, force: true });
     else if (root) report.retainedPrivateDirectory = root;
-    await save(path.join(output, 'suite.json'), report);
+    report.cleanupUncertain = cleanupUncertain;
+    try { await save(path.join(output, 'suite.json'), report); }
+    catch (error) {
+      if (cleanupUncertain) Object.assign(error, { cleanupUncertain: true, retainedPrivateDirectory: root,
+        retainedPrivateDirectories: report.retainedRunDirectories ?? [] });
+      throw error;
+    }
   }
   return report;
 }

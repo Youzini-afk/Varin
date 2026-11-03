@@ -1,6 +1,6 @@
-/** Own only new disposable benchmark workers. A stop acknowledgement is not an
- * exit: wait for the real process, retain forced cleanup as a failed outcome. */
-import { fork, execFile } from 'node:child_process';
+/** Own only new disposable benchmark workers. Await the original owner's stop
+ * and direct process exit; retain private data when either remains uncertain. */
+import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,27 +31,21 @@ export async function startFixtureWorker({ node, env, configuration, timeoutMs =
     child.send({ id, command, ...fields }, error => { if (error) { const entry = pending.get(id); pending.delete(id); entry?.reject(error); } });
   });
   let collector;
-  const force = async () => {
-    // A root exit is not a descendant exit. Retain the original collector and
-    // original detached process group until forced cleanup is observed too.
-    const before = collector ? await collector.sample() : null;
-    if (!exited || before?.processes.length) {
-      if (process.platform === 'win32') {
-        await new Promise(resolve => execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => resolve()));
-      } else {
-        try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-      }
-      if (!exited) await Promise.race([exit, new Promise((_, reject) => setTimeout(() => reject(new Error('Forced fixture exit remains unobserved')), 10000).unref())]);
+  const retainUnresolved = (error, { receipt, ownerStopAcknowledged = false, final } = {}) => {
+    // A sampled empty table cannot prove that a descendant did not fork/detach
+    // between observations. Never signal a reusable numeric PID or process
+    // group to manufacture a cleanup receipt after the original owner failed.
+    if (child.pid) {
+      error.cleanupUncertain = true;
+      error.fixtureCleanup = { receipt, pid: child.pid, exit: exitResult ?? null,
+        drained: false, forced: false, ownerStopAcknowledged,
+        observedCounterScopeEmpty: !!final && !final.processes.length && final.coverage?.rootState === 'exited',
+        termination: 'not-attempted-without-launch-bound-process-scope' };
+      // Keep the actual worker and its private data intact. Do not keep this
+      // reporting controller alive solely through an unresolved child's IPC.
+      child.unref(); child.channel?.unref();
     }
-    if (collector) {
-      const deadline = performance.now() + 10000;
-      while (performance.now() < deadline) {
-        const sample = await collector.sample();
-        if (!sample.processes.length && sample.coverage.rootState === 'exited' && sample.coverage.processCountersComplete) return;
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      throw new Error('Forced fixture process-tree drain remains unobserved; keep its private directory');
-    }
+    return error;
   };
 
   try {
@@ -62,18 +56,29 @@ export async function startFixtureWorker({ node, env, configuration, timeoutMs =
     return { pid: child.pid, startup, origin: started.origin, credentials: started.credentials, request,
       sample: () => collector.sample(),
       async stop() {
-        let receipt, forced = false;
+        let receipt, final, ownerStopAcknowledged = false;
         try {
           receipt = (await request('inspect')).receipt;
           await collector.sample();
-          await request('stop');
+          await request('stop'); ownerStopAcknowledged = true;
           await Promise.race([exit, new Promise((_, reject) => setTimeout(() => reject(new Error('Fixture owner acknowledged stop but process did not exit')), 10000).unref())]);
-          const final = await collector.sample();
+          final = await collector.sample();
           if (exitResult.code !== 0 || final.processes.length || final.coverage.rootState !== 'exited' || !final.coverage.processCountersComplete) throw new Error('Fixture owner process tree did not drain');
-          return { receipt, exit: exitResult, drained: true, forced, final };
-        } catch (error) { forced = true; try { await force(); } catch (cleanupError) { throw Object.assign(cleanupError, { cleanupUncertain: true }); } throw Object.assign(error, { fixtureCleanup: { receipt, exit: exitResult, drained: false, forced } }); }
-        finally { await collector.close(); }
+          // The fixture's original stop protocol awaits its actual owner (the
+          // Host rejects incomplete native shutdown), then its direct process
+          // exits. The counter table is supporting observation, not that proof.
+          await collector.close();
+          return { receipt, exit: exitResult, drained: true, forced: false, ownerStopAcknowledged, final };
+        } catch (error) {
+          retainUnresolved(error, { receipt, ownerStopAcknowledged, final });
+          try { await collector.close(); } catch { /* Preserve the original failure and unresolved owner. */ }
+          throw error;
+        }
       },
     };
-  } catch (error) { try { await force(); } catch (cleanupError) { throw Object.assign(cleanupError, { cleanupUncertain: true }); } finally { await collector?.close(); } throw error; }
+  } catch (error) {
+    retainUnresolved(error);
+    try { await collector?.close(); } catch { /* Preserve cleanup uncertainty on the original setup error. */ }
+    throw error;
+  }
 }
