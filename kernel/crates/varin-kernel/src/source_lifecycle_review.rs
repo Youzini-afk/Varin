@@ -251,7 +251,7 @@ impl Review {
                                 schema
                                     .requirements
                                     .as_ref()
-                                    .is_some_and(|required| required.accepts_mode(p.mode))
+                                    .is_none_or(|required| required.accepts_mode(p.mode))
                             })
                             .map(|schema| schema.name)
                             .collect::<Vec<_>>();

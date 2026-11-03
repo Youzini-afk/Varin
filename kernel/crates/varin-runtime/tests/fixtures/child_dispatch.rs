@@ -536,7 +536,11 @@ impl Fixture {
                 use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
                 ChildCapabilityDescriptor { process: matches!(tool.name.as_str(), "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process"), name: tool.name.clone(), version: tool.version.clone(),
                     source_requirement: match tool.name.as_str() {
-                        "file_read" => ChildSourceRequirement::Source,
+                        "file_read" => tool.requirements.as_ref().map_or(ChildSourceRequirement::None, |requirements| match requirements.source {
+                            ToolSourceRequirement::Source => ChildSourceRequirement::Source,
+                            ToolSourceRequirement::Physical => ChildSourceRequirement::Physical,
+                            ToolSourceRequirement::Live => ChildSourceRequirement::Live,
+                        }),
                         "file_write" | "file_edit" | "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process" => ChildSourceRequirement::Physical,
                         _ => ChildSourceRequirement::None,
                     }, default_presets: Vec::new() }

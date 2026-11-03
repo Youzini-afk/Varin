@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { KernelClient } from './kernel-client.js';
-import { admitMaterializedRoot, admitRunSourceAuthority, originalMaterializationLocation } from './source-launch.js';
+import { admitMaterializedRoot, admitRunSourceAuthority, originalMaterializationLocation, sourceToolSchemas } from './source-launch.js';
 
 it('requires the original materialized directory and rejects substitution inside the same managed root', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'varin-original-materialization-'));
@@ -53,5 +53,40 @@ it('uses current Documents admission before minting a source grant and revokes i
     const unbound = new AgentRuntimeClient(client);
     await expect(admitRunSourceAuthority(client, unbound, source)).rejects.toMatchObject({ code: 'source_unavailable' });
     expect(kernel.issueGrant).toHaveBeenCalledOnce();
+  } finally { await f.cleanup(); }
+});
+
+
+it('binds hybrid file_read paths only to the original admitted Source', async () => {
+  const f = await createDocumentAuthorityHarness();
+  try {
+    f.setTrusted(true);
+    const fileRead = { name: 'file_read', version: '1', description: '', schema: { type: 'object' } };
+    const resourceRead = { name: 'resource_read', version: '4', description: '', schema: { type: 'object' } };
+    const selected = { source: { mode: 'fixed_branch' as const, resource_owner: { kind: 'local' as const },
+      workspace_id: f.identity.workspaceId, execution_workspace_id: f.identity.workspaceId,
+      branch_id: 'fixed', revision: 7, live_root: null }, tools: [fileRead, resourceRead], extension_bindings: [] };
+    const selection = selected as unknown as Parameters<typeof sourceToolSchemas>[0];
+    const source = { resourceOwner: selected.source.resource_owner, workspaceId: f.identity.workspaceId,
+      executionWorkspaceId: f.identity.workspaceId, runId: 'run', mode: 'fixed_branch' as const,
+      branchId: 'fixed', revision: 7, tools: sourceToolSchemas(selection).map(tool => tool.name) as ['file_read'] };
+    const kernel = { subscribeExit() {}, onToolReleased() {},
+      scoped: () => ({ readBranch: vi.fn(async () => ({ workspaceId: source.workspaceId, branchId: 'fixed', revision: 7, view: 'revision', root: 'original-root' })), executionViewInspect: async () => null }),
+      issueGrant: vi.fn(async (input: { grantId: string }) => ({ grantId: input.grantId })), revokeGrant: vi.fn(async () => {}),
+      agentRuntimeRequest: vi.fn(async (method: string) => {
+        if (method === 'runtime.run.inspect') return { id: 'run', thread_id: 'thread', state: 'runnable' };
+        if (method === 'runtime.launch.inspect') return { selection };
+        throw new Error(`Unexpected source call: ${method}`);
+      }) };
+    const client = kernel as unknown as KernelClient;
+    const runtime = new AgentRuntimeClient(client, undefined, undefined, undefined, undefined, undefined, f.authority.admitWorkspaceRegistration);
+    const admitted = await admitRunSourceAuthority(client, runtime, source);
+    expect(admitted.toolBinding.enabledTools).toEqual(['file_read']);
+    expect(admitted.toolBinding.fileSource).toEqual({ branchId: 'fixed', revision: 7 });
+    expect(kernel.issueGrant).toHaveBeenCalledOnce();
+    expect(sourceToolSchemas({ ...selection, source: null })).toEqual([]);
+    expect(sourceToolSchemas({ ...selection, extension_bindings: [{ tool: fileRead }] as typeof selection.extension_bindings })).toEqual([]);
+    expect(sourceToolSchemas({ ...selection, mcp_binding: { tools: [fileRead] } as NonNullable<typeof selection.mcp_binding> })).toEqual([]);
+    await admitted.release();
   } finally { await f.cleanup(); }
 });
