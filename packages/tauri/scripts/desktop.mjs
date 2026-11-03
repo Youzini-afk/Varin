@@ -15,8 +15,8 @@ export async function desktopInvocation(command, directory) {
   if (command !== 'dev' && command !== 'build') throw new Error('Only development dev/build are available; production distribution remains gated');
   directory = path.resolve(directory);
   await verifyRuntimeManifest(directory, { platform: process.platform, architecture: process.arch });
-  // These commands never install or publish. resources is deliberately an array
-  // to replace (not merge with) the checked-in bundle map. A debug runtime comes
+  // These commands never install or publish. No runtime resources are bundled;
+  // a debug runtime comes
   // from its explicit, verified generation, never a shared mutable resource link.
   const config = { build: { frontendDist: path.join(directory, 'frontend') }, bundle: { active: false, resources: [] } };
   const require = createRequire(path.join(packageRoot, 'package.json'));

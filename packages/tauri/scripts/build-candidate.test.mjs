@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { discoverCef, engineInventory } from './build-candidate.mjs';
+import { candidateConfiguration, discoverCef, engineInventory } from './build-candidate.mjs';
 import { pinnedCefLicense } from './cef-license.mjs';
 
 test('the pinned Tauri CLI prepares release builds without rewriting committed manifests', async t => {
@@ -17,8 +17,9 @@ test('the pinned Tauri CLI prepares release builds without rewriting committed m
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const source = path.resolve(import.meta.dirname, '../src-tauri'), native = path.join(root, 'src-tauri');
   await fs.mkdir(path.join(native, 'src'), { recursive: true });
-  await fs.mkdir(path.join(root, 'frontend'));
-  await fs.writeFile(path.join(root, 'frontend/index.html'), '<!doctype html><title>Prepare</title>');
+  const runtime = path.join(root, 'runtime');
+  await fs.mkdir(path.join(runtime, 'frontend'), { recursive: true });
+  await fs.writeFile(path.join(runtime, 'frontend/index.html'), '<!doctype html><title>Prepare</title>');
   const originals = new Map();
   for (const name of ['Cargo.toml', 'Cargo.lock', 'tauri.conf.json', 'build.rs']) {
     const bytes = await fs.readFile(path.join(source, name));
@@ -30,11 +31,11 @@ test('the pinned Tauri CLI prepares release builds without rewriting committed m
   await fs.writeFile(path.join(native, 'src/lib.rs'), '');
   // The actual CLI owns preparation and feature normalization. Node replaces
   // only the compiler, and a receipt proves preparation reached that boundary.
-  await fs.writeFile(path.join(native, 'build'), `require('node:fs').writeFileSync('runner.json', JSON.stringify(process.argv.slice(2))); process.exit(86);\n`);
+  await fs.writeFile(path.join(native, 'build'), `require('node:fs').writeFileSync('runner.json', JSON.stringify({args:process.argv.slice(2),config:JSON.parse(process.env.TAURI_CONFIG||'{}')})); process.exit(86);\n`);
   const require = createRequire(new URL('../package.json', import.meta.url));
   const cli = path.join(path.dirname(require.resolve('@tauri-apps/cli/package.json')), 'tauri.js');
   const result = spawnSync(process.execPath, [cli, 'build', '--no-bundle', '--ci', '--features', 'desktop',
-    '--runner', process.execPath, '--config', JSON.stringify({ build: { frontendDist: '../frontend' }, bundle: { active: false, resources: [] } })], {
+    '--runner', process.execPath, '--config', JSON.stringify(candidateConfiguration(runtime))], {
     cwd: root, encoding: 'utf8', windowsHide: true, timeout: 30_000,
     env: { ...process.env, CARGO_NET_OFFLINE: 'true', CARGO_HOME: path.join(root, 'cargo-home'), CARGO_TARGET_DIR: path.join(root, 'target') },
   });
@@ -43,10 +44,87 @@ test('the pinned Tauri CLI prepares release builds without rewriting committed m
   const runner = await fs.readFile(path.join(native, 'runner.json'), 'utf8').catch(error => {
     throw new Error(`CLI did not reach the no-build runner: ${result.stdout}\n${result.stderr}`, { cause: error });
   });
-  assert.ok(JSON.parse(runner).includes('--release'));
+  const prepared = JSON.parse(runner);
+  assert.ok(prepared.args.includes('--release'));
+  assert.deepEqual(prepared.config.bundle.resources, { [runtime + path.sep]: 'runtime/' });
+  assert.equal(prepared.config.build.frontendDist, path.join(runtime, 'frontend'));
   for (const [name, original] of originals) {
     assert.deepEqual(await fs.readFile(path.join(native, name)), original, `${name} changed during CLI preparation`);
   }
+});
+
+test('the pinned CLI bundles only the prepared runtime after merging the checked-in configuration', async t => {
+  // Linux's small .deb path exercises the real CLI/config/resource copier without
+  // compiling, downloading dependencies or running Varin. It does not prove the
+  // macOS app bundle, CEF framework/helper layout or installed-product startup.
+  if (process.platform !== 'linux') {
+    t.skip('The resource-merge regression uses the Linux deb bundler');
+    return;
+  }
+  for (const command of ['cargo', 'rustc', 'dpkg-deb']) {
+    if (spawnSync(command, ['--version'], { timeout: 10_000 }).status !== 0) {
+      t.skip(`The resource-merge regression requires ${command} for metadata or archive inspection`);
+      return;
+    }
+  }
+  if (!await fs.stat('/bin/true').then(stat => stat.isFile(), error => {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  })) {
+    t.skip('The resource-merge regression requires /bin/true as an unexecuted binary placeholder');
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-tauri-bundle-merge-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const source = path.resolve(import.meta.dirname, '../src-tauri'), native = path.join(root, 'src-tauri');
+  const target = path.join(root, 'target'), runtime = path.join(root, 'generations/prepared-runtime');
+  await fs.mkdir(path.join(native, 'src'), { recursive: true });
+  await fs.mkdir(path.join(target, 'release'), { recursive: true });
+  await fs.mkdir(path.join(runtime, 'frontend'), { recursive: true });
+  await fs.writeFile(path.join(runtime, 'frontend/index.html'), '<!doctype html><title>Prepared runtime</title>');
+  await fs.writeFile(path.join(runtime, 'generation.txt'), 'only the selected immutable generation');
+  await fs.mkdir(path.join(root, 'generations/other-runtime'));
+  await fs.writeFile(path.join(root, 'generations/other-runtime/unselected.txt'), 'must not be bundled');
+  const config = JSON.parse(await fs.readFile(path.join(source, 'tauri.conf.json'), 'utf8'));
+  config.bundle.icon = config.bundle.icon.map(icon => path.resolve(source, icon));
+  // Do not run application hooks even if one is added to the base configuration.
+  config.build.beforeBundleCommand = null;
+  await fs.writeFile(path.join(native, 'tauri.conf.json'), JSON.stringify(config));
+  await fs.writeFile(path.join(native, 'Cargo.toml'), `[package]\nname = "varin"\nversion = ${JSON.stringify(config.version)}\nedition = "2021"\ndescription = "Resource merge probe"\nlicense = "AGPL-3.0-only"\nauthors = ["Varin"]\n[features]\ndesktop = []\n`);
+  await fs.writeFile(path.join(native, 'src/main.rs'), 'fn main() {}\n');
+  await fs.copyFile('/bin/true', path.join(target, 'release/varin'));
+  const env = { ...process.env, CARGO_NET_OFFLINE: 'true', CARGO_HOME: path.join(root, 'cargo-home'), CARGO_TARGET_DIR: target };
+  delete env.CARGO_BUILD_TARGET;
+  delete env.TAURI_CONFIG;
+  const invoke = (command, args) => spawnSync(command, args, { cwd: root, env, encoding: 'utf8', timeout: 30_000 });
+  const require = createRequire(new URL('../package.json', import.meta.url));
+  const cli = path.join(path.dirname(require.resolve('@tauri-apps/cli/package.json')), 'tauri.js');
+  const bundle = () => invoke(process.execPath, [cli, 'bundle', '--ci', '--no-sign', '--no-binary-patching',
+    '--bundles', 'deb', '--features', 'desktop', '--config', JSON.stringify(candidateConfiguration(runtime))]);
+  const result = bundle();
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const bundles = path.join(target, 'release/bundle/deb');
+  const archives = (await fs.readdir(bundles)).filter(name => name.endsWith('.deb'));
+  assert.equal(archives.length, 1);
+  const extracted = path.join(root, 'extracted');
+  const extraction = invoke('dpkg-deb', ['--extract', path.join(bundles, archives[0]), extracted]);
+  assert.ifError(extraction.error);
+  assert.equal(extraction.status, 0, `${extraction.stdout}\n${extraction.stderr}`);
+  const resources = path.join(extracted, 'usr/lib', config.productName);
+  assert.deepEqual((await fs.readdir(resources, { recursive: true })).sort(),
+    ['runtime', 'runtime/frontend', 'runtime/frontend/index.html', 'runtime/generation.txt']);
+  for (const file of ['frontend/index.html', 'generation.txt']) {
+    assert.deepEqual(await fs.readFile(path.join(resources, 'runtime', file)), await fs.readFile(path.join(runtime, file)));
+  }
+  // Capturing TAURI_CONFIG alone cannot detect this regression: the CLI folds
+  // overlays before merging with the base, so a stale base map survives.
+  config.bundle.resources = { '../resources/runtime/': 'runtime/' };
+  await fs.writeFile(path.join(native, 'tauri.conf.json'), JSON.stringify(config));
+  const stale = bundle();
+  assert.ifError(stale.error);
+  assert.notEqual(stale.status, 0);
+  assert.match(`${stale.stdout}\n${stale.stderr}`, /resource path `\.\.\/resources\/runtime` doesn't exist/);
 });
 
 test('retains the pinned CEF license when the upstream downloader omits it and rejects drift', async t => {

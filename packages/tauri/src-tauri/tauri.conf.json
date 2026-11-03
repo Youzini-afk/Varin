@@ -18,9 +18,7 @@
   },
   "bundle": {
     "active": false,
-    "resources": {
-      "../resources/runtime/": "runtime/"
-    },
+    "resources": [],
     "category": "DeveloperTool",
     "shortDescription": "Agent workspace for code, research and office work",
     "license": "AGPL-3.0-only",

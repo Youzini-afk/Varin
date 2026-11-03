@@ -14,6 +14,14 @@ const repository=path.resolve(import.meta.dirname,'../../..'),packageRoot=path.r
 const lock=JSON.parse(await fs.readFile(new URL('./cef-runtime.lock.json',import.meta.url),'utf8'));
 const require=createRequire(path.join(packageRoot,'package.json'));
 function run(command,args,options={}){return execFileSync(command,args,{cwd:packageRoot,env:process.env,stdio:'inherit',windowsHide:true,...options});}
+export function candidateConfiguration(runtime){
+  runtime=path.resolve(runtime);
+  // The CLI first folds --config overlays together, then merges the result
+  // into the checked-in configuration. An array reset in an earlier overlay
+  // therefore cannot remove old map entries. The base owns no runtime path;
+  // this one overlay supplies the exact immutable candidate generation.
+  return{build:{frontendDist:path.join(runtime,'frontend')},bundle:{active:true,resources:{[runtime+path.sep]:'runtime/'},macOS:{minimumSystemVersion:'13.0',infoPlist:path.join(packageRoot,'installer/Info.plist'),entitlements:path.join(repository,'packages/electron/resources/entitlements.mac.plist')}}};
+}
 export async function discoverCef(root,platform,architecture){
   const pin=lock.targets[`${platform}-${architecture}`];if(!pin)throw new Error('Unsupported CEF target');
   const name=`cef_binary_${lock.version}_${pin.upstream}_minimal.tar.bz2`;
@@ -48,9 +56,7 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
   if(signed&&!process.env.VARIN_TAURI_UPDATER_PUBLIC_KEY)throw new Error('Supply the release updater public key before compiling a signed candidate');
   await fs.mkdir(output,{recursive:false});
   const cli=path.join(path.dirname(require.resolve('@tauri-apps/cli/package.json')),'tauri.js');
-  const reset={build:{frontendDist:path.join(runtime,'frontend')},bundle:{active:true,resources:[]}};
-  const config={bundle:{resources:{[runtime+path.sep]:'runtime/'},macOS:{minimumSystemVersion:'13.0',infoPlist:path.join(packageRoot,'installer/Info.plist'),entitlements:path.join(repository,'packages/electron/resources/entitlements.mac.plist')}}};
-  const configs=['--config',JSON.stringify(reset),'--config',JSON.stringify(config)];
+  const configs=['--config',JSON.stringify(candidateConfiguration(runtime))];
   run(process.execPath,[cli,'build','--no-bundle','--ci','--features','desktop',...configs,...(process.platform==='win32'?['--','--lib']:[])]);
   const metadata=JSON.parse(run(process.env.CARGO||'cargo',['metadata','--no-deps','--format-version','1'],{cwd:path.join(packageRoot,'src-tauri'),stdio:'pipe',encoding:'utf8'}));
   const cargo=path.join(metadata.target_directory,...(process.env.CARGO_BUILD_TARGET?[process.env.CARGO_BUILD_TARGET]:[]),'release');
