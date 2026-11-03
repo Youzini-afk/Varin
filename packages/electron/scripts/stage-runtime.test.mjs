@@ -61,3 +61,30 @@ test('the production tree excludes checkout artifacts, keeps versioned Node reso
   assert.ok(result.unpackPatterns.includes('node_modules/triviumdb-upgrade-0.8/**/*'));
   assert.equal(JSON.parse(await fs.readFile(path.join(destination, 'package.json'), 'utf8')).dependencies['@varin/web'], '1.0.0');
 });
+
+test('an independent Node Host reuses staging without copying the Electron shell or frontend build dependencies', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-stage-node-host-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const write = async (name, content) => { const file = path.join(root, name); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, content); };
+  const pkg = async (directory, name, dependencies = {}) => {
+    await write(`${directory}/package.json`, JSON.stringify({ name, version: '1.0.0', type: 'module', dependencies }));
+    await write(`${directory}/index.js`, 'export {};');
+  };
+  await pkg('packages/tauri', '@varin/tauri', { '@varin/web': 'workspace:*', '@tauri-apps/api': '3.0.0-alpha.3' });
+  await pkg('packages/tauri/node_modules/@varin/web', '@varin/web', { native: '1.0.0' });
+  await pkg('packages/tauri/node_modules/native', 'native');
+  await write('packages/tauri/node_modules/native/LICENSE', 'native legal notice');
+  await write('packages/tauri/node_modules/native/native.node', 'native binary');
+  await write('host/desktop-host.js', 'export {};');
+  await write('host/runtime/LICENSE.parser', 'parser legal notice');
+  const manifest = { name: '@varin/tauri-host-runtime', version: '1.0.0', type: 'module', dependencies: { '@varin/web': 'workspace:*' } };
+  const destination = path.join(root, 'product');
+  await stageRuntime({ repository: root, destination, hostDirectory: path.join(root, 'host'),
+    appDirectory: path.join(root, 'packages/tauri'), entries: [], manifest });
+  assert.equal(manifest.dependencies['@varin/web'], 'workspace:*', 'staging must not mutate caller metadata');
+  assert.equal(JSON.parse(await fs.readFile(path.join(destination, 'package.json'), 'utf8')).name, '@varin/tauri-host-runtime');
+  assert.equal(await fs.readFile(path.join(destination, 'node_modules/@varin/web/server/desktop-host.js'), 'utf8'), 'export {};');
+  assert.equal(await fs.readFile(path.join(destination, 'node_modules/native/LICENSE'), 'utf8'), 'native legal notice');
+  assert.equal(await fs.readFile(path.join(destination, 'node_modules/@varin/web/server/runtime/LICENSE.parser'), 'utf8'), 'parser legal notice');
+  for (const missing of ['bootstrap.mjs', 'dist-bundle', 'node_modules/@tauri-apps', 'node_modules/electron']) await assert.rejects(fs.access(path.join(destination, missing)));
+});

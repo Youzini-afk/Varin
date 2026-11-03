@@ -1,3 +1,4 @@
+import { prepareDesktopRenderer } from './desktop-bootstrap';
 import { readCompanionWorldPlate, verifyCompanionWorldPlate } from './companionWorldPlate';
 import { companionAssetBase } from '@varin/application-client';
 
@@ -46,6 +47,7 @@ if (new URLSearchParams(window.location.search).get('scene') === '1') {
     root.append(image);
   }
 } else {
+  await prepareDesktopRenderer();
   const [{ createConfiguredWebAPIs }, { renderCompanionApp }] = await Promise.all([
     import('./runtimeConfig'), import('@varin/ui/apps/renderCompanionApp'),
   ]);

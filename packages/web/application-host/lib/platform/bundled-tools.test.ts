@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { augmentPathWithBundledRipgrep, resolveBundledRipgrepBinDir } from './bundled-tools.js';
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
 it('preserves user tool precedence and merges Windows PATH case-insensitively', () => {
   const env: NodeJS.ProcessEnv = { Path: 'C:\\UserTools;C:\\Windows;C:/windows/' };
@@ -33,4 +33,13 @@ it('does not treat a package manager JavaScript shim as a native tool', () => {
   fs.mkdirSync(path.join(root, 'bin'));
   fs.writeFileSync(path.join(root, 'bin', 'rg.mjs'), '#!/usr/bin/env node\n');
   expect(resolveBundledRipgrepBinDir({ packageJsonPath: path.join(root, 'package.json'), resourcesPath: root })).toBeNull();
+});
+
+it('finds the managed Node release tools without Electron process.resourcesPath', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-rg-managed-')); roots.push(root);
+  fs.mkdirSync(path.join(root, 'tools'));
+  const target = path.join(root, 'tools', process.platform === 'win32' ? 'rg.exe' : 'rg');
+  fs.writeFileSync(target, 'packaged-native-fixture'); fs.chmodSync(target, 0o755);
+  vi.stubEnv('VARIN_RESOURCES_PATH', root);
+  expect(resolveBundledRipgrepBinDir()).toBe(path.join(root, 'tools'));
 });

@@ -1,3 +1,4 @@
+import { getDesktopRuntime } from '@/lib/desktopRuntime';
 import { create } from 'zustand';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { usePreferencesStore } from './usePreferencesStore';
@@ -5,7 +6,7 @@ import {
   checkForDesktopUpdates,
   downloadDesktopUpdate,
   restartToApplyUpdate,
-  isElectronShell,
+  isDesktopShell,
   isWebRuntime,
 } from '@/lib/desktop';
 import { runtimeFetch } from '@varin/application-client';
@@ -38,11 +39,11 @@ interface UpdateStore extends UpdateState {
 type ClientRuntime = 'desktop' | 'web' | 'mobile';
 
 function detectArch(): 'arm64' | 'x64' | 'unknown' {
-  const electronArch = typeof window !== 'undefined'
-    ? window.__VARIN_ELECTRON__?.arch?.toLowerCase?.()
+  const desktopArch = typeof window !== 'undefined'
+    ? getDesktopRuntime()?.arch?.toLowerCase?.()
     : undefined;
-  if (electronArch === 'arm64' || electronArch === 'aarch64') return 'arm64';
-  if (electronArch === 'x64' || electronArch === 'amd64' || electronArch === 'x86_64') return 'x64';
+  if (desktopArch === 'arm64' || desktopArch === 'aarch64') return 'arm64';
+  if (desktopArch === 'x64' || desktopArch === 'amd64' || desktopArch === 'x86_64') return 'x64';
 
   const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & { userAgentData?: { architecture?: string } }).userAgentData : undefined;
   const fromUAData = nav?.architecture?.toLowerCase?.();
@@ -71,7 +72,7 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
   params.set('arch', detectArch());
   params.set('platform', detectPlatform());
   if (runtime === 'desktop') {
-    params.set('appType', 'desktop-electron');
+    params.set('appType', getDesktopRuntime()?.runtime === 'tauri' ? 'desktop-tauri' : 'desktop-electron');
     return params;
   }
 
@@ -124,7 +125,7 @@ function detectRuntimeType(): 'desktop' | 'web' | 'mobile' | null {
   if (isCapacitorApp()) {
     return 'mobile';
   }
-  if (isElectronShell()) {
+  if (isDesktopShell()) {
     return 'desktop';
   }
   if (isWebRuntime()) return 'web';

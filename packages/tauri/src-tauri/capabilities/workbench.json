@@ -1,0 +1,7 @@
+{
+  "identifier": "workbench",
+  "description": "Only packaged Varin workbench windows can receive their own native events. Browser content has no desktop capability.",
+  "local": true,
+  "windows": ["main", "workbench-*", "mini-chat-*", "companion-*"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

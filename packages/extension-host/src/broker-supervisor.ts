@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from "@varin/protocol/node/runtime";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { fork, type ChildProcess } from "node:child_process";
@@ -220,7 +221,9 @@ export class ChildBrokeredHostTransport implements BrokeredHostTransport {
     this.#onCrash = options.onCrash;
     this.#requestFromChild = options.requestFromChild;
     this.#child = (options.forkProcess ?? fork)(options.brokerScript, [], {
-      env: process.env,
+      execPath: resolveNodeRuntime().executable,
+      execArgv: [],
+      env: resolveNodeRuntime().env,
       serialization: "json",
       stdio: ["ignore", "ignore", "ignore", "ipc"],
     });

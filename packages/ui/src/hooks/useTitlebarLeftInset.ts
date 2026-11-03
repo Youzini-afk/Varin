@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { getElectronPlatform, invokeDesktop, isDesktopShell, usesFramelessElectronChrome } from '@/lib/desktop';
+import { getDesktopPlatform, invokeDesktop, isDesktopShell, usesFramelessDesktopChrome } from '@/lib/desktop';
 import { useTabletStandalonePwaRuntime } from '@/lib/device';
 
 /** Each workbench owns its titlebar, including when it is the first shell mounted.
  * Reserve native controls directly rather than inheriting another shell's CSS side effect. */
 export function useTitlebarLeftInset(contentInset = '0.75rem'): string {
   const desktop = isDesktopShell();
-  const nativeMacControls = desktop && getElectronPlatform() === 'darwin';
+  const nativeMacControls = desktop && getDesktopPlatform() === 'darwin';
   const tabletStandalone = useTabletStandalonePwaRuntime();
   const [fullscreen, setFullscreen] = useState(false);
 
@@ -33,6 +33,6 @@ export function useTitlebarLeftInset(contentInset = '0.75rem'): string {
 
   if (nativeMacControls && !fullscreen) return '5.5rem';
   if (tabletStandalone) return `max(calc(${contentInset} + var(--varin-wco-left-inset, 0px)), 5.5rem)`;
-  if (!desktop || usesFramelessElectronChrome()) return `calc(${contentInset} + var(--varin-wco-left-inset, 0px))`;
+  if (!desktop || usesFramelessDesktopChrome()) return `calc(${contentInset} + var(--varin-wco-left-inset, 0px))`;
   return contentInset;
 }

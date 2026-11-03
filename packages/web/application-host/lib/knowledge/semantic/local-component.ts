@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from '@varin/protocol/node/runtime';
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream, existsSync, readFileSync } from "node:fs";
@@ -183,8 +184,8 @@ const defaultValidatePack = async (pack: ResolvedModelPack, signal?: AbortSignal
     } finally { await worker.terminate(); }
   `.trim();
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", script, entry, pack.root, String(pack.space.dim), pack.space.pooling, String(pack.space.normalize), modelFileName, pack.inferenceWorkerEntry!], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    const child = spawn(resolveNodeRuntime().executable, ["--input-type=module", "-e", script, entry, pack.root, String(pack.space.dim), pack.space.pooling, String(pack.space.normalize), modelFileName, pack.inferenceWorkerEntry!], {
+      env: resolveNodeRuntime().env,
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
     });

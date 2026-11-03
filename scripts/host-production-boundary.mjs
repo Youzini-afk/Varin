@@ -38,12 +38,12 @@ export function inspectHostProductionGraph(root, entries = ['index.js', 'public-
   return [...visited].map(file => path.relative(root, file).replaceAll('\\', '/')).sort();
 }
 
-export function pruneLegacyHostArtifacts(root) {
-  const modules = inspectHostProductionGraph(root);
+export function pruneLegacyHostArtifacts(root, entries = ['index.js', 'public-contract.js']) {
+  const modules = inspectHostProductionGraph(root, entries);
   const removed = walkFiles(root).filter(file => isLegacyHostArtifact(path.relative(root, file)));
   for (const file of removed) fs.unlinkSync(file);
   // Run again against the exact bytes about to be shipped, not only the source.
-  inspectHostProductionGraph(root);
+  inspectHostProductionGraph(root, entries);
   fs.writeFileSync(path.join(root, 'production-boundary.json'), JSON.stringify({ schema: 1, runtimeModules: modules, removedArtifacts: removed.map(file => path.relative(root, file).replaceAll('\\', '/')).sort() }, null, 2) + '\n');
   return { runtimeModules: modules.length, removedArtifacts: removed.length };
 }

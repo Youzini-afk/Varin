@@ -17,7 +17,7 @@ vi.mock('react-dom/client', async original => {
   return { ...actual, createRoot: (...args: Parameters<typeof actual.createRoot>) => (boundary.root = actual.createRoot(...args)) };
 });
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), getRuntimeEndpointGeneration: () => 1, getRuntimeKey: () => 'test-host', subscribeRuntimeEndpointChanged: () => boundary.noop, runtimeFetch: async () => ({ ok: true, json: async () => ({ themes: [] }) }) }));
-vi.mock('@/lib/desktop', () => ({ isElectronShell: () => !window.location.search.includes('review=1'), isDesktopShell: () => true, isDesktopLocalOriginActive: () => true, invokeDesktop: boundary.native }));
+vi.mock('@/lib/desktop', () => ({ isDesktopShell: () => !window.location.search.includes('review=1'), isDesktopLocalOriginActive: () => true, invokeDesktop: boundary.native }));
 vi.mock('@/lib/desktopNative', () => ({ setDesktopWindowTheme: boundary.native }));
 vi.mock('@/lib/persistence', () => ({ updateDesktopSettings: boundary.persist }));
 vi.mock('@/lib/i18n', () => ({ initializeLocale: boundary.noop, I18nProvider: ({ children }: { children: React.ReactNode }) => children, useI18n: () => ({ t: (key: string) => key }) }));

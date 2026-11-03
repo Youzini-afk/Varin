@@ -21,7 +21,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type DesktopCompanionDrawing, type RuntimeAPIs, type ThreadIdentity, type ThreadSnapshot, type ThreadSummary } from '@varin/application-client';
 import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
-import { invokeDesktop, isElectronShell } from '@/lib/desktop';
+import { invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import { readCompanionPackage, readCompanionEndpoints, type CompanionEndpoints, type CompanionPackage } from '@/components/companion/sequencePackage';
 import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
@@ -103,7 +103,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const firstPaint = React.useRef<'pending' | 'ready' | 'failed'>('pending');
   const [presented, setPresented] = React.useState(false);
   React.useEffect(() => {
-    if (review || !error || firstPaint.current !== 'pending' || !isElectronShell()) return;
+    if (review || !error || firstPaint.current !== 'pending' || !isDesktopShell()) return;
     firstPaint.current = 'failed';
     void invokeDesktop('desktop_companion_presented', { status: 'failed', message: error }).catch(() => {});
   }, [error, review]);
@@ -537,7 +537,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     })) return;
     if (firstPaint.current === 'pending') {
       firstPaint.current = 'ready'; setPresented(true);
-      if (!review && isElectronShell()) void invokeDesktop('desktop_companion_presented', { status: 'ready' }).catch(cause => setError(String(cause)));
+      if (!review && isDesktopShell()) void invokeDesktop('desktop_companion_presented', { status: 'ready' }).catch(cause => setError(String(cause)));
     }
     const frame = sequence.frames[exposure]!;
     const cue = frame.cue ? sceneCue(frame.cue, sequence.sceneAction ?? sequence.action) : 'engaged';
@@ -604,7 +604,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const identity = selected?.generation === generation ? selected.identity : null;
   const focusTitle = identity ? attention.snapshot?.branches.find(branch => branch.threadId === identity.threadId && branch.branchId === identity.branchId)?.title
     || threads.find(thread => thread.thread_id === identity.threadId)?.title : undefined;
-  const openThread = (target: ThreadIdentity) => { if (isElectronShell()) void invokeDesktop('desktop_focus_main_window', target).catch(cause => setError(String(cause))); };
+  const openThread = (target: ThreadIdentity) => { if (isDesktopShell()) void invokeDesktop('desktop_focus_main_window', target).catch(cause => setError(String(cause))); };
   const run = snapshot?.activeRun;
   const pending = snapshot?.operations.filter(operation => operation.phase !== 'terminal') ?? [];
   const unknownEffects = snapshot?.operations.filter(operation => operation.effect === 'unknown') ?? [];
@@ -631,7 +631,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     {review ? reviewChrome && <header style={{ ...panel, WebkitAppRegion: 'drag' } as React.CSSProperties}>
       <strong>Varin companion · development review</strong>
       <button style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} onClick={() => { setControlsOpen(false); setAttentionOpen(false); setReviewStageOnly(true); window.scrollTo(0, 0); }}>只看角色/小队</button>
-      <button style={{ float: 'right', WebkitAppRegion: 'no-drag' } as React.CSSProperties} disabled={!isElectronShell()}
+      <button style={{ float: 'right', WebkitAppRegion: 'no-drag' } as React.CSSProperties} disabled={!isDesktopShell()}
         onClick={() => void invokeDesktop('desktop_close_current_window')}>Close</button>
     </header> : presented && <button className="companion-menu-trigger" aria-label={t('companion.controls')} aria-expanded={controlsOpen} onClick={() => setControlsOpen(value => !value)} style={{ position: 'absolute', right: 6, top: 6, zIndex: 20, borderRadius: 20, background: '#20242bca', color: 'white', border: 0, padding: '6px 10px' }}>⋯</button>}
     {reviewChrome && <section style={{ ...panel, margin: 0, padding: '4px 8px' }} aria-label="Director review entry">
@@ -658,7 +658,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     </section>}
     {!review && controlsOpen && showCompanionAttentionSummary(attention, !!identity) && <section data-companion-scene-floor style={{ ...panel, position: 'fixed', bottom: 3, left: 5, right: 5, margin: 0, maxHeight: 104, overflow: 'auto', boxSizing: 'border-box' }}><CompanionAttentionSummary interactionRoute={director.interactionRoute} directorMode={directorMode} onClearInspection={() => setSelected(null)} attention={attention} focusTitle={focusTitle} focused={!!identity} focusStatus={shortStatus} onInspect={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }} /></section>}
     {attentionOpen && <div style={{ position: 'fixed', inset: '6px 4px', maxHeight: 'calc(100vh - 12px)', zIndex: 30, overflow: 'auto' }}><CompanionAttentionPanel interactionRoute={director.interactionRoute} directorMode={directorMode} onClearInspection={() => { setSelected(null); setAttentionOpen(false); }} attention={attention} identity={identity} focusTitle={focusTitle} onFocus={target => { setSelected({ generation, identity: target }); setAttentionOpen(false); }} onOpenThread={openThread} onClose={() => setAttentionOpen(false)} onRefresh={attention.refresh} /></div>}
-    {(reviewChrome || !review && controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{!review && apis.bots && <label style={{ display: 'block' }}>{t('companion.association')}<select aria-label={t('companion.association')} value={productMode === 'bot-coordinator' ? `bot:${associatedBot}` : productMode === 'agent-companion' ? 'agent' : ''} onChange={event => companion.choose(event.target.value.startsWith('bot:') ? event.target.value.slice(4) : null)}>{productMode === 'unknown' && <option value="" disabled>{t('companion.association.unknown')}</option>}{companion.bots.map(bot => <option key={bot.id} value={`bot:${bot.id}`}>{bot.name}</option>)}<option value="agent">{t('companion.association.agent')}</option></select></label>}{directorMode && <><button onClick={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }}>{t('companion.director.projects')}</button><label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />{t('companion.director.hideTaskNames')}</label></>}{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
+    {(reviewChrome || !review && controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isDesktopShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isDesktopShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{!review && apis.bots && <label style={{ display: 'block' }}>{t('companion.association')}<select aria-label={t('companion.association')} value={productMode === 'bot-coordinator' ? `bot:${associatedBot}` : productMode === 'agent-companion' ? 'agent' : ''} onChange={event => companion.choose(event.target.value.startsWith('bot:') ? event.target.value.slice(4) : null)}>{productMode === 'unknown' && <option value="" disabled>{t('companion.association.unknown')}</option>}{companion.bots.map(bot => <option key={bot.id} value={`bot:${bot.id}`}>{bot.name}</option>)}<option value="agent">{t('companion.association.agent')}</option></select></label>}{directorMode && <><button onClick={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }}>{t('companion.director.projects')}</button><label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />{t('companion.director.hideTaskNames')}</label></>}{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isDesktopShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
     {reviewChrome && <section style={panel} aria-label="Development presentation review">
       <label>Preview presentation (not Host state) <select value={presentation} onChange={event => { setPresentation(event.target.value); setReviewRoute(true); setManualReview(false); setPlaying(false); }}>
         {catalog.states.map(state => <option key={state.id} value={state.id} disabled={state.id === 'L04' || state.id === 'L05'}>{state.id} {state.label}{state.id === 'L04' || state.id === 'L05' ? ' · drag/release the character' : ''}</option>)}
@@ -683,7 +683,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       {threadListUnavailable && <p role="status">{t('companion.unavailable')}</p>}
       <p role="status">{review ? connection : health === 'current' ? t('companion.observing') : health === 'unknown' || connection.includes('Error') ? t('companion.unavailable') : t('companion.noThread')}</p>{review && automatic.blocker && <p>Artwork: {automatic.blocker}</p>}{review && <p>Host presentation: {intent.state ?? 'Unclassified execution'} · {intent.reason}</p>}
       {review && snapshot && <p>Run: {run?.state ?? 'No active run'} · cancellation requested: {String(run?.cancel_requested ?? false)} · nonterminal operations: {pending.length} · unknown effects: {unknownEffects.length}</p>}
-      <button disabled={!identity || !isElectronShell()} onClick={() => { if (identity) void invokeDesktop('desktop_focus_main_window', identity); }}>{t('companion.openThread')}</button>
+      <button disabled={!identity || !isDesktopShell()} onClick={() => { if (identity) void invokeDesktop('desktop_focus_main_window', identity); }}>{t('companion.openThread')}</button>
       {review && <small>Observation does not create a thread, mark it read, approve, cancel or restart work. Host intent is read-only. Candidate review remains separate; automatic playback requires accepted, compatible artwork.</small>}
     </section>}
   </main>;

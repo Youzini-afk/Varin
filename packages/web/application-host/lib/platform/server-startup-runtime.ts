@@ -47,6 +47,7 @@ export const createServerStartupRuntime = (dependencies: {
 
   const startListeningAndMaybeTunnel = async ({
     port,
+    fallbackPorts = [],
     bindHost,
     startupTunnelRequest,
     onTunnelReady,
@@ -54,13 +55,23 @@ export const createServerStartupRuntime = (dependencies: {
     bindHost: string;
     onTunnelReady?: (publicUrl: string, connectUrl: string | null) => void;
     port: number;
+    fallbackPorts?: readonly number[];
     startupTunnelRequest?: StartupTunnelRequest | null;
   }): Promise<{ activePort: number }> => {
     let activePort = port;
+    const remainingPorts = [...fallbackPorts];
+    if ([port, ...remainingPorts].some(value => !Number.isInteger(value) || value < 0 || value > 65535)) throw new Error('Invalid listening port');
 
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => {
         server.off('error', onError);
+        server.off('listening', onListening);
+        const next = remainingPorts.shift();
+        if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE' && next !== undefined) {
+          server.once('error', onError);
+          server.listen(next, bindHost, onListening);
+          return;
+        }
         reject(error);
       };
       server.once('error', onError);

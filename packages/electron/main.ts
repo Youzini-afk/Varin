@@ -1,3 +1,5 @@
+import { createDesktopDeepLinks, parseDesktopDeepLink as parseDeepLink, type DesktopDeepLink, type DesktopConnectPreview } from '@varin/web/server/lib/platform/desktop-deep-links.js';
+import { acquireDesktopSessionLease } from '@varin/web/server/lib/platform/desktop-session-lease.js';
 import {
   app,
   BrowserWindow,
@@ -38,9 +40,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import type { UpdateCheckResult } from 'electron-updater';
 import {
@@ -55,6 +56,7 @@ import {
 import type { WebUiServerController } from '@varin/web/server/index.js';
 import type { HostSshManager } from '@varin/web/server/lib/connections/ssh-manager.js';
 import { readHostConnections, writeHostConnections } from '@varin/web/server/lib/connections/hosts.js';
+import { createDesktopConnections, buildHealthUrl, normalizeHostUrl, isKnownLocalDesktopUrl, getOrCreateDesktopInstallId as getOrCreateDesktopInstallIdentity, type HostProbeResult } from '@varin/web/server/lib/platform/desktop-connections.js';
 import { createDesktopNetworkFetch } from './harness-network-fetch.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
@@ -75,16 +77,7 @@ import {
   normalizeExternalHttpUrl,
   REMOTE_SAFE_DESKTOP_COMMANDS,
 } from './renderer-security-policy.js';
-import {
-  buildLinuxInstalledApps,
-  buildLinuxOpenSpecs,
-  fetchLinuxAppIcons,
-  filterLinuxInstalledApps,
-  readLinuxDesktopEntries,
-  type InstalledAppInfo,
-  type LinuxDesktopEntry,
-  type LinuxOpenSpec,
-} from './linux-app-discovery.js';
+import { createDesktopAppsOwner } from '@varin/web/server/lib/platform/desktop-apps.js';
 import {
   readLinuxAutostartEnabled,
   setLinuxAutostartEnabled,
@@ -98,8 +91,6 @@ import {
   clearAppImageArgv0FromProcessEnv,
 } from '@varin/web/server/index.js';
 import { createSettingsFileStore, type VarinSettingsDocument } from '@varin/settings-store';
-
-const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -190,6 +181,10 @@ if (!app.requestSingleInstanceLock()) {
   app.exit(0);
   process.exit(0);
 }
+// Both desktop engines share this data lease before either opens a Host.
+// Chromium's own single-instance lock remains responsible for Electron focus.
+const desktopSessionLease = acquireDesktopSessionLease(resolveVarinDataDir());
+process.once('exit', () => desktopSessionLease.release());
 
 try {
   process.chdir(os.homedir());
@@ -306,20 +301,14 @@ const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
 const MINI_CHAT_MIN_WINDOW_HEIGHT = 480;
 const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
-const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
-const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // Remote hosts get a regular 'desktop' client (NOT 'desktop-local' — that kind
 // grants whole-server device management and must never be issued to a desktop
 // connecting to someone else's server).
-const REMOTE_DESKTOP_CLIENT_KIND = 'desktop';
 const ENV_OVERRIDE_HOST_ID = '__env';
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/Youzini-afk/Varin/main/CHANGELOG.md';
 const GITHUB_BUG_REPORT_URL = 'https://github.com/Youzini-afk/Varin/issues/new';
 const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/Youzini-afk/Varin/issues/new';
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
-const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
-const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
-const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 const { autoUpdater } = updaterPkg;
 
 interface BootOutcome extends Record<string, unknown> {
@@ -495,7 +484,7 @@ const shutdownBackgroundServices = async ({ allowDuringUpdate = false }: { allow
       await companionPlacementWrite;
       await killSidecar();
       if (state.notificationListener) {
-        state.notificationListener.stop();
+        await state.notificationListener.stop();
         state.notificationListener = null;
       }
       await shutdownSshSessions();
@@ -750,32 +739,7 @@ const desktopDeviceMetadata = () => {
   };
 };
 
-const getOrCreateDesktopInstallId = async () => {
-  const existing = readSettingsRoot().desktopInstallId;
-  if (typeof existing === 'string' && existing.trim()) return existing.trim();
-  const generated = globalThis.crypto.randomUUID();
-  await mutateSettingsRoot((root) => {
-    // Race guard: keep an id another writer may have already persisted.
-    if (typeof root.desktopInstallId === 'string' && root.desktopInstallId.trim()) return root;
-    root.desktopInstallId = generated;
-    return root;
-  });
-  const after = readSettingsRoot().desktopInstallId;
-  return typeof after === 'string' && after.trim() ? after.trim() : generated;
-};
-
-const normalizeHostUrl = (raw: unknown): string | null => {
-  const trimmed = typeof raw === 'string' ? raw.trim() : '';
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
+const getOrCreateDesktopInstallId = () => getOrCreateDesktopInstallIdentity(settingsStore);
 
 const sanitizeClientTokenForStorage = (raw: unknown): string | null => {
   const token = typeof raw === 'string' ? raw.trim() : '';
@@ -822,40 +786,7 @@ const readDesktopLocalClientToken = () => {
   return sanitizeClientTokenForStorage(readSettingsRoot().desktopLocalClientToken) || '';
 };
 
-const isMachineLocalHostname = (hostname: unknown): boolean => {
-  const clean = String(hostname || '').replace(/^\[|\]$/g, '');
-  if (!clean) return false;
-  if (clean === 'localhost' || clean === '127.0.0.1' || clean === '::1' || clean === '0.0.0.0' || clean === '::') {
-    return true;
-  }
-  try {
-    return Object.values(os.networkInterfaces()).some((entries) =>
-      (entries || []).some((entry) => entry?.address === clean));
-  } catch {
-    return false;
-  }
-};
-
-const isLocalRuntimeUrl = (targetUrl: unknown): boolean => {
-  const localUrl = state.sidecarUrl || state.localOrigin || '';
-  if (!localUrl) return false;
-  if (sameOrigin(targetUrl, localUrl)) return true;
-  // The embedded server bound to 0.0.0.0 for LAN access is still THIS
-  // machine's server when addressed via any of its own interfaces on the same
-  // port — the minted client token must carry the desktop-local kind, or the
-  // server's client-create gate rejects it (the "Local — Auth required" +
-  // unreachable-screen regression).
-  try {
-    const normalizedTarget = normalizeHostUrl(targetUrl);
-    if (!normalizedTarget) return false;
-    const target = new URL(normalizedTarget);
-    const local = new URL(localUrl);
-    const portOf = (url: URL): string => url.port || (url.protocol === 'https:' ? '443' : '80');
-    return portOf(target) === portOf(local) && isMachineLocalHostname(target.hostname);
-  } catch {
-    return false;
-  }
-};
+const isLocalRuntimeUrl = (targetUrl: unknown): boolean => isKnownLocalDesktopUrl(targetUrl, state.sidecarUrl || state.localOrigin);
 
 type DesktopHostsConfig = import('@varin/application-client').DesktopHostsConfig;
 const readDesktopHostsConfig = (): DesktopHostsConfig => readHostConnections(settingsStore);
@@ -958,153 +889,13 @@ const debounceWindowStatePersist = (browserWindow: BrowserWindow, immediate = fa
   state.windowGeometryTimers.set(key, timer);
 };
 
-const buildHealthUrl = (url: unknown): string | null => {
-  try {
-    const normalized = normalizeHostUrl(url);
-    if (!normalized) return null;
-    const parsed = new URL(normalized);
-    parsed.pathname = `${parsed.pathname.replace(/\/$/, '') || ''}/health`;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-const buildVersionUrl = (url: unknown): string | null => {
-  try {
-    const normalized = normalizeHostUrl(url);
-    if (!normalized) return null;
-    const parsed = new URL(normalized);
-    parsed.pathname = `${parsed.pathname.replace(/\/$/, '') || ''}/api/version`;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-const buildSessionStatusUrl = (url: unknown): string | null => {
-  try {
-    const normalized = normalizeHostUrl(url);
-    if (!normalized) return null;
-    const parsed = new URL(normalized);
-    parsed.pathname = `${parsed.pathname.replace(/\/$/, '') || ''}/auth/session`;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-type HostProbeStatus = 'auth' | 'incompatible' | 'ok' | 'unreachable' | 'update-recommended' | 'wrong-service';
-interface HostProbeResult { latencyMs: number; status: HostProbeStatus }
-
-const classifyVersionPayload = (payload: unknown): Exclude<HostProbeStatus, 'auth' | 'unreachable'> => {
-  const value = recordOf(payload);
-  const compatibility = recordOf(value.compatibility);
-  if (value.status !== 'ok' || Object.keys(compatibility).length === 0) {
-    return 'wrong-service';
-  }
-
-  if (!Array.isArray(compatibility.capabilities) || !compatibility.capabilities.includes('api.runtime-url.v1')) {
-    return 'incompatible';
-  }
-
-  if (compatibility.apiVersion !== 1 || typeof compatibility.minClientApiVersion !== 'number' || compatibility.minClientApiVersion > 1) {
-    return 'update-recommended';
-  }
-
-  return 'ok';
-};
-
-const fetchVersionPayload = async (versionUrl: string, { headers, timeoutMs }: {
-  headers: Record<string, string>;
-  timeoutMs: number;
-}): Promise<Response> => {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  try {
-    return await fetch(versionUrl, { signal: timeoutSignal, headers });
-  } catch (error) {
-    if (timeoutSignal.aborted) {
-      throw error;
-    }
-    return await Promise.race([
-      electronNet.fetch(versionUrl, { headers }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(error), timeoutMs)),
-    ]);
-  }
-};
-
-const probeHostWithTimeout = async (
-  url: string,
-  timeoutMs: number,
-  clientToken = '',
-  requestHeaders: unknown = {},
-  expectedServerId = '',
-): Promise<HostProbeResult> => {
-  const versionUrl = buildVersionUrl(url);
-  const sessionStatusUrl = buildSessionStatusUrl(url);
-  if (!versionUrl || !sessionStatusUrl) {
-    throw new Error('Invalid URL');
-  }
-
-  const started = Date.now();
-
-  // Identity gate for learned/untrusted addresses: verify the UNAUTHENTICATED
-  // /health identity before the token-carrying version fetch, so the bearer
-  // token is never sent to a re-assigned address that now belongs to a
-  // different machine. Older servers omit serverId from /health; only an
-  // explicit mismatch rejects.
-  if (typeof expectedServerId === 'string' && expectedServerId.trim()) {
-    const healthUrl = buildHealthUrl(url);
-    if (healthUrl) {
-      try {
-        const response = await fetch(healthUrl, { signal: AbortSignal.timeout(timeoutMs), headers: { Accept: 'application/json' } });
-        if (response.ok) {
-          const payload = await response.json().catch(() => null);
-          const reported = typeof payload?.serverId === 'string' ? payload.serverId.trim() : '';
-          if (reported && reported !== expectedServerId.trim()) {
-            return { status: 'wrong-service', latencyMs: Date.now() - started };
-          }
-        }
-      } catch {
-        // Unreachable/timeout surfaces in the version fetch below.
-      }
-    }
-  }
-
-  try {
-    const headers: Record<string, string> = { ...sanitizeRuntimeRequestHeaders(requestHeaders), Accept: 'application/json' };
-    const token = typeof clientToken === 'string' ? clientToken.trim() : '';
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    const response = await fetchVersionPayload(versionUrl, { headers, timeoutMs });
-    const status = response.status;
-    if (status === 401 || status === 403) {
-      return { status: 'auth', latencyMs: Date.now() - started };
-    }
-    if (status < 200 || status >= 300) {
-      return { status: 'unreachable', latencyMs: Date.now() - started };
-    }
-    const payload = await response.json().catch(() => null);
-    const versionStatus = classifyVersionPayload(payload);
-    if (versionStatus !== 'ok') {
-      return { status: versionStatus, latencyMs: Date.now() - started };
-    }
-    const sessionResponse = await fetchVersionPayload(sessionStatusUrl, { headers, timeoutMs });
-    if (sessionResponse.status === 401 || sessionResponse.status === 403) {
-      return { status: 'auth', latencyMs: Date.now() - started };
-    }
-    if (!sessionResponse.ok) {
-      return { status: 'unreachable', latencyMs: Date.now() - started };
-    }
-    return {
-      status: versionStatus,
-      latencyMs: Date.now() - started,
-    };
-  } catch {
-    return { status: 'unreachable', latencyMs: Date.now() - started };
-  }
-};
+const desktopConnections = createDesktopConnections({
+  fetch: (url, init) => createDesktopNetworkFetch(session.fromPartition('varin-harness-egress', { cache: false }))(url, init),
+  getInstallId: getOrCreateDesktopInstallId,
+  deviceMetadata: desktopDeviceMetadata,
+  isLocalRuntimeUrl,
+});
+const { probeHostWithTimeout, loginRemoteAndIssueClientToken } = desktopConnections;
 
 const resolveStoredClientTokenForUrl = (targetUrl: unknown, config = readDesktopHostsConfig()): string => {
   const normalizedTarget = normalizeHostUrl(targetUrl);
@@ -1806,91 +1597,6 @@ const navigateWindow = async (
   }
 };
 
-const extractCookieHeader = (response: Response): string => {
-  const getSetCookie = typeof response.headers?.getSetCookie === 'function'
-    ? response.headers.getSetCookie.bind(response.headers)
-    : null;
-  const cookies = getSetCookie ? getSetCookie() : [];
-  const rawCookies = cookies.length > 0
-    ? cookies
-    : String(response.headers?.get?.('set-cookie') || '').split(/,(?=\s*[^;,=]+=[^;,]+)/);
-  return rawCookies
-    .map((cookie) => String(cookie || '').split(';')[0]?.trim() || '')
-    .filter(Boolean)
-    .join('; ');
-};
-
-const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requestHeaders }: {
-  password: unknown;
-  requestHeaders: unknown;
-  trustDevice: boolean;
-  url: unknown;
-}) => {
-  const baseUrl = normalizeHostUrl(String(url || ''));
-  const candidatePassword = typeof password === 'string' ? password : '';
-  const safeRequestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
-  if (!baseUrl) throw new Error('Invalid URL');
-  if (!candidatePassword) throw new Error('Password is required');
-
-  // Stable client identity so re-login reuses the same device record. Local
-  // uses the fixed desktop-local identity; remote uses this install's id with a
-  // regular 'desktop' kind.
-  const clientIdentity = isLocalRuntimeUrl(baseUrl)
-    ? { clientKind: LOCAL_DESKTOP_CLIENT_KIND, dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY, ...desktopDeviceMetadata() }
-    : { clientKind: REMOTE_DESKTOP_CLIENT_KIND, dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`, ...desktopDeviceMetadata() };
-
-  const loginResponse = await fetch(new URL('/auth/session', `${baseUrl}/`).toString(), {
-    method: 'POST',
-    signal: AbortSignal.timeout(10_000),
-    headers: {
-      ...safeRequestHeaders,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      password: candidatePassword,
-      trustDevice: trustDevice === true,
-      issueClientToken: true,
-      clientLabel: 'Varin Desktop',
-      ...clientIdentity,
-    }),
-  });
-  if (!loginResponse.ok) {
-    return { ok: false, status: loginResponse.status };
-  }
-
-  const loginPayload = await loginResponse.json().catch(() => null);
-  if (typeof loginPayload?.clientToken === 'string' && loginPayload.clientToken.trim()) {
-    return { ok: true, token: loginPayload.clientToken.trim() };
-  }
-
-  const cookie = extractCookieHeader(loginResponse);
-  if (!cookie) {
-    return { ok: false, status: 401 };
-  }
-
-  const tokenResponse = await fetch(new URL('/api/client-auth/clients', `${baseUrl}/`).toString(), {
-    method: 'POST',
-    signal: AbortSignal.timeout(10_000),
-    headers: {
-      ...safeRequestHeaders,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Cookie: cookie,
-    },
-    body: JSON.stringify({
-      label: 'Varin Desktop',
-      ...clientIdentity,
-    }),
-  });
-  if (!tokenResponse.ok) {
-    return { ok: false, status: tokenResponse.status };
-  }
-  const tokenPayload = await tokenResponse.json().catch(() => null);
-  const token = typeof tokenPayload?.token === 'string' ? tokenPayload.token.trim() : '';
-  return token ? { ok: true, token } : { ok: false, status: 500 };
-};
-
 const emitToWindow = <E extends VarinDesktopEvent>(
   browserWindow: BrowserWindow | null | undefined,
   event: E,
@@ -1949,199 +1655,9 @@ const setTaskbarProgress = (value: number): void => {
   }
 };
 
-interface DeepLink {
-  branchId?: string | undefined;
-  hostId?: string | undefined;
-  runtimeConfig?: Partial<RendererRuntimeConfig> | undefined;
-  directory?: string | undefined;
-  raw?: string | undefined;
-  type: string;
-  value: string;
-}
-
-interface PairingCandidate {
-  priority: number;
-  type: 'lan' | 'relay' | 'tunnel';
-  url: string;
-}
-
-interface PairingPayload {
-  candidates: PairingCandidate[];
-  expiresAt: string | null;
-  fingerprint: string;
-  label: string;
-  pairingId: string;
-  secret: string;
-}
-
-interface ConnectImportPayload {
-  label?: string | undefined;
-  serverUrl: string;
-  token: string;
-}
-
+interface DeepLink extends DesktopDeepLink { runtimeConfig?: Partial<RendererRuntimeConfig> | undefined }
 const pendingDeepLinks: DeepLink[] = [];
 const pendingTrayActions: TrayAction[] = [];
-
-const parseDeepLink = (raw: unknown): DeepLink | null => {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== `${DEEP_LINK_PROTOCOL}:`) return null;
-    const type = url.hostname;
-    if (!type) return null;
-    const segments = url.pathname.split('/').filter(Boolean);
-    const value = segments.length > 0
-      ? decodeURIComponent(segments.join('/'))
-      : '';
-    return { type, value, raw: trimmed, branchId: url.searchParams.get('branch') || undefined, hostId: url.searchParams.get('host') || undefined, directory: url.searchParams.get('dir') || undefined };
-  } catch {
-    return null;
-  }
-};
-
-const decodeBase64UrlJson = (value: unknown): unknown => {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  try {
-    const json = Buffer.from(value.trim(), 'base64url').toString('utf8');
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-};
-
-const parseConnectPairingDeepLinkPayload = (raw: unknown): PairingPayload | null => {
-  if (typeof raw !== 'string') return null;
-  try {
-    const url = new URL(raw.trim());
-    if (url.protocol !== `${DEEP_LINK_PROTOCOL}:` || url.hostname !== 'connect') return null;
-    if (url.searchParams.get('v') !== '2') return null;
-    const payload = recordOf(decodeBase64UrlJson(url.searchParams.get('p') || ''));
-    if (payload.v !== 2) return null;
-    const pairingId = typeof payload.pairingId === 'string' ? payload.pairingId.trim() : '';
-    const secret = typeof payload.secret === 'string' ? payload.secret.trim() : '';
-    if (!pairingId || !secret) return null;
-    const candidates = Array.isArray(payload.candidates)
-      ? payload.candidates.flatMap<PairingCandidate>((rawCandidate) => {
-        const candidate = recordOf(rawCandidate);
-        const type = candidate.type === 'lan' || candidate.type === 'tunnel' || candidate.type === 'relay'
-          ? candidate.type
-          : null;
-        const candidateUrl = normalizeHostUrl(candidate.url || '');
-        if (!type || !candidateUrl) return [];
-        const priority = typeof candidate.priority === 'number' && Number.isFinite(candidate.priority) ? candidate.priority : 100;
-        return [{ type, url: candidateUrl, priority }];
-      })
-      : [];
-    if (candidates.length === 0) return null;
-    const expiresAt = typeof payload.expiresAt === 'string' ? payload.expiresAt.trim() : '';
-    if (expiresAt) {
-      const expiresTime = Date.parse(expiresAt);
-      if (!Number.isFinite(expiresTime) || expiresTime <= Date.now()) return null;
-    }
-    return {
-      pairingId,
-      secret,
-      label: typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : 'Varin',
-      fingerprint: typeof payload.fingerprint === 'string' && payload.fingerprint.trim() ? payload.fingerprint.trim() : '',
-      expiresAt: expiresAt || null,
-      candidates: candidates.sort((left, right) => left.priority - right.priority),
-    };
-  } catch {
-    return null;
-  }
-};
-
-const importConnectDeepLink = async (payload: ConnectImportPayload): Promise<string | null> => {
-  if (!payload?.serverUrl || !payload?.token) return null;
-  const serverUrl = normalizeHostUrl(payload.serverUrl);
-  if (!serverUrl) return null;
-  const config = readDesktopHostsConfig();
-  const existing = config.hosts.find((host) => {
-    const hostUrl = normalizeHostUrl(host?.url || '');
-    const apiUrl = normalizeHostUrl(host?.apiUrl || host?.url || '');
-    return serverUrl === hostUrl || serverUrl === apiUrl;
-  });
-
-  const id = existing?.id || `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const importedHost = {
-    ...(existing || {}),
-    id,
-    label: payload.label || existing?.label || serverUrl,
-    url: serverUrl,
-    apiUrl: serverUrl,
-    clientToken: payload.token,
-  };
-  const hosts = existing
-    ? config.hosts.map((host) => (host.id === existing.id ? importedHost : host))
-    : [importedHost, ...config.hosts];
-  await writeDesktopHostsConfig({
-    ...config,
-    hosts,
-    defaultHostId: config.defaultHostId || id,
-    initialHostChoiceCompleted: true,
-  });
-  return id;
-};
-
-const requestJsonWithTimeout = async (
-  url: string,
-  init: RequestInit = {},
-  timeoutMs = 8000,
-): Promise<{ data: Record<string, unknown> | null; ok: boolean; status: number }> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const rawData = await response.json().catch(() => null);
-    const data = rawData && typeof rawData === 'object' ? recordOf(rawData) : null;
-    return { ok: response.ok, status: response.status, data };
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const selectPairingCandidateUrl = async (payload: PairingPayload): Promise<string | null> => {
-  for (const candidate of payload.candidates || []) {
-    try {
-      const health = await requestJsonWithTimeout(`${candidate.url.replace(/\/+$/g, '')}/health`, { method: 'GET' }, 3500);
-      if (health.ok) return candidate.url.replace(/\/+$/g, '');
-    } catch {
-      /* candidate unreachable; try next pairing candidate */
-    }
-  }
-  return null;
-};
-
-const redeemConnectPairingDeepLink = async (
-  payload: PairingPayload,
-  serverUrl: string,
-): Promise<ConnectImportPayload | null> => {
-  const response = await requestJsonWithTimeout(`${serverUrl.replace(/\/+$/g, '')}/api/client-auth/pairing/redeem`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      pairingId: payload.pairingId,
-      secret: payload.secret,
-      clientLabel: 'Varin Desktop',
-      clientKind: 'desktop',
-      deviceName: 'Varin Desktop',
-      ...desktopDeviceMetadata(),
-      dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`,
-    }),
-  });
-  if (!response.ok || !response.data || typeof response.data.clientToken !== 'string') return null;
-  const token = sanitizeClientTokenForStorage(response.data.clientToken);
-  if (!token) return null;
-  const server = recordOf(response.data.server);
-  return {
-    serverUrl,
-    token,
-    label: payload.label || (typeof server.label === 'string' ? server.label : '') || serverUrl,
-  };
-};
 
 const switchToHostById = async (rawId: unknown): Promise<void> => {
   const id = typeof rawId === 'string' ? rawId.trim() : '';
@@ -2178,7 +1694,7 @@ const switchToHostById = async (rawId: unknown): Promise<void> => {
   await activateMainWindow(targetUrl, state.localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
 };
 
-const confirmConnectDeepLink = async (payload: ConnectImportPayload): Promise<boolean> => {
+const confirmConnectDeepLink = async (payload: DesktopConnectPreview): Promise<boolean> => {
   // A connect deep-link can be triggered from a browser/email/chat with no
   // in-app interaction. Importing it stores a client token and points all of
   // this app's API traffic at the given server, so require explicit consent
@@ -2192,7 +1708,7 @@ const confirmConnectDeepLink = async (payload: ConnectImportPayload): Promise<bo
     type: 'warning',
     title: nativeText('Connect to Varin server?'),
     message: nativeText('Connect to “{label}”?', { label: payload.label || payload.serverUrl }),
-    detail: nativeText('This will add {url} as a remote instance and route this app’s activity through it. Only continue if you trust this server and started the connection yourself.', { url: payload.serverUrl }),
+    detail: nativeText('This will add {url} as a remote instance and route this app’s activity through it. Only continue if you trust this server and started the connection yourself.', { url: payload.candidateUrls.join('\n') }),
     buttons: [nativeText('Connect'), nativeText('Cancel')],
     defaultId: 1,
     cancelId: 1,
@@ -2208,41 +1724,19 @@ const confirmConnectDeepLink = async (payload: ConnectImportPayload): Promise<bo
   }
 };
 
+const desktopDeepLinks = createDesktopDeepLinks({
+  settings: settingsStore, getInstallId: getOrCreateDesktopInstallId, deviceMetadata: desktopDeviceMetadata,
+  fetch: (url, init) => createDesktopNetworkFetch(session.fromPartition('varin-harness-egress', { cache: false }))(url, init),
+  confirm: confirmConnectDeepLink,
+});
+
 const dispatchDeepLink = (link: DeepLink | undefined): void => {
   if (!link) return;
   log.info('[electron] dispatching deep-link', { type: link.type, valueLen: link.value?.length || 0 });
   if (link.type === 'connect') {
-    const pairingPayload = parseConnectPairingDeepLinkPayload(link.raw);
-    if (pairingPayload) {
-      const previewUrl = pairingPayload.candidates[0]?.url || pairingPayload.label;
-      void confirmConnectDeepLink({
-        serverUrl: previewUrl,
-        token: 'pairing-v2',
-        label: pairingPayload.fingerprint ? `${pairingPayload.label} (${pairingPayload.fingerprint})` : pairingPayload.label,
-      }).then(async (confirmed) => {
-        if (!confirmed) {
-          log.info('[electron] connect pairing deep-link declined by user');
-          return;
-        }
-        const serverUrl = await selectPairingCandidateUrl(pairingPayload);
-        if (!serverUrl) {
-          log.warn('[electron] connect pairing deep-link has no reachable candidate');
-          return;
-        }
-        const importedPayload = await redeemConnectPairingDeepLink(pairingPayload, serverUrl).catch((error) => {
-          log.warn('[electron] connect pairing redeem failed:', error);
-          return null;
-        });
-        if (!importedPayload?.token) {
-          log.warn('[electron] connect pairing redeem returned no client token');
-          return;
-        }
-        const id = await importConnectDeepLink(importedPayload);
-        if (id) void switchToHostById(id);
-      });
-      return;
-    }
-    log.warn('[electron] invalid connect deep-link payload');
+    void desktopDeepLinks.receive(link.raw).then(action => {
+      if (action?.type === 'host') return switchToHostById(action.hostId);
+    }).catch(() => log.warn('[electron] deep-link pairing did not complete'));
     return;
   }
   if (link.type === 'thread' && link.value && link.branchId) {
@@ -3435,589 +2929,13 @@ const parseRelevantChangelogNotes = async (fromVersion: string, toVersion: strin
   }
 };
 
-const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
-
-// Async variants. sips + mdfind via spawnSync blocked the Electron main event
-// loop for 2-3s on boot (22 OPEN_IN_APPS × ~200 ms each). Use execFile promises
-// so each child-process wait yields to the loop and the UI stays responsive.
-const pathExists = async (candidate: string): Promise<boolean> => {
-  try {
-    await fsp.access(candidate);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const resolveAppBundlePath = async (appName: string): Promise<string | null> => {
-  if (process.platform !== 'darwin') return null;
-  const bundleName = appName.endsWith('.app') ? appName : `${appName}.app`;
-  const candidates = [
-    `/Applications/${bundleName}`,
-    `/System/Applications/${bundleName}`,
-    `/System/Applications/Utilities/${bundleName}`,
-    path.join(os.homedir(), 'Applications', bundleName),
-  ];
-  for (const candidate of candidates) {
-    if (await pathExists(candidate)) return candidate;
-  }
-  try {
-    const { stdout } = await execFileAsync('mdfind', ['-name', bundleName], { encoding: 'utf8' });
-    const first = (stdout || '').split('\n').map((line) => line.trim()).find(Boolean);
-    return first || null;
-  } catch {
-    return null;
-  }
-};
-
-const isAppBundleInstalled = async (appName: string): Promise<boolean> => Boolean(await resolveAppBundlePath(appName));
-
-const iconToDataUrl = async (iconPath: string | null, appName: string): Promise<string | null> => {
-  if (!iconPath || !(await pathExists(iconPath))) return null;
-  const safeName = String(appName || 'app').replace(/[^a-z0-9]/gi, '_');
-  const tempPath = path.join(os.tmpdir(), `varin-icon-${safeName}-${Date.now()}.png`);
-  try {
-    await execFileAsync('sips', ['-s', 'format', 'png', '-Z', '32', iconPath, '--out', tempPath]);
-  } catch {
-    return null;
-  }
-  if (!(await pathExists(tempPath))) return null;
-  try {
-    const bytes = await fsp.readFile(tempPath);
-    return `data:image/png;base64,${bytes.toString('base64')}`;
-  } finally {
-    await fsp.rm(tempPath, { force: true }).catch(() => {});
-  }
-};
-
-const resolveAppIconPath = async (appPath: string): Promise<string | null> => {
-  if (!appPath || !(await pathExists(appPath))) return null;
-  const resourcesPath = path.join(appPath, 'Contents', 'Resources');
-  if (!(await pathExists(resourcesPath))) return null;
-  let entries;
-  try {
-    entries = await fsp.readdir(resourcesPath);
-  } catch {
-    return null;
-  }
-  const icon = entries.find((entry) => entry.toLowerCase().endsWith('.icns'));
-  return icon ? path.join(resourcesPath, icon) : null;
-};
-
-const buildInstalledApps = async (apps: unknown): Promise<InstalledAppInfo[]> => {
-  const seen = new Set<string>();
-  const names = (Array.isArray(apps) ? apps : [])
-    .map((raw) => String(raw || '').trim())
-    .filter((raw) => raw && !seen.has(raw) && seen.add(raw));
-  const results: InstalledAppInfo[] = [];
-  for (const name of names) {
-    const appPath = await resolveAppBundlePath(name);
-    if (!appPath) continue;
-    const iconDataUrl = await iconToDataUrl(await resolveAppIconPath(appPath), name);
-    results.push({ name, iconDataUrl });
-  }
-  return results;
-};
-
-let linuxDesktopEntriesCache: { entries: LinuxDesktopEntry[] | null; expiresAt: number } = { expiresAt: 0, entries: null };
-
-const getLinuxDesktopEntries = async (): Promise<LinuxDesktopEntry[]> => {
-  const now = Date.now();
-  if (linuxDesktopEntriesCache.entries && linuxDesktopEntriesCache.expiresAt > now) {
-    return linuxDesktopEntriesCache.entries;
-  }
-  const entries = await readLinuxDesktopEntries();
-  linuxDesktopEntriesCache = { entries, expiresAt: now + LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS };
-  return entries;
-};
-
-const buildPlatformInstalledApps = async (apps: unknown): Promise<InstalledAppInfo[]> => {
-  if (process.platform === 'linux') {
-    return buildLinuxInstalledApps(apps);
-  }
-  if (process.platform === 'win32') {
-    return buildWindowsInstalledApps(apps);
-  }
-  return buildInstalledApps(apps);
-};
-
-const spawnDetachedLinux = (program: string, args: string[]): Promise<void> => new Promise<void>((resolve, reject) => {
-  const child = spawn(program, args, {
-    detached: true,
-    stdio: 'ignore',
-  });
-  let settled = false;
-  const finish = (callback: (value?: unknown) => void, value?: unknown): void => {
-    if (settled) return;
-    settled = true;
-    callback(value);
-  };
-  child.once('error', (error) => finish(reject, error));
-  child.once('spawn', () => {
-    child.unref();
-    if (!settled) {
-      settled = true;
-      resolve();
-    }
-  });
+const desktopApps = createDesktopAppsOwner({
+  dataDirectory: path.dirname(settingsFilePath()),
+  async openPath(target) { const error = await shell.openPath(target); if (error) throw new Error(error); },
+  async showItemInFolder(target) { shell.showItemInFolder(target); },
+  async fileIcon(target) { const icon = await app.getFileIcon(target, { size: 'normal' }); return icon.isEmpty() ? null : icon.toDataURL(); },
+  updated: apps => emitToAllWindows('varin:installed-apps-updated', apps),
 });
-
-const isDefaultLinuxOpenSpec = (
-  spec: LinuxOpenSpec,
-): spec is Extract<LinuxOpenSpec, { kind: 'default' }> => 'kind' in spec;
-
-const runLinuxSpecChain = async (specs: LinuxOpenSpec[], appName: string): Promise<void> => {
-  if (!Array.isArray(specs) || specs.length === 0) {
-    throw new Error(`Failed to open in ${appName}: no launch candidates`);
-  }
-
-  const failures: string[] = [];
-  for (const spec of specs) {
-    if (isDefaultLinuxOpenSpec(spec)) {
-      if (spec.targetKind === 'file') {
-        shell.showItemInFolder(spec.targetPath);
-        return;
-      }
-      const errorMessage = await shell.openPath(spec.targetPath);
-      if (!errorMessage) return;
-      failures.push(`default opener: ${errorMessage}`);
-      continue;
-    }
-
-    try {
-      await spawnDetachedLinux(spec.program, spec.args);
-      return;
-    } catch (error) {
-      failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
-};
-
-const JETBRAINS_APP_IDS = new Set([
-  'pycharm',
-  'intellij',
-  'webstorm',
-  'phpstorm',
-  'rider',
-  'rustrover',
-  'android-studio',
-]);
-
-const CLI_BY_APP_ID: Record<string, string> = {
-  vscode: 'code',
-  cursor: 'cursor',
-  vscodium: 'codium',
-  windsurf: 'windsurf',
-  zed: 'zed',
-};
-
-const WINDOWS_CLI_BY_APP_ID: Record<string, string> = {
-  vscode: 'code.cmd',
-  cursor: 'cursor.cmd',
-  vscodium: 'codium.cmd',
-  windsurf: 'windsurf.cmd',
-  zed: 'zed.cmd',
-};
-
-const WINDOWS_APP_EXECUTABLES: Record<string, readonly string[]> = {
-  terminal: ['wt.exe', 'WindowsTerminal.exe'],
-  vscode: ['code.exe', 'code.cmd'],
-  cursor: ['cursor.exe', 'cursor.cmd'],
-  vscodium: ['codium.exe', 'codium.cmd'],
-  windsurf: ['windsurf.exe', 'windsurf.cmd'],
-  zed: ['zed.exe', 'zed.cmd'],
-  'visual-studio': ['devenv.exe'],
-  'sublime-text': ['subl.exe', 'sublime_text.exe'],
-};
-
-const WINDOWS_APP_ID_BY_NAME = new Map<string, string>([
-  ['finder', 'finder'],
-  ['file explorer', 'finder'],
-  ['terminal', 'terminal'],
-  ['windows terminal', 'terminal'],
-  ['visual studio code', 'vscode'],
-  ['cursor', 'cursor'],
-  ['vscodium', 'vscodium'],
-  ['windsurf', 'windsurf'],
-  ['zed', 'zed'],
-  ['visual studio', 'visual-studio'],
-  ['sublime text', 'sublime-text'],
-]);
-
-const getWindowsAppIdForName = (appName: unknown): string => WINDOWS_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
-
-const runWhere = (program: string): string | null => {
-  const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true });
-  if (result.error || result.status !== 0) return null;
-  const first = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-  return first || null;
-};
-
-const findWindowsExecutable = (appId: string): string | null => {
-  for (const program of WINDOWS_APP_EXECUTABLES[appId] || []) {
-    const resolved = runWhere(program);
-    if (resolved) return resolved;
-  }
-  return null;
-};
-
-const resolveWindowsScriptIconExecutable = (scriptPath: string): string | null => {
-  if (!scriptPath || !/\.(?:cmd|bat)$/i.test(scriptPath)) return null;
-  let source = '';
-  try {
-    source = fs.readFileSync(scriptPath, 'utf8');
-  } catch {
-    return null;
-  }
-  const scriptDir = path.dirname(scriptPath);
-  const matches = [...source.matchAll(/(?:(?:%~dp0|%~dp0\\|%~dp0\/|\.\.\\|\.\.\/|[A-Za-z]:\\|[A-Za-z]:\/)[^"'\r\n]*?\.exe)/gi)];
-  for (const match of matches) {
-    const raw = String(match[0] || '').replace(/^%~dp0[\\/]?/i, '').trim();
-    const candidate = path.isAbsolute(raw) ? raw : path.resolve(scriptDir, raw);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
-};
-
-let windowsTerminalPackagePathCache: string | null | undefined;
-
-const resolveWindowsTerminalPackagePath = () => {
-  if (windowsTerminalPackagePathCache !== undefined) return windowsTerminalPackagePathCache;
-
-  const powershell = runWhere('powershell.exe') || runWhere('pwsh.exe');
-  if (powershell) {
-    const command = '$packages = @(' +
-      'Get-AppxPackage -Name Microsoft.WindowsTerminal -ErrorAction SilentlyContinue;' +
-      'Get-AppxPackage -Name Microsoft.WindowsTerminalPreview -ErrorAction SilentlyContinue' +
-      ') | Where-Object { $_.InstallLocation } | Sort-Object Version -Descending; ' +
-      'if ($packages) { $packages[0].InstallLocation }';
-    const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], {
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    if (!result.error && result.status === 0) {
-      const packagePath = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-      if (packagePath && fs.existsSync(packagePath)) {
-        windowsTerminalPackagePathCache = packagePath;
-        return windowsTerminalPackagePathCache;
-      }
-    }
-  }
-
-  const programFilesRoots = [process.env.ProgramW6432, process.env.ProgramFiles, 'C:\\Program Files']
-    .filter((value, index, values): value is string => typeof value === 'string' && Boolean(value) && values.indexOf(value) === index);
-  for (const root of programFilesRoots) {
-    const windowsAppsPath = path.join(root, 'WindowsApps');
-    let entries = [];
-    try {
-      entries = fs.readdirSync(windowsAppsPath, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    const packageNames = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .filter((name) => /^Microsoft\.WindowsTerminal(?:Preview)?_.*__8wekyb3d8bbwe$/i.test(name))
-      .sort()
-      .reverse();
-    const stable = packageNames.find((name) => /^Microsoft\.WindowsTerminal_/i.test(name));
-    const selected = stable || packageNames[0];
-    if (selected) {
-      windowsTerminalPackagePathCache = path.join(windowsAppsPath, selected);
-      return windowsTerminalPackagePathCache;
-    }
-  }
-
-  windowsTerminalPackagePathCache = null;
-  return windowsTerminalPackagePathCache;
-};
-
-const resolveWindowsTerminalIconPath = () => {
-  const packagePath = resolveWindowsTerminalPackagePath();
-  if (!packagePath) return null;
-  const candidates = [
-    path.join(packagePath, 'Images', 'Square44x44Logo.targetsize-96_altform-unplated.png'),
-    path.join(packagePath, 'Images', 'Square44x44Logo.targetsize-96.png'),
-    path.join(packagePath, 'Images', 'StoreLogo.scale-200.png'),
-    path.join(packagePath, 'Images', 'StoreLogo.scale-100.png'),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
-};
-
-const resolveWindowsTerminalExecutable = () => {
-  const packagePath = resolveWindowsTerminalPackagePath();
-  if (packagePath) {
-    const executable = path.join(packagePath, 'WindowsTerminal.exe');
-    if (fs.existsSync(executable)) return executable;
-  }
-  return findWindowsExecutable('terminal');
-};
-
-const imageFileToDataUrl = (filePath: string | null): string | null => {
-  if (!filePath) return null;
-  try {
-    return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
-  } catch {
-    return null;
-  }
-};
-
-interface AppOpenIdentity { appId: string; appName: string }
-interface ProjectOpenIdentity extends AppOpenIdentity { projectPath: string }
-interface FileOpenIdentity extends AppOpenIdentity { filePath: string }
-interface LaunchSpec { args: string[]; program: string; shellStart?: boolean | undefined }
-
-const resolveWindowsAppIconExecutable = ({ appId, appName }: AppOpenIdentity): string | null => {
-  if (appId === 'finder') {
-    const explorerPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
-    return fs.existsSync(explorerPath) ? explorerPath : 'explorer.exe';
-  }
-  if (appId === 'terminal') {
-    return resolveWindowsTerminalExecutable();
-  }
-
-  const executable = findWindowsExecutable(appId) || findWindowsAppNameExecutable(appName);
-  if (!executable) return null;
-  if (/\.exe$/i.test(executable)) return executable;
-  return resolveWindowsScriptIconExecutable(executable) || executable;
-};
-
-const windowsIconToDataUrl = async (executablePath: string | null): Promise<string | null> => {
-  if (!executablePath) return null;
-  try {
-    const image = await app.getFileIcon(executablePath, { size: 'normal' });
-    if (image.isEmpty()) return null;
-    return image.toDataURL();
-  } catch {
-    return null;
-  }
-};
-
-const findWindowsAppNameExecutable = (appName: string): string | null => {
-  const program = `${String(appName || '').trim()}.exe`.replace(/\s+/g, '');
-  return program === '.exe' ? null : runWhere(program);
-};
-
-const isWindowsAppInstalled = ({ appId, appName }: AppOpenIdentity): boolean => {
-  if (appId === 'finder') return true;
-  if (appId === 'terminal') return Boolean(findWindowsExecutable('terminal'));
-  if (findWindowsExecutable(appId)) return true;
-  return Boolean(findWindowsAppNameExecutable(appName));
-};
-
-const buildWindowsInstalledApps = async (apps: unknown): Promise<InstalledAppInfo[]> => {
-  const seen = new Set<string>();
-  const names = (Array.isArray(apps) ? apps : [])
-    .map((appName) => String(appName || '').trim())
-    .filter((appName) => appName && !seen.has(appName) && seen.add(appName))
-    .filter((appName) => isWindowsAppInstalled({ appId: getWindowsAppIdForName(appName), appName }));
-  const results: InstalledAppInfo[] = [];
-  for (const name of names) {
-    const appId = getWindowsAppIdForName(name);
-    const executablePath = resolveWindowsAppIconExecutable({ appId, appName: name });
-    const iconDataUrl = appId === 'terminal'
-      ? imageFileToDataUrl(resolveWindowsTerminalIconPath()) || await windowsIconToDataUrl(executablePath)
-      : await windowsIconToDataUrl(executablePath);
-    results.push({ name, iconDataUrl });
-  }
-  return results;
-};
-
-const buildWindowsOpenProjectSpecs = ({ projectPath, appId, appName }: ProjectOpenIdentity): LaunchSpec[] => {
-  if (appId === 'finder') {
-    return [{ program: 'explorer.exe', args: [projectPath] }];
-  }
-  if (appId === 'terminal') {
-    const specs: LaunchSpec[] = [];
-    const terminal = findWindowsExecutable('terminal');
-    if (terminal) {
-      specs.push({ program: terminal, args: ['-d', projectPath] });
-    }
-    const shell = runWhere('pwsh.exe') || runWhere('powershell.exe');
-    if (shell) {
-      specs.push({ program: shell, args: ['-NoExit', '-Command', `Set-Location -LiteralPath ${JSON.stringify(projectPath)}`], shellStart: true });
-    }
-    const commandPrompt = process.env.ComSpec || runWhere('cmd.exe');
-    if (commandPrompt) {
-      specs.push({ program: commandPrompt, args: ['/k', 'cd', '/d', projectPath], shellStart: true });
-    }
-    return specs;
-  }
-  const specs: LaunchSpec[] = [];
-  const cli = WINDOWS_CLI_BY_APP_ID[appId];
-  if (cli) {
-    const resolvedCli = runWhere(cli);
-    if (resolvedCli) {
-      specs.push({ program: resolvedCli, args: [projectPath] });
-    }
-  }
-  const exe = findWindowsExecutable(appId);
-  if (exe) {
-    specs.push({ program: exe, args: [projectPath] });
-  }
-  const namedExe = findWindowsAppNameExecutable(appName);
-  if (namedExe && !specs.some((spec) => spec.program === namedExe)) {
-    specs.push({ program: namedExe, args: [projectPath] });
-  }
-  return specs;
-};
-
-const buildWindowsOpenFileSpecs = ({ filePath, appId, appName }: FileOpenIdentity): LaunchSpec[] => {
-  if (appId === 'finder') {
-    return [{ program: 'explorer.exe', args: ['/select,', filePath] }];
-  }
-  if (appId === 'terminal') {
-    return buildWindowsOpenProjectSpecs({ projectPath: path.dirname(filePath), appId, appName });
-  }
-  const specs: LaunchSpec[] = [];
-  const cli = WINDOWS_CLI_BY_APP_ID[appId];
-  if (cli) {
-    const resolvedCli = runWhere(cli);
-    if (resolvedCli) {
-      specs.push({ program: resolvedCli, args: [filePath] });
-    }
-  }
-  const exe = findWindowsExecutable(appId);
-  if (exe) {
-    specs.push({ program: exe, args: [filePath] });
-  }
-  const namedExe = findWindowsAppNameExecutable(appName);
-  if (namedExe && !specs.some((spec) => spec.program === namedExe)) {
-    specs.push({ program: namedExe, args: [filePath] });
-  }
-  return specs;
-};
-
-const buildOpenProjectSpecs = ({ projectPath, appId, appName }: ProjectOpenIdentity): LaunchSpec[] => {
-  if (appId === 'finder') {
-    return [{ program: 'open', args: [projectPath] }];
-  }
-
-  if (appId === 'terminal' || appId === 'iterm2' || appId === 'ghostty') {
-    return [{ program: 'open', args: ['-a', appName, projectPath] }];
-  }
-
-  const specs: LaunchSpec[] = [];
-
-  const cli = CLI_BY_APP_ID[appId];
-  if (cli) {
-    specs.push({ program: cli, args: ['-n', projectPath] });
-  }
-
-  if (JETBRAINS_APP_IDS.has(appId)) {
-    specs.push({ program: 'open', args: ['-na', appName, '--args', projectPath] });
-  }
-
-  specs.push({ program: 'open', args: ['-a', appName, projectPath] });
-  return specs;
-};
-
-const buildOpenFileSpecs = ({ filePath, appId, appName }: FileOpenIdentity): LaunchSpec[] => {
-  if (appId === 'finder') {
-    return [{ program: 'open', args: ['-R', filePath] }];
-  }
-
-  const parentDir = path.dirname(filePath);
-  if (appId === 'terminal' || appId === 'iterm2' || appId === 'ghostty') {
-    return [{ program: 'open', args: ['-a', appName, parentDir] }];
-  }
-
-  const specs: LaunchSpec[] = [];
-
-  const cli = CLI_BY_APP_ID[appId];
-  if (cli) {
-    specs.push({ program: cli, args: [filePath] });
-  }
-
-  specs.push({ program: 'open', args: ['-a', appName, filePath] });
-  return specs;
-};
-
-const quoteWindowsCommandArg = (value: unknown): string => `"${String(value).replace(/"/g, '""')}"`;
-
-const resolveWindowsLaunchProgram = (program: string): string | null => {
-  if (path.isAbsolute(program)) {
-    return fs.existsSync(program) ? program : null;
-  }
-  return runWhere(program);
-};
-
-const launchWindowsCommandScript = (spec: LaunchSpec, program: string): void => {
-  const commandLine = ['call', quoteWindowsCommandArg(program), ...spec.args.map(quoteWindowsCommandArg)].join(' ');
-  const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false,
-    windowsVerbatimArguments: true,
-  });
-  child.unref();
-};
-
-const launchWindowsSpec = (spec: LaunchSpec): void => {
-  const program = resolveWindowsLaunchProgram(spec.program);
-  if (!program) {
-    throw new Error('program not found');
-  }
-
-  if (spec.shellStart) {
-    const commandLine = ['start', '""', quoteWindowsCommandArg(program), ...spec.args.map(quoteWindowsCommandArg)].join(' ');
-    const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
-      windowsVerbatimArguments: true,
-    });
-    child.unref();
-    return;
-  }
-
-  if (/\.(cmd|bat)$/i.test(program)) {
-    launchWindowsCommandScript(spec, program);
-    return;
-  }
-
-  const child = spawn(program, spec.args, {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false,
-  });
-  child.unref();
-};
-
-const runSpecChain = (specs: LaunchSpec[], appName: string): void => {
-  if (!Array.isArray(specs) || specs.length === 0) {
-    throw new Error(`Failed to open in ${appName}: no launch candidates`);
-  }
-
-  if (process.platform === 'win32') {
-    const failures: string[] = [];
-    for (const spec of specs) {
-      try {
-        launchWindowsSpec(spec);
-        return;
-      } catch (error) {
-        failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
-  }
-
-  const failures: string[] = [];
-  for (const spec of specs) {
-    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore', windowsHide: true });
-    if (result.error) {
-      failures.push(`${spec.program}: ${result.error.message}`);
-      continue;
-    }
-    if (result.status === 0) {
-      return;
-    }
-    failures.push(`${spec.program} exited ${result.status}`);
-  }
-  throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
-};
 
 const finiteNumber = (value: unknown): number | null => (
   typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -4276,11 +3194,11 @@ const handleInvoke = async (
       if (command === 'desktop_browser_control') return desktopBrowser.takeControl(pageId, args.paused === true);
       const viewId = typeof args.viewId === 'string' ? args.viewId : '';
       if (!viewId) throw new Error('viewId is required');
-      if (command === 'desktop_browser_detach') { desktopBrowser.detach(pageId, viewId, browserWindow); return null; }
+      if (command === 'desktop_browser_detach') { await desktopBrowser.detach(pageId, viewId, browserWindow); return null; }
       const raw = args.bounds as Record<string, unknown>;
       if (!raw || !['x', 'y', 'width', 'height'].every(key => typeof raw[key] === 'number' && Number.isFinite(raw[key]))) throw new Error('A finite browser viewport is required');
       const bounds = { x: Math.round(Number(raw.x)), y: Math.round(Number(raw.y)), width: Math.max(1, Math.round(Number(raw.width))), height: Math.max(1, Math.round(Number(raw.height))) };
-      if (command === 'desktop_browser_layout') { desktopBrowser.layout(pageId, viewId, browserWindow, bounds, args.visible === true); return null; }
+      if (command === 'desktop_browser_layout') { await desktopBrowser.layout(pageId, viewId, browserWindow, bounds, args.visible === true); return null; }
       return desktopBrowser.present({ pageId, viewId, url: String(args.url ?? 'about:blank'), bounds, visible: args.visible === true }, browserWindow);
     }
 
@@ -4477,146 +3395,12 @@ const handleInvoke = async (
       return null;
     }
 
-    case 'desktop_open_in_app': {
-      const projectPath = typeof args.projectPath === 'string' ? args.projectPath.trim() : '';
-      const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
-      const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
-      if (!projectPath || !appId || !appName) {
-        throw new Error('Project path, app id, and app name are required');
-      }
-      const validated = await validateLocalPath(projectPath, 'Project path');
-      if (process.platform === 'win32') {
-        if (appId === 'finder') {
-          const error = await shell.openPath(validated.path);
-          if (error) throw new Error(error);
-          return null;
-        }
-        runSpecChain(buildWindowsOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
-        return null;
-      }
-      if (process.platform === 'linux') {
-        const entries = await getLinuxDesktopEntries();
-        await runLinuxSpecChain(buildLinuxOpenSpecs({
-          targetPath: validated.path,
-          appId,
-          appName,
-          targetKind: 'project',
-          entries,
-        }), appName);
-        return null;
-      }
-      if (process.platform !== 'darwin') {
-        throw new Error(unsupportedAppSpecificOpenError('projects'));
-      }
-      runSpecChain(buildOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
-      return null;
-    }
-
-    case 'desktop_open_file_in_app': {
-      const filePath = typeof args.filePath === 'string' ? args.filePath.trim() : '';
-      const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
-      const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
-      if (!filePath || !appId || !appName) {
-        throw new Error('File path, app id, and app name are required');
-      }
-      const validated = await validateLocalPath(filePath, 'File path');
-      if (process.platform === 'win32') {
-        runSpecChain(buildWindowsOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
-        return null;
-      }
-      if (process.platform === 'linux') {
-        const entries = await getLinuxDesktopEntries();
-        await runLinuxSpecChain(buildLinuxOpenSpecs({
-          targetPath: validated.path,
-          appId,
-          appName,
-          targetKind: 'file',
-          entries,
-        }), appName);
-        return null;
-      }
-      if (process.platform !== 'darwin') {
-        throw new Error(unsupportedAppSpecificOpenError('files'));
-      }
-      runSpecChain(buildOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
-      return null;
-    }
-
-    case 'desktop_filter_installed_apps': {
-      if (process.platform === 'win32') {
-        return (await buildWindowsInstalledApps(args.apps)).map((app) => app.name);
-      }
-      if (process.platform === 'linux') {
-        return filterLinuxInstalledApps(args.apps);
-      }
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_filter_installed_apps is only supported on macOS, Windows, and Linux');
-      }
-      if (!Array.isArray(args.apps)) return [];
-      const results = await Promise.all(
-        args.apps.map(async (appName) => (await isAppBundleInstalled(String(appName))) ? String(appName) : null)
-      );
-      return results.filter((result): result is string => typeof result === 'string');
-    }
-
-    case 'desktop_fetch_app_icons': {
-      if (process.platform === 'win32') {
-        const names = Array.isArray(args.apps) ? args.apps : [];
-        const results = [];
-        for (const name of names) {
-          const appName = String(name || '').trim();
-          if (!appName) continue;
-          const appId = getWindowsAppIdForName(appName);
-          const dataUrl = appId === 'terminal'
-            ? imageFileToDataUrl(resolveWindowsTerminalIconPath()) || await windowsIconToDataUrl(resolveWindowsAppIconExecutable({ appId, appName }))
-            : await windowsIconToDataUrl(resolveWindowsAppIconExecutable({ appId, appName }));
-          if (dataUrl) results.push({ app: appName, data_url: dataUrl });
-        }
-        return results;
-      }
-      if (process.platform === 'linux') {
-        return fetchLinuxAppIcons(Array.isArray(args.apps) ? args.apps : []);
-      }
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_fetch_app_icons is only supported on macOS, Windows, and Linux');
-      }
-      const names = Array.isArray(args.apps) ? args.apps : [];
-      const results = [];
-      for (const name of names) {
-        const appPath = await resolveAppBundlePath(String(name));
-        if (!appPath) continue;
-        const dataUrl = await iconToDataUrl(await resolveAppIconPath(appPath), String(name));
-        if (dataUrl) results.push({ app: String(name), dataUrl });
-      }
-      return results;
-    }
-
-    case 'desktop_get_installed_apps': {
-      const cachePath = buildInstalledAppsCachePath();
-      const now = Math.floor(Date.now() / 1000);
-      let cache = null;
-      try {
-        cache = JSON.parse(await fsp.readFile(cachePath, 'utf8'));
-      } catch {
-        /* cache missing or corrupt; treat as no cache and refresh */
-      }
-      const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
-      const hasCache = Boolean(cache);
-      const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
-      const refresh = async () => {
-        const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
-        await fsp.mkdir(path.dirname(cachePath), { recursive: true });
-        await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
-        emitToAllWindows('varin:installed-apps-updated', apps);
-      };
-      if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
-        return { apps: [], hasCache: false, isCacheStale: false, supported: false };
-      }
-      if (!hasCache || isCacheStale || args.force === true) {
-        void refresh();
-      }
-      return { apps: cachedApps, hasCache, isCacheStale };
-    }
+    case 'desktop_open_in_app':
+    case 'desktop_open_file_in_app':
+    case 'desktop_filter_installed_apps':
+    case 'desktop_fetch_app_icons':
+    case 'desktop_get_installed_apps':
+      return await desktopApps.invoke({ command, args }) as VarinDesktopCommandResult<VarinDesktopCommand>;
 
     case 'desktop_hosts_get': {
       const result: DesktopHostsContract & { localOrigin: string | null } = {
@@ -5745,7 +4529,7 @@ app.whenReady().then(async () => {
     packaged: app.isPackaged,
     platform: process.platform,
     arch: process.arch,
-    argv: process.argv,
+    argumentCount: process.argv.length,
     isBackgroundStart,
     loginItemSettings,
   });

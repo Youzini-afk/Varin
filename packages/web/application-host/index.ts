@@ -1,3 +1,4 @@
+import { createDesktopLocalCredentials } from './lib/platform/desktop-credentials.js';
 import { createAbsoluteAttachmentCapture } from './lib/kernel/attachment-absolute.js';
 import { releaseDeletedAttachmentSources } from './lib/kernel/attachment-retention.js';
 import { createThreadAttachments } from './lib/kernel/thread-attachments.js';
@@ -3004,6 +3005,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     TUNNEL_MODE_MANAGED_REMOTE,
     ...(host ? { host } : {}),
     port,
+    ...(options.fallbackPorts ? { fallbackPorts: options.fallbackPorts } : {}),
     startupTunnelRequest,
     ...(onTunnelReady ? { onTunnelReady } : {}),
     tunnelRuntimeContext,
@@ -3037,6 +3039,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       scheduledTasks: await scheduledTasksRuntime.getStatus(),
     }),
     isReady: () => kernelClient.isReady,
+    mintOutsideFileGrant: targetPath => mintOutsideFileGrant(targetPath, { scopes: ['stat', 'read', 'raw'] }),
+    getDesktopLocalCredentials: createDesktopLocalCredentials({ read: readSettingsFromDisk, update: updateSettingsOnDisk, auth: remoteClientAuthRuntime }),
     stop: (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => stopTask ??= (async () => {
       const shutdown = createShutdownCollector();
       await shutdown.run('observations.stop', () => observations.stop());

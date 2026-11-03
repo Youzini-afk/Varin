@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from '@varin/protocol/node/runtime';
 /** Native opens stay in the private storage owner. The old engine is used only
  * to finish a pre-0.9 WAL-only checkpoint, then exits before the current open. */
 import { execFileSync } from 'node:child_process';
@@ -56,12 +57,12 @@ export function openKnowledgeDatabase(file: string, options: TriviumDBOptions) {
     // The failed open has released its lease. Let the original engine recover
     // its own WAL and publish a full checkpoint; never recreate the database
     // or translate WAL bytes in the Host.
-    execFileSync(process.execPath, ['-e', checkpointLegacyWal,
+    execFileSync(resolveNodeRuntime().executable, ['-e', checkpointLegacyWal,
       require.resolve('triviumdb-upgrade-0.8'), file,
       JSON.stringify({ dim: options.dim, dtype: options.dtype, syncMode: 'full',
         autoBuildQuiver: false, loadTextIndex: false, payloadCacheMb: 0 })], {
       windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      env: resolveNodeRuntime().env,
     });
     return new TriviumDB(file, options);
   }

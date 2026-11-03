@@ -88,6 +88,7 @@ test('owner/dependency/build input decisions include the actual downstream bound
     ['packages/mobile/android/app/build.gradle', ['frontend', 'android'], ['native', 'container']],
     ['.github/actions/android-setup/action.yml', ['android'], ['native']],
     ['packages/electron/main.ts', ['windows', 'macos', 'frontend'], ['native', 'container']],
+    ['packages/tauri/src-tauri/src/updater.rs', ['tauri', 'native', 'rust', 'windows', 'macos', 'production'], ['container']],
     ['Dockerfile.base', ['container', 'toolbelt'], ['windows', 'rust']],
     ['.github/workflows/container-check.yml', ['container', 'toolbelt'], ['windows']],
     ['packages/web/package.json', surfaces, []],
@@ -199,4 +200,16 @@ test('all heavy Dependabot lanes share one non-cancelling queue, including reusa
     assert.equal(job.concurrency.queue, 'max');
     assert.notEqual(job.concurrency['cancel-in-progress'], true);
   }
+});
+
+test('new native runner installations require the explicit manual dispatch option', () => {
+  assert.equal(workflow.on.workflow_dispatch.inputs.tauri_native.default, false);
+  assert.match(workflow.jobs['tauri-desktop'].if, /workflow_dispatch.*inputs.tauri_native/u);
+  const scope = classifyChanges(['packages/tauri/src-tauri/src/updater.rs']);
+  assert.equal(requiredJobs(scope)['tauri-desktop'], false);
+  assert.equal(requiredJobs(scope, { tauriNative: true })['tauri-desktop'], true);
+  const needs = { changes: { result: 'success' }, ...Object.fromEntries(Object.entries(requiredJobs(scope, { tauriNative: true })).map(([job, required]) => [job, { result: required ? 'success' : 'skipped' }])) };
+  assert.doesNotThrow(() => assertRequiredResults(scope, needs, { tauriNative: true }));
+  needs['tauri-desktop'].result = 'skipped';
+  assert.throws(() => assertRequiredResults(scope, needs, { tauriNative: true }), /expected success/);
 });

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/3",
+  "productName": "Varin",
+  "version": "0.9.37",
+  "identifier": "dev.varin.desktop",
+  "build": {
+    "frontendDist": "../resources/runtime/frontend"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http: varin-companion:; font-src 'self' data:; connect-src 'self' ipc: http: https: ws: wss: varin-companion:; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'self'",
+      "capabilities": [
+        "workbench"
+      ]
+    }
+  },
+  "bundle": {
+    "active": false,
+    "resources": {
+      "../resources/runtime/": "runtime/"
+    },
+    "category": "DeveloperTool",
+    "shortDescription": "Agent workspace for code, research and office work",
+    "license": "AGPL-3.0-only",
+    "icon": [
+      "../../electron/resources/icons/icon.png",
+      "../../electron/resources/icons/icon.ico",
+      "../../electron/resources/icons/icon.icns"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "requireSignedVersion": true,
+      "allowDowngrades": false,
+      "windows": {
+        "installMode": "basicUi"
+      }
+    }
+  }
+}

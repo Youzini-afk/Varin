@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useCompanionWindow } from './useCompanionWindow';
-vi.mock('@/lib/desktop', () => ({ isElectronShell: () => false, invokeDesktop: vi.fn() }));
+vi.mock('@/lib/desktop', () => ({ isDesktopShell: () => false, invokeDesktop: vi.fn() }));
 let root: Root | undefined;
 let view: ReturnType<typeof useCompanionWindow>;
 let opaque = true, repeated = false;

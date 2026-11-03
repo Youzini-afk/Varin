@@ -1,6 +1,6 @@
 import React from 'react';
 import { DesktopBrowserPane } from './DesktopBrowserPane';
-import { isDesktopLocalOriginActive } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { VarinLogo } from '@/components/ui/VarinLogo';
@@ -24,8 +24,8 @@ type DesktopBrowserPaneProps = {
   initialPosition?: { x: number; y: number };
 };
 
-const isElectronBrowserRuntime = (): boolean => {
-  return typeof window !== 'undefined' && Boolean(window.__VARIN_ELECTRON__) && isDesktopLocalOriginActive();
+const isDesktopBrowserRuntime = (): boolean => {
+  return isDesktopShell();
 };
 
 const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID, onNavigate, initialPosition }) => {
@@ -525,5 +525,5 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 };
 
 export function BrowserResourceView(props: DesktopBrowserPaneProps) {
-  return isElectronBrowserRuntime() ? <DesktopBrowserPane {...props} /> : <IframeBrowserPane {...props} />;
+  return isDesktopBrowserRuntime() ? <DesktopBrowserPane {...props} /> : <IframeBrowserPane {...props} />;
 }

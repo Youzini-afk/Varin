@@ -31,7 +31,8 @@
     "@varin/extension-contract": "workspace:*",
     "esbuild": "^0.28.2",
     "jsonc-parser": "^3.3.1",
-    "tar": "^7.5.22"
+    "tar": "^7.5.22",
+    "@varin/protocol": "workspace:*"
   },
   "engines": {
     "node": ">=22.19.0"

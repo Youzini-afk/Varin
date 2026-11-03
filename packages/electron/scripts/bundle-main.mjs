@@ -24,7 +24,7 @@ await prepareCompanionCatalog();
 fs.rmSync(outdir, { recursive: true, force: true });
 
 const result = await Bun.build({
-  entrypoints: [path.join(root, 'main.ts'), path.join(root, 'preload.ts')],
+  entrypoints: [path.join(root, 'main.ts'), path.join(root, 'preload.ts'), path.join(root, 'frontend-migration.ts')],
   outdir,
   target: 'node',
   format: 'esm',
@@ -49,7 +49,7 @@ if (!result.success) {
 
 // Verify both entry bundles exist and are accepted by the same Node parser
 // used by Electron's main-process runtime.
-const expectedEntries = ['main.mjs', 'preload.mjs'];
+const expectedEntries = ['main.mjs', 'preload.mjs', 'frontend-migration.mjs'];
 const nodeExecutable = process.env.VARIN_PACKAGING_NODE || 'node';
 for (const entry of expectedEntries) {
   const entryPath = path.join(outdir, entry);

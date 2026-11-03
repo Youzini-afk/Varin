@@ -19,7 +19,7 @@ import { DESKTOP_BROWSER_INSPECT_SCRIPT, DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT, 
 export interface DesktopBrowserPaneProps {
   initialUrl: string; directory: string; tabID: string; onNavigate?(url: string): void; initialPosition?: { x: number; y: number };
 }
-/** The DOM supplies chrome and placement; Electron retains the same live page. */
+/** The DOM supplies chrome and placement; The native desktop owner retains the same live page. */
 export function DesktopBrowserPane({ initialUrl, directory, tabID, onNavigate }: DesktopBrowserPaneProps) {
   const { t } = useI18n();
   const pageId = embeddedBrowserPageId(directory, tabID);

@@ -1,3 +1,4 @@
+import { getDesktopRuntime } from '@/lib/desktopRuntime';
 import React from 'react';
 import { runtimeFetch } from '@varin/application-client';
 
@@ -15,12 +16,12 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import {
-    canUseElectronDesktopIPC,
+    canUseDesktopIPC,
     invokeDesktop,
     isDesktopLocalOriginActive,
     isDesktopShell,
     isWebRuntime,
-    usesFramelessElectronChrome,
+    usesFramelessDesktopChrome,
     type DesktopWindowControlsPosition,
     type DesktopWindowControlsStyle,
 } from '@/lib/desktop';
@@ -250,13 +251,13 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     // (vibrancy is a window-creation option), so we persist + restart on save.
     const macVibrancySupported = React.useMemo(
         () => isDesktopShell()
-            && canUseElectronDesktopIPC()
+            && canUseDesktopIPC()
             && isDesktopLocalOriginActive()
             && typeof window !== 'undefined'
-            && window.__VARIN_ELECTRON__?.macVibrancySupported === true,
+            && getDesktopRuntime()?.macVibrancySupported === true,
         [],
     );
-    const macVibrancyEnabled = typeof window !== 'undefined' && window.__VARIN_ELECTRON__?.macVibrancy === true;
+    const macVibrancyEnabled = typeof window !== 'undefined' && getDesktopRuntime()?.macVibrancy === true;
     const [vibrancyChecked, setVibrancyChecked] = React.useState(macVibrancyEnabled);
     const [vibrancyRestarting, setVibrancyRestarting] = React.useState(false);
 
@@ -270,7 +271,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     );
     const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
     const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
-    const showWindowControlsPosition = usesFramelessElectronChrome();
+    const showWindowControlsPosition = usesFramelessDesktopChrome();
     const desktopWindowControlsPosition = useUIStore((state) => state.desktopWindowControlsPosition);
     const setDesktopWindowControlsPosition = useUIStore((state) => state.setDesktopWindowControlsPosition);
     const desktopWindowControlsStyle = useUIStore((state) => state.desktopWindowControlsStyle);

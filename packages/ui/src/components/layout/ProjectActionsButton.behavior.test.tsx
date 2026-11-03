@@ -20,7 +20,7 @@ vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: mocks.mobile }) }));
-vi.mock('@/lib/desktop', () => ({ isDesktopShell: () => false, canUseElectronDesktopIPC: () => false }));
+vi.mock('@/lib/desktop', () => ({ isDesktopShell: () => false, canUseDesktopIPC: () => false }));
 vi.mock('@/lib/project-config', () => ({ getProjectActionsState: mocks.readActions }));
 vi.mock('@/lib/url', () => ({ openExternalUrl: mocks.openExternal }));
 vi.mock('@/contexts/useThemeSystem', () => ({

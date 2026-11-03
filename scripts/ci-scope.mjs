@@ -6,7 +6,7 @@ import path from 'node:path';
 // These are product/owner boundaries, not a second package dependency graph.
 // Unknown inputs deliberately select the complete qualification path.
 export const surfaces = ['code', 'frontend', 'native', 'rust', 'windows', 'macos',
-  'production', 'container', 'toolbelt', 'android', 'security', 'full'];
+  'production', 'container', 'toolbelt', 'android', 'security', 'tauri', 'full'];
 const empty = () => Object.fromEntries(surfaces.map(name => [name, false]));
 const all = () => Object.fromEntries(surfaces.map(name => [name, true]));
 const prose = /(?:^docs\/|^packages\/docs\/|^\.github\/readme\/|(?:^|\/)(?:README(?:\.[a-z]{2}(?:-[A-Z]{2})?)?|DOCUMENTATION|AGENTS|CHANGELOG)\.md$)/u;
@@ -32,6 +32,9 @@ export function classifyChanges(files, { full = false, called = false } = {}) {
     }
     if (/^packages\/mobile\//u.test(file) || file.startsWith('.github/actions/android-setup/')) {
       enable('frontend', 'android'); continue;
+    }
+    if (file.startsWith('packages/tauri/') || file === 'scripts/desktop-update-signatures.mjs') {
+      enable('frontend', 'native', 'rust', 'windows', 'macos', 'production', 'tauri'); continue;
     }
     if (file.startsWith('packages/electron/')) {
       enable('frontend', 'windows', 'macos'); continue;
@@ -82,7 +85,7 @@ export function changedPaths({ cwd = process.cwd(), eventName, event }) {
   } catch { return null; }
 }
 
-export function requiredJobs(scope) {
+export function requiredJobs(scope, { tauriNative = false } = {}) {
   if (surfaces.some(name => typeof scope[name] !== 'boolean')) throw new Error('Missing or invalid CI surface');
   return {
     'portable-source': true,
@@ -94,12 +97,13 @@ export function requiredJobs(scope) {
     'production-build': scope.production,
     'container-check': scope.container,
     'android-build': scope.android,
+    'tauri-desktop': scope.tauri && tauriNative,
   };
 }
 
-export function assertRequiredResults(scope, needs) {
+export function assertRequiredResults(scope, needs, options) {
   if (needs.changes?.result !== 'success') throw new Error('Change detection did not succeed');
-  for (const [job, required] of Object.entries(requiredJobs(scope))) {
+  for (const [job, required] of Object.entries(requiredJobs(scope, options))) {
     const expected = required ? 'success' : 'skipped';
     if (needs[job]?.result !== expected) throw new Error(`${job}: expected ${expected}, received ${needs[job]?.result ?? 'missing'}`);
   }
@@ -113,7 +117,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (value !== 'true' && value !== 'false') throw new Error(`Missing or invalid CI surface: ${name}`);
       return [name, value === 'true'];
     }));
-    assertRequiredResults(scope, needs);
+    assertRequiredResults(scope, needs, { tauriNative: process.env.CI_TAURI_NATIVE === 'true' });
     console.log('Every applicable source, native, platform and product check passed.');
   } else {
     const eventName = process.env.GITHUB_EVENT_NAME;

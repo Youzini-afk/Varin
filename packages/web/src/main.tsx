@@ -1,4 +1,4 @@
-import { createConfiguredWebAPIs, getDesktopRelayRestoreReady } from './runtimeConfig';
+import { prepareDesktopRenderer } from './desktop-bootstrap';
 import { registerSW } from 'virtual:pwa-register';
 
 import type { RuntimeAPIs } from '@varin/application-client';
@@ -28,21 +28,12 @@ const isCoarsePointer = (): boolean => {
   return window.matchMedia('(pointer: coarse)').matches;
 };
 
-const hostedSurface = detectHostedSurface({
-  search: window.location.search,
-  innerWidth: window.innerWidth || 0,
-  screenWidth: window.screen?.width || window.innerWidth || 0,
-  maxTouchPoints: navigator.maxTouchPoints || 0,
-  isCoarsePointer: isCoarsePointer(),
-  mobileLayoutPreference: getStoredMobileLayoutPreference(),
-});
-window.__VARIN_SURFACE__ = hostedSurface;
-
 type PrerenderingDocument = Document & {
   prerendering?: boolean;
 };
 
 const canUseServiceWorker = (): boolean => {
+  if ('__TAURI_INTERNALS__' in window) return false;
   if (!('serviceWorker' in navigator)) return false;
   if (!window.isSecureContext) return false;
   if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') return false;
@@ -104,6 +95,19 @@ const unregisterDevelopmentServiceWorkers = (): void => {
 };
 
 const start = async (): Promise<void> => {
+  await prepareDesktopRenderer();
+  const { createConfiguredWebAPIs, getDesktopRelayRestoreReady } = await import('./runtimeConfig');
+  const hostedSurface = detectHostedSurface({
+    search: window.location.search,
+    innerWidth: window.innerWidth || 0,
+    screenWidth: window.screen?.width || window.innerWidth || 0,
+    maxTouchPoints: navigator.maxTouchPoints || 0,
+    isCoarsePointer: isCoarsePointer(),
+    mobileLayoutPreference: getStoredMobileLayoutPreference(),
+  });
+  window.__VARIN_SURFACE__ = hostedSurface;
+
+
   const embeddedBootstrap = isEmbeddedSessionChat()
     ? await requestEmbeddedSessionRuntimeBootstrap()
     : null;
@@ -130,7 +134,7 @@ const start = async (): Promise<void> => {
   await Promise.all([getDesktopRelayRestoreReady(), applicationModule]);
 };
 
-void start();
+void start().catch(() => { console.error('[desktop] Application startup failed'); });
 
 if (import.meta.hot) {
   import.meta.hot.on('varin:theme-updated', (theme: unknown) => {

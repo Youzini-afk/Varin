@@ -21,7 +21,7 @@ export function resolveBundledRipgrepBinDir(options: {
 } = {}): string | null {
   const platform = options.platform ?? process.platform;
   const binary = platform === 'win32' ? 'rg.exe' : 'rg';
-  const resources = options.resourcesPath ?? (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const resources = options.resourcesPath ?? (process.env.VARIN_RESOURCES_PATH?.trim() || (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath);
   const candidates = resources ? [path.join(resources, 'tools', binary)] : [];
   if (options.packageJsonPath) candidates.push(path.join(path.dirname(options.packageJsonPath), 'bin', binary));
   else {

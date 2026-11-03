@@ -1,11 +1,12 @@
+import { getDesktopRuntime } from '@/lib/desktopRuntime';
 import React from 'react';
-import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
+import { canUseDesktopIPC, invokeDesktop } from '@/lib/desktop';
 import { useThreadStore } from '@/stores/useThreadStore';
 
 /** Push presentation only; the Catalog remains the native work/attention authority. */
 export const useTraySync = (options: { enabled?: boolean } = {}): void => {
   React.useEffect(() => {
-    if (options.enabled === false || !canUseElectronDesktopIPC() || window.__VARIN_ELECTRON__?.trayEnabled === false) return;
+    if (options.enabled === false || !canUseDesktopIPC() || getDesktopRuntime()?.trayEnabled === false) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const flush = () => {
       timer = undefined;

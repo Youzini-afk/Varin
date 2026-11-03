@@ -4,7 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useCompanionWindow } from './useCompanionWindow';
 import { useCompanionLeisure } from './useCompanionLeisure';
-vi.mock('@/lib/desktop', () => ({ isElectronShell: () => false, invokeDesktop: vi.fn() }));
+vi.mock('@/lib/desktop', () => ({ isDesktopShell: () => false, invokeDesktop: vi.fn() }));
 let cleanup: (() => void) | undefined;
 afterEach(() => { cleanup?.(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 function environment() {

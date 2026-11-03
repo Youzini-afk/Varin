@@ -1,3 +1,4 @@
+import { nodeProcessEnvironment } from '@varin/protocol/node/runtime';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -330,7 +331,7 @@ export const createDebugSupervisor = ({
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       child = await launchOwnedProcess(record, (signal) => spawn(adapter.command, adapter.args ?? [], {
         cwd: workspace.root,
-        env: { ...env, ...adapter.env },
+        env: nodeProcessEnvironment(adapter.command, { ...env, ...adapter.env }),
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         signal,

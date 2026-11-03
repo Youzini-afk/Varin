@@ -1,3 +1,4 @@
+import { getDesktopRuntime } from '@/lib/desktopRuntime';
 import type { Theme } from '@/types/theme';
 import { SEMANTIC_TYPOGRAPHY } from '@/lib/typography';
 
@@ -227,8 +228,7 @@ export class CSSVariableGenerator {
     document.documentElement.setAttribute('data-theme', theme.metadata.variant);
 
     const hasMacVibrancy = typeof window !== 'undefined'
-      && window.__VARIN_ELECTRON__?.runtime === 'electron'
-      && window.__VARIN_ELECTRON__?.macVibrancy === true;
+      && getDesktopRuntime()?.macVibrancy === true;
     document.documentElement.toggleAttribute('data-varin-vibrancy', hasMacVibrancy);
     // Default the "ready" flag here (DOM is guaranteed to exist) rather than
     // relying on the preload, which sets it at document-start when

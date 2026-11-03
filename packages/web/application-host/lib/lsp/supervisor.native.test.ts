@@ -149,7 +149,7 @@ describe('language supervisor', () => {
           onTypeFormattingTriggerCharacters: ['}', ';'],
         },
       });
-      expect(spawnedEnvironment?.ELECTRON_RUN_AS_NODE).toBe('1');
+      expect(spawnedEnvironment?.ELECTRON_RUN_AS_NODE).toBe(process.versions.electron ? '1' : undefined);
       const completion = await language.completion({
         resource,
         languageId: 'typescript',

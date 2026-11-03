@@ -53,3 +53,21 @@ test('missing worker entrypoints fail the release audit', t => {
   f.write('index.js', "new Worker(new URL('./worker.js', import.meta.url));");
   assert.throws(() => inspectHostProductionGraph(f.root), /Missing Host runtime dependency/);
 });
+
+test('independent desktop entries participate in the same production graph and must all exist', t => {
+  const f = fixture(t);
+  f.write('index.js');
+  f.write('desktop-host.js', "import './desktop-worker.js';");
+  f.write('desktop-worker.js');
+  f.write('desktop-settings.js');
+  const entries = ['index.js', 'public-contract.js', 'desktop-host.js', 'desktop-settings.js', 'desktop-browser.js'];
+  assert.throws(() => pruneLegacyHostArtifacts(f.root, entries), /Missing Host runtime dependency: desktop-browser.js/);
+  f.write('desktop-browser.js', "import './lib/old.test-helper.js';");
+  f.write('lib/old.test-helper.js');
+  assert.throws(() => pruneLegacyHostArtifacts(f.root, entries), /Legacy Host runtime dependency: desktop-browser.js/);
+  f.write('desktop-browser.js');
+  pruneLegacyHostArtifacts(f.root, entries);
+  const report = JSON.parse(fs.readFileSync(path.join(f.root, 'production-boundary.json'), 'utf8'));
+  assert.ok(report.runtimeModules.includes('desktop-worker.js'));
+  assert.ok(report.runtimeModules.includes('desktop-browser.js'));
+});

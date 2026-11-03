@@ -1,7 +1,7 @@
 import { cueMatchesScene, directorCueMatchesPresentation } from './sceneCues';
 import React from 'react';
 import type { DesktopCompanionScene, DesktopCompanionSceneLayoutReceipt } from '@varin/application-client';
-import { invokeDesktop, isElectronShell } from '@/lib/desktop';
+import { invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import type { SceneFact } from './sceneFacts';
 import { visibleSceneViewport, type SceneViewport } from './sceneViewport';
 
@@ -33,7 +33,7 @@ export function useCompanionScene(canvas: React.RefObject<HTMLCanvasElement | nu
   const knownSide = layoutReceipt?.layoutSubject === layoutSubject && layoutReceipt?.scope === scope && layoutReceipt.viewportRevision === sizeRevision ? layoutReceipt.inspectionSide : null;
   const signature = JSON.stringify([knownSide, fact, scope, suppressed, menuOpen, visibleCue, team, portfolio, presentationKey, drawing, spatialEnabled, reduced, hidden, sizeRevision]);
   React.useEffect(() => {
-    if (!isElectronShell()) return;
+    if (!isDesktopShell()) return;
     const { viewport, visible } = visibleSceneViewport(canvas.current?.getBoundingClientRect(), window.innerWidth, window.innerHeight, lastViewport.current);
     if (!viewport) return;
     if (spatialEnabled) {

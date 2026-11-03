@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from '@varin/protocol/node/runtime';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -231,9 +232,9 @@ const server = createDapServer({
     if (method === 'launch') {
       program = typeof request.program === 'string' ? request.program : '';
       cwd = typeof request.cwd === 'string' ? request.cwd : path.dirname(program);
-      child = spawn(process.execPath, ['--inspect-brk=127.0.0.1:0', program], {
+      child = spawn(resolveNodeRuntime().executable, ['--inspect-brk=127.0.0.1:0', program], {
         cwd,
-        env: { ...process.env, NODE_OPTIONS: '' },
+        env: { ...resolveNodeRuntime().env, NODE_OPTIONS: '' },
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });

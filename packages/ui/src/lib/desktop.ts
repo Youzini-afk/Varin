@@ -1,3 +1,4 @@
+import { getDesktopRuntime } from './desktopRuntime';
 import type { ProjectEntry, TerminalShell } from '@varin/application-client';
 import type {
   VarinDesktopBridge,
@@ -212,32 +213,19 @@ export type DesktopSettings = {
 };
 
 // The desktop bridge type is owned by @varin/application-client so that
-// preload, main, and UI share a single typed contract for all 58 commands.
+// Native adapters and UI share a single typed desktop command contract.
 // The exposed bridge is structurally compatible with VarinDesktopBridge;
 // we keep a local alias for ergonomics and backward-compatible imports.
 type DesktopBridgeGlobal = Partial<VarinDesktopBridge>;
-
-type ElectronRuntimeGlobal = {
-  runtime?: string;
-  arch?: string;
-  macVibrancy?: boolean;
-  macVibrancySupported?: boolean;
-  trayEnabled?: boolean;
-};
-
-const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
-  if (typeof window === 'undefined') return null;
-  return (window as unknown as { __VARIN_ELECTRON__?: ElectronRuntimeGlobal }).__VARIN_ELECTRON__ ?? null;
-};
 
 const getDesktopBridge = (): DesktopBridgeGlobal | null => {
   if (typeof window === 'undefined') return null;
   return (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__ ?? null;
 };
 
-export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
+export const isElectronShell = (): boolean => getDesktopRuntime()?.runtime === 'electron';
 
-export const getElectronPlatform = (): string | null => {
+export const getDesktopPlatform = (): string | null => {
   if (typeof window === 'undefined') return null;
   const platform = (window as unknown as { __VARIN_PLATFORM__?: string }).__VARIN_PLATFORM__;
   return typeof platform === 'string' ? platform : null;
@@ -247,9 +235,9 @@ export const getElectronPlatform = (): string | null => {
 export const DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION: DesktopWindowControlsPosition = 'right';
 
 /** Windows and Linux use frameless windows with in-app minimize/maximize/close controls. */
-export const usesFramelessElectronChrome = (): boolean => {
-  if (!isElectronShell()) return false;
-  const platform = getElectronPlatform();
+export const usesFramelessDesktopChrome = (): boolean => {
+  if (!isDesktopShell()) return false;
+  const platform = getDesktopPlatform();
   return platform === 'win32' || platform === 'linux';
 };
 
@@ -288,7 +276,7 @@ export const hasDesktopInvoke = (): boolean => {
 export const subscribeDesktopCompanionLibrary = (handler: () => void): Promise<() => void> =>
   getDesktopBridge()?.listen?.('varin:companion-library-changed', handler) ?? Promise.resolve(() => {});
 
-export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
+export const canUseDesktopIPC = (): boolean => isDesktopShell() && hasDesktopInvoke();
 
 export const invokeDesktop = async <K extends VarinDesktopCommand>(
   command: K,
@@ -300,7 +288,7 @@ export const invokeDesktop = async <K extends VarinDesktopCommand>(
 };
 
 export const getDesktopLaunchAtLogin = async (): Promise<DesktopLaunchAtLoginStatus | null> => {
-  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
@@ -317,7 +305,7 @@ export const getDesktopLaunchAtLogin = async (): Promise<DesktopLaunchAtLoginSta
 };
 
 export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<DesktopLaunchAtLoginStatus | null> => {
-  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
@@ -334,7 +322,7 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<Desktop
 };
 
 export const getDesktopMinimizeToTray = async (): Promise<DesktopMinimizeToTrayStatus | null> => {
-  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
@@ -351,7 +339,7 @@ export const getDesktopMinimizeToTray = async (): Promise<DesktopMinimizeToTrayS
 };
 
 export const setDesktopMinimizeToTray = async (enabled: boolean): Promise<DesktopMinimizeToTrayStatus | null> => {
-  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
@@ -368,7 +356,7 @@ export const setDesktopMinimizeToTray = async (enabled: boolean): Promise<Deskto
 };
 
 export const getDesktopKeepAwake = async (): Promise<DesktopKeepAwakeStatus | null> => {
-  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
@@ -385,7 +373,7 @@ export const getDesktopKeepAwake = async (): Promise<DesktopKeepAwakeStatus | nu
 };
 
 export const setDesktopKeepAwake = async (enabled: boolean): Promise<DesktopKeepAwakeStatus | null> => {
-  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
   }
 
@@ -497,7 +485,7 @@ export const isDesktopLocalOriginActive = (): boolean => {
 
 export const isDesktopShell = (): boolean => {
   if (typeof window === 'undefined') return false;
-  return isElectronShell();
+  return getDesktopRuntime() !== null;
 };
 
 export const canRequestNativeDirectoryAccess = (): boolean => (
@@ -966,3 +954,8 @@ export const fetchDesktopInstalledApps = async (
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 };
+
+// Legacy names retained for existing integrations; product consumers use shell-neutral names.
+export const getElectronPlatform = getDesktopPlatform;
+export const usesFramelessElectronChrome = usesFramelessDesktopChrome;
+export const canUseElectronDesktopIPC = canUseDesktopIPC;

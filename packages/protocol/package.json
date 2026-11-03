@@ -18,6 +18,10 @@
     "./node/embeddings": {
       "types": "./dist/node/embeddings.d.ts",
       "import": "./dist/node/embeddings.js"
+    },
+    "./node/runtime": {
+      "types": "./dist/node/runtime.d.ts",
+      "import": "./dist/node/runtime.js"
     }
   },
   "scripts": {

@@ -20,7 +20,7 @@ import {
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
-import { isElectronShell, isDesktopShell } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -98,7 +98,7 @@ const getLocalOrigin = (): string => {
 };
 
 const getLocalClientToken = async (): Promise<string> => {
-  if (!isElectronShell()) return '';
+  if (!isDesktopShell()) return '';
   return desktopLocalClientTokenGet().catch(() => '');
 };
 
@@ -452,7 +452,7 @@ export function DesktopHostSwitcherDialog({
           if (h.relay && !h.apiUrl) {
             return [h.id, await probeRelayLeg()] as const;
           }
-          const url = normalizeHostUrl(isElectronShell() ? getDesktopHostApiUrl(h) : h.url);
+          const url = normalizeHostUrl(isDesktopShell() ? getDesktopHostApiUrl(h) : h.url);
           if (!url) {
             return [h.id, { status: 'unreachable' as const, latencyMs: 0 } satisfies HostStatus] as const;
           }
@@ -558,7 +558,7 @@ export function DesktopHostSwitcherDialog({
     const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
     if (!origin && !relayOnly) return;
 
-    if (isElectronShell()) {
+    if (isDesktopShell()) {
       if (!apiOrigin && !host.relay) return;
       setSwitchingHostId(host.id);
       const clientToken = host.id === LOCAL_HOST_ID ? await getLocalClientToken() : (host.clientToken || '');
@@ -796,7 +796,7 @@ export function DesktopHostSwitcherDialog({
       phase: 'idle',
     }));
     const localTarget = toNavigationUrl(localOrigin);
-    if (isElectronShell()) {
+    if (isDesktopShell()) {
       const clientToken = await getLocalClientToken();
       try {
         await switchRuntimeEndpointSafely({ apiBaseUrl: localOrigin, clientToken: clientToken || null, runtimeKey: 'local' });
@@ -1278,7 +1278,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
       if (!localUrl) {
         throw new Error('Connected but missing forwarded URL');
       }
-      if (isElectronShell()) {
+      if (isDesktopShell()) {
         await switchRuntimeEndpointSafely({ apiBaseUrl: localUrl, clientToken: null, runtimeKey: `ssh:${hostId}` });
       } else {
         window.location.assign(toNavigationUrl(localUrl));
@@ -1317,7 +1317,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
       })
       .catch(() => undefined);
 
-    if (isElectronShell()) {
+    if (isDesktopShell()) {
       const clientToken = await getLocalClientToken();
       try {
         await switchRuntimeEndpointSafely({ apiBaseUrl: nextLocalOrigin, clientToken: clientToken || null, runtimeKey: 'local' });
@@ -1353,7 +1353,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
         const current = resolveCurrentHost(all);
 
         if (
-          !isElectronShell() &&
+          !isDesktopShell() &&
           !attemptedDefaultSshConnectRef.current &&
           current.id === LOCAL_HOST_ID &&
           cfg.defaultHostId &&

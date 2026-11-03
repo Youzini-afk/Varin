@@ -24,13 +24,13 @@ export async function resolveRuntimePackage(name, importer) {
 }
 
 /** Produce an ordinary, closed Node dependency tree from the installed lockfile graph. */
-export async function stageRuntime({ repository, destination, hostDirectory, platform = process.platform, architecture = process.arch }) {
-  const electron = path.join(repository, 'packages/electron');
-  const app = JSON.parse(await fs.readFile(path.join(electron, 'package.json'), 'utf8'));
+export async function stageRuntime({ repository, destination, hostDirectory, platform = process.platform, architecture = process.arch,
+  appDirectory = path.join(repository, 'packages/electron'), entries = ['bootstrap.mjs', 'dist-bundle'], manifest }) {
+  const app = manifest ? structuredClone(manifest) : JSON.parse(await fs.readFile(path.join(appDirectory, 'package.json'), 'utf8'));
   const modules = path.join(destination, 'node_modules');
   const nodes = new Map();
   const direct = new Map();
-  for (const name of Object.keys(app.dependencies)) direct.set(name, await resolveRuntimePackage(name, electron));
+  for (const name of Object.keys(app.dependencies)) direct.set(name, await resolveRuntimePackage(name, appDirectory));
   await fs.rm(destination, { recursive: true, force: true });
   await fs.mkdir(modules, { recursive: true });
   const add = async (name, source, parentModules = modules, optional = false) => {
@@ -105,7 +105,7 @@ export async function stageRuntime({ repository, destination, hostDirectory, pla
   }
   delete app.devDependencies; delete app.build; delete app.scripts;
   await fs.writeFile(path.join(destination, 'package.json'), JSON.stringify(app, null, 2) + '\n');
-  for (const entry of ['bootstrap.mjs', 'dist-bundle']) await fs.cp(path.join(electron, entry), path.join(destination, entry), { recursive: true });
+  for (const entry of entries) await fs.cp(path.join(appDirectory, entry), path.join(destination, entry), { recursive: true });
 
   // These entry owners run through a real Node process, including a user-selected Node executable.
   // Preserve their dependency closures outside ASAR; ordinary main-process JS stays in the archive.

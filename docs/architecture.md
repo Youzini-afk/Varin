@@ -1,6 +1,6 @@
 # Varin 架构
 
-Varin 由共享工作台、可信 Application Host 和私有 Rust 内核组成。Web、Electron 和移动端使用同一套产品服务。
+Varin 由共享工作台、可信 Application Host 和私有 Rust 内核组成。Web、原生桌面和移动端使用同一套产品服务。
 Varin 原生对话通过 Agent runtime 执行；Thread、HistoryBranch、Run、请求和 Operation 由 Rust Catalog 持久化。
 外部 Harness 继续执行自己的会话循环，产品绑定、投递与观察记录也由 Catalog 保存，见[外部 Agent](external-agents.md)。
 Workbench Profile 选择 Agent、IDE、Research 或 Bot 外壳，不改变执行身份、来源和权限。
@@ -11,7 +11,7 @@ Workbench Profile 选择 Agent、IDE、Research 或 Bot 外壳，不改变执行
 ## 进程与包边界
 
 ```text
-Web / Electron / mobile renderer
+Web / Tauri / Electron transition / mobile renderer
   application-client RuntimeAPIs + authenticated HTTP / multiplexed observations
     Application Host (packages/web/application-host)
       admission, model accounts, resources, MCP, Documents, research, ComputerService
@@ -25,10 +25,13 @@ Web / Electron / mobile renderer
 - `application-client` 定义无框架依赖的产品 API、DTO 和类型化失败；`protocol` 提供共享领域和 Surface 类型。
   私有 Rust wire 由 `kernel/protocol/schema.json` 生成，不能作为 renderer 的任意方法透传口。
 - `ui` 负责 React 呈现、Thread 投影、Document Registry 与编辑器分组，不拥有文件写入、凭据或耐久执行。
-- `web` 是 Application Host。Electron 内嵌同一 Host 并提供窗口、preload、通知和更新；移动端连接 Host。
+- `web` 是 Application Host。Tauri 通过私有受管管道运行随包 Node 的原 Host；纯远端模式不启动本地 Host。
+  旧 Electron 适配器仍用于迁移对照与旧版本交接；移动端连接 Host。
   客户端只观察或提交明确操作，不增加另一套后端或对话数据库。
-- 内置 Browser Use 由 Electron 的原 Chromium 会话和 `WebContentsView` 承载，Host 注入受信的 BrowserOwner。
-  UI 只挂载同一页面的视图；页面操作、下载与关闭由该 owner 管理。无此 owner 的远端 Host 不会借用本机登录态。
+- 内置 Browser Use 的业务 owner 位于 `application-host/lib/browser`，由原 Host 注入。Tauri 通过私有管道提供同一 CEF 页面与原生子视图；Electron 过渡适配器复用该 owner。
+  UI 只挂载同一页面；页面操作、下载、真实终止与文件回收仍由该 owner 管理。无此 owner 的远端 Host 不借用本机登录态。
+- 原生桌面注册表只保存窗口启动资料、呈现投影和资源租约，不复制 Catalog/History。主界面、网站和装饰层能力分离，
+  具体边界见 [Tauri 桌面](../packages/tauri/README.md)。正式替换受平台验收和签名发布资格约束。
 - Office 格式引擎在 Host 中读取和转换 DOCX/XLSX/PPTX，输出交给原生文件事务；材料、文件、运行和恢复仍由上述原 owner 管理。
 - `varin-runtime` 负责执行状态机与 provider 协议；`varin-kernel` 将它连接到资源权威和特权 Host bridge。
 - 扩展契约、作者 API、Host 生命周期和 Surface 生命周期分别由对应包拥有。相同扩展 ID 不等于相同权限。

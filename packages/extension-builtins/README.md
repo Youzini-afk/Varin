@@ -63,4 +63,4 @@ The build writes these language server assets to `dist/builtin-packages/language
 - YAML Language Server with its localizations.
 - Bash Language Server with its Tree-sitter grammar.
 
-Each brokered entrypoint launches the immutable runtime with `process.execPath`; it never installs a server at runtime. The packaging smoke copies a completed distribution to a temporary directory and speaks LSP over stdio to verify initialization, document open, and symbols or diagnostics without resolving the workspace's `node_modules`.
+Each brokered entrypoint launches the immutable runtime with the explicit `@varin/protocol/node/runtime` entry (`VARIN_NODE_PATH` for managed desktops); it never installs a server at runtime. The packaging smoke copies a completed distribution to a temporary directory and speaks LSP over stdio to verify initialization, document open, and symbols or diagnostics without resolving the workspace's `node_modules`.

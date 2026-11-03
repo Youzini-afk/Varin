@@ -41,6 +41,8 @@ export interface StartWebUiServerOptions {
   onTunnelReady?: ((publicUrl: string, connectUrl: string | null) => void) | undefined;
   openFilesystemPath?: ((targetPath: string) => void | Promise<void>) | undefined;
   port?: number | undefined;
+  /** Retry only listener EADDRINUSE on this same initialized Host, never recreate owners. */
+  fallbackPorts?: readonly number[] | undefined;
   /** The embedding process owns a real stop and clean-process relaunch. */
   restartApplicationHost?: (() => Promise<void>) | undefined;
   /** Trusted desktop-only offscreen renderer used by harness.web.render. */
@@ -69,6 +71,10 @@ export interface WebUiServerController {
   getTunnelUrl(): string | null;
   httpServer: Server;
   isReady(): boolean;
+  /** Private embedding contract; never expose through an unauthenticated route. */
+  getDesktopLocalCredentials?(): Promise<{ clientToken: string }>;
+  /** Trusted native picker only; grants belong to this Host process. */
+  mintOutsideFileGrant?(path: string): Promise<OutsideFileGrantResult>;
   stop(options?: { exitProcess?: boolean | undefined }): Promise<void>;
 }
 

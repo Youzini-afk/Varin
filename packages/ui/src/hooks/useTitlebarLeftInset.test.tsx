@@ -7,8 +7,8 @@ const shell = vi.hoisted(() => ({ desktop: true, platform: 'darwin', fullscreen:
   query: vi.fn<() => Promise<boolean>>() }));
 vi.mock('@/lib/desktop', () => ({
   isDesktopShell: () => shell.desktop,
-  getElectronPlatform: () => shell.platform,
-  usesFramelessElectronChrome: () => shell.desktop && ['win32', 'linux'].includes(shell.platform),
+  getDesktopPlatform: () => shell.platform,
+  usesFramelessDesktopChrome: () => shell.desktop && ['win32', 'linux'].includes(shell.platform),
   invokeDesktop: () => shell.query(),
 }));
 vi.mock('@/lib/device', () => ({ useTabletStandalonePwaRuntime: () => shell.tablet }));

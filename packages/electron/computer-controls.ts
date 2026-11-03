@@ -3,11 +3,7 @@ import { getNativeLocale, nativeText } from './native-i18n.js';
 import type { ComputerControlState, ComputerGesture } from '@varin/protocol';
 
 type Commands = { holderId: string; takeover(): Promise<void>; handback(): Promise<void>; cancel(): Promise<void> };
-const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'"><style>
-*{box-sizing:border-box}html,body{margin:0;background:transparent;color:#e9e9e9;font:13px system-ui}main{margin:5px;display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #ffffff18;border-radius:14px;background:#242525f5;box-shadow:0 2px 10px #0005}#state{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}a{color:inherit;text-decoration:none;white-space:nowrap;padding:7px 10px;border-radius:8px;background:#ffffff12}a:first-of-type{background:#e6ecee;color:#182024}a[aria-disabled=true]{pointer-events:none;opacity:.45}#error{color:#ffbcb2;display:none;max-width:100%;padding:0 12px 6px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-</style></head><body><main><span id="state"></span><a id="handoff"></a><a id="cancel" href="varin-computer-control:cancel"></a></main><div id="error"></div><script>
-window.setComputerControl=s=>{document.documentElement.lang=s.locale;const state=document.getElementById('state'),handoff=document.getElementById('handoff'),cancel=document.getElementById('cancel'),error=document.getElementById('error');state.textContent=s.text;handoff.textContent=s.handoff;handoff.href='varin-computer-control:'+s.command;cancel.textContent=s.cancel;cancel.style.display=s.cancelVisible?'':'none';for(const a of [handoff,cancel])a.setAttribute('aria-disabled',String(s.busy));error.textContent=s.error||'';error.style.display=s.error?'block':'none'};
-</script></body></html>`;
+import { COMPUTER_CONTROLS_HTML as HTML } from '../ui/src/lib/computerControls.js';
 
 /** Native control surface only. Its fixed commands call the owning Host directly. */
 export function createComputerControls() {

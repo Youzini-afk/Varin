@@ -199,7 +199,7 @@ export const registerRuntimeEndpointSwitchBlocker = (
 
 export const switchRuntimeEndpointSafely = (
   options: RuntimeEndpointSwitchOptions,
-  lifecycle?: { beforeCommit?(): void | Promise<void> },
+  lifecycle?: { beforePrepare?(): void | Promise<void>; beforeCommit?(): void | Promise<void> },
 ): Promise<void> => {
   const requested: RuntimeEndpointSwitchOptions = {
     ...options,
@@ -207,6 +207,9 @@ export const switchRuntimeEndpointSafely = (
     ...(options.relay ? { relay: structuredClone(options.relay) } : {}),
   };
   const run = async () => {
+    // Re-check the requesting identity after earlier queued switches commit,
+    // before asking guards or cleaning the newly selected runtime.
+    await lifecycle?.beforePrepare?.();
     const apiBaseUrl = requested.apiBaseUrl.trim();
     const detail: RuntimeEndpointChangedDetail = {
       apiBaseUrl,

@@ -1,3 +1,4 @@
+import { resolveNodeRuntime, nodeProcessEnvironment } from '@varin/protocol/node/runtime';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -81,7 +82,7 @@ export const createWorkspaceTaskRunner = ({
   pathModule = path,
   env = process.env,
   isTrusted = async () => false,
-  execPath = process.execPath,
+  execPath = resolveNodeRuntime({ env }).executable,
 }: TaskRunnerOptions) => {
   const runs = new Map<string, TaskRunRecord>();
   const workspaceListeners = new Map<string, Set<(event: VarinTaskEvent) => void>>();
@@ -284,7 +285,7 @@ export const createWorkspaceTaskRunner = ({
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       child = await launchOwnedProcess(record, (signal) => spawn(command, args, {
         cwd: workspace.root,
-        env: { ...env },
+        env: nodeProcessEnvironment(command, env),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         signal,

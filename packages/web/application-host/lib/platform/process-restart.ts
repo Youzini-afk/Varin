@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from '@varin/protocol/node/runtime';
 /** A clean-process relay. The replacement cannot start before the original Host drains. */
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -40,7 +41,8 @@ export function createProcessRestart(options: {
 }) {
   let pending: Promise<void> | undefined;
   return () => pending ??= (async () => {
-    const child = (options.spawn ?? spawn)(process.execPath, ['-e', relaySource], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], env: process.env });
+    const runtime = resolveNodeRuntime();
+    const child = (options.spawn ?? spawn)(runtime.executable, ['-e', relaySource], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], env: runtime.env });
     const observation = new AbortController();
     const ready = message(child, 'ready', observation.signal);
     const launched = message(child, 'launched', observation.signal);
@@ -51,7 +53,7 @@ export function createProcessRestart(options: {
       await ready;
       await options.stop();
       if (!child.connected) throw new Error('Application Host relaunch failed');
-      child.send({ kind: 'launch', executable: options.executable ?? process.execPath,
+      child.send({ kind: 'launch', executable: options.executable ?? runtime.executable,
         args: options.args ?? [...process.execArgv, ...process.argv.slice(1)], cwd: options.cwd ?? process.cwd() }, error => { if (error) observation.abort(error); });
       await launched;
       child.unref();

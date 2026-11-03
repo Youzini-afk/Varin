@@ -18,6 +18,7 @@ type PipelineOptions = Omit<TerminalOptions, 'TERMINAL_INPUT_WS_HEARTBEAT_INTERV
     host?: string;
     onTunnelReady?: StartupTunnelOptions['onTunnelReady'];
     port: number;
+    fallbackPorts?: readonly number[];
     startupTunnelRequest?: StartupTunnelOptions['startupTunnelRequest'];
     staticRoutesRuntime: StaticRoutesRuntime;
     terminalHeartbeatIntervalMs: number;
@@ -127,6 +128,7 @@ export const createStartupPipelineRuntime = (dependencies: {
     const bindHost = serverStartupRuntime.resolveBindHost(host);
     const startupResult = await serverStartupRuntime.startListeningAndMaybeTunnel({
       port,
+      ...(options.fallbackPorts ? { fallbackPorts: options.fallbackPorts } : {}),
       bindHost,
       ...(startupTunnelRequest ? { startupTunnelRequest } : {}),
       ...(onTunnelReady ? { onTunnelReady } : {}),

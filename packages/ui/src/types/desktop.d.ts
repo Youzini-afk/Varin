@@ -1,11 +1,12 @@
-import type { DesktopBootOutcome } from '@/lib/desktopBoot';
+import type { DesktopBootOutcome, DesktopRuntimeInfo } from '@varin/application-client';
 
 declare global {
   interface Window {
     __VARIN_HOME__?: string;
     __VARIN_MACOS_MAJOR__?: number;
     __VARIN_LOCAL_ORIGIN__?: string;
-    __VARIN_ELECTRON__?: { runtime?: string; arch?: string; macVibrancy?: boolean; macVibrancySupported?: boolean; trayEnabled?: boolean };
+    __VARIN_DESKTOP_RUNTIME__?: DesktopRuntimeInfo;
+    __VARIN_ELECTRON__?: { runtime?: string; locale?: DesktopRuntimeInfo['locale']; arch?: string; macVibrancy?: boolean; macVibrancySupported?: boolean; trayEnabled?: boolean };
     __VARIN_PLATFORM__?: string;
     __VARIN_DESKTOP_BOOT_OUTCOME__?: DesktopBootOutcome;
   }

@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from '@varin/protocol/node/runtime';
 import { fork, type ChildProcess, type ForkOptions } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -53,10 +54,11 @@ export class KnowledgeStoreProcess {
     // child must load that physical tree, not depend on Electron's ASAR loader.
     const physicalEntry = fileURLToPath(entry).replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
     const loader = source ? pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href : null;
+    const runtime = resolveNodeRuntime();
     const forkOptions: ForkOptions & { windowsHide: boolean } = {
-      execPath: process.execPath,
+      execPath: runtime.executable,
       execArgv: loader ? ["--import", loader] : [],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      env: runtime.env,
       serialization: "advanced", // Preserve Set, Date and undefined in the existing contract.
       // A native addon can fail before IPC is ready. Preserve the child's error
       // so release and installed-app logs identify the real cause of a disconnect.

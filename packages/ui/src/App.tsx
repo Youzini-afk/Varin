@@ -1,4 +1,5 @@
 import React from 'react';
+import { DesktopMigrationRecovery } from '@/components/desktop/DesktopMigrationRecovery';
 import { ChatView } from '@/components/views/ChatView';
 import {
   isEmbeddedSessionChatReady,
@@ -468,6 +469,8 @@ function App({ apis }: AppProps) {
     };
 
     window.addEventListener('varin:open-draft-thread', handler as EventListener);
+    // Framework-neutral readiness: native navigation must wait for both handlers.
+    window.dispatchEvent(new Event('varin:desktop-navigation-ready'));
     return () => window.removeEventListener('varin:open-draft-thread', handler as EventListener);
   }, [embeddedSessionChat]);
 
@@ -692,6 +695,7 @@ function App({ apis }: AppProps) {
               <WorkbenchProfileBridge />
               <WorkbenchShellHost onReadyChange={setWorkbenchReady} />
               <Toaster />
+              <DesktopMigrationRecovery />
               <WorkspaceEditReviewDialog />
               {!isBootShell && (
                 <>

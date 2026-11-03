@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 
 import {
   resolveDesktopWindowControlsSide,
-  usesFramelessElectronChrome,
+  usesFramelessDesktopChrome,
   type DesktopWindowControlsSide,
 } from '@/lib/desktop';
 import { useUIStore } from '@/stores/useUIStore';
@@ -14,7 +14,7 @@ export function useDesktopWindowControlsLayout(): {
   const preference = useUIStore((state) => state.desktopWindowControlsPosition);
 
   return useMemo(() => {
-    const usesFramelessChrome = usesFramelessElectronChrome();
+    const usesFramelessChrome = usesFramelessDesktopChrome();
     const side = resolveDesktopWindowControlsSide(preference);
     return { usesFramelessChrome, side };
   }, [preference]);

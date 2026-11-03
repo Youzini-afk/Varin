@@ -1,0 +1,38 @@
+{
+  "name": "@varin/tauri",
+  "version": "0.9.37",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "Varin native desktop adapter",
+  "exports": {
+    "./bootstrap": "./src/bootstrap.ts",
+    "./bridge": "./src/bridge.ts"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "3.0.0-alpha.3",
+    "@varin/application-client": "workspace:*",
+    "@varin/web": "workspace:*"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "3.0.0-alpha.5"
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:tooling": "node --test scripts/*.test.mjs",
+    "test:native": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src test --config ../../eslint.config.js",
+    "dev": "node ./scripts/desktop.mjs dev",
+    "build": "node ./scripts/desktop.mjs build",
+    "prepare:runtime": "node ./scripts/stage-desktop.mjs",
+    "verify:runtime": "node ./scripts/runtime-manifest.mjs",
+    "smoke:runtime": "node ./scripts/smoke-runtime.mjs",
+    "prepare:exporter": "node ./scripts/prepare-exporter.mjs",
+    "candidate:build": "node ./scripts/build-candidate.mjs",
+    "candidate:collect": "node ./scripts/collect-candidate.mjs",
+    "candidate:verify": "node ./scripts/release.mjs verify",
+    "candidate:assemble": "node ./scripts/release.mjs assemble",
+    "smoke:native": "node ./scripts/smoke-native.mjs"
+  }
+}

@@ -44,7 +44,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
-  canUseElectronDesktopIPC,
+  canUseDesktopIPC,
   invokeDesktop,
   isDesktopLocalOriginActive,
 } from '@/lib/desktop';
@@ -245,7 +245,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
         <Icon name={pinned ? 'unpin' : 'pushpin'} className="size-4" />
         {t(pinned ? 'sessions.sidebar.session.menu.unpin' : 'sessions.sidebar.session.menu.pin')}
       </Item>
-      {canUseElectronDesktopIPC() && !session.harness ? <Item onClick={() => props.onOpenMiniChat(session)}>
+      {canUseDesktopIPC() && !session.harness ? <Item onClick={() => props.onOpenMiniChat(session)}>
         <Icon name="chat-new" className="size-4" />
         {t('sessions.sidebar.session.menu.openMiniChatWindow')}
       </Item> : null}

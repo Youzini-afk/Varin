@@ -195,3 +195,12 @@ Vitest native suites，不会补跑这些 Rust 场景。需要某项 ignored 回
 
 修改前检查 Git 状态，保留无关用户改动。将有完整证据的阶段提交并在获准后推送，确认远端实际 SHA；没有运行的验证不作
 成功声明。发行、部署和凭据变更继续遵守该操作的授权边界。
+
+## Tauri 原生桌面
+
+新桌面入口为 `bun run --cwd packages/tauri dev`；适配、原生 core、打包工具分别由该包的 `test`、`test:native`、`test:tooling` 验证。
+完整 CEF 桌面需要平台 SDK 与系统库，不能用 core-only 测试冒充原生编译或 GUI 验收。固定 runtime 来源、6 架构安装包、
+旧 Electron 更新器到独立 Tauri feed 的交接见 [原生桌面](../packages/tauri/README.md) 与 [构建说明](../packages/tauri/scripts/README.md)。
+
+CI 的原生候选任务由显式 `tauri_native` 授权启动；`tauri_full` 选择 6 目标完整矩阵。普通 source gate 的跳过说明不是 native 成功。
+候选构建不发布、不使用发布证书，也不生成虚假的平台验收资格。安装升级、透明合成、混合 DPI、输入法与全进程树资源测量仍需对应真实证据。

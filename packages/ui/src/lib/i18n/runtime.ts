@@ -1,3 +1,4 @@
+import { getDesktopRuntime } from '@/lib/desktopRuntime';
 import { DEFAULT_LOCALE, normalizeLocale, type Locale } from '@varin/application-client/locale';
 export { DEFAULT_LOCALE, LOCALES, normalizeLocale, type Locale } from '@varin/application-client/locale';
 
@@ -53,7 +54,7 @@ export function detectInitialLocale(): Locale {
   // A saved desktop preference is shared across local, remote and Mini Chat
   // origins. Without one, preserve the existing browser preference on upgrade.
   if (typeof window !== 'undefined') {
-    const desktop = (window as Window & { __VARIN_ELECTRON__?: { locale?: string } }).__VARIN_ELECTRON__;
+    const desktop = getDesktopRuntime();
     if (desktop?.locale) return normalizeLocale(desktop.locale);
   }
   const stored = readStoredLocale();

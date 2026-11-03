@@ -72,7 +72,7 @@ it('uses fresh executing-Host spawn inputs without inheriting its parent IPC cha
   expect(first.command).toBe(node.executable);
   expect(first.args).toEqual(['--experimental-repl-await', node.worker_path]);
   expect(first.env).not.toContainEqual(expect.objectContaining({ name: 'NODE_CHANNEL_FD' }));
-  expect(first.env).toContainEqual({ name: 'ELECTRON_RUN_AS_NODE', value: '1' });
+  expect(first.env).not.toContainEqual(expect.objectContaining({ name: 'ELECTRON_RUN_AS_NODE' }));
   expect(first.env).toContainEqual({ name: 'VARIN_SCRIPT_BINDING_TEST', value: 'first' });
   vi.stubEnv('VARIN_SCRIPT_BINDING_TEST', 'second');
   expect(scriptNodeSpawnInput(node).env).toContainEqual({ name: 'VARIN_SCRIPT_BINDING_TEST', value: 'second' });

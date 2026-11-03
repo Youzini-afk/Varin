@@ -121,7 +121,8 @@
     "web-tree-sitter": "^0.27.1",
     "ws": "^8.22.1",
     "yaml": "^2.9.1",
-    "yazl": "^3.3.1"
+    "yazl": "^3.3.1",
+    "puppeteer-core": "25.16.0"
   },
   "devDependencies": {
     "@types/compression": "^1.8.1",
@@ -155,7 +156,8 @@
     "vite": "^8.3.5",
     "vite-plugin-pwa": "^2.0.0",
     "vitest": "^5.0.5",
-    "workbox-window": "^7.4.1"
+    "workbox-window": "^7.4.1",
+    "@varin/tauri": "workspace:*"
   },
   "files": [
     "dist",

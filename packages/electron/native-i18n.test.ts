@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'vitest';
 import type { MenuItemConstructorOptions } from 'electron';
 import { LOCALES } from '@varin/application-client/locale';
+import nativeCatalog from '../application-client/src/native-messages.json' with { type: 'json' };
 import { getNativeLocale, localizeNativeMenu, nativeContextMenuLabels, nativeText, setNativeLocale } from './native-i18n.js';
 
 afterEach(() => setNativeLocale('en'));
@@ -38,10 +39,22 @@ test('already registered context labels update without new handlers and preserve
 test('every supported language provides native actions, dialogs and control handoff text', () => {
   for (const locale of LOCALES) {
     setNativeLocale(locale);
-    for (const key of ['File', 'Quit Varin?', 'Select Folder', 'Take over'] as const) {
+    for (const key of ['File', 'Quit Varin?', 'Select Folder', 'Take over', 'This window has unsaved changes. Close it anyway?', 'Keep editing', 'Varin update was not installed'] as const) {
       expect(nativeText(key)).toBeTruthy();
       if (locale !== 'en') expect(nativeText(key)).not.toBe(key);
     }
     expect(nativeText('{count} awaiting approval', { count: 3 })).toContain('3');
+  }
+});
+
+
+test('the shared native catalog covers every translated locale and preserves template placeholders', () => {
+  for (const [key, translations] of Object.entries(nativeCatalog.messages)) {
+    expect(translations, key).toHaveLength(nativeCatalog.translatedLocales.length);
+    const placeholders = (value: string) => [...value.matchAll(/\{([^{}]+)\}/g)].map(match => match[1]).sort();
+    for (const translation of translations) {
+      expect(translation, key).toBeTruthy();
+      expect(placeholders(translation), key).toEqual(placeholders(key));
+    }
   }
 });

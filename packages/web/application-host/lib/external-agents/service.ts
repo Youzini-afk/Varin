@@ -1,3 +1,4 @@
+import { resolveNodeRuntime, nodeProcessEnvironment } from '@varin/protocol/node/runtime';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -403,12 +404,12 @@ export class ExternalAgentsService {
           'launcher_required',
           'Select the executable and arguments used by this command script',
         );
-      const node = this.environment.searchPathFor('node', env.PATH ?? env.Path) ?? process.execPath;
+      const node = this.environment.searchPathFor('node', env.PATH ?? env.Path) ?? resolveNodeRuntime().executable;
       return {
         executable,
         command: node,
         args: [path.resolve(path.dirname(executable), entry), ...config.args],
-        env: { ...env, ...(node === process.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
+        env: nodeProcessEnvironment(node, env),
       };
     }
     return { executable, command: executable, args: config.args, env };
@@ -653,7 +654,7 @@ export class ExternalAgentsService {
     const { admittedSource, executionCwd } = await this.executionSource(c, signal);
     const launch = await this.executable(config);
     const version = config.harness === 'pi' ? await this.probeVersion(launch, signal) : undefined;
-    const command = config.harness === 'claude' ? process.execPath : launch.command;
+    const command = config.harness === 'claude' ? resolveNodeRuntime().executable : launch.command;
     const args =
       config.harness === 'claude'
         ? [fileURLToPath(new URL('./claude-worker.js', import.meta.url))]
@@ -668,7 +669,7 @@ export class ExternalAgentsService {
     signal.throwIfAborted();
     const spawnOptions = {
       cwd: executionCwd,
-      env: { ...launch.env, ...(config.harness === 'claude' ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
+      env: nodeProcessEnvironment(command, launch.env),
       stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       signal,

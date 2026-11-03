@@ -31,6 +31,7 @@ const runtimeInputs = [...sharedInputs, 'bun-patches', ...runtimePackages.map(na
 const frontendInputs = [...sharedInputs, 'packages/ui', 'packages/web/src', 'packages/web/public',
   'packages/web/vite.config.ts', 'packages/web/package.json', 'packages/web/tsconfig.json', 'packages/web/index.html', 'packages/web/mobile.html',
   'packages/web/mini-chat.html', 'packages/web/companion.html', 'packages/web/postcss.config.js',
+  'packages/tauri/src', 'packages/tauri/package.json',
   ...runtimePackages.map(name => `packages/${name}`),
   ':(exclude)packages/web/public/companion-assets', ':(exclude)packages/web/public/companion-review-director'];
 const frontendValues = () => ({ nodeMajor: environment.node.split('.')[0], bun: environment.bun, reactScan: process.env.VITE_ENABLE_REACT_SCAN ?? '',

@@ -1,3 +1,4 @@
+import { resolveNodeRuntime, nodeProcessEnvironment } from '@varin/protocol/node/runtime';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -94,7 +95,7 @@ export const createTestSupervisor = ({
   pathModule = path,
   env = process.env,
   isTrusted = async () => false,
-  execPath = process.execPath,
+  execPath = resolveNodeRuntime({ env }).executable,
   fsPromises = fs.promises,
 }: TestSupervisorOptions) => {
   const providers: RegisteredTestProvider[] = [];
@@ -226,7 +227,7 @@ export const createTestSupervisor = ({
       }
       child = await launchOwnedProcess(processOwner, (signal) => spawn(provider.command, provider.args ?? [], {
         cwd: workspace.root,
-        env: { ...env, ...provider.env },
+        env: nodeProcessEnvironment(provider.command, { ...env, ...provider.env }),
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         signal,
@@ -412,7 +413,7 @@ export const createTestSupervisor = ({
         }
         child = await launchOwnedProcess(record, (signal) => spawn(execPath, ['--test', '--test-reporter=tap', filePath], {
           cwd: workspace.root,
-          env: { ...env, NODE_OPTIONS: '' },
+          env: nodeProcessEnvironment(execPath, { ...env, NODE_OPTIONS: '' }),
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'pipe'],
           signal,

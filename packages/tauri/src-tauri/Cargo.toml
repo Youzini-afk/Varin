@@ -1,0 +1,76 @@
+[package]
+name = "varin-desktop"
+version = "0.9.37"
+edition = "2024"
+rust-version = "1.95"
+license = "AGPL-3.0-only"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "varin_desktop"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "varin"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[features]
+default = ["desktop"]
+desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-runtime-cef", "dep:tauri-plugin-dialog", "dep:tauri-plugin-single-instance", "dep:tauri-plugin-opener", "dep:tauri-plugin-notification", "dep:tauri-plugin-autostart", "dep:tauri-plugin-global-shortcut", "dep:tauri-plugin-updater", "dep:winit", "dep:wgpu", "dep:pollster", "dep:winit-common", "dep:objc2", "dep:objc2-app-kit", "dep:block2", "dep:zbus", "dep:gtk4", "dep:core-foundation-sys", "dep:objc2-foundation", "dep:notify-rust", "dep:windows", "dep:windows-core"]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10.9"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+url = "2.5.8"
+uuid = { version = "1.29.0", features = ["v4"] }
+base64 = "0.22"
+minisign-verify = "0.3.0"
+fs2 = "0.4.3"
+
+# One engine for application and Browser Use. Never silently select an unsandboxed runtime.
+tauri = { version = "=3.0.0-alpha.5", features = ["tray-icon", "image-png", "image-ico", "unstable", "devtools"], optional = true }
+tauri-runtime-cef = { version = "=3.0.0-alpha.6", features = ["unstable"], optional = true }
+tauri-plugin-dialog = { version = "=3.0.0-alpha.4", default-features = false, features = ["xdg-portal"], optional = true }
+tauri-plugin-single-instance = { version = "=3.0.0-alpha.3", optional = true }
+tauri-plugin-opener = { version = "=3.0.0-alpha.3", optional = true }
+tauri-plugin-notification = { version = "=3.0.0-alpha.3", optional = true }
+tauri-plugin-autostart = { version = "=3.0.0-alpha.3", optional = true }
+tauri-plugin-global-shortcut = { version = "=3.0.0-alpha.3", optional = true }
+tauri-plugin-updater = { version = "=3.0.0-alpha.3", optional = true }
+winit = { package = "tauri-winit", version = "=0.31.0-beta.3", default-features = false, optional = true }
+wgpu = { version = "=30.0.1", optional = true }
+pollster = { version = "0.4", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk4 = { version = "=0.11.5", features = ["v4_14"], optional = true }
+zbus = { version = "=5.19.0", optional = true }
+winit-common = { version = "=0.31.0-beta.3", features = ["xkb"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+notify-rust = { version = "=4.18.2", optional = true }
+core-foundation-sys = { version = "=0.8.7", optional = true }
+objc2 = { version = "=0.6.5", optional = true }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSProcessInfo", "NSGeometry", "NSString"], optional = true }
+block2 = { version = "=0.6.2", optional = true }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSEvent", "NSView", "NSWindow", "NSVisualEffectView", "NSColor", "NSResponder", "NSGraphics", "block2"], optional = true }
+
+[build-dependencies]
+tauri-build = { version = "=3.0.0-alpha.4", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[patch.crates-io]
+tauri-runtime-cef = { path = "vendor/tauri-runtime-cef" }
+
+[target.'cfg(windows)'.dependencies]
+windows-core = { version = "=0.61.2", optional = true }
+windows = { version = "=0.61.3", optional = true, features = ["Foundation", "Data_Xml_Dom", "UI_Notifications", "Win32_Foundation", "Win32_Security", "Win32_System_Com", "Win32_System_WinRT", "Win32_System_Registry", "Win32_UI_Notifications", "Win32_UI_Shell"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+png = "0.18.1"
+

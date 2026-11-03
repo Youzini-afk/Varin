@@ -11,6 +11,9 @@ The Application Host, shared packages, UI and manifest-verified Rust kernel are 
 Publishing only the browser bundle is not a supported deployment. The canonical cloud builder stages
 `packages/web/kernel` and runs release smoke against the assembled runtime.
 
+The managed desktop entry and its private lifecycle protocol are documented in
+[Application Host process boundary](application-host/DOCUMENTATION.md).
+
 ## Development
 
 From the repository root:

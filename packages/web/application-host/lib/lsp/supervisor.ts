@@ -1,3 +1,4 @@
+import { nodeProcessEnvironment } from '@varin/protocol/node/runtime';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { PreparedLanguageSource } from '../kernel/source-query.js';
@@ -806,14 +807,7 @@ export const createLanguageSupervisor = ({
           : spawn;
         return launch(prepared?.command ?? provider.command, prepared?.args ?? provider.args, {
         cwd: workspace.root,
-        env: {
-          ...env,
-          ...provider.env,
-          // Electron and VS Code expose their executable as process.execPath.
-          // Language providers are always headless CLI processes; without Node
-          // mode a provider using process.execPath launches another GUI shell.
-          ELECTRON_RUN_AS_NODE: '1',
-        },
+        env: nodeProcessEnvironment(prepared?.command ?? provider.command, { ...env, ...provider.env }),
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         signal,

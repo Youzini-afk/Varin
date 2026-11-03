@@ -1,0 +1,28 @@
+import { FRONTEND_CREDENTIAL_KEYS } from '@varin/application-client/desktop';
+const statuses=new Set(['imported','retained','unsupported','failed']);
+const object=(value:unknown):Record<string,unknown>|null=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
+const slots=new Set(FRONTEND_CREDENTIAL_KEYS.flatMap(key=>[key,`config-store.state.${key}`]));
+const origin=(value:unknown):value is string=>{try{if(typeof value!=='string')return false;const url=new URL(value);return ['http:','https:'].includes(url.protocol)&&url.origin===value&&!url.username&&!url.password;}catch{return false;}};
+/** This receipt never accepts secrets or raw cookie/storage records. It is the
+ * original settings owner's durable account of native, read-back verified work. */
+export function nativeMigrationReceipt(input:unknown):Record<string,unknown>{
+ const value=object(input);
+ if(!value||value.schema!==1||value.protocol!==1||value.attemptComplete!==true||typeof value.sourceSha!=='string'||!/^[a-f0-9]{40}$/i.test(value.sourceSha)||typeof value.sourceVersion!=='string'||!Array.isArray(value.credentials)||!Array.isArray(value.cookies)||!Array.isArray(value.origins)||value.sourceRetained!==true)throw new Error('Native migration receipt is invalid');
+ const credentials=value.credentials.map(raw=>{const item=object(raw);if(!item||typeof item.slot!=='string'||!slots.has(item.slot)||!statuses.has(String(item.status)))throw new Error('Native credential receipt is invalid');return{slot:item.slot,status:item.status};});
+ if(new Set(credentials.map(item=>item.slot)).size!==credentials.length)throw new Error('Native credential receipt is duplicated');
+ const cookies=value.cookies.map(raw=>{const item=object(raw),identity=object(item?.identity);if(!item||!statuses.has(String(item.status))||!identity||!['domain','name','path'].every(key=>typeof identity[key]==='string'))throw new Error('Native cookie receipt is invalid');const result:Record<string,unknown>={domain:identity.domain,name:identity.name,path:identity.path};if(identity.partitionKey!==undefined){const partition=object(identity.partitionKey);if(!partition||!origin(partition.topLevelSite)||typeof partition.hasCrossSiteAncestor!=='boolean')throw new Error('Native cookie partition receipt is invalid');result.partitionKey={topLevelSite:partition.topLevelSite,hasCrossSiteAncestor:partition.hasCrossSiteAncestor};}if(identity.opaque===true)result.opaque=true;return{identity:result,status:item.status};});
+ const origins=value.origins.map(raw=>{const item=object(raw);if(!item||!origin(item.origin)||!statuses.has(String(item.status))||!Number.isSafeInteger(item.localStorageImported)||Number(item.localStorageImported)<0||!Number.isSafeInteger(item.localStorageRetained)||Number(item.localStorageRetained)<0||!(item.indexedDbDatabases===null||Array.isArray(item.indexedDbDatabases)&&item.indexedDbDatabases.every(name=>typeof name==='string')))throw new Error('Native site storage receipt is invalid');return{origin:item.origin,status:item.status,localStorageImported:item.localStorageImported,localStorageRetained:item.localStorageRetained,indexedDbDatabases:item.indexedDbDatabases,serviceWorkers:'requires-site-recovery'};});
+ const companionFailures=Array.isArray(value.companionFailures)?value.companionFailures.map(raw=>{const item=object(raw);if(!item||typeof item.id!=='string'||!['source-validation','destination-conflict','asset-integrity','publication-unavailable','source-cache-unavailable'].includes(String(item.reason)))throw new Error('Companion recovery receipt is invalid');return{id:item.id,reason:item.reason};}):[];
+ if(value.browserStatus!==undefined&&!['available','source-unavailable'].includes(String(value.browserStatus)))throw new Error('Browser recovery receipt is invalid');
+ return{schema:1,protocol:1,browserStatus:value.browserStatus??'available',companionFailures,sourceSha:value.sourceSha,sourceVersion:value.sourceVersion,attemptComplete:true,credentials,cookies,origins,credentialsComplete:credentials.every(item=>item.status==='imported'||item.status==='retained'),cookiesComplete:value.browserStatus!=='source-unavailable'&&cookies.every(item=>item.status==='imported'||item.status==='retained'),siteStorageInventory:'cookies-and-saved-browser-pages',indexedDb:'requires-site-recovery',serviceWorkers:'requires-site-recovery',sourceRetained:true};
+}
+
+/** Provisional namespaces were absent before this attempt. No cookie value or
+ * frontend secret is written to this crash-recovery journal. */
+export function nativeMigrationCookieJournal(input:unknown):Record<string,unknown>{
+ const value=object(input);
+ if(!value||value.schema!==1||typeof value.sourceSha!=='string'||!/^[a-f0-9]{40}$/i.test(value.sourceSha)||!Array.isArray(value.scopes))throw new Error('Native cookie journal is invalid');
+ const scopes=value.scopes.map(raw=>{const item=object(raw);if(!item||typeof item.name!=='string'||typeof item.domain!=='string'||typeof item.path!=='string'||!item.path.startsWith('/'))throw new Error('Native cookie namespace is invalid');let url:URL;try{url=new URL(`https://${item.domain}/`);}catch{throw new Error('Native cookie namespace is invalid');}if(url.hostname!==item.domain||url.username||url.password||url.port||url.pathname!=='/'||url.search||url.hash)throw new Error('Native cookie namespace is invalid');return{name:item.name,domain:item.domain,path:item.path};});
+ if(new Set(scopes.map(scope=>JSON.stringify(scope))).size!==scopes.length)throw new Error('Native cookie namespace is duplicated');
+ return{schema:1,sourceSha:value.sourceSha,scopes};
+}

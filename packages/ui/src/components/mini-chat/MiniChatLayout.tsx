@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
 import { ChatView } from '@/components/views/ChatView';
-import { invokeDesktop, isElectronShell } from '@/lib/desktop';
+import { invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useThreadStore } from '@/stores/useThreadStore';
@@ -16,7 +16,7 @@ export function MiniChatLayout({ unavailable }: { unavailable?: string }) {
   const [pinned, setPinned] = React.useState(false);
   const { usesFramelessChrome, side } = useDesktopWindowControlsLayout();
   const mac = typeof window !== 'undefined' && (window.__VARIN_MACOS_MAJOR__ ?? 0) > 0;
-  React.useEffect(() => { if (isElectronShell()) void invokeDesktop('desktop_get_window_pinned').then(result => setPinned(result?.pinned ?? false)); }, []);
+  React.useEffect(() => { if (isDesktopShell()) void invokeDesktop('desktop_get_window_pinned').then(result => setPinned(result?.pinned ?? false)); }, []);
   const drag = { WebkitAppRegion: 'drag' } as React.CSSProperties;
   const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
   const openMain = () => { void invokeDesktop('desktop_focus_main_window', identity ? { threadId: identity.threadId, branchId: identity.branchId, directory: directory || '' }

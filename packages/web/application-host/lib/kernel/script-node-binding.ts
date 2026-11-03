@@ -1,3 +1,4 @@
+import { resolveNodeRuntime, nodeProcessEnvironment } from '@varin/protocol/node/runtime';
 /** The evaluator binding and spawn inputs belong to the Host that executes it. */
 import { createHash } from 'node:crypto';
 import { readdir, readFile, realpath } from 'node:fs/promises';
@@ -29,7 +30,7 @@ export async function hashScriptWorkerDirectory(directory: string): Promise<stri
  * fail resolution; no source entry point or other Host's executable can replace them. */
 export async function resolveScriptNodeBinding(): Promise<NodeBinding> {
   const { resolveVarinBuiltinPackageRoot } = await import('@varin/extension-builtins/host');
-  const executable = await realpath(process.execPath);
+  const executable = await realpath(resolveNodeRuntime().executable);
   const worker = await realpath(resolveVarinBuiltinPackageRoot(fileURLToPath(import.meta.resolve('@varin/script-runtime/worker'))));
   const workerIdentity = await hashScriptWorkerDirectory(dirname(worker));
   const configurationIdentity = JSON.stringify({ version: 1, executable, worker, workerIdentity, nodeVersion: process.versions.node, replAwait: true });
@@ -41,7 +42,7 @@ export async function resolveScriptNodeBinding(): Promise<NodeBinding> {
 export function scriptNodeSpawnInput(node: NodeBinding): Pick<KernelProcessSpawnParams, 'command' | 'args' | 'env' | 'mode' | 'cols' | 'rows'> {
   return {
     command: node.executable, args: ['--experimental-repl-await', node.worker_path], mode: 'pipe', cols: 80, rows: 24,
-    env: Object.entries({ ...process.env, ELECTRON_RUN_AS_NODE: '1' })
+    env: Object.entries(nodeProcessEnvironment(node.executable))
       .flatMap(([name, value]) => value === undefined || name === 'NODE_CHANNEL_FD' ? [] : [{ name, value }]),
   };
 }

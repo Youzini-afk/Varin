@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from "@varin/protocol/node/runtime";
 import {
   createWorkspaceLanguageClient,
   defineHostExtension,
@@ -11,7 +12,7 @@ const bundledProvider = (
   args: readonly string[] = [],
   initializationOptions?: VarinLanguageProviderDescriptor["initializationOptions"],
 ): VarinLanguageProviderDescriptor => ({
-  command: process.execPath,
+  command: resolveNodeRuntime().executable,
   languageIds,
   providerId,
   source: "extension",

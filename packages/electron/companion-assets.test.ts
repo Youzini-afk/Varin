@@ -93,3 +93,25 @@ test('catalog identities, file boundaries and hashes cannot redirect installatio
     const catalog = structuredClone(data.catalog); mutation(catalog); expect(() => readCompanionAssetCatalog(catalog)).toThrow();
   }
 });
+
+test('imports verified installed artwork without network, preserves old bytes and never overwrites target generations', async () => {
+  const data=fixture('old'),legacy=path.join(root,'legacy'),target=path.join(root,'new');
+  const original=new CompanionAssets({root:legacy,catalog:data.catalog,changed:()=>{},fetch:async url=>fileResponse(data.bodies,url)});
+  await original.initialize();original.start('varin');await original.wait('varin');
+  const fetch=vi.fn(async()=>{throw new Error('must stay offline');});
+  const migrated=new CompanionAssets({root:target,catalog:fixture('new').catalog,fetch,changed:()=>{}});await migrated.initialize();
+  expect(await migrated.importInstalled(legacy)).toEqual({imported:['varin'],retained:[],rejected:[]});
+  expect(migrated.get('varin')?.version).toBe(data.catalog.packs[0]!.version);
+  expect(await fs.readFile(path.join(target,'packs/varin/atlas.png'))).toEqual(data.bodies.get('atlas.png'));
+  expect(await fs.readFile(path.join(legacy,'packs/varin/atlas.png'))).toEqual(data.bodies.get('atlas.png'));
+  expect(await migrated.importInstalled(legacy)).toEqual({imported:[],retained:['varin'],rejected:[]});expect(fetch).not.toHaveBeenCalled();
+});
+test('rejects corrupted or symlinked legacy artwork without publishing a partial target', async () => {
+  const data=fixture(),legacy=path.join(root,'legacy'),target=path.join(root,'new');
+  const original=new CompanionAssets({root:legacy,catalog:data.catalog,changed:()=>{},fetch:async url=>fileResponse(data.bodies,url)});await original.initialize();original.start('varin');await original.wait('varin');
+  await fs.writeFile(path.join(legacy,'packs/varin/atlas.png'),'x'.repeat(data.bodies.get('atlas.png')!.length));
+  const migrated=new CompanionAssets({root:target,catalog:data.catalog,changed:()=>{},fetch:async()=>{throw new Error('offline');}});await migrated.initialize();
+  expect((await migrated.importInstalled(legacy)).rejected).toEqual(['varin']);expect(migrated.get('varin')).toBeUndefined();expect(await fs.readdir(path.join(target,'packs'))).toEqual([]);
+  await fs.rm(path.join(legacy,'packs/varin/atlas.png'));await fs.symlink(path.join(legacy,'packs/varin/bundle.json'),path.join(legacy,'packs/varin/atlas.png'));
+  expect((await migrated.importInstalled(legacy)).rejected).toEqual(['varin']);expect(await fs.readdir(target)).toEqual(['packs']);
+});

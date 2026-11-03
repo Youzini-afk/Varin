@@ -1,4 +1,4 @@
-import { isDesktopLocalOriginActive } from './desktop';
+import { isDesktopShell } from './desktop';
 import { invokeDesktopCommand } from './desktopNative';
 
 const ownedPrefix = 'browser:page:';
@@ -9,6 +9,6 @@ export function closeEmbeddedBrowserPage(directory: string, tabId: string) {
   closeEmbeddedBrowserPageId(embeddedBrowserPageId(directory, tabId));
 }
 export function closeEmbeddedBrowserPageId(pageId: string) {
-  if (!isDesktopLocalOriginActive()) return;
+  if (!isDesktopShell()) return;
   void invokeDesktopCommand('desktop_browser_action', { pageId, action: { action: 'close' } }).catch(() => undefined);
 }

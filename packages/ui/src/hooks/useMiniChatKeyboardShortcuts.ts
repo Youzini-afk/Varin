@@ -1,6 +1,6 @@
 import React from 'react';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
-import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
+import { canUseDesktopIPC, invokeDesktop } from '@/lib/desktop';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -17,7 +17,7 @@ export const useMiniChatKeyboardShortcuts = () => {
       if (matches('open_model_selector')) { event.preventDefault(); useUIStore.getState().setModelSelectorOpen(!useUIStore.getState().isModelSelectorOpen); return; }
       if (matches('expand_input')) { event.preventDefault(); useUIStore.getState().toggleExpandedInput(); return; }
       if (matches('new_chat')) { event.preventDefault(); void startThreadFromNavigation().then(focusChatInput); return; }
-      if (matches('new_mini_chat') && canUseElectronDesktopIPC()) {
+      if (matches('new_mini_chat') && canUseDesktopIPC()) {
         event.preventDefault(); void invokeDesktop('desktop_open_draft_mini_chat_window', { directory: useDirectoryStore.getState().currentDirectory || '' }); return;
       }
       const forward = matches('cycle_favorite_model_forward'); const backward = matches('cycle_favorite_model_backward');

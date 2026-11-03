@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from '@varin/protocol/node/runtime';
 import path from 'node:path';
 import { createWorkspaceTaskRunner } from './tasks.js';
 import { createDebugSupervisor } from './debug-supervisor.js';
@@ -11,7 +12,7 @@ export const createRunRuntime = ({
   pathModule = path,
   env = process.env,
   isTrusted = async () => false,
-  execPath = process.execPath,
+  execPath = resolveNodeRuntime({ env }).executable,
   registerBuiltins = true,
 }: RunRuntimeOptions) => {
   const tasks = createWorkspaceTaskRunner({

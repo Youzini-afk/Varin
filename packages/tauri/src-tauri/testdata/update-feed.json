@@ -1,0 +1,23 @@
+{
+  "publicKey": "dW50cnVzdGVkIGNvbW1lbnQ6IFJGQyA4MDMyIFRFU1QgT05MWQpSV1FBQVFJREJBVUdCOWRhbUFHQ3NRcTMxVXYrMDhsa0J6b080WEx6MnFZakphOENHbWozQjFFYQo=",
+  "feed": {
+    "version": "1.2.3",
+    "notes": "Signed fixture 中文",
+    "pub_date": "2026-11-03T00:00:00Z",
+    "varin": {
+      "schema": 1,
+      "product": "varin-tauri-desktop",
+      "channel": "stable",
+      "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "platforms": {
+      "linux-x64": {
+        "url": "https://example.org/Varin.AppImage",
+        "size": 1,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "signature": "unused fixture"
+      }
+    },
+    "varinSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IFRFU1QgT05MWQpSVVFBQVFJREJBVUdCOFh5Y29iNS9hTXZSYkQ0aTdJQ3l4dkd2TXJTK0VOZUxkL1Y2SnFBL3BmN3JPcDZiNmJTVTdvTlJXa2lVOWN6VGtMSWE5a0ZRRllZbnYybXVyZEFZUUk9CnRydXN0ZWQgY29tbWVudDogdGltZXN0YW1wOjAJZmlsZTpmaXh0dXJlCXZlcnNpb246MS4yLjMKRDg3aGNtczQveUlQQ0hoeVg5bU5BcldIekc3MGdCUkZFYlVOREdxTU1JeVZ0ZDQzeDJvWWhmUEJDZWY4UG5GeEdycDB4TlNaZmFyTlhLMXE5RzZsRGc9PQo="
+  }
+}

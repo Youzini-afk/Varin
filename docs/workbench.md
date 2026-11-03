@@ -17,7 +17,7 @@ Varin 的工作台是在共享状态之上的可替换界面。本文说明更�
 | Shell contribution | 布局、呈现和自身短期交互状态 |
 | Runtime / 领域 owner | 对话、执行、终端、Git、语言、调试、测试和资源事实 |
 
-Electron 在进程内承载同一套 Web Application Host；移动端连接 Varin server。
+Tauri 桌面在随包 Node 中受管运行同一套 Application Host；纯远端模式仅连接所选 Host。旧 Electron 过渡适配器和移动端复用相同工作台合同。
 它们不另建文件系统或语言进程后端，renderer 也不能通过更换 Shell 或编辑器取得额外权限。
 
 ### 桌宠偏好与资源
@@ -409,3 +409,13 @@ Web/Electron 共享桌面文件能力；hosted/Capacitor mobile 使用兼容 con
 Profile transition、Registry、Monaco、client settings 和 Thread consumer 的局部测试描述中断与 stale-owner
 行为；它们不证明完整 provider 集成、真机触屏/无障碍、打包 worker 加载或 UI 端到端验收。
 平台验证应针对实际变更的 Surface。
+
+## 原生桌面呈现与运行时
+
+Tauri 适配层保持 `application-client/desktop` 的命令、事件和逐窗口启动资料；React 不直接导入 Tauri API。
+窗口文档先完成自己的 bootstrap，原生菜单/通知导航等到该文档实际安装监听器后再提交；Host 切换通过原安全切换 guard，
+已经切往远端的窗口不会被本地 Host 重启覆盖凭据。Mini Chat 按真实 Host、Thread、Branch 去重，装饰层不加载完整工作台。
+
+Browser Use 嵌入原 CEF 页面，隐藏、重新呈现与用户介入不建立第二页面。工作台关闭先将仍被任务使用的页面脱离到隐藏 owner，
+不会把关闭观察窗口当成取消执行。桌宠及需要透明的原生层使用同一 CEF 的 OSR 与 GPU alpha 合成；输入、拖放、DPI 和窗口层级是原生边界，
+不能以 DOM 截图或纯视觉测试代替验收。平台与验证状态见 [Tauri 桌面](../packages/tauri/README.md)。

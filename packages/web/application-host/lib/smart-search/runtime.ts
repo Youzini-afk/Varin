@@ -1,3 +1,4 @@
+import { resolveNodeRuntime } from '@varin/protocol/node/runtime';
 import { createRequire } from 'node:module';
 import { remapAsarUnpackedPath } from '../structure/runtime-path.js';
 import type { SpawnOptions } from 'node:child_process';
@@ -192,8 +193,8 @@ export const createSmartSearchRuntime = (dependencies: SmartSearchRuntimeDepende
     const packageRoot = resolveInstalledPackageRoot();
     const packageWrapper = packageRoot ? path.join(packageRoot, 'npm', 'bin', 'smart-search.js') : '';
     if (packageWrapper && await hasFile(packageWrapper)) {
-      candidates.push({ label: '@konbakuyomu/smart-search package', command: process.execPath, args: [packageWrapper, ...args],
-        ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {}) });
+      candidates.push({ label: '@konbakuyomu/smart-search package', command: resolveNodeRuntime().executable, args: [packageWrapper, ...args],
+        env: resolveNodeRuntime().env });
     }
 
     const sourceDir = await getConfiguredSourceDir();

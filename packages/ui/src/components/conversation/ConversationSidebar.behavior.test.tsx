@@ -21,7 +21,7 @@ vi.mock('@/components/icon/Icon', () => ({ Icon: ({ name }: { name: string }) =>
 vi.mock('@/components/ui/AgentAvatar', () => ({ AgentAvatar: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ files: {} }) }));
-vi.mock('@/lib/desktop', () => ({ canUseElectronDesktopIPC: () => false, isDesktopLocalOriginActive: () => false }));
+vi.mock('@/lib/desktop', () => ({ canUseDesktopIPC: () => false, isDesktopLocalOriginActive: () => false }));
 vi.mock('@/components/layout/ProjectActionsButton', () => ({ ProjectActionsButton: () => null }));
 vi.mock('@/components/layout/WorkbenchProfileSwitcher', () => ({ WorkbenchProfileSwitcher: () => null }));
 vi.mock('@/lib/extensions/workbench-registry', () => ({ useWorkbenchMatchRenderers: () => [], renderFirstWorkbenchMatch: () => null }));

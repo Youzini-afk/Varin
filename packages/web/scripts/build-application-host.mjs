@@ -184,7 +184,8 @@ try {
     throw new Error('Staging directory does not contain the typed public Host contract');
   }
 
-  const boundary = pruneLegacyHostArtifacts(buildDir);
+  const boundary = pruneLegacyHostArtifacts(buildDir, ['index.js', 'public-contract.js',
+    'desktop-host.js', 'desktop-browser.js', 'desktop-settings.js']);
   log(`Production boundary: ${boundary.runtimeModules} reachable modules; ${boundary.removedArtifacts} legacy/test artifacts excluded.`);
   log(`${devOutputName ? 'Development generation' : 'Staging'} complete: ${buildDir}`);
 

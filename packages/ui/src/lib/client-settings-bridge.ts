@@ -1,3 +1,4 @@
+import { getDesktopRuntime } from '@/lib/desktopRuntime';
 /**
  * Client-settings surface bridge (Stage S / D-309).
  *
@@ -15,7 +16,7 @@ import { useUIStore, type FileEditorKeymap } from '@/stores/useUIStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { isCapacitorApp } from '@/lib/platform';
 import {
-  canUseElectronDesktopIPC,
+  canUseDesktopIPC,
   getDesktopLaunchAtLogin,
   hasDesktopInvoke,
   isDesktopShell,
@@ -125,10 +126,10 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
     },
   },
 
-  'appearance.window-transparency': canUseElectronDesktopIPC()
+  'appearance.window-transparency': canUseDesktopIPC()
     ? {
         read: async () => ({
-          enabled: (window as { __VARIN_ELECTRON__?: { macVibrancy?: boolean } }).__VARIN_ELECTRON__?.macVibrancy === true,
+          enabled: getDesktopRuntime()?.macVibrancy === true,
         }),
         apply: async (values) => {
           const enabled = boolField(values, 'enabled');
@@ -165,7 +166,7 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
     (value) => useUIStore.getState().setPersistChatDraft(value),
   ),
 
-  'sessions.desktop-launch-at-login': canUseElectronDesktopIPC()
+  'sessions.desktop-launch-at-login': canUseDesktopIPC()
     ? {
         read: async () => {
           const status = await getDesktopLaunchAtLogin();
@@ -179,7 +180,7 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
       }
     : notOnThisSurface('launch-at-login is a desktop shell preference'),
 
-  'remote-instances.direct-hosts': canUseElectronDesktopIPC()
+  'remote-instances.direct-hosts': canUseDesktopIPC()
     ? {
         read: async () => {
           const config = await desktopHostsGet();

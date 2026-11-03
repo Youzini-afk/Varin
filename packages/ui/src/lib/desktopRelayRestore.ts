@@ -1,4 +1,4 @@
-import { isElectronShell } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 import { desktopHostProbe, desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { runtimeFetch } from '@varin/application-client';
 import { getRuntimeKey, switchRuntimeEndpointSafely } from '@varin/application-client';
@@ -29,7 +29,7 @@ let candidateRefreshInFlight = false;
  * to it and the server does not know its own public hostnames.
  */
 export const refreshDesktopHostCandidates = async (hostId: string): Promise<void> => {
-  if (!isElectronShell() || candidateRefreshInFlight) return;
+  if (!isDesktopShell() || candidateRefreshInFlight) return;
   const runtimeKey = `host:${hostId}`;
   // The candidates fetch rides the active runtime's transport — only meaningful
   // while this host IS the active runtime.
@@ -112,7 +112,7 @@ export const scheduleDesktopHostCandidateRefresh = (hostId: string): void => {
  * the default host is local or already active.
  */
 export const restoreDesktopRelayRuntime = async (targetHostId?: string): Promise<void> => {
-  if (!isElectronShell()) return;
+  if (!isDesktopShell()) return;
   const config = await desktopHostsGet().catch(() => null);
   if (!config) return;
   // An explicit target (a "new window for host X") wins over the default-host

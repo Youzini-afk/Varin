@@ -1,3 +1,4 @@
+import { getDesktopRuntime } from '@/lib/desktopRuntime';
 import React, {
   useEffect,
   useMemo,
@@ -295,7 +296,7 @@ export function ThemeSystemProvider({ children, defaultThemeId, passiveTranspare
       return;
     }
     const hasMacVibrancy = document.documentElement.hasAttribute('data-varin-vibrancy')
-      || window.__VARIN_ELECTRON__?.macVibrancy === true;
+      || getDesktopRuntime()?.macVibrancy === true;
     const chromeColor = hasMacVibrancy ? 'transparent' : theme.colors.surface.background;
 
     document.body.style.backgroundColor = chromeColor;
