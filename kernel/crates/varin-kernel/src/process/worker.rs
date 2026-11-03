@@ -95,6 +95,8 @@ struct Diagnostic {
     kernel_epoch: String,
     started: Instant,
     stalled: Option<Arc<super::stalled_trace::StalledTrace>>,
+    #[cfg(windows)]
+    target_pid: Arc<std::sync::atomic::AtomicU32>,
 }
 fn trace(diagnostic: &Option<Diagnostic>, stage: &'static str) {
     if let Some(diagnostic) = diagnostic {
@@ -272,26 +274,40 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::from_slice(&frame)?
     };
     let trace_mode = std::env::var("VARIN_PROCESS_TRACE").ok();
+    #[cfg(windows)]
+    let job = Arc::new(platform::WorkerJob::open(&config.job_name)?);
     let diagnostic = matches!(trace_mode.as_deref(), Some("1" | "stalled"))
-        .then(|| Diagnostic {
+        .then(|| {
+            #[cfg(windows)]
+            let target_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            Diagnostic {
             output: output.clone(),
             process_id: config.process_id.clone(),
             kernel_epoch: config.kernel_epoch.clone(),
             started: Instant::now(),
+            #[cfg(windows)]
+            target_pid: target_pid.clone(),
             stalled: (trace_mode.as_deref() == Some("stalled")).then(|| {
                 let path = config.receipt_path.with_extension("guardian.trace");
                 let kernel_stall = config.receipt_path.with_extension("kernel.trace");
                 let process_id = config.process_id.clone();
+                #[cfg(windows)]
+                let job = job.clone();
                 // The original kernel publishes this marker only after its stop
                 // stalls. It also reveals a guardian blocked before stop-received.
                 super::stalled_trace::StalledTrace::start_with_trigger(move || kernel_stall.exists(), move |stages| {
                     let snapshot = json!({"processId":process_id,"role":"guardian","stages":stages});
+                    #[cfg(windows)]
+                    let snapshot = {
+                        let mut snapshot = snapshot;
+                        let pid = target_pid.load(Ordering::Acquire);
+                        snapshot["job"] = job.diagnostic_snapshot((pid != 0).then_some(pid));
+                        snapshot
+                    };
                     let _ = std::fs::write(path, snapshot.to_string());
                 })
             }),
-        });
-    #[cfg(windows)]
-    let job = Arc::new(platform::WorkerJob::open(&config.job_name)?);
+        }});
     if STOP.load(Ordering::Acquire) > 0 {
         let value = json!({"processId":config.process_id,"kernelEpoch":config.kernel_epoch,
             "status":"failed","pid":null,"exitCode":null,"signal":null,"reason":"process launch cancelled before spawn",
@@ -321,6 +337,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pid = child
         .process_id()
         .ok_or_else(|| io::Error::other("process has no OS identity"))?;
+    #[cfg(windows)]
+    if let Some(diagnostic) = &diagnostic {
+        diagnostic.target_pid.store(pid, Ordering::Release);
+    }
     send(&output, json!({"type":"started", "pid":pid}))?;
     let master = Arc::new(Mutex::new(master));
     let mut readers = readers.into_iter().map(|(channel, mut reader)| {

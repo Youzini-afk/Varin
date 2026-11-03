@@ -25,7 +25,7 @@ vi.mock('../kernel/kernel-recovery-store.js', () => ({ KernelRecoveryContentStor
 vi.mock('../kernel/process-service.js', () => ({ createKernelProcessService: () => ({ dispose: resources.disposeService }) }));
 
 vi.stubEnv('VARIN_TEST_KERNEL_PATH', process.execPath);
-const { createNativeProcessTestHarness } = await import('./native-process.test-helper.js');
+const { createNativeProcessTestHarness, summarizeNativeJobDiagnostic } = await import('./native-process.test-helper.js');
 afterAll(() => vi.unstubAllEnvs());
 beforeEach(() => {
   vi.resetAllMocks();
@@ -192,4 +192,35 @@ it('opts into delayed file diagnostics without enabling immediate stage traffic'
     expect(options.spawnProcess).toBeUndefined();
     expect(resources.spawn).not.toHaveBeenCalled();
   } finally { await fixture.dispose(); }
+});
+
+it('keeps unknown Job members unknown and preserves Win32 read errors without printing paths or commands', () => {
+  const summary = summarizeNativeJobDiagnostic({ guardianPid: 10, targetPid: 11, activeProcesses: 2,
+    assignedProcesses: 2, listedProcesses: 2, memberLimit: 64, truncated: false,
+    errors: [{ operation: 'JobObjectBasicAccountingInformation', code: 5, message: 'private content' }],
+    members: [
+      { pid: 10, belongsToJob: true, signaled: false, imageBasename: 'C:\\private\\conhost.exe', commandLine: 'private command' },
+      { pid: 11, belongsToJob: null, signaled: null, imageBasename: null, errors: [{ operation: 'OpenProcess', code: 87 }] },
+    ] });
+  expect(summary).toMatchObject({ guardianPid: 10, targetPid: 11, activeProcesses: 2,
+    errors: [{ operation: 'JobObjectBasicAccountingInformation', code: 5 }], members: [
+      { pid: 10, belongsToJob: true, signaled: false, imageBasename: 'conhost.exe' },
+      { pid: 11, belongsToJob: null, signaled: null, imageBasename: null, errors: [{ operation: 'OpenProcess', code: 87 }] },
+    ] });
+  expect(JSON.stringify(summary)).not.toContain('private');
+  expect(summarizeNativeJobDiagnostic({ members: null, errors: [{ operation: 'JobObjectBasicProcessIdList', code: 234 }], truncated: true }))
+    .toMatchObject({ members: null, truncated: true, errors: [{ code: 234 }] });
+});
+
+it('bounds delayed Job output and rejects unrelated fields', () => {
+  const summary = summarizeNativeJobDiagnostic({ members: Array.from({ length: 70 }, (_, pid) => ({ pid,
+    imageBasename: 'a'.repeat(400), errors: Array.from({ length: 9 }, () => ({ operation: 'private command', code: 5 })) })) });
+  const members = summary?.members as Array<{ imageBasename: string; imageTruncated: boolean; errors: unknown[] }>;
+  expect(summary?.truncated).toBe(true);
+  expect(members).toHaveLength(64);
+  expect(members[0]?.imageBasename).toHaveLength(256);
+  expect(members[0]?.imageTruncated).toBe(true);
+  expect(members[0]?.errors).toHaveLength(4);
+  expect(JSON.stringify(summary)).not.toContain('private');
+  expect(summarizeNativeJobDiagnostic(undefined)).toBeUndefined();
 });

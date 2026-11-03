@@ -88,6 +88,108 @@ mod windows {
                 TerminateJobObject(self.handle.as_raw_handle() as _, 1);
             }
         }
+        /// Read-only, bounded metadata from this original Job. Called only by
+        /// the delayed diagnostic observer, never the control or output lanes.
+        pub fn diagnostic_snapshot(&self, target_pid: Option<u32>) -> serde_json::Value {
+            use serde_json::json;
+            use windows_sys::Win32::{
+                Foundation::{ERROR_MORE_DATA, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT},
+                System::Threading::{
+                    OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
+                    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+                },
+            };
+            fn error(operation: &str) -> serde_json::Value {
+                let code = io::Error::last_os_error().raw_os_error();
+                json!({"operation":operation,"code":code})
+            }
+            // This is a diagnostic output bound, not a containment limit. A
+            // larger/racing Job is explicitly unavailable, never called empty.
+            const MEMBER_LIMIT: usize = 64;
+            let raw = self.handle.as_raw_handle() as _;
+            let mut errors = Vec::new();
+            let active_processes = match active(raw) {
+                Ok(count) => Some(count),
+                Err(error) => {
+                    errors.push(json!({"operation":"JobObjectBasicAccountingInformation","code":error.raw_os_error()}));
+                    None
+                }
+            };
+            let mut snapshot = json!({"guardianPid":std::process::id(),"targetPid":target_pid,
+                "activeProcesses":active_processes,"assignedProcesses":null,"listedProcesses":null,
+                "memberLimit":MEMBER_LIMIT,"truncated":false,"members":null});
+            let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
+            let bytes = header + MEMBER_LIMIT * std::mem::size_of::<usize>();
+            let mut buffer = vec![0usize; bytes.div_ceil(std::mem::size_of::<usize>())];
+            if unsafe {
+                QueryInformationJobObject(raw, JobObjectBasicProcessIdList,
+                    buffer.as_mut_ptr() as _, bytes as u32, std::ptr::null_mut())
+            } == 0 {
+                let failure = error("JobObjectBasicProcessIdList");
+                snapshot["truncated"] = json!(failure["code"].as_i64() == Some(ERROR_MORE_DATA as i64));
+                errors.push(failure);
+            } else {
+                let list = unsafe { &*(buffer.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST) };
+                snapshot["assignedProcesses"] = json!(list.NumberOfAssignedProcesses);
+                snapshot["listedProcesses"] = json!(list.NumberOfProcessIdsInList);
+                snapshot["truncated"] = json!(list.NumberOfAssignedProcesses > list.NumberOfProcessIdsInList);
+                let count = list.NumberOfProcessIdsInList as usize;
+                if count > MEMBER_LIMIT {
+                    snapshot["truncated"] = json!(true);
+                    errors.push(json!({"operation":"JobObjectBasicProcessIdList","code":null,"result":count}));
+                } else {
+                    let pids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
+                    let mut members = Vec::with_capacity(count);
+                    for &pid in pids {
+                        let mut member = json!({"pid":pid,"belongsToJob":null,"signaled":null,
+                            "imageBasename":null,"imageTruncated":false});
+                        let mut failures = Vec::new();
+                        let process = unsafe {
+                            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE, 0, pid as u32)
+                        };
+                        if process.is_null() {
+                            failures.push(error("OpenProcess"));
+                        } else {
+                            let process = unsafe { OwnedHandle::from_raw_handle(process as _) };
+                            let mut belongs = 0;
+                            if unsafe { IsProcessInJob(process.as_raw_handle() as _, raw, &mut belongs) } == 0 {
+                                failures.push(error("IsProcessInJob"));
+                            } else {
+                                member["belongsToJob"] = json!(belongs != 0);
+                                // A PID can disappear/recycle after the Job query.
+                                // Inspect no process that is outside this Job now.
+                                if belongs != 0 {
+                                    match unsafe { WaitForSingleObject(process.as_raw_handle() as _, 0) } {
+                                        WAIT_OBJECT_0 => member["signaled"] = json!(true),
+                                        WAIT_TIMEOUT => member["signaled"] = json!(false),
+                                        WAIT_FAILED => failures.push(error("WaitForSingleObject")),
+                                        result => failures.push(json!({"operation":"WaitForSingleObject","code":null,"result":result})),
+                                    }
+                                    let mut path = vec![0u16; 32768];
+                                    let mut length = path.len() as u32;
+                                    if unsafe {
+                                        QueryFullProcessImageNameW(process.as_raw_handle() as _, 0,
+                                            path.as_mut_ptr(), &mut length)
+                                    } == 0 {
+                                        failures.push(error("QueryFullProcessImageNameW"));
+                                    } else {
+                                        let path = String::from_utf16_lossy(&path[..length as usize]);
+                                        let basename = path.rsplit(['\\', '/']).next().unwrap_or_default();
+                                        member["imageBasename"] = json!(basename.chars().take(256).collect::<String>());
+                                        member["imageTruncated"] = json!(basename.chars().count() > 256);
+                                    }
+                                }
+                            }
+                        }
+                        member["errors"] = json!(failures);
+                        members.push(member);
+                    }
+                    snapshot["members"] = json!(members);
+                }
+            }
+            snapshot["errors"] = json!(errors);
+            snapshot
+        }
         pub fn drain_descendants(&self) -> io::Result<bool> {
             use windows_sys::Win32::System::Threading::{
                 OpenProcess, TerminateProcess, WaitForSingleObject,

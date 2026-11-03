@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createIsolatedTerminalSessionApi } from "./isolated-session-api.test-helper.js";
 import type { TerminalCommandRecord } from "./session-api.js";
 import { createPlatformEnvironmentRuntime } from '../platform/environment-runtime.js';
-import { createNativeProcessTestHarness, hasNativeProcessKernel, type NativeProcessDiagnostic } from '../process/native-process.test-helper.js';
+import { createNativeProcessTestHarness, hasNativeProcessKernel, summarizeNativeJobDiagnostic, type NativeProcessDiagnostic } from '../process/native-process.test-helper.js';
 
 const gitBashCandidates = [
   process.env.VARIN_TERMINAL_SHELL,
@@ -193,12 +193,15 @@ describe("live shell integration", () => {
             if (name.endsWith('.trace')) {
               if (reportedTraceFiles.has(name)) continue;
               const value = JSON.parse(await fs.readFile(file, 'utf8')) as {
-                processId: string; role: string; stages: Array<[string, number]>;
+                processId: string; role: string; stages: Array<[string, number]>; job?: unknown;
               };
               reportedTraceFiles.add(name);
               console.info('[live shell] stalled native phases', {
                 processId: value.processId, role: value.role, stages: value.stages,
               });
+              const job = summarizeNativeJobDiagnostic(value.job);
+              // Node's default object inspection would hide nested members as [Object].
+              if (job) console.info('[live shell] stalled native Job', JSON.stringify(job));
             } else if (name.endsWith('.output')) {
               console.info('[live shell] native output file', { bytes: (await fs.stat(file)).size });
             } else {
