@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
-import { BotProfileConflictError, BotProfileMutationError, type BotModelSelection, type BotService } from "./bot-service.js";
+import { BotProfileConflictError, BotProfileMutationError, parseBotModelSelection, type BotModelSelection, type BotService } from "./bot-service.js";
 import type { ComputerService } from "../computer/computer-service.js";
 import { botScopeId } from "../harness/owner-scope.js";
 import { createHash } from "node:crypto";
@@ -30,17 +30,9 @@ const botIdOf = (request: Request): string => String(request.params.botId ?? "")
 const parseModel = (value: unknown): BotModelSelection | null | undefined => {
   if (value === undefined) return undefined;
   if (value === null) return null;
-  if (
-    typeof value === "object" && value !== null
-    && typeof (value as { providerId?: unknown }).providerId === "string"
-    && typeof (value as { modelId?: unknown }).modelId === "string"
-  ) {
-    return {
-      providerId: (value as { providerId: string }).providerId,
-      modelId: (value as { modelId: string }).modelId,
-    };
-  }
-  throw new HarnessServiceError("invalid-params", "model must be {providerId, modelId} or null");
+  const parsed = parseBotModelSelection(value);
+  if (parsed) return parsed;
+  throw new HarnessServiceError("invalid-params", "model must contain providerId, modelId and an optional valid thinkingLevel, or be null");
 };
 
 const sendError = (response: Response, error: unknown, fallback: string): void => {

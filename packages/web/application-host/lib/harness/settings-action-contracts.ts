@@ -11,7 +11,7 @@ const integer = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER 
 const nullableString = { type: ['string', 'null'] };
 const object = (properties: Record<string, unknown> = {}, required: string[] = []): Schema =>
   ({ type: 'object', additionalProperties: false, properties, ...(required.length ? { required } : {}) });
-const model = object({ providerId: string, modelId: string }, ['providerId', 'modelId']);
+const model = object({ providerId: string, modelId: string, thinkingLevel: { enum: THINKING_LEVELS } }, ['providerId', 'modelId']);
 const threadModel = object({ ...model.properties as Schema, thinkingLevel: { enum: THINKING_LEVELS }, temperature: { type: 'number', minimum: 0 } }, ['providerId', 'modelId']);
 const read = (inputSchema = object(), note?: string): SettingsActionContract => ({ inputSchema, mutation: 'none', ...(note ? { note } : {}) });
 const write = (inputSchema: Schema, apply: SettingsCatalogEntry['apply'] = 'immediate', note?: string,

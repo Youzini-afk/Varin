@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { THINKING_LEVELS } from '@varin/protocol';
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { BotExecutionGate, KernelRecordResult } from "../kernel/protocol.generated.js";
 import { HarnessServiceError } from "../harness/service-error.js";
@@ -78,11 +79,13 @@ export interface BotServiceOptions {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-const parseModel = (value: unknown): BotModelSelection | null => {
+export const parseBotModelSelection = (value: unknown): BotModelSelection | null => {
   if (!isObject(value)) return null;
   const providerId = typeof value.providerId === "string" ? value.providerId : "";
   const modelId = typeof value.modelId === "string" ? value.modelId : "";
-  return providerId && modelId ? { providerId, modelId } : null;
+  if (value.thinkingLevel !== undefined && !THINKING_LEVELS.some(level => level === value.thinkingLevel)) return null;
+  return providerId.trim() && modelId.trim() ? { providerId, modelId,
+    ...(value.thinkingLevel === undefined ? {} : { thinkingLevel: value.thinkingLevel as NonNullable<BotModelSelection['thinkingLevel']> }) } : null;
 };
 
 const parseProfile = (record: KernelRecordResult): BotProfile | null => {
@@ -93,7 +96,7 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
     if (typeof raw.coordinatorHostId !== "string" || !raw.coordinatorHostId
       || typeof raw.homeDir !== "string" || !raw.homeDir
       || (raw.instructions !== null && typeof raw.instructions !== 'string')
-      || (raw.model !== null && !parseModel(raw.model))) return null;
+      || (raw.model !== null && !parseBotModelSelection(raw.model))) return null;
     // Unsupported formats remain untouched; no legacy asset conversion is performed.
     if ('entrySessionId' in raw || !isObject(raw.entry) || raw.entry.runtime !== 'agent'
       || typeof raw.entry.threadId !== 'string' || !raw.entry.threadId
@@ -106,7 +109,7 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
       id,
       name: raw.name,
       instructions: typeof raw.instructions === "string" ? raw.instructions : null,
-      model: parseModel(raw.model),
+      model: parseBotModelSelection(raw.model),
       coordinatorHostId: raw.coordinatorHostId,
       homeDir: typeof raw.homeDir === "string" ? raw.homeDir : "",
       entry: { runtime: 'agent', threadId: raw.entry.threadId, branchId: raw.entry.branchId },
@@ -301,6 +304,7 @@ export function createBotService(options: BotServiceOptions): BotService {
 
   const create: BotService["create"] = async (input = {}) => {
     if ("runtime" in input) throw new HarnessServiceError("invalid-params", "Bot runtime selection is unsupported");
+    if (input.model != null && !parseBotModelSelection(input.model)) throw new HarnessServiceError('invalid-params', 'Invalid Bot model or thinking level');
     const botId = randomUUID();
     const homeDir = join(options.dataDir, "bots", botId);
     await mkdir(homeDir, { recursive: true });
@@ -337,8 +341,8 @@ export function createBotService(options: BotServiceOptions): BotService {
         : null;
     }
     if (patch.model !== undefined) {
-      if (patch.model !== null && (!parseModel(patch.model) || !patch.model.providerId.trim() || !patch.model.modelId.trim()))
-        throw new HarnessServiceError('invalid-params', 'Bot model must be a provider/model pair or null');
+      if (patch.model !== null && !parseBotModelSelection(patch.model))
+        throw new HarnessServiceError('invalid-params', 'Bot model must be a provider/model pair with an optional valid thinking level, or null');
       updates.model = patch.model;
     }
     if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? (toSummary(existing)?.pinnedAt ?? new Date().toISOString()) : null;

@@ -1,11 +1,12 @@
 import type { ComputerArtifact, ComputerDesktop, MemorySourceExcerpt, Run, ThreadSummary } from "@varin/protocol";
-import type { ThreadIdentity } from './threads.js';
+import type { ThreadIdentity, ThreadThinkingLevel } from './threads.js';
 
 /** Durable Bot catalog contracts shared by the Application Host, routes, and UI (BC0). */
 
 export interface BotModelSelection {
   providerId: string;
   modelId: string;
+  thinkingLevel?: ThreadThinkingLevel;
 }
 
 interface BotSleepProgress {

@@ -58,6 +58,18 @@ const setup = async () => {
   return { service, recreate, lifecycle, records, catalog, removeData, onDeleted, ensureEntry, applyProfile, listWork, listSessions, createSession, failWrite: () => { failWrite = true; } };
 };
 
+it('persists thinking-only profile edits, propagates them and restores the model default', async () => {
+  const { service, recreate, applyProfile } = await setup();
+  const model = { providerId: 'channel', modelId: 'model' };
+  const bot = await service.create({ model });
+  const saved = await service.update(bot.id, { model: { ...model, thinkingLevel: 'high' } });
+  expect(saved?.model?.thinkingLevel).toBe('high');
+  expect(applyProfile).toHaveBeenLastCalledWith(expect.objectContaining({ model: { ...model, thinkingLevel: 'high' } }));
+  expect((await recreate().get(bot.id))?.model).toEqual(saved?.model);
+  await service.update(bot.id, { model });
+  expect((await recreate().get(bot.id))?.model).toEqual(model);
+});
+
 it('creates one default assistant under concurrent opens and preserves existing assistants', async () => {
   const { service } = await setup();
   const [first, second] = await Promise.all([service.primary(), service.primary()]);

@@ -65,7 +65,8 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
   const selected = bots?.find((bot) => bot.id === selectedId) ?? null;
   const workBotId = selected?.id;
   const dirty = Boolean(profileBaseline && (name !== profileBaseline.name || instructions !== profileBaseline.instructions
-    || model?.providerId !== profileBaseline.model?.providerId || model?.modelId !== profileBaseline.model?.modelId));
+    || model?.providerId !== profileBaseline.model?.providerId || model?.modelId !== profileBaseline.model?.modelId
+    || model?.thinkingLevel !== profileBaseline.model?.thinkingLevel));
   React.useEffect(() => { onDraftStateChange?.({ dirty, saving: busy !== null }); }, [dirty, busy, onDraftStateChange]);
   const discardProfile = () => { setError(null); if (selected) { setName(selected.name); setInstructions(selected.instructions ?? ''); setModel(selected.model); setProfileBaseline({ id: selected.id, name: selected.name, instructions: selected.instructions ?? '', model: selected.model }); } };
   const confirmDiscard = () => !dirty || window.confirm(t('settings.bots.discardConfirm'));
@@ -240,8 +241,9 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
             placeholder={t('settings.bots.instructions.placeholder')}
             onChange={(event) => setInstructions(event.target.value)} />
         </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.bots.model.label')} description={<>{t('settings.bots.model.description')} {t('settings.bots.modelSavedSeparately')}</>}>
-          <BotModelSelector model={model} disabled={locked} onChange={selectModel} />
+        <SettingsFieldRow label={t('settings.bots.model.label')} description={t('settings.bots.model.description')}>
+          <BotModelSelector model={model} disabled={locked} onChange={selectModel}
+            onThinkingChange={thinkingLevel => setModel(current => current ? { ...current, thinkingLevel } : null)} />
         </SettingsFieldRow>
 
       </SettingsSection> : null}

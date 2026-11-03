@@ -12,7 +12,7 @@ vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/li
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
-vi.mock('./BotModelSelector', () => ({ BotModelSelector: ({ onChange }: { onChange(provider: string, model: string): Promise<void> }) => <button onClick={() => { void onChange('gateway', 'claude'); }}>choose-model</button> }));
+vi.mock('./BotModelSelector', () => ({ BotModelSelector: ({ onChange, onThinkingChange }: { onChange(provider: string, model: string): Promise<void>; onThinkingChange(level: 'high'): void }) => <><button onClick={() => { void onChange('gateway', 'claude'); }}>choose-model</button><button onClick={() => onThinkingChange('high')}>choose-thinking</button></> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
 vi.mock('@/components/sections/computers/ComputerDesktopView', () => ({ ComputerDesktopView: () => null }));
@@ -50,6 +50,15 @@ const click = async (text: string) => {
   const button = [...(container.querySelector('[role=dialog]') ?? container).querySelectorAll('button')].find((item) => item.textContent === text);
   expect(button).toBeTruthy(); await act(async () => { button!.click(); });
 };
+
+it('marks thinking-only changes as dirty and saves them with the profile', async () => {
+  const model = { providerId: 'gateway', modelId: 'claude' };
+  api.list.mockResolvedValue([{ ...bot('a'), model }]);
+  await render();
+  await click('choose-thinking');
+  await click('settings.bots.save');
+  expect(api.update).toHaveBeenCalledWith('a', expect.objectContaining({ model: { ...model, thinkingLevel: 'high' } }));
+});
 
 it('connects list rename/archive/restore to the right Bot without changing the selected profile', async () => {
   api.list.mockResolvedValue([bot('a'), bot('b')]);

@@ -208,6 +208,7 @@ import { registerAgentPersonalizationRoutes } from './lib/memory/agent-personali
 import { createPromptToolCatalog } from './lib/memory/prompt-tool-catalog.js';
 
 import { createBotService } from './lib/bots/bot-service.js';
+import { botModelMatches, resolveBotModelSelection } from './lib/bots/bot-model.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createBotPresencePublisher } from './lib/bots/bot-presence.js';
@@ -1477,8 +1478,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
             const run = branch.latest_run;
             if (!run || run.cancel_requested) continue;
             const selected = await agentRuntime.modelSelections(run.id);
-            const configuration = (selected.desired?.configuration ?? run.configuration) as { providerId?: string; model?: string };
-            if (configuration.providerId !== model.providerId || configuration.model !== model.modelId) await threads.selectModel({ runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id, runId: run.id,
+            const configuration = (selected.desired?.configuration ?? run.configuration) as Parameters<typeof botModelMatches>[0];
+            if (!botModelMatches(configuration, model)) await threads.selectModel({ runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id, runId: run.id,
               key: `bot-profile:${bot.id}:${profileRevision}:${branch.branch_id}`, model });
           }
         }
@@ -1842,10 +1843,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const modelAuthority = createModelAuthority(modelsService, { retrySettings: async () => (await modelsService.readGlobalInferenceSettings()).retry, outputVisibleBytes: async () => (await modelsService.settings.harness()).output.visibleBytes });
   const botAgentModel = async (bot: import('@varin/application-client').BotSummary) => {
     const global = (await modelsService.settings.snapshot()).global;
-    const selection = bot.model ?? (typeof global.defaultProvider === 'string' && typeof global.defaultModel === 'string'
-      ? { providerId: global.defaultProvider, modelId: global.defaultModel } : null);
-    if (selection && !(await modelAuthority.listModels()).some(model => model.providerId === selection.providerId && model.modelId === selection.modelId)) throw new Error('Bot model is no longer registered. Select an available Agent model in Bot settings.');
-    return selection;
+    return resolveBotModelSelection(bot.model, global, await modelAuthority.listModels());
   };
   const liveSources = createLiveSourceOwner({ documents: documentsAuthority, kernel: kernelClient });
   const mcpProcessAdmission = (input: import('./lib/kernel/agent-runtime-client.js').McpPreparation) => {

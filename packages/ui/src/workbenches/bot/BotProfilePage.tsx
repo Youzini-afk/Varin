@@ -11,7 +11,7 @@ import { useI18n } from '@/lib/i18n';
 import { updateBot } from '@/lib/bots';
 import { useBotPanel } from './botPanelModel';
 
-const sameModel = (a: BotModelSelection | null, b: BotModelSelection | null) => a?.providerId === b?.providerId && a?.modelId === b?.modelId;
+const sameModel = (a: BotModelSelection | null, b: BotModelSelection | null) => a?.providerId === b?.providerId && a?.modelId === b?.modelId && a?.thinkingLevel === b?.thinkingLevel;
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
 /** Draft state the panel consults before it lets the page close (§5.8). */
@@ -42,7 +42,7 @@ export function BotProfilePage({ leaving, guard }: { leaving: boolean; guard: Re
     setName(bot.name); setInstructions(bot.instructions ?? ''); setSelection(bot.model);
     setBaseline({ id: bot.id, name: bot.name, instructions: bot.instructions ?? '', model: bot.model });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id, bot.name, bot.instructions, bot.model?.providerId, bot.model?.modelId]);
+  }, [bot.id, bot.name, bot.instructions, bot.model?.providerId, bot.model?.modelId, bot.model?.thinkingLevel]);
   const discard = () => { setName(baseline.name); setInstructions(baseline.instructions); setSelection(baseline.model); setError(null); };
   const save = async () => {
     if (!name.trim()) return;
@@ -85,7 +85,8 @@ export function BotProfilePage({ leaving, guard }: { leaving: boolean; guard: Re
           <span className="text-[12px] text-muted-foreground">{t('bot.profile.instructionsHint')}</span>
         </label>
         <div className={field}><span className={label}>{t('settings.bots.model.label')}</span>
-          <BotModelSelector model={selection} disabled={locked} onChange={(providerId, modelId) => setSelection(providerId && modelId ? { providerId, modelId } : null)} />
+          <BotModelSelector model={selection} disabled={locked} onChange={(providerId, modelId) => setSelection(providerId && modelId ? { providerId, modelId } : null)}
+            onThinkingChange={thinkingLevel => setSelection(current => current ? { ...current, thinkingLevel } : null)} />
           <span className="text-[12px] text-muted-foreground">{t('settings.bots.model.description')}</span>
         </div>
         {harness.harness ? <label className="flex items-center gap-3 text-[13.5px]">

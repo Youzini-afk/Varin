@@ -31,6 +31,15 @@ function fixture() {
   return { create, update, ensureEntry, listWork, listSessions, createSession, botActivity, botScope, session, call };
 }
 describe('Bot routes without a network listener', () => {
+  it('keeps thinking settings through create and update and rejects unknown levels', async () => {
+    const f = fixture();
+    const model = { providerId: 'channel', modelId: 'model', thinkingLevel: 'high' };
+    expect((await f.call('POST', '/api/harness/bots', { model })).status).toBe(201);
+    expect(f.create).toHaveBeenCalledWith({ model });
+    expect((await f.call('POST', '/api/harness/bots/bot/update', { model })).status).toBe(200);
+    expect(f.update).toHaveBeenCalledWith('bot', { model });
+    expect((await f.call('POST', '/api/harness/bots/bot/update', { model: { ...model, thinkingLevel: 'invalid' } })).status).toBe(400);
+  });
   it('creates native Bots without a runtime selector and returns the original tagged entry', async () => {
     const f = fixture();
     expect((await f.call('POST', '/api/harness/bots', { name: 'Bot' })).status).toBe(201);
