@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { join, resolve } from 'node:path';
 import { parse, type ParseError } from 'jsonc-parser';
 import { object } from '../models/configuration.js';
+import { withConfigurationFileAccess } from '../configuration-file-access.js';
 export type McpExposure = 'direct' | 'codemode' | 'deferred' | 'hidden';
 interface McpConfigBase { enabled?: boolean; exposure?: McpExposure; toolExposure?: Record<string, McpExposure>; description?: string; timeout?: number; isolation?: 'shared' | 'session'; lifecycle?: { keepAlive?: boolean; idleTimeoutSeconds?: number } }
 export interface McpStdioServerConfig extends McpConfigBase { command: string; args?: string[]; env?: Record<string, string>; cwd?: string; type?: 'stdio' }
@@ -81,12 +82,16 @@ async function readSource(accepted: Map<string, Source>, path: string, scope: 'g
   try {
     const parseErrors: ParseError[] = [];
     // Read bytes and metadata from the same opened file, including across atomic replacement.
-    const file = await open(path, 'r');
-    try {
-      const text = await file.readFile('utf8'), stat = await file.stat({ bigint: true });
-      version = JSON.stringify([String(stat.dev), String(stat.ino), String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)]);
-      document = parse(text.replace(/^\uFEFF/, ''), parseErrors, { allowTrailingComma: true });
-    } finally { await file.close(); }
+    ({ document, version } = await withConfigurationFileAccess(path, async () => {
+      const file = await open(path, 'r');
+      try {
+        const text = await file.readFile('utf8'), stat = await file.stat({ bigint: true });
+        return {
+          version: JSON.stringify([String(stat.dev), String(stat.ino), String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)]),
+          document: parse(text.replace(/^\uFEFF/, ''), parseErrors, { allowTrailingComma: true }) as unknown,
+        };
+      } finally { await file.close(); }
+    }));
     if (parseErrors.length || validateMcpDocument(document)) throw new Error('Invalid MCP configuration');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') { accepted.delete(key); return undefined; }
