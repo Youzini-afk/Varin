@@ -89,13 +89,14 @@ test('shell exit and passed case name cannot replace original native/browser/Hos
 function lifecycleFixture({failAt,incompleteAt}={}){
   const calls=[];
   const operation=name=>async()=>{calls.push(name);if(name===failAt)throw new Error('observed failure or timeout');};
-  const operations=Object.fromEntries(['seed','verifySourceBefore','mount','install','replace','unregisterOwned','uninstall','verifySourceAfter','detach','cleanup'].map(name=>[name,operation(name)]));
+  const operations=Object.fromEntries(['seed','verifySourceBefore','mount','install','replace','unregisterOwned','uninstall','verifySourceAfter','detach','retainSession'].map(name=>[name,operation(name)]));
+  operations.cleanup=async()=>{throw new Error('Standalone fixture readback cannot authorize private session cleanup');};
   operations.launch=async restart=>{const name=restart?'reopen':'launch';await operation(name)();const value=nativeObservation();if(incompleteAt===name)value.report.cases[1].evidence.applicationAndHostScopesEnded=false;return value;};
   return{calls,operations};
 }
-test('installation controller gates replacement/removal on native drain and cleans only after successful detach',async()=>{
+test('installation controller gates replacement/removal on native drain and retains the fixture session after detach',async()=>{
   const success=lifecycleFixture();await runMacInstallationLifecycle(success.operations);
-  const ordered=['seed','verifySourceBefore','mount','install','launch','replace','reopen','unregisterOwned','uninstall','verifySourceAfter','detach','cleanup'];
+  const ordered=['seed','verifySourceBefore','mount','install','launch','replace','reopen','unregisterOwned','uninstall','verifySourceAfter','detach','retainSession'];
   assert.deepEqual(success.calls,ordered);
   for(const name of ordered){const fixture=lifecycleFixture({failAt:name});await assert.rejects(runMacInstallationLifecycle(fixture.operations),/observed failure/);assert.deepEqual(fixture.calls,ordered.slice(0,ordered.indexOf(name)+1));}
   for(const name of ['launch','reopen']){const fixture=lifecycleFixture({incompleteAt:name});await assert.rejects(runMacInstallationLifecycle(fixture.operations),/terminal evidence/);assert.deepEqual(fixture.calls,ordered.slice(0,ordered.indexOf(name)+1));}

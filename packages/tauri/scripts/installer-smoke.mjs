@@ -36,6 +36,7 @@ export async function runObserved(file,args,{env=process.env,cwd,timeoutMs=180_0
     child.once('error',error=>{clearTimeout(timer);const observed={spawnFailed:true,code:error.code??'unknown',timedOut,...(classifier?{startupSignatures:classifier.finish()}:{})};reject(Object.assign(new Error(`Process launch failed (${observed.code})`),{observed}));});
     // 'exit' can precede the last stderr chunk. Only closed streams provide a
     // complete signature observation; raw output is never returned or written.
+    // This observes the direct process only, not completion of its descendants.
     child.once('close',(code,signal)=>{clearTimeout(timer);const observed={code,signal,timedOut,...(classifier?{startupSignatures:classifier.finish()}:{})};if(code===0&&!timedOut)resolve(observed);else reject(Object.assign(new Error(timedOut?'Process observation timed out; cleanup is unconfirmed':`Process failed (${signal??code})`),{observed}));});
     timer=setTimeout(()=>{
       timedOut=true;
@@ -258,10 +259,13 @@ export async function smokeInstaller(candidateFile,{output,disposableRunner=fals
       return{method:windows?'original-nsis-uninstaller-keep-data':'portable-file-removal',originalProfileRetained:true,isolatedTargetRetained:true};
     });
     await observe('reopen-original-profile-after-uninstall',async()=>({observation:await seedOrVerify('verify',session,nonce,profile,path.join(output,'legacy-after-uninstall.json'),fixtureExecutable)}));
-    evidence.complete=true;evidence.cleanupUncertain=false;
-    // Only native-drained successful runs are cleaned. The synthetic original
-    // profile stays in the disposable OS user, demonstrating uninstall retention.
-    await fs.rm(session.root,{recursive:true,force:true});
+    // The final original-Electron readback observes only its direct process
+    // close. Earlier Tauri native-drain receipts do not cover that later scope.
+    // Retain both private and original profiles for disposal of the whole runner.
+    evidence.complete=true;evidence.qualified=false;evidence.cleanupUncertain=true;
+    evidence.fixtureCleanup='not-verified';evidence.privateSessionRetained=true;
+    evidence.retainedPrivateDirectory=session.root;
+    evidence.notProven.push('original-electron-fixture-process-scope-drain');
     await fs.writeFile(path.join(output,'installer-smoke.json'),JSON.stringify(evidence,null,2)+'\n');
     return evidence;
   }catch(error){

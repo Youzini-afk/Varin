@@ -126,7 +126,9 @@ export async function runMacInstallationLifecycle(operations){
   await operations.uninstall();
   await operations.verifySourceAfter();
   await operations.detach();
-  await operations.cleanup();
+  // The standalone Electron reader has only direct-child exit evidence. The
+  // preceding Tauri drain cannot authorize cleanup of that later fixture scope.
+  await operations.retainSession();
 }
 
 export async function smokeMacInstaller(candidateFile,{output,disposableRunner=false}={}){
@@ -144,7 +146,7 @@ export async function smokeMacInstaller(candidateFile,{output,disposableRunner=f
   const evidence={schema:1,product:'varin-installed-product-smoke',target:candidate.target,sourceSha,version:candidate.version,
     runtimeManifestSha256:candidate.runtimeManifest.sha256,engineManifestSha256:candidate.engineManifest.sha256,
     artifacts:{[artifact.name]:artifact.sha256},installationKind:'macos-dmg-private-copy',fixture:'synthetic-original-electron-profile',
-    complete:false,steps:[],notProven:['signed-release','gatekeeper-quarantine-assessment','automatic-update','cross-version-upgrade','real-user-profile','default-tauri-data-root-uninstall','system-applications-installation','zip-or-tar-installation','default-url-handler','cold-url-activation','physical-desktop-permissions']};
+    complete:false,qualified:false,steps:[],notProven:['signed-release','gatekeeper-quarantine-assessment','automatic-update','cross-version-upgrade','real-user-profile','default-tauri-data-root-uninstall','system-applications-installation','zip-or-tar-installation','default-url-handler','cold-url-activation','physical-desktop-permissions','original-electron-fixture-process-scope-drain']};
   let phase='preflight',mountAttempted=false,mounted=false,detachConfirmed=false;
   const observe=async(name,operation)=>{phase=name;const detail=await operation();evidence.steps.push({name,status:'passed',...detail});return detail;};
   const buildRegistrationOwned=ownsBuildRegistration(candidate.payload,recordedPayload);
@@ -249,12 +251,14 @@ export async function smokeMacInstaller(candidateFile,{output,disposableRunner=f
         mounted=false;detachConfirmed=true;assertMacState(readMacState(),{...stateOptions,requireEmpty:true});
         return{forced:false,mountAbsent:true};
       }),
-      cleanup:()=>observe('cleanup-drained-private-session',async()=>{
-        await verifyOwnedDirectory(session.data);await fs.rm(root,{recursive:true});
-        return{privateSessionRemoved:true,originalOsProfileRetained:true};
+      retainSession:()=>observe('retain-unconfirmed-fixture-session',async()=>{
+        // app.quit(), the direct process close and a passed profile readback do
+        // not prove all original Electron descendants have terminated.
+        return{fixtureCleanup:'not-verified',privateSessionRetained:true,originalOsProfileRetained:true};
       }),
     });
-    evidence.complete=true;evidence.cleanupUncertain=false;
+    evidence.complete=true;evidence.cleanupUncertain=true;evidence.fixtureCleanup='not-verified';
+    evidence.privateSessionRetained=true;evidence.retainedPrivateDirectory=root;
     await fs.writeFile(path.join(output,'installer-smoke.json'),JSON.stringify(evidence,null,2)+'\n');return evidence;
   }catch(error){
     evidence.complete=false;evidence.failedStep=phase;evidence.failure=error.message;evidence.cleanupUncertain=true;evidence.retainedPrivateDirectory=root;
