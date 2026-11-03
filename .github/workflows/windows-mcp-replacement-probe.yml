@@ -1,0 +1,24 @@
+name: Windows MCP replacement probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/windows-mcp-replacement-probe.yml
+      - scripts/probe-windows-mcp-replacement.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.2
+      - name: Observe one replacement per independent handle state
+        run: node scripts/probe-windows-mcp-replacement.mjs
