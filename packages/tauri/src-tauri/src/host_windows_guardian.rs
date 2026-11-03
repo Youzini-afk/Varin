@@ -566,10 +566,27 @@ fn create_service(
     let stdout = unsafe {
         OwnedHandle::from_raw_handle(duplicate_to(output.as_raw_handle(), current, true)? as HANDLE)
     };
-    let stderr = unsafe {
-        OwnedHandle::from_raw_handle(
-            duplicate_to(GetStdHandle(STD_ERROR_HANDLE), current, true)? as HANDLE
+    // Explorer-launched GUI applications need not have a standard error
+    // handle. Keep an inherited handle when present, but give the service a
+    // real NUL handle when there is no console. Never pass NULL as an explicit
+    // STARTF_USESTDHANDLES value or treat an arbitrary duplication failure as
+    // permission to replace an existing stream.
+    let inherited_stderr = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+    let null_stderr = if inherited_stderr.is_null() {
+        Some(
+            File::options()
+                .write(true)
+                .open("NUL")
+                .map_err(|_| "Managed service null error stream is unavailable")?,
         )
+    } else {
+        None
+    };
+    let stderr_source = null_stderr
+        .as_ref()
+        .map_or(inherited_stderr, AsRawHandle::as_raw_handle);
+    let stderr = unsafe {
+        OwnedHandle::from_raw_handle(duplicate_to(stderr_source, current, true)? as HANDLE)
     };
     let handles = [
         stdin.as_raw_handle(),
@@ -769,7 +786,50 @@ mod tests {
                 std::env::var_os(format!("VARIN_TEST_WINDOWS_GUARDIAN_ARG_{index}")).unwrap()
             })
             .collect();
+        if std::env::var_os("VARIN_TEST_WINDOWS_GUARDIAN_NULL_STDERR").is_some() {
+            // A separate native fixture process models Explorer GUI startup;
+            // never mutate this test runner's process-global standard handles.
+            assert_ne!(
+                unsafe {
+                    windows_sys::Win32::System::Console::SetStdHandle(STD_ERROR_HANDLE, null_mut())
+                },
+                0
+            );
+        }
         std::process::exit(run(arguments));
+    }
+
+    #[tokio::test]
+    async fn missing_gui_stderr_keeps_service_admission_and_clean_settlement() {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let data = tempfile::tempdir().unwrap();
+        let _lease = crate::desktop_lock::Lease::acquire(data.path()).unwrap();
+        let node = std::env::var_os("VARIN_TEST_NODE_PATH").unwrap_or_else(|| "node".into());
+        let mut command = Command::new(node);
+        command
+            .args([
+                "-e",
+                "require('node:fs').writeSync(2,'valid native error stream\\n');process.stdout.write('ready\\n')",
+            ])
+            .env("VARIN_TEST_WINDOWS_GUARDIAN_NULL_STDERR", "1");
+        let (mut child, scope) =
+            crate::host_scope::ProcessScope::spawn(command, data.path()).unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .await
+            .unwrap();
+        assert_eq!(line, "ready\n");
+        let status = child.wait().await;
+        let ended = tokio::time::timeout(
+            Duration::from_secs(10),
+            scope.settle_after_node_exit(&status),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(ended.clean && ended.success, "Original scope: {ended:?}");
+        assert!(scope.empty().unwrap());
     }
 
     #[tokio::test]
