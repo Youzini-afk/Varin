@@ -55,6 +55,13 @@ Host carries that read cancellation through history, context, child and recovery
 conversation's initial load failure replaces the previous painted scene with its own retry state;
 loading labels identify the selected conversation. Retrying reads that same identity and preserves drafts.
 
+Tool cards can render before their Operation is accepted, or from cached history before a new snapshot
+arrives. An absent Operation is not an identity match; without an Operation ID, no read/cancel
+action is available. When the original record arrives, its identity and revision decide which observation is current. Chat render
+failures are scoped to the Host and complete conversation identity; navigation releases the old error
+without clearing drafts or replaying work. Error details retain both JavaScript and component stacks
+for explicit copying, including in production builds.
+
 Conversation cards project native history IDs and original request metadata. File navigation resolves the
 history item's original source through the Host before opening Documents; the selected navigation project
 does not identify a task's working copy. Child rows follow Catalog execution admission order, while reports

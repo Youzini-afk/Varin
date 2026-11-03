@@ -45,16 +45,16 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
     }
   }, [conversationActive, autoOpenDraft, api, identity, externalId, draftKey, catalogLoaded, error, readOnly, hostKey]);
   if (!conversationActive) return null;
-  if (externalId) return <ChatErrorBoundary sessionId={externalId}><ExternalConversationView key={`${hostKey}:${externalId}`} id={externalId} readOnly={readOnly} /></ChatErrorBoundary>;
+  if (externalId) return <ChatErrorBoundary sessionId={externalId} resetKey={JSON.stringify([hostKey, 'external', externalId])}><ExternalConversationView key={`${hostKey}:${externalId}`} id={externalId} readOnly={readOnly} /></ChatErrorBoundary>;
   if (!api) return <p role="alert">Conversation service unavailable</p>;
-  if (!identity && draftKey && !readOnly) return <ChatErrorBoundary sessionId={draftKey}>
+  if (!identity && draftKey && !readOnly) return <ChatErrorBoundary sessionId={draftKey} resetKey={JSON.stringify([hostKey, 'draft', draftKey])}>
     {conversationHeader}<ThreadDraftConversation key={draftKey} api={api} draftKey={draftKey} handoff={handoff} />
   </ChatErrorBoundary>;
   if (!identity) return <div className="flex h-full flex-col items-center justify-center gap-3">
     {error && <p role="alert" className="text-destructive">{error}</p>}
     <Button disabled={readOnly} onClick={() => void startThreadFromNavigation().catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))}>{t('sessions.sidebar.header.actions.newSession')}</Button>
   </div>;
-  return <ChatErrorBoundary sessionId={identity.threadId}>
+  return <ChatErrorBoundary sessionId={identity.threadId} resetKey={JSON.stringify([hostKey, 'thread', identity.threadId, identity.branchId])}>
     {conversationHeader}
     <ThreadConversation key={hostKey} api={api} identity={identity} readOnly={readOnly} messageHandoff={handoff}
       initialWorkspacePath={directory} onBranchCreated={created => { void useThreadStore.getState().loadCatalog().then(() => useThreadStore.getState().selectThread(created)); }} />

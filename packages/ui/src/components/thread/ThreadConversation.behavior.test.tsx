@@ -28,6 +28,7 @@ import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { KERNEL_PROTOCOL_VERSION } from '../../../../web/application-host/lib/kernel/protocol.generated.js';
+import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import type { WorkspaceCombinedRecoveryOperation, WorkspaceCombinedRecoveryPlan, WorkspaceRecoveryAPI } from '@varin/extension-contract';
 
 const translations = vi.hoisted(() => ({ dictionary: {} as Record<string, string> }));
@@ -1709,6 +1710,56 @@ it('does not silently discard a prepared workspace when a live run appears befor
   await act(async () => { button('Remove prepared workspace').click(); });
   await submitForm(container.querySelector('form')!);
   expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'run on prepared workspace' }));
+});
+
+it('restores a cached question before its fresh snapshot and preserves both unsent drafts', async () => {
+  const f = fixture(true);
+  const operationId = 'request:tool:ask';
+  const call = { call_id: 'ask', name: 'ask_user', schema_version: '2', arguments: {
+    questions: [{ id: 'choice', question: 'Which approach should survive reopening?',
+      options: [{ id: 'a', label: 'Option A' }, { id: 'b', label: 'Option B' }] }],
+  } };
+  const operation: ThreadSnapshot['operations'][number] = { id: operationId, run_id: 'ui-run', epoch: 1, revision: 2,
+    phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true,
+    executor: 'ask_user', waiting_on: `question:${operationId}`, intent: { kind: 'tool', call }, result: null,
+    external_receipt: null, execution_owner: null,
+    call_completion: { kind: 'job_accepted', operation_id: operationId, phase: 'awaiting_user', effect: 'none', lifetime: 'thread' } };
+  f.view.activeRun!.state = 'waiting'; f.view.activeRun!.waiting_on = operation.waiting_on;
+  f.view.operations = [operation];
+  f.view.history = [{ id: 'question-history', parent: null, thread_id: identity.threadId, run_id: 'ui-run',
+    source: 'assistant', provider: null, content: { id: 'model-item:7:request:ask', content: { kind: 'tool_call', call } } }];
+  f.view.historyPage = { head: 'question-history', previous: null };
+  f.view.thread.branches[0]!.head = 'question-history';
+  f.api.answerQuestion = vi.fn(); f.api.operation = vi.fn(); f.api.cancelOperation = vi.fn();
+  const key = threadComposerKey(threadHostKey(), identity), questionKey = JSON.stringify([key, operationId]);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Message thread"]', 'Keep my separate composer draft');
+  await act(async () => container.querySelectorAll<HTMLInputElement>('input[type=radio]')[1]!.click());
+  await edit('[aria-label="chat.questionCard.yourAnswer"]', 'Keep my answer detail');
+  const questionDraft = useQuestionDraftStore.getState().drafts[questionKey];
+  expect(questionDraft.answers.choice).toMatchObject({ selectedOptionIds: ['b'], text: 'Keep my answer detail' });
+  const history = threadHistoryWindow(f.api, String(endpoint.generation), identity);
+  expect(history.getSnapshot()).toMatchObject({ ready: true, items: [{ id: 'question-history' }] });
+  await act(async () => root.render(null));
+  let finish!: (snapshot: ThreadSnapshot) => void;
+  f.api.snapshot = vi.fn(() => new Promise<ThreadSnapshot>(resolve => { finish = resolve; }));
+  // Error-boundary reset and reopening both remount from the same in-memory
+  // history cache before the new snapshot restores its Operation projection.
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(f.api.snapshot).toHaveBeenCalledOnce();
+  expect(container.querySelector('.conversation-question summary')?.textContent).toContain('Which approach should survive reopening?');
+  expect(container.querySelector('form.thread-question-form')).toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Keep my separate composer draft');
+  expect(useQuestionDraftStore.getState().drafts[questionKey]).toBe(questionDraft);
+  await act(async () => finish(structuredClone(f.view)));
+  expect(container.querySelector<HTMLInputElement>('input[type=radio][value=b]')?.checked).toBe(true);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')?.value).toBe('Keep my answer detail');
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Keep my separate composer draft');
+  expect(button('chat.questionCard.submit').disabled).toBe(false);
+  expect(f.api.answerQuestion).not.toHaveBeenCalled();
+  expect(f.api.operation).not.toHaveBeenCalled();
+  expect(f.api.cancelOperation).not.toHaveBeenCalled();
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });
 
 it('answers a policy-node question explicitly, keeps the draft on failure and disables a stale question', async () => {
