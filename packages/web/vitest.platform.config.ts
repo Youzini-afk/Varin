@@ -7,10 +7,13 @@ import baseConfig from './vitest.config.js';
 // too. New tests within these owners are discovered without a per-file list.
 export const PLATFORM_TEST_INCLUDE = [
   'cli/**/*.test.ts',
+  // Shared Host plumbing includes watcher canonicalization, shutdown and updates.
+  'application-host/lib/*.test.ts',
   'application-host/lib/{client-auth,ui-auth,service-credentials,documents,fs,process,terminal,workspace,git,github,mcp,platform,knowledge,lsp,computer,external-agents,agent-resources,connections,tunnels,relay}/**/*.test.ts',
 ];
 
 export const PLATFORM_NATIVE_INCLUDE = [
+  'application-host/lib/*.native.test.ts',
   'application-host/lib/{documents,storage,recovery,terminal,lsp,knowledge,external-agents,agent-resources,computer}/**/*.native.test.ts',
   'application-host/lib/kernel/{kernel-process,kernel-transport*,process-*,file-*,binary-file-*,storage-*,*source*,permission-*}.native.test.ts',
 ];
