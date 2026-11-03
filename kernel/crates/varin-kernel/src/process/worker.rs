@@ -60,6 +60,8 @@ struct Spawned {
     input: Option<Input>,
     master: Option<Box<dyn MasterPty + Send>>,
     readers: Vec<Reader>,
+    #[cfg(windows)]
+    infrastructure: Option<platform::PtyInfrastructure>,
 }
 fn send(output: &Output, event: Value) -> io::Result<()> {
     write_frame(
@@ -94,19 +96,9 @@ struct Diagnostic {
     process_id: String,
     kernel_epoch: String,
     started: Instant,
-    stalled: Option<Arc<super::stalled_trace::StalledTrace>>,
-    #[cfg(windows)]
-    target_pid: Arc<std::sync::atomic::AtomicU32>,
 }
 fn trace(diagnostic: &Option<Diagnostic>, stage: &'static str) {
     if let Some(diagnostic) = diagnostic {
-        if let Some(stalled) = &diagnostic.stalled {
-            stalled.mark(stage);
-            if stage == "stop-received" { stalled.arm(); }
-            return;
-        }
-        // Additional probe-only lane markers never enter ordinary immediate tracing.
-        if !diagnostic_stage(stage) { return; }
         let _ = send(&diagnostic.output, json!({
             "type":"diagnostic", "processId":diagnostic.process_id,
             "kernelEpoch":diagnostic.kernel_epoch, "guardianPid":std::process::id(),
@@ -136,7 +128,47 @@ fn child_cwd(path: &std::path::Path) -> std::borrow::Cow<'_, std::path::Path> {
     std::borrow::Cow::Borrowed(path)
 }
 
-fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
+#[cfg(windows)]
+#[derive(Debug)]
+struct UnconfirmedPtySpawn(Box<dyn std::error::Error>);
+#[cfg(windows)]
+impl std::fmt::Display for UnconfirmedPtySpawn {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "native PTY setup failed without an exit receipt: {}",
+            self.0
+        )
+    }
+}
+#[cfg(windows)]
+impl std::error::Error for UnconfirmedPtySpawn {}
+#[cfg(windows)]
+fn failed_pty_setup(
+    job: &platform::WorkerJob,
+    pair: Option<portable_pty::PtyPair>,
+    error: Box<dyn std::error::Error>,
+) -> Box<dyn std::error::Error> {
+    let error = match job.abort() {
+        Ok(()) => error,
+        Err(abort) => {
+            io::Error::other(format!("{error}; original Job abort failed: {abort}")).into()
+        }
+    };
+    // TerminateJobObject includes this guardian. If it failed or termination is
+    // still pending, do not let ClosePseudoConsole block this error before any
+    // reader exists. run() propagates this typed error directly to main's exit;
+    // the OS releases these handles and the kernel retains the same Job for
+    // guardian-loss recovery. This is not a successful tree-cleanup receipt.
+    if let Some(pair) = pair {
+        std::mem::forget(pair);
+    }
+    Box::new(UnconfirmedPtySpawn(error))
+}
+fn spawn(
+    config: &Config,
+    #[cfg(windows)] job: &platform::WorkerJob,
+) -> Result<Spawned, Box<dyn std::error::Error>> {
     let executable = super::program::resolve(config)?;
     #[cfg(target_os = "linux")]
     platform::prepare_guardian()?;
@@ -146,32 +178,53 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             cols: config.cols,
             pixel_width: 0,
             pixel_height: 0,
-        })?;
-        let reader = pair.master.try_clone_reader()?;
-        let mut input = pair.master.take_writer()?;
-        // portable-pty creates a fresh ConPTY with INHERIT_CURSOR. There is no
-        // pre-existing surface cursor to inherit: supply the fresh terminal
-        // origin before launching user code, including detached Harness shells.
+        });
         #[cfg(windows)]
-        {
-            input.write_all(b"\x1b[1;1R")?;
-            input.flush()?;
-        }
-        let mut command = CommandBuilder::new(&executable);
-        command.args(&config.args);
-        command.cwd(child_cwd(&config.cwd).as_os_str());
-        command.env_clear();
-        for entry in &config.env {
-            command.env(&entry.name, &entry.value);
-        }
-        let child = pair.slave.spawn_command(command)?;
+        let pair = pair.map_err(|error| failed_pty_setup(job, None, error.into()))?;
+        #[cfg(not(windows))]
+        let pair = pair?;
+        // Keep the master outside this fallible setup: on Windows, failure must
+        // invalidate native infrastructure before its potentially blocking Drop.
+        let prepared = (|| -> Result<Spawned, Box<dyn std::error::Error>> {
+            #[cfg(windows)]
+            let infrastructure = job.capture_pty_infrastructure()?;
+            let reader = pair.master.try_clone_reader()?;
+            let mut input = pair.master.take_writer()?;
+            // portable-pty creates a fresh ConPTY with INHERIT_CURSOR. There is no
+            // pre-existing surface cursor to inherit: supply the fresh terminal
+            // origin before launching user code, including detached Harness shells.
+            #[cfg(windows)]
+            {
+                input.write_all(b"\x1b[1;1R")?;
+                input.flush()?;
+            }
+            let mut command = CommandBuilder::new(&executable);
+            command.args(&config.args);
+            command.cwd(child_cwd(&config.cwd).as_os_str());
+            command.env_clear();
+            for entry in &config.env {
+                command.env(&entry.name, &entry.value);
+            }
+            let child = pair.slave.spawn_command(command)?;
+            Ok(Spawned {
+                child,
+                input: Some(input),
+                master: None,
+                readers: vec![("stdout".into(), reader)],
+                #[cfg(windows)]
+                infrastructure: Some(infrastructure),
+            })
+        })();
+        let mut spawned = match prepared {
+            Ok(spawned) => spawned,
+            #[cfg(windows)]
+            Err(error) => return Err(failed_pty_setup(job, Some(pair), error)),
+            #[cfg(not(windows))]
+            Err(error) => return Err(error),
+        };
         drop(pair.slave);
-        Ok(Spawned {
-            child,
-            input: Some(input),
-            master: Some(pair.master),
-            readers: vec![("stdout".into(), reader)],
-        })
+        spawned.master = Some(pair.master);
+        Ok(spawned)
     } else {
         let mut command = Command::new(&executable);
         command
@@ -179,7 +232,11 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             .current_dir(child_cwd(&config.cwd))
             .env_clear()
             .envs(config.env.iter().map(|v| (&v.name, &v.value)))
-            .stdin(if config.stdin_mode.as_deref() == Some("null") { Stdio::null() } else { Stdio::piped() })
+            .stdin(if config.stdin_mode.as_deref() == Some("null") {
+                Stdio::null()
+            } else {
+                Stdio::piped()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         #[cfg(windows)]
@@ -230,6 +287,8 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             input,
             master: None,
             readers,
+            #[cfg(windows)]
+            infrastructure: None,
         })
     }
 }
@@ -273,41 +332,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         };
         serde_json::from_slice(&frame)?
     };
-    let trace_mode = std::env::var("VARIN_PROCESS_TRACE").ok();
-    #[cfg(windows)]
-    let job = Arc::new(platform::WorkerJob::open(&config.job_name)?);
-    let diagnostic = matches!(trace_mode.as_deref(), Some("1" | "stalled"))
-        .then(|| {
-            #[cfg(windows)]
-            let target_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
-            Diagnostic {
+    let diagnostic = (std::env::var("VARIN_PROCESS_TRACE").as_deref() == Ok("1"))
+        .then(|| Diagnostic {
             output: output.clone(),
             process_id: config.process_id.clone(),
             kernel_epoch: config.kernel_epoch.clone(),
             started: Instant::now(),
-            #[cfg(windows)]
-            target_pid: target_pid.clone(),
-            stalled: (trace_mode.as_deref() == Some("stalled")).then(|| {
-                let path = config.receipt_path.with_extension("guardian.trace");
-                let kernel_stall = config.receipt_path.with_extension("kernel.trace");
-                let process_id = config.process_id.clone();
-                #[cfg(windows)]
-                let job = job.clone();
-                // The original kernel publishes this marker only after its stop
-                // stalls. It also reveals a guardian blocked before stop-received.
-                super::stalled_trace::StalledTrace::start_with_trigger(move || kernel_stall.exists(), move |stages| {
-                    let snapshot = json!({"processId":process_id,"role":"guardian","stages":stages});
-                    #[cfg(windows)]
-                    let snapshot = {
-                        let mut snapshot = snapshot;
-                        let pid = target_pid.load(Ordering::Acquire);
-                        snapshot["job"] = job.diagnostic_snapshot((pid != 0).then_some(pid));
-                        snapshot
-                    };
-                    let _ = std::fs::write(path, snapshot.to_string());
-                })
-            }),
-        }});
+        });
+    #[cfg(windows)]
+    let job = Arc::new(platform::WorkerJob::open(&config.job_name)?);
     if STOP.load(Ordering::Acquire) > 0 {
         let value = json!({"processId":config.process_id,"kernelEpoch":config.kernel_epoch,
             "status":"failed","pid":null,"exitCode":null,"signal":null,"reason":"process launch cancelled before spawn",
@@ -316,14 +349,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         send(&output, json!({"type":"receipt","value":value}))?;
         return Ok(());
     }
+    #[cfg(windows)]
+    let spawned = spawn(&config, &job);
+    #[cfg(not(windows))]
+    let spawned = spawn(&config);
     let Spawned {
         mut child,
         input,
         master,
         readers,
-    } = match spawn(&config) {
+        #[cfg(windows)]
+        infrastructure,
+    } = match spawned {
         Ok(spawned) => spawned,
         Err(error) => {
+            #[cfg(windows)]
+            if error.is::<UnconfirmedPtySpawn>() {
+                return Err(error);
+            }
             let value = json!({"processId": config.process_id, "kernelEpoch": config.kernel_epoch,
                 "status": "failed", "pid": null, "exitCode": null, "signal": null,
                 "reason": format!("process spawn failed: {error}"), "treeConfirmed": true,"spawned":false,"stopApplied":false});
@@ -337,10 +380,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pid = child
         .process_id()
         .ok_or_else(|| io::Error::other("process has no OS identity"))?;
-    #[cfg(windows)]
-    if let Some(diagnostic) = &diagnostic {
-        diagnostic.target_pid.store(pid, Ordering::Release);
-    }
     send(&output, json!({"type":"started", "pid":pid}))?;
     let master = Arc::new(Mutex::new(master));
     let mut readers = readers.into_iter().map(|(channel, mut reader)| {
@@ -351,16 +390,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut buffer = [0u8; 16384];
             let mut delivering = true;
             loop {
-                trace(&diagnostic, "output-read-started");
-                let read = reader.read(&mut buffer);
-                trace(&diagnostic, "output-read-returned");
-                match read {
+                match reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(n) => {
-                        trace(&diagnostic, "output-send-started");
-                        let failed = delivering && send_data(&data_output, json!({"type":"output", "channel":channel, "bytesBase64":BASE64.encode(&buffer[..n])})).is_err();
-                        trace(&diagnostic, "output-send-returned");
-                        if failed {
+                        if delivering && send_data(&data_output, json!({"type":"output", "channel":channel, "bytesBase64":BASE64.encode(&buffer[..n])})).is_err() {
                             STOP.store(2, Ordering::Release);
                             delivering = false;
                             let _ = send(&output, json!({"type":"output-error", "channel":channel}));
@@ -380,11 +413,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (input_tx, input_rx) = mpsc::sync_channel::<Value>(1);
     let input_output = output.clone();
     let input_receipt_path = config.receipt_path.clone();
-    let input_diagnostic = diagnostic.clone();
     let input_worker = thread::spawn(move || {
         let mut input = input;
         let mut active: Option<(InteractionReceipt, u64)> = None;
-        trace(&input_diagnostic, "input-idle");
         for value in input_rx {
             if value["type"] == "finish" {
                 if let Some((mut receipt, chunk)) = active.take() {
@@ -410,15 +441,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     id.reason = Some(
                         "process tree stopped before the remaining input or EOF was sent".into(),
                     );
-                    trace(&input_diagnostic, "input-receipt-started");
                     publish_interaction_receipt(&input_receipt_path, &mut receipt);
-                    trace(&input_diagnostic, "input-receipt-returned");
-                    trace(&input_diagnostic, "input-send-started");
                     let _ = send(
                         &input_output,
                         json!({"type":"interaction","receipt":receipt,"chunk":chunk}),
                     );
-                    trace(&input_diagnostic, "input-send-returned");
                 }
                 return;
             }
@@ -456,10 +483,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Some(writer) => {
                         let mut offset = 0;
                         while offset < bytes.len() {
-                            trace(&input_diagnostic, "input-write-started");
-                            let write = writer.write(&bytes[offset..]);
-                            trace(&input_diagnostic, "input-write-returned");
-                            match write {
+                            match writer.write(&bytes[offset..]) {
                                 Ok(0) => {
                                     error = Some("process stdin write made no progress".into());
                                     break;
@@ -481,10 +505,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         if error.is_none() {
-                            trace(&input_diagnostic, "input-flush-started");
-                            let flushed = writer.flush();
-                            trace(&input_diagnostic, "input-flush-returned");
-                            if let Err(e) = flushed {
+                            if let Err(e) = writer.flush() {
                                 error = Some(e.to_string());
                             }
                         }
@@ -531,17 +552,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     InteractionState::NotApplied
                 };
-                trace(&input_diagnostic, "input-receipt-started");
                 publish_interaction_receipt(&input_receipt_path, receipt);
-                trace(&input_diagnostic, "input-receipt-returned");
             }
-            trace(&input_diagnostic, "input-send-started");
             if send(&input_output,json!({"type":if finished{"interaction"}else{"input-chunk"},"receipt":receipt,"chunk":chunk})).is_err(){return;}
-            trace(&input_diagnostic, "input-send-returned");
             if finished {
                 active = None;
             }
-            trace(&input_diagnostic, "input-idle");
         }
     });
     let control_input = input_tx.clone();
@@ -553,11 +569,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let control_job = job.clone();
     thread::spawn(move || {
         let mut input = io::stdin().lock();
-        loop {
-            trace(&control_diagnostic, "control-read-started");
-            let frame = read_frame(&mut input);
-            trace(&control_diagnostic, "control-read-returned");
-            let Ok(Some(frame)) = frame else { break; };
+        while let Ok(Some(frame)) = read_frame(&mut input) {
             let Ok(value) = serde_json::from_slice::<Value>(&frame) else {
                 break;
             };
@@ -618,7 +630,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         pixel_width: 0,
                         pixel_height: 0,
                     };
-                    trace(&control_diagnostic, "control-resize-started");
                     match control_master.lock() {
                         Ok(master) => match master.as_ref() {
                             None => {
@@ -641,7 +652,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             receipt = receipt.unknown("PTY master owner failed", false);
                         }
                     }
-                    trace(&control_diagnostic, "control-resize-returned");
                     publish_interaction_receipt(&control_receipt_path, &mut receipt);
                     if send(
                         &control_output,
@@ -661,7 +671,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // owning kernel and this control pipe remain alive.
         STOP.store(2, Ordering::Release);
         #[cfg(windows)]
-        control_job.abort();
+        let _ = control_job.abort();
     });
     let mut stop_started: Option<Instant> = None;
     let mut stop_applied = false;
@@ -683,10 +693,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg(windows)]
                 {
                     let _ = force;
-                    trace(&diagnostic, "target-kill-started");
                     child.kill()?;
                     // portable-pty accepting kill is not an observed OS exit.
-                    if !stop_applied || diagnostic.as_ref().is_some_and(|value| value.stalled.is_some()) {
+                    if !stop_applied {
                         trace(&diagnostic, "target-kill-returned");
                     }
                     stop_applied = true;
@@ -700,6 +709,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             thread::sleep(Duration::from_millis(10));
         };
     trace(&diagnostic, "target-exit-observed");
+    // A terminated primary can leave clients holding the console open. Stop
+    // those original-Job descendants before either ClosePseudoConsole (which
+    // blocks on older Windows) or EOF, without killing the original host's tail.
+    #[cfg(windows)]
+    if let Some(infrastructure) = &infrastructure {
+        let drain_started = Instant::now();
+        while !job
+            .drain_pty_clients(infrastructure)
+            .map_err(|error| io::Error::other(format!("native PTY client drain: {error}")))?
+        {
+            if drain_started.elapsed() >= Duration::from_secs(5) {
+                return Err(io::Error::other("native PTY clients did not confirm exit").into());
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
     // Close ConPTY while its reader is still draining, not after joining it.
     trace(&diagnostic, "pty-master-lock-started");
     {
@@ -710,10 +735,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         drop(master.take());
     }
     trace(&diagnostic, "pty-close-returned");
-    // ConPTY's console host owns the final screen flush. Killing Job members
-    // before its output pipe reaches EOF can truncate the last output and race
-    // a conhost already tearing down. ClosePseudoConsole above runs alongside
-    // the reader; only then drain any remaining Job descendants.
+    // The retained original console host owns the final screen flush. Only
+    // user-created Job members were stopped above. Keep original infrastructure
+    // alive until actual EOF, then drain every remaining descendant.
     #[cfg(windows)]
     if config.mode == "pty" {
         trace(&diagnostic, "pty-reader-join-started");
@@ -766,7 +790,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     for reader in readers.drain(..) {
         let _ = reader.join();
     }
-    if let Some(trace) = diagnostic.as_ref().and_then(|value| value.stalled.as_ref()) { trace.finish(); }
     // Process-local input threads die here. The main binary exits immediately.
     Ok(())
 }

@@ -1,102 +1,153 @@
 import React from 'react';
-import { modelThinkingConfiguration, modelThinkingLevels, type ChannelModel, type ChannelTypeInfo, type ModelConnectionOptions, type ModelConnectionTestResult, type ModelThinkingConfiguration, type ThreadThinkingLevel } from '@varin/application-client';
+import { Dialog } from '@base-ui/react/dialog';
+import { modelThinkingConfiguration, modelThinkingLevels, type ChannelModel, type ChannelTypeInfo, type ModelCatalogField, type ModelConnectionOptions, type ModelConnectionTestResult, type ModelThinkingConfiguration, type ThreadThinkingLevel } from '@varin/application-client';
 import type { JsonValue } from '@varin/protocol';
 import { SettingsSection, SettingsStackedField, SettingsFieldRow } from '../shared/SettingsSection';
-import { JsonObjectField } from '../shared/JsonObjectField';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ModelCommonSettings } from './ModelCommonSettings';
-import { ModelApiSettings } from './ModelApiSettings';
-import { ModelTokenizerSettings } from './ModelTokenizerSettings';
-import { ModelPricingSettings } from './ModelPricingSettings';
+import { Switch } from '@/components/ui/switch';
+import { ModelLogo } from '@/components/ui/ModelLogo';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { ModelCommonSettings } from './ModelCommonSettings';
+import { ModelApiSettings } from './ModelApiSettings';
+import { ModelTokenizerSettings } from './ModelTokenizerSettings';
+import { ModelPricingSettings } from './ModelPricingSettings';
+import { ModelAutoSaveField } from './ModelAutoSaveField';
+import { ModelFieldContext } from './model-field-context';
+import { ModelFieldLabel } from './ModelFieldStatus';
+import './model-connections.css';
 
 interface Props {
-  model: ChannelModel; type: ChannelTypeInfo; busy: boolean; selected: boolean;
-  inheritedImageApi?: string;
-  inheritedDecisionApi?: string;
-  inheritedPaths?: ModelConnectionOptions['paths'];
-  onChange(model: ChannelModel): void;
-  onRemove(): void;
-  validity(field: string, valid: boolean): void;
+  model: ChannelModel; type: ChannelTypeInfo; defaults?: ChannelModel;
+  reset?: number;
+  inheritedImageApi?: string; inheritedDecisionApi?: string; inheritedPaths?: ModelConnectionOptions['paths'];
+  onChange(patch: Partial<ChannelModel>): void;
+  onFollow(field: ModelCatalogField): void; onRemove(): void;
   onTest(level: ThreadThinkingLevel, signal: AbortSignal): Promise<ModelConnectionTestResult>;
 }
-export function ModelConfiguration({ model, type, busy, selected, inheritedImageApi, inheritedDecisionApi, inheritedPaths, onChange, onRemove, validity, onTest }: Props) {
+
+export function ModelConfigurationDrawer({ open, onOpenChange, ...props }: Props & { open: boolean; onOpenChange(open: boolean): void }) {
   const { t } = useI18n();
+  const descriptionRef = React.useRef<HTMLDivElement>(null);
+  return <Dialog.Root open={open} onOpenChange={value => {
+    if (!value && document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    onOpenChange(value);
+  }}>
+    <Dialog.Portal>
+      <Dialog.Backdrop className="motion-dialog-backdrop fixed inset-0 z-50 bg-black/30 dark:bg-black/55" />
+      <Dialog.Popup data-slot="dialog-content" className="model-configuration-drawer fixed inset-y-0 right-0 z-50 flex w-full max-w-[520px] flex-col border-l border-border bg-background text-foreground shadow-xl"
+        initialFocus={() => descriptionRef.current?.querySelector('textarea') ?? false}>
+        <Dialog.Close render={<Button variant="ghost" size="icon" className="absolute top-4 right-4 z-10" aria-label={t('settings.models.close')} />}><Icon name="close" className="size-4" /></Dialog.Close>
+        <ModelConfiguration key={props.reset} {...props} descriptionRef={descriptionRef} />
+      </Dialog.Popup>
+    </Dialog.Portal>
+  </Dialog.Root>;
+}
+
+/** Invalid multi-control combinations remain local until the model is coherent again. */
+function ModelConfiguration({ model: saved, type, defaults, inheritedImageApi, inheritedDecisionApi, inheritedPaths, onChange, onFollow, onRemove, onTest, descriptionRef }: Props & { descriptionRef: React.RefObject<HTMLDivElement | null> }) {
+  const { t } = useI18n();
+  const [model, setModel] = React.useState(saved);
+  const local = React.useRef(saved);
+  const unsaved = React.useRef<Partial<ChannelModel>>({});
+  const [restored, setRestored] = React.useState<Partial<Record<ModelCatalogField, number>>>({});
+  React.useEffect(() => { local.current = { ...saved, ...unsaved.current }; setModel(local.current); }, [saved]);
   const [testing, setTesting] = React.useState(false);
   const [result, setResult] = React.useState<ModelConnectionTestResult | null>(null);
   const [failure, setFailure] = React.useState<string | null>(null);
-  const [previewLevel, setPreviewLevel] = React.useState<ThreadThinkingLevel>('off');
+  const [levelChoice, setLevelChoice] = React.useState<ThreadThinkingLevel>('off');
   const controller = React.useRef<AbortController | null>(null);
-  React.useEffect(() => {
-    setResult(null); setFailure(null);
-    return () => controller.current?.abort();
-  }, [selected]);
-  const disabled = busy || testing;
+  React.useEffect(() => () => controller.current?.abort(), []);
   const chat = model.operations.includes('chat');
   const levels = modelThinkingLevels(model);
-  const level = levels.includes(previewLevel) ? previewLevel : levels[0] ?? 'off';
+  const level = levels.includes(levelChoice) ? levelChoice : levels[0] ?? 'off';
   const thinking = modelThinkingConfiguration(model);
   const protocol = model.protocol ?? type.protocol;
   const budgetSupported = ['anthropic-messages', 'google-generative-ai', 'google-vertex', 'bedrock-converse-stream', 'openai-completions'].includes(protocol)
     && !(protocol === 'anthropic-messages' && (model.compat?.forceAdaptiveThinking === true || model.compat?.supportsMidConvoEffort === true));
   const modes: ModelThinkingConfiguration['mode'][] = ['levels', 'switch', 'fixed', ...(budgetSupported ? ['budget' as const] : [])];
   const needsBudgetField = model.reasoning && thinking.mode === 'budget' && protocol === 'openai-completions' && model.compat?.thinkingFormat !== 'openrouter';
-  const update = (patch: Partial<ChannelModel>) => { setResult(null); setFailure(null); onChange({ ...model, ...patch }); };
+  const valid = (value: ChannelModel) => {
+    const configuration = modelThinkingConfiguration(value);
+    const chat = value.operations.includes('chat');
+    const protocol = value.protocol ?? type.protocol;
+    const tokenizer = value.tokenizer;
+    const tokenizerValue = tokenizer?.kind === 'encoding' ? tokenizer.name : tokenizer?.kind === 'huggingface' ? tokenizer.repository : tokenizer?.kind === 'url' ? tokenizer.url : tokenizer?.kind === 'file' ? tokenizer.path : undefined;
+    return (!tokenizer || Boolean(tokenizerValue?.trim())) && value.operations.length > 0 && !(chat && value.reasoning && (configuration.mode === 'levels' && !configuration.levels.length
+      || configuration.mode === 'budget' && (!Number.isSafeInteger(configuration.tokens) || configuration.tokens <= 0
+        || protocol === 'openai-completions' && value.compat?.thinkingFormat !== 'openrouter' && !value.compat?.thinkingTokenBudgetField)));
+  };
+  const update = (patch: Partial<ChannelModel>) => {
+    const next = { ...local.current, ...patch };
+    local.current = next; setModel(next); setResult(null); setFailure(null);
+    unsaved.current = { ...unsaved.current, ...patch };
+    if (valid(next)) { const commit = unsaved.current; unsaved.current = {}; onChange(commit); }
+    else if (valid({ ...saved, ...patch })) {
+      // An unfinished thinking/tokenizer edit does not hold unrelated model fields hostage.
+      for (const key of Object.keys(patch) as (keyof ChannelModel)[]) delete unsaved.current[key];
+      onChange(patch);
+    }
+  };
   const changeOperation = (operation: ChannelModel['operations'][number], checked: boolean) => {
     const operations = checked ? [...model.operations, operation] : model.operations.filter(value => value !== operation);
     update({ operations, ...(!operations.includes('decision') ? { decision: undefined } : {}),
       ...(!operations.some(value => value === 'image-generation' || value === 'image-editing') ? { image: undefined } : {}) });
   };
   const changeMode = (mode: ModelThinkingConfiguration['mode']) => update({ thinking: mode === 'levels' ? { mode, levels: [], allowOff: true } : mode === 'budget' ? { mode, tokens: 8192, allowOff: true } : { mode } });
-  const invalidThinking = chat && model.reasoning && thinking.mode === 'levels' && !thinking.levels.length;
-  const invalidCapacity = [model.contextWindow, model.maxOutputTokens].some(value => value !== undefined && (!Number.isSafeInteger(value) || value <= 0));
-  const invalidBudget = chat && model.reasoning && thinking.mode === 'budget' && (!Number.isSafeInteger(thinking.tokens) || thinking.tokens <= 0 || needsBudgetField && typeof model.compat?.thinkingTokenBudgetField !== 'string');
-  React.useEffect(() => { validity('budget', !invalidBudget); }, [invalidBudget, validity]);
   const test = async () => {
     const abort = new AbortController(); controller.current = abort;
     setTesting(true); setResult(null); setFailure(null);
     try { const value = await onTest(level, abort.signal); if (!abort.signal.aborted) setResult(value); }
-    catch (error) { if (!abort.signal.aborted) setFailure(error instanceof Error ? error.message : String(error)); }
+    catch (cause) { if (!abort.signal.aborted) setFailure(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (controller.current === abort) { controller.current = null; setTesting(false); } }
   };
-  return <div className="grid items-start gap-8 @4xl:grid-cols-[minmax(0,1fr)_260px]">
-    <div className="min-w-0 @container">
-      <SettingsSection title={t('settings.models.basic')} divider={false}>
-        <SettingsFieldRow label={t('settings.models.name')} controlClassName="@xl:flex-1"><Input aria-label={t('settings.models.name')} value={model.name} disabled={disabled} onChange={event => update({ name: event.target.value })} /></SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.models.requestModelId')} controlClassName="@xl:flex-1"><Input aria-label={t('settings.models.requestModelId')} placeholder={model.id} value={model.requestModelId ?? ''} disabled={disabled} onChange={event => update({ requestModelId: event.target.value || undefined })} /></SettingsFieldRow>
-        {type.operations.length > 1 ? <div className="flex flex-wrap gap-x-5 gap-y-3">{type.operations.map(operation => <label key={operation} className="flex items-center gap-2 typography-meta"><Checkbox ariaLabel={t(`settings.models.operation.${operation}`)} checked={model.operations.includes(operation)} disabled={disabled} onChange={checked => changeOperation(operation, checked)} />{t(`settings.models.operation.${operation}`)}</label>)}</div> : null}
+  return <ModelFieldContext.Provider value={{ model, defaults, restored, onFollow: field => {
+    delete unsaved.current[field]; setResult(null); setFailure(null);
+    setRestored(previous => ({ ...previous, [field]: (previous[field] ?? 0) + 1 }));
+    onFollow(field);
+  } }}>
+    <header className="shrink-0 space-y-4 border-b border-border/60 px-6 pt-6 pb-5">
+      <div className="flex items-start gap-3 pr-9"><ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} className="mt-1 size-6 shrink-0" /><div className="min-w-0 flex-1"><Dialog.Title className="break-words typography-ui-label">{model.name || model.id}</Dialog.Title><p className="mt-1 break-all typography-micro text-muted-foreground">{model.id}</p></div><Switch aria-label={`${t('settings.models.enabled')}: ${model.name || model.id}`} checked={model.enabled} onCheckedChange={enabled => update({ enabled })} /></div>
+      {chat ? <><div className="flex flex-wrap items-center gap-2">{model.reasoning ? levels.map(value => <button type="button" key={value} onClick={() => { setLevelChoice(value); setResult(null); setFailure(null); }} disabled={testing} aria-pressed={level === value} className={cn('rounded-md px-2 py-1 typography-micro transition-colors', level === value ? 'bg-foreground/10' : 'text-muted-foreground hover:bg-interactive-hover')}>{t(`settings.agents.thinking.${value}`)}</button>) : null}<Button variant="outline" size="sm" disabled={testing || !valid(model)} onClick={() => { void test(); }}>{testing ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="play" className="size-3.5" />}{t('settings.models.test')}</Button></div><p className="typography-micro text-muted-foreground">{t('settings.models.testHint')}</p></> : null}
+      {result ? <div role="status" className="space-y-1 typography-meta"><p>{t('settings.models.testPassed')} · {(result.elapsedMs / 1000).toFixed(1)} s</p><p className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-muted-foreground">{result.text}</p></div> : null}{failure ? <p role="alert" className="break-words typography-meta text-destructive">{failure}</p> : null}
+    </header>
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6 @container">
+      <div ref={descriptionRef}><SettingsSection divider={false} className="pt-5" title={<ModelFieldLabel field="description">{t('settings.models.modelDescription')}</ModelFieldLabel>}>
+        <ModelAutoSaveField catalogField="description" multiline rows={4} aria-label={t('settings.models.modelDescription')} value={model.description ?? ''} onCommit={description => update({ description })} />
+        <p className="mt-2 typography-micro text-muted-foreground">{t('settings.models.descriptionDispatchHint')}</p>
+      </SettingsSection></div>
+      <SettingsSection title={t('settings.models.basic')}>
+        <SettingsFieldRow label={<ModelFieldLabel field="name">{t('settings.models.name')}</ModelFieldLabel>}><ModelAutoSaveField catalogField="name" aria-label={t('settings.models.name')} value={model.name} onCommit={name => update({ name })} validate={value => value.trim() ? null : t('settings.models.requiredValue')} /></SettingsFieldRow>
+        <SettingsFieldRow label={<ModelFieldLabel field="requestModelId">{t('settings.models.requestModelId')}</ModelFieldLabel>}><ModelAutoSaveField catalogField="requestModelId" aria-label={t('settings.models.requestModelId')} placeholder={model.id} value={model.requestModelId ?? ''} onCommit={requestModelId => update({ requestModelId: requestModelId || undefined })} /></SettingsFieldRow>
+        {type.operations.length > 1 ? <div className="space-y-3"><ModelFieldLabel field="operations">{t('settings.models.capabilities')}</ModelFieldLabel><div className="flex flex-wrap gap-x-5 gap-y-3">{type.operations.map(operation => <label key={operation} className="flex items-center gap-2 typography-meta"><Checkbox ariaLabel={t(`settings.models.operation.${operation}`)} checked={model.operations.includes(operation)} onChange={checked => changeOperation(operation, checked)} />{t(`settings.models.operation.${operation}`)}</label>)}</div>{!model.operations.length ? <p role="alert" className="typography-micro text-destructive">{t('settings.models.chooseOperation')}</p> : null}</div> : null}
       </SettingsSection>
-      <SettingsSection title={t('settings.models.capabilities')}>
-        <ModelCommonSettings model={model} disabled={disabled} onChange={next => { setResult(null); setFailure(null); onChange(next); }} validity={validity} />
+      {chat ? <SettingsSection title={t('settings.models.capabilitiesThinking')}>
+        <ModelCommonSettings model={model} group="capabilities" disabled={false} onChange={update}>
+          <SettingsFieldRow label={<ModelFieldLabel field="thinking">{t('settings.models.thinkingMode')}</ModelFieldLabel>}><Select value={thinking.mode} onValueChange={mode => changeMode(mode as ModelThinkingConfiguration['mode'])}><SelectTrigger size="settings" aria-label={t('settings.models.thinkingMode')}><SelectValue /></SelectTrigger><SelectContent>{modes.map(mode => <SelectItem key={mode} value={mode}>{t(`settings.models.thinkingMode.${mode}`)}</SelectItem>)}</SelectContent></Select></SettingsFieldRow>
+          {protocol === 'openai-completions' ? <SettingsFieldRow label={<ModelFieldLabel field="compat">{t('settings.models.thinkingFormat')}</ModelFieldLabel>}><Select value={String(model.compat?.thinkingFormat ?? 'standard')} onValueChange={value => { const compat = { ...model.compat }; if (value === 'standard') delete compat.thinkingFormat; else compat.thinkingFormat = value; update({ compat }); }}><SelectTrigger size="settings" aria-label={t('settings.models.thinkingFormat')}><SelectValue /></SelectTrigger><SelectContent>{['standard', 'deepseek', 'qwen', 'qwen-chat-template', 'openrouter', 'zai', 'together', 'ant-ling', 'string-thinking'].map(format => <SelectItem key={format} value={format}>{format === 'standard' ? 'reasoning_effort' : format}</SelectItem>)}</SelectContent></Select></SettingsFieldRow> : null}
+          {needsBudgetField ? <SettingsFieldRow label={<ModelFieldLabel field="compat">{t('settings.models.budgetField')}</ModelFieldLabel>}><ModelAutoSaveField catalogField="compat" aria-label={t('settings.models.budgetField')} value={String(model.compat?.thinkingTokenBudgetField ?? '')} placeholder="thinking_token_budget" validate={value => value.trim() ? null : t('settings.models.invalidBudget')} onCommit={value => update({ compat: { ...local.current.compat, thinkingTokenBudgetField: value.trim() } })} /></SettingsFieldRow> : null}
+        </ModelCommonSettings>
+      </SettingsSection> : null}
+      <SettingsSection title={t('settings.models.capacity')}><ModelCommonSettings model={model} group="capacity" disabled={false} onChange={update} /></SettingsSection>
+      <ModelPricingSettings model={model} disabled={false} onChange={update} />
+      <SettingsSection title={t('settings.models.interface')}>
+        <ModelApiSettings model={model} type={type} disabled={false} inheritedImageApi={inheritedImageApi} inheritedDecisionApi={inheritedDecisionApi} inheritedPaths={inheritedPaths} onChange={update} />
+        {chat && (type.protocols?.length ?? 0) > 1 ? <SettingsFieldRow label={<ModelFieldLabel field="protocol">{t('settings.models.protocol')}</ModelFieldLabel>}><Select value={protocol} onValueChange={value => update({ protocol: value })}><SelectTrigger size="settings" aria-label={t('settings.models.protocol')}><SelectValue /></SelectTrigger><SelectContent>{type.protocols!.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></SettingsFieldRow> : null}
+        {chat ? <ModelTokenizerSettings model={model} disabled={false} onChange={update} /> : null}
       </SettingsSection>
-      <ModelApiSettings model={model} type={type} disabled={disabled} inheritedImageApi={inheritedImageApi} inheritedDecisionApi={inheritedDecisionApi} inheritedPaths={inheritedPaths} onChange={update} />
-      <ModelPricingSettings model={model} disabled={disabled} onChange={update} validity={validity} />
-      <SettingsSection title={t('settings.models.advanced')}>
-        {chat ? <ModelTokenizerSettings model={model} disabled={disabled} onChange={update} validity={validity} /> : null}
-        {chat && (type.protocols?.length ?? 0) > 1 ? <SettingsFieldRow label={t('settings.models.protocol')}><Select value={protocol} disabled={disabled} onValueChange={value => update({ protocol: value })}><SelectTrigger size="settings" aria-label={t('settings.models.protocol')}><SelectValue /></SelectTrigger><SelectContent>{type.protocols!.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></SettingsFieldRow> : null}
-        {chat && model.reasoning ? <div className="space-y-3">
-            <SettingsFieldRow label={t('settings.models.thinkingMode')}><Select value={thinking.mode} disabled={disabled} onValueChange={mode => changeMode(mode as ModelThinkingConfiguration['mode'])}><SelectTrigger size="settings" aria-label={t('settings.models.thinkingMode')}><SelectValue /></SelectTrigger><SelectContent>{modes.map(mode => <SelectItem key={mode} value={mode}>{t(`settings.models.thinkingMode.${mode}`)}</SelectItem>)}</SelectContent></Select></SettingsFieldRow>
-            {needsBudgetField ? <SettingsFieldRow label={t('settings.models.budgetField')}><Input aria-label={t('settings.models.budgetField')} value={String(model.compat?.thinkingTokenBudgetField ?? '')} placeholder="thinking_token_budget" disabled={disabled} onChange={event => { const compat = { ...model.compat }; if (event.target.value.trim()) compat.thinkingTokenBudgetField = event.target.value.trim(); else delete compat.thinkingTokenBudgetField; update({ compat }); }} /></SettingsFieldRow> : null}
-            {invalidBudget ? <p role="alert" className="typography-micro text-destructive">{t('settings.models.invalidBudget')}</p> : null}
-            {protocol === 'openai-completions' ? <SettingsFieldRow label={t('settings.models.thinkingFormat')}><Select value={String(model.compat?.thinkingFormat ?? 'standard')} disabled={disabled} onValueChange={value => { const compat = { ...model.compat }; if (value === 'standard') delete compat.thinkingFormat; else compat.thinkingFormat = value; update({ compat }); }}><SelectTrigger size="settings" aria-label={t('settings.models.thinkingFormat')}><SelectValue /></SelectTrigger><SelectContent>{['standard', 'deepseek', 'qwen', 'qwen-chat-template', 'openrouter', 'zai', 'together', 'ant-ling', 'string-thinking'].map(format => <SelectItem key={format} value={format}>{format === 'standard' ? 'reasoning_effort' : format}</SelectItem>)}</SelectContent></Select></SettingsFieldRow> : null}
-        </div> : null}
-        <details><summary className="cursor-pointer typography-meta text-muted-foreground">{t('settings.models.parameters')}</summary><div className="mt-4 space-y-4">{(['parameters', 'compat', 'thinkingLevelMap', 'image'] as const).map(field => <SettingsStackedField key={field} label={t(`settings.models.${field}`)} controlClassName="max-w-none"><JsonObjectField value={model[field] as Record<string, JsonValue> | undefined} label={t(`settings.models.${field}`)} disabled={disabled} onValidityChange={valid => validity(field, valid)} onChange={value => update({ [field]: value })} /></SettingsStackedField>)}</div></details>
-        <Button variant="ghost" size="sm" className="text-destructive" disabled={disabled} onClick={onRemove}>{t('settings.models.removeModel')}</Button>
-      </SettingsSection>
+      <SettingsDisclosure title={t('settings.models.rawParameters')}>
+        {(['parameters', 'compat', 'thinkingLevelMap', 'image'] as const).map(field => <SettingsStackedField key={field} label={<ModelFieldLabel field={field}>{t(`settings.models.${field}`)}</ModelFieldLabel>} controlClassName="max-w-none">
+          <ModelAutoSaveField catalogField={field} multiline rows={4} className="font-mono typography-micro" value={model[field] === undefined ? '' : JSON.stringify(model[field], null, 2)} aria-label={t(`settings.models.${field}`)} validate={value => {
+            if (!value.trim()) return null;
+            try { const object = JSON.parse(value); return object && typeof object === 'object' && !Array.isArray(object) ? null : t('settings.models.invalidObject'); } catch { return t('settings.models.invalidObject'); }
+          }} onCommit={value => update({ [field]: value.trim() ? JSON.parse(value) as Record<string, JsonValue> : undefined })} />
+        </SettingsStackedField>)}
+      </SettingsDisclosure>
+      <div className="mt-5 border-t border-border/60 pt-4"><Button variant="ghost" size="sm" className="text-destructive" onClick={() => { if (window.confirm(t('settings.models.removeModelConfirm'))) onRemove(); }}>{t('settings.models.removeModel')}</Button></div>
     </div>
-    {chat ? <aside className="rounded-xl border border-border/60 bg-muted/15 p-5 @4xl:sticky @4xl:top-0">
-      <h3 className="typography-ui-label">{t('settings.models.preview')}</h3>
-      <div className="mt-4 rounded-xl border border-border/70 bg-background p-3"><div className="mb-6 typography-meta text-muted-foreground">{t('settings.models.previewPlaceholder')}</div><div className="flex flex-wrap items-center gap-2 typography-micro"><Icon name="add" className="size-4" /><span className="max-w-28 truncate">{model.name || model.id}</span>{model.reasoning ? <span className="rounded bg-muted px-1.5 py-0.5">{t(`settings.agents.thinking.${level}`)}</span> : null}<Icon name="arrow-up" className="ml-auto size-4 text-muted-foreground" /></div></div>
-      {model.reasoning ? <div className="mt-4 flex flex-wrap gap-2">{levels.map(value => <button type="button" key={value} onClick={() => { setPreviewLevel(value); setResult(null); setFailure(null); }} disabled={testing} aria-pressed={level === value} className={cn('rounded-md px-2 py-1 typography-micro', level === value ? 'bg-foreground/10' : 'text-muted-foreground hover:bg-interactive-hover')}>{t(`settings.agents.thinking.${value}`)}</button>)}</div> : null}
-      <div className="mt-4 space-y-2 typography-micro text-muted-foreground"><p>{t(model.input?.includes('image') ? 'settings.models.previewImages' : 'settings.models.previewText')}</p>{model.contextWindow ? <p>{t('settings.models.context')} · {model.contextWindow.toLocaleString()}</p> : null}{model.maxOutputTokens ? <p>{t('settings.models.output')} · {model.maxOutputTokens.toLocaleString()}</p> : null}</div>
-      <div className="mt-5 border-t border-border/60 pt-4"><Button variant="outline" className="w-full" disabled={disabled || !!invalidThinking || invalidCapacity || !!invalidBudget} onClick={() => { void test(); }}>{testing ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="play" className="size-4" />}{t('settings.models.test')}</Button><p className="mt-2 typography-micro text-muted-foreground">{t('settings.models.testHint')}</p>
-        {result ? <div role="status" className="mt-3 space-y-1 typography-meta"><p>{t('settings.models.testPassed')} · {(result.elapsedMs / 1000).toFixed(1)} s</p><p className="whitespace-pre-wrap break-words text-muted-foreground">{result.text}</p></div> : null}{failure ? <p role="alert" className="mt-3 break-words typography-meta text-destructive">{failure}</p> : null}
-      </div>
-    </aside> : null}
-  </div>;
+  </ModelFieldContext.Provider>;
 }

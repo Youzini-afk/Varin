@@ -6,7 +6,6 @@ pub(crate) mod platform;
 pub(crate) mod receipt_wake;
 pub(crate) mod subscriptions;
 pub(crate) mod worker;
-mod stalled_trace;
 pub(crate) mod text;
 mod paging;
 mod program;
@@ -101,7 +100,6 @@ struct ControlState {
     requested: u8,
 }
 struct ProcessControl {
-    stalled_trace: Option<Arc<stalled_trace::StalledTrace>>,
     guardian: Arc<Mutex<Child>>,
     containment: Arc<platform::Containment>,
     input: Arc<Mutex<Option<SyncSender<Value>>>>,
@@ -124,8 +122,6 @@ impl ProcessControl {
         #[cfg(unix)]
         self.containment.terminate(&guardian, state.requested > 1)?;
         #[cfg(windows)]
-        {
-        if let Some(trace) = &self.stalled_trace { trace.mark("stop-enqueue-started"); }
         self.input
             .lock()
             .map_err(|_| failure("guardian input poisoned"))?
@@ -133,8 +129,6 @@ impl ProcessControl {
             .ok_or_else(|| failure("guardian input closed"))?
             .try_send(json!({"type":"stop","force":state.requested>1}))
             .map_err(|_| failure("guardian control backpressure; stop remains requested"))?;
-        if let Some(trace) = &self.stalled_trace { trace.mark("stop-enqueued"); }
-        }
         Ok(true)
     }
     fn stop(&self, force: bool) -> Result<bool, KernelError> {
@@ -146,7 +140,6 @@ impl ProcessControl {
             return Ok(false);
         }
         state.requested = state.requested.max(if force { 2 } else { 1 });
-        if let Some(trace) = &self.stalled_trace { trace.mark("stop-requested"); trace.arm(); }
         self.apply(&state)?;
         // Before readiness this is an owned stop request, not a claim the target has stopped.
         Ok(true)
@@ -161,7 +154,6 @@ impl ProcessControl {
         Ok(())
     }
     fn terminal(&self) {
-        if let Some(trace) = &self.stalled_trace { trace.finish(); }
         if let Ok(mut state) = self.state.lock() {
             state.terminal = true;
         }

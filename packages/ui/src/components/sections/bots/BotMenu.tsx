@@ -7,8 +7,8 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, C
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 
 export type BotMenuAction = 'pin' | 'rename' | 'profile' | 'memory' | 'sleep' | 'wake' | 'archive' | 'restore' | 'retry' | 'delete';
-export function BotMenu({ bot, disabled, onAction, children }: {
-  bot: BotSummary; disabled: boolean; onAction(action: BotMenuAction): void; children: React.ReactNode;
+export function BotMenu({ bot, disabled, onAction, children, persistentActions = false }: {
+  bot: BotSummary; disabled: boolean; onAction(action: BotMenuAction): void; children: React.ReactNode; persistentActions?: boolean;
 }) {
   const { t } = useI18n();
   const state = bot.activity?.state ?? 'awake';
@@ -47,7 +47,7 @@ export function BotMenu({ bot, disabled, onAction, children }: {
       <div className="group flex items-center rounded-md focus-within:bg-interactive-hover data-[state=open]:bg-interactive-hover">
         {children}
         <DropdownMenu>
-          <DropdownMenuTrigger asChild><button type="button" aria-label={`${bot.name} · ${t('settings.bots.actions')}`} className="mr-1 rounded p-1 text-muted-foreground opacity-0 hover:text-foreground focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100">
+          <DropdownMenuTrigger asChild><button type="button" disabled={disabled} aria-label={`${bot.name} · ${t('settings.bots.actions')}`} className={`mr-1 rounded p-1 text-muted-foreground hover:text-foreground focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 ${persistentActions ? 'opacity-100' : 'opacity-0'}`}>
             <Icon name="more" className="size-4" />
           </button></DropdownMenuTrigger>
           <DropdownMenuContent align="start">{items(true)}</DropdownMenuContent>

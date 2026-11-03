@@ -1,7 +1,6 @@
-# DIAGNOSTIC-ONLY BRANCH: DO NOT MERGE. Restore the ordinary CI workflow with
-# the actual repair. This job observes the existing live-shell failure; it does
-# not replace or relax any acceptance requirement on main.
-name: Windows terminal stall probe (DO NOT MERGE)
+# DIAGNOSTIC-ONLY BRANCH: DO NOT MERGE. Product sources match repair PR249
+# exactly; only this targeted workflow differs. Ordinary CI stays on PR249/main.
+name: Windows PTY repair validation (DO NOT MERGE)
 
 on:
   pull_request:
@@ -12,7 +11,7 @@ permissions:
 
 jobs:
   windows-terminal-stall:
-    name: Capture pending native shell stop
+    name: Verify Windows PTY descendant drain
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -40,9 +39,18 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build:type-dependencies
       - run: bun run --cwd packages/web type-check:application-host:tests
-      - name: Build the exact probe kernel
+      - name: Build the exact repair kernel
         run: node scripts/test-kernel-authority.mjs --build-only
-      - name: Preserve the exact compiled probe inputs
+      - name: Prepare WinFsp for native workspace acceptance
+        shell: pwsh
+        run: |
+          node packages/electron/scripts/prepare-workspace-component.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $component = Get-Content packages/electron/resources/workspace-component.json -Raw | ConvertFrom-Json
+          $installer = Join-Path $PWD "packages/electron/resources/workspace-component/$($component.file)"
+          $installation = Start-Process msiexec.exe -ArgumentList @('/i', "`"$installer`"", '/qn', '/norestart') -Wait -PassThru -WindowStyle Hidden
+          if ($installation.ExitCode -ne 0) { throw "WinFsp installation did not finish without a restart: $($installation.ExitCode)" }
+      - name: Preserve the exact compiled repair inputs
         if: ${{ steps.rust-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
@@ -51,16 +59,18 @@ jobs:
             ~/.cargo/git
             kernel/target
           key: ${{ steps.rust-cache.outputs.cache-primary-key }}
-      - name: Capture the first failure without retrying it
+      - name: Verify original process ownership and untraced Bash teardown
         timeout-minutes: 15
         # Match the original failing CI launcher. The terminal inherits this
         # process environment, including Git Bash/MSYS context.
         shell: bash
-        env:
-          VARIN_TEST_TERMINAL_TRACE: stalled
         run: |
-          # Independent fresh fixtures sample the intermittent race. A failure
-          # terminates this job immediately; it can never become retry-to-green.
+          # No diagnostic tracing or alternate production path. The whole native
+          # process file includes real descendants, tail output and setup failure.
+          unset VARIN_TEST_TERMINAL_TRACE VARIN_PROCESS_TRACE
+          node scripts/test-kernel-authority.mjs --vitest-file=application-host/lib/kernel/kernel-process.native.test.ts
+          # Independent fresh fixtures sample the original intermittent race.
+          # Any failure terminates this job; it can never become retry-to-green.
           for iteration in $(seq 1 12); do
             echo "Git Bash live-shell stop sample $iteration / 12"
             node scripts/test-kernel-authority.mjs --vitest-file=application-host/lib/terminal/shell-integration.live.native.test.ts

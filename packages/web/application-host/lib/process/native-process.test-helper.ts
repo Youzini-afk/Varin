@@ -21,36 +21,6 @@ export interface NativeProcessDiagnostic {
   stage: string;
 }
 
-/** Print only bounded process ownership metadata from the delayed Job probe. */
-export function summarizeNativeJobDiagnostic(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const job = value as Record<string, unknown>;
-  const number = (input: unknown) => typeof input === 'number' && Number.isSafeInteger(input) && input >= 0 ? input : null;
-  const boolean = (input: unknown) => typeof input === 'boolean' ? input : null;
-  const operations = new Set(['JobObjectBasicAccountingInformation', 'JobObjectBasicProcessIdList',
-    'OpenProcess', 'IsProcessInJob', 'WaitForSingleObject', 'QueryFullProcessImageNameW']);
-  const errors = (input: unknown) => Array.isArray(input) ? input.slice(0, 4).map((entry: unknown) => {
-    const error = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
-    return { operation: typeof error.operation === 'string' && operations.has(error.operation) ? error.operation : 'unknown',
-      code: number(error.code), result: number(error.result) };
-  }) : [];
-  return {
-    guardianPid: number(job.guardianPid), targetPid: number(job.targetPid),
-    activeProcesses: number(job.activeProcesses), assignedProcesses: number(job.assignedProcesses),
-    listedProcesses: number(job.listedProcesses), memberLimit: number(job.memberLimit),
-    truncated: Array.isArray(job.members) && job.members.length > 64 ? true : boolean(job.truncated),
-    errors: errors(job.errors),
-    members: Array.isArray(job.members) ? job.members.slice(0, 64).map((entry: unknown) => {
-      const member = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
-      const basename = typeof member.imageBasename === 'string' ? path.win32.basename(member.imageBasename) : undefined;
-      return { pid: number(member.pid), belongsToJob: boolean(member.belongsToJob), signaled: boolean(member.signaled),
-        imageBasename: basename?.slice(0, 256) ?? null,
-        imageTruncated: member.imageTruncated === true || (basename?.length ?? 0) > 256,
-        errors: errors(member.errors) };
-    }) : null,
-  };
-}
-
 function observeProcessDiagnostics(child: ChildProcess, observe: (event: NativeProcessDiagnostic) => void): void {
   const prefix = '[native process stage] ';
   // This is only a diagnostic carry limit, not a process-output/protocol limit.
@@ -85,7 +55,6 @@ function observeProcessDiagnostics(child: ChildProcess, observe: (event: NativeP
 /** An isolated real-kernel fixture. No Node/Bun PTY production fallback. */
 export function createNativeProcessTestHarness(authority?: DocumentAuthority, options: {
   onProcessDiagnostic?: (event: NativeProcessDiagnostic) => void;
-  stalledProcessDiagnostics?: boolean;
 } = {}) {
   let initialized: Promise<{
     service: ReturnType<typeof createKernelProcessService>;
@@ -110,7 +79,6 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority, op
       const buildVersion = (JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string }).version;
       const observeDiagnostic = options.onProcessDiagnostic;
       const client = createKernelClient({ hostId: "process-consumer", storageRoot: path.join(root, "storage"), kernelPath, buildVersion, allowCargoDevRunner: false,
-        ...(options.stalledProcessDiagnostics ? { env: { VARIN_PROCESS_TRACE: 'stalled' } } : {}),
         ...(observeDiagnostic ? {
           env: { VARIN_PROCESS_TRACE: '1' },
           spawnProcess: ((command: string, args: string[], spawnOptions: Parameters<typeof nodeSpawn>[2]) => {

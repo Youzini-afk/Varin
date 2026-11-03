@@ -1,0 +1,8 @@
+.model-configuration-drawer {
+  transform: translateX(0);
+  transition: transform var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out);
+}
+.model-configuration-drawer:is([data-starting-style], [data-ending-style]) { transform: translateX(100%); opacity: 0; }
+.model-configuration-drawer[data-ending-style] { transition-duration: var(--motion-dur-exit); transition-timing-function: var(--motion-ease-exit); }
+:root:is([data-motion="reduced"], [data-motion="off"]) .model-configuration-drawer { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); transform: none; }
+@media (prefers-reduced-motion: reduce) { .model-configuration-drawer { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); transform: none; } }

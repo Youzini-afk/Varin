@@ -586,8 +586,22 @@ and retain the reviewed canonical path; cancelled or retired Host views cannot g
 Conversation defaults edit Host-global values. Project model and thinking overrides live with the
 project and restore inheritance by deleting overrides.
 
-Model services open on their model collection with separate connection/authentication and request
-configuration tabs. MCP settings project tool declarations from the retained live connection or the
+Model services own an internal service-list/detail layout; narrow panes show one side at a time.
+Connection/authentication/request fields form a guarded draft that excludes models. Model edits save
+immediately through a serial queue using the latest acknowledged revision; connection saves merge
+with the latest models. Failure rereads authoritative configuration and rolls back optimistic model
+edits while retaining the connection draft. The three-step create flow stores a key only when the
+selected models and service are confirmed. Discovery/testing uses transient connection inputs.
+
+Model rows expose descriptions, capabilities and exact-channel usage bindings. Their right-side
+dialog edits the existing capabilities, capacities, pricing, protocols, tokenizer and JSON controls;
+text edits debounce or commit on blur/Enter, with invalid values retained in the field. Catalog
+restoration is field-local and explicit empty descriptions remain overrides. Delegation's candidate
+list uses the backend's enabled-channel/enabled-chat-model eligibility and consumes a transient
+`settingsModelFocus` navigation intent to open the corresponding description. Session-only test
+success is never presented as persisted connection health.
+
+MCP settings project tool declarations from the retained live connection or the
 original directory cache, labeling their source. Configuration, authorization, and connection state
 remain distinct. The tool settings page lists the actual registered catalog; native tool selection is
 edited in Agent profiles rather than through the obsolete global tool-name toggles.

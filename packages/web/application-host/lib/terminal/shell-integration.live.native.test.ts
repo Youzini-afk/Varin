@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createIsolatedTerminalSessionApi } from "./isolated-session-api.test-helper.js";
 import type { TerminalCommandRecord } from "./session-api.js";
 import { createPlatformEnvironmentRuntime } from '../platform/environment-runtime.js';
-import { createNativeProcessTestHarness, hasNativeProcessKernel, summarizeNativeJobDiagnostic, type NativeProcessDiagnostic } from '../process/native-process.test-helper.js';
+import { createNativeProcessTestHarness, hasNativeProcessKernel, type NativeProcessDiagnostic } from '../process/native-process.test-helper.js';
 
 const gitBashCandidates = [
   process.env.VARIN_TERMINAL_SHELL,
@@ -78,9 +78,7 @@ describe("live shell integration", () => {
       // later progress without console I/O in the command-to-stop race window.
       if (reportPendingStages) console.info('[live shell] pending native stage', event);
     } : undefined;
-    const native = createNativeProcessTestHarness(undefined, onProcessDiagnostic ? { onProcessDiagnostic } : {
-      stalledProcessDiagnostics: process.env.VARIN_TEST_TERMINAL_TRACE === 'stalled',
-    });
+    const native = createNativeProcessTestHarness(undefined, onProcessDiagnostic ? { onProcessDiagnostic } : {});
     let lastControl: Record<string, unknown> | undefined;
     let lastData: Record<string, unknown> | undefined;
     let nativeRoot: string | undefined;
@@ -173,12 +171,7 @@ describe("live shell integration", () => {
       // Observe only frames already delivered and durable receipt metadata. A
       // process.list/read call could reconcile state and mask a missed wakeup.
       // This timer neither settles destroy nor releases its original process.
-      let diagnosticPasses = 0;
-      const reportedTraceFiles = new Set<string>();
-      const diagnostic = setInterval(() => {
-        // Bound the probe to the original 35 s test budget; never keep a
-        // timed-out fixture printing forever. No retry or success is inferred.
-        if (++diagnosticPasses >= 5) clearInterval(diagnostic);
+      const diagnostic = setTimeout(() => {
         reportPendingStages = true;
         console.info('[live shell] pending destroy', { nativePhases, nativeStages, lastControl, lastData });
         if (!nativeRoot) return;
@@ -188,21 +181,9 @@ describe("live shell integration", () => {
             treeReceipts: names.filter(name => name.endsWith('.json')).length,
             outputMarkers: names.filter(name => name.endsWith('.output.complete')).length,
           });
-          for (const name of names.filter(name => name.endsWith('.json') || name.endsWith('.output') || name.endsWith('.output.complete') || name.endsWith('.trace'))) {
+          for (const name of names.filter(name => name.endsWith('.json') || name.endsWith('.output') || name.endsWith('.output.complete'))) {
             const file = path.join(directory, name);
-            if (name.endsWith('.trace')) {
-              if (reportedTraceFiles.has(name)) continue;
-              const value = JSON.parse(await fs.readFile(file, 'utf8')) as {
-                processId: string; role: string; stages: Array<[string, number]>; job?: unknown;
-              };
-              reportedTraceFiles.add(name);
-              console.info('[live shell] stalled native phases', {
-                processId: value.processId, role: value.role, stages: value.stages,
-              });
-              const job = summarizeNativeJobDiagnostic(value.job);
-              // Node's default object inspection would hide nested members as [Object].
-              if (job) console.info('[live shell] stalled native Job', JSON.stringify(job));
-            } else if (name.endsWith('.output')) {
+            if (name.endsWith('.output')) {
               console.info('[live shell] native output file', { bytes: (await fs.stat(file)).size });
             } else {
               const value = JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, unknown>;
@@ -217,7 +198,7 @@ describe("live shell integration", () => {
         }).catch(() => phase('native receipt metadata unavailable'));
       }, 5_000);
       try { await handle.destroy(); }
-      finally { clearInterval(diagnostic); reportPendingStages = false; }
+      finally { clearTimeout(diagnostic); reportPendingStages = false; }
       console.info('[live shell] native teardown', { nativePhases, nativeStages });
       phase('destroyed');
     } finally {
