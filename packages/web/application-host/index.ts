@@ -1,4 +1,5 @@
 import { createDesktopLocalCredentials } from './lib/platform/desktop-credentials.js';
+import { clientCors } from './lib/security/client-cors.js';
 import { createThreadUserDispatch } from './lib/kernel/thread-user-dispatch.js';
 import { registerThreadUserDispatchRoutes } from './lib/kernel/thread-user-dispatch-routes.js';
 import { createAbsoluteAttachmentCapture } from './lib/kernel/attachment-absolute.js';
@@ -815,20 +816,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     next();
   });
   app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
-  const packagedClientOrigins = new Set(['varin-ui://app', 'capacitor://localhost', 'http://localhost', 'https://localhost']);
-  app.use((req, res, next) => {
-    const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
-    if (packagedClientOrigins.has(origin) || /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-Varin-Application-Token,X-Varin-Directory,X-Varin-Directory-Encoding');
-      res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
-      res.setHeader('Vary', 'Origin');
-      if (req.method === 'OPTIONS') return res.status(204).end();
-    }
-    next();
-  });
+  app.use(clientCors);
   app.use(compression({
     filter: (req, res) => shouldSkipCompression(req, res) ? false : compression.filter(req, res),
     threshold: 1024,

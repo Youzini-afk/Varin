@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
+import { isPackagedClientOrigin } from './client-origins.js';
 
 export interface SecurityRequest {
   headers: IncomingHttpHeaders;
@@ -17,18 +18,6 @@ export interface RequestSecurityDependencies {
 
 export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) => {
   const { readSettingsFromDisk } = deps;
-  // Origins of packaged (non-browser) clients whose WebView origin never
-  // matches the server host: the desktop shell, the iOS Capacitor WebView
-  // (capacitor://localhost), and the Android Capacitor WebView, which uses
-  // androidScheme 'https' and therefore reports 'https://localhost'. Missing
-  // the Android origin 403'd every WebSocket upgrade from the Android app
-  // (message stream, terminal, dictation) while SSE kept working.
-  const packagedClientOrigins = new Set([
-    'varin-ui://app',
-    'capacitor://localhost',
-    'https://localhost',
-  ]);
-
   const getUiSessionTokenFromRequest = (req: SecurityRequest | null | undefined): string | null => {
     const cookieHeader = req?.headers?.cookie;
     if (!cookieHeader || typeof cookieHeader !== 'string') {
@@ -136,7 +125,7 @@ export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) 
       return false;
     }
 
-    if (packagedClientOrigins.has(originHeader)) {
+    if (isPackagedClientOrigin(originHeader)) {
       return true;
     }
 
