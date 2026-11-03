@@ -333,8 +333,11 @@ it('read reauthorization and epoch checks can deny already captured bytes withou
 it('private resource calls cancel independently and discard late old-epoch results', async () => {
   let epoch = 'epoch'; const replies: PrivateResourceResponse[] = [];
   const bridge = new ResourceBridge(() => epoch, async value => { replies.push(value); }, () => { throw new Error('Unexpected transport failure'); });
-  const held = deferred<ResourceToolResult>(); const signals: AbortSignal[] = [];
-  bridge.setOwner(async (_query, signal) => { signals.push(signal); return signals.length === 1 ? held.promise : resourceQueryFailure('missing', 'Other call finished'); });
+  const held = deferred<ResourceToolResult>(); const oldEpoch = deferred<ResourceToolResult>(); const signals: AbortSignal[] = [];
+  bridge.setOwner(async (_query, signal) => {
+    signals.push(signal);
+    return signals.length === 1 ? held.promise : signals.length === 3 ? oldEpoch.promise : resourceQueryFailure('missing', 'Other call finished');
+  });
   const frame = (id: string) => ({ v: 1, kind: 'resource-request', id, kernelEpoch: epoch, query: request('skill') });
   bridge.consume(frame('slow')); bridge.consume(frame('fast'));
   await vi.waitFor(() => expect(replies).toHaveLength(1));
@@ -342,9 +345,15 @@ it('private resource calls cancel independently and discard late old-epoch resul
   bridge.consume({ v: 1, kind: 'resource-cancel', id: 'slow', kernelEpoch: 'old' });
   expect(signals[0]?.aborted).toBe(false);
   bridge.consume({ v: 1, kind: 'resource-cancel', id: 'slow', kernelEpoch: epoch });
+  expect(signals[0]?.aborted).toBe(true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(replies).toHaveLength(1); // Abort is not proof that the original owner stopped.
+  held.resolve(resourceQueryFailure('missing', 'Original reader has drained'));
   await vi.waitFor(() => expect(replies).toHaveLength(2));
   expect(replies[1]).toMatchObject({ id: 'slow', result: { status: 'cancelled' } });
-  epoch = 'next'; bridge.close(); held.resolve(resourceQueryFailure('missing', 'Late old response'));
+  bridge.consume(frame('old-epoch'));
+  await vi.waitFor(() => expect(signals).toHaveLength(3));
+  epoch = 'next'; bridge.close(); oldEpoch.resolve(resourceQueryFailure('missing', 'Late old response'));
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(replies).toHaveLength(2);
 });
