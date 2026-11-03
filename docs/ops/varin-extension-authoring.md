@@ -35,13 +35,15 @@ npx varin-extension test
 
 `init` is deliberately non-interactive and refuses to overwrite a non-empty directory. The generated
 project is a complete managed Surface extension with a standalone `varin.extension.json`, source,
-build mapping, TypeScript configuration, and package metadata.
+build mapping, TypeScript configuration, and package metadata. Install and enable its directory in
+Extensions, open a conversation, and click the counter beside the composer. Disabling the extension
+withdraws the view and its click listener; it never sends a message or invokes a tool.
 
 Optional `--template` values:
 
 | Template | What it generates |
 | --- | --- |
-| `surface` | Default managed Surface page contribution |
+| `surface` | Interactive counter in the conversation composer, using the public mount contract |
 | `shell` | Framework-neutral `workbench.shell` replacement using `defineShellMount` |
 | `editor` | Custom resource editor selected by language or filename |
 | `view` | Sidebar view on `workbench.primary-sidebar.views` |
@@ -74,6 +76,79 @@ and are automatically disposed when the Shell unmounts; retaining the returned h
 when the Shell wants to dispose that host point earlier. Calls are limited to seams declared by the
 Shell contract and accept JSON-safe props only. Isolated iframe/Worker Shells are self-contained in
 v1 and do not receive this parent-realm DOM composition host.
+
+### Settings, commands, and conversation presentation
+
+Managed/native authors use the same framework-neutral mount lifetime as views. These public contracts
+need neither Varin's private React components nor keys in its translation catalog:
+
+| Contribution | Public implementation | Product location |
+| --- | --- | --- |
+| `settings-page` | `defineSettingsPageMount` | Settings navigation; `data.slug`, literal `data.title`, optional `group` / `kind` / `keywords` |
+| `command` | `defineCommand` | Command palette; literal `data.title`, optional `keywords` |
+| `message-renderer` | `defineMessageRenderer` (`matches` + `mount`) | `VARIN_CONVERSATION_SLOTS.messages` |
+| `tool-renderer` | `defineToolRenderer` (`matches` + `mount`) | `VARIN_CONVERSATION_SLOTS.tools` |
+| `session-decoration` | `defineSessionDecoration` (`matches` + `mount`) | `VARIN_CONVERSATION_SLOTS.sessionDecorations` |
+| `composer-action` | `defineSurfaceMount` | `VARIN_CONVERSATION_SLOTS.composerLeading` / `composerTrailing` |
+
+The contribution descriptor still declares `contractVersion: 1`, supported surfaces, and a namespaced
+ID. Mirror it in the manifest when it must be discovered before activation. Renderer/action descriptors
+set `placement.slot` to the public constant; command and settings consumers need no slot. A command's
+execution identity is its contribution ID, not an arbitrary private command identifier. It receives
+`{ currentDirectory, isMobile }`; `isAvailable` may restrict palette availability. Execution capabilities
+must still be explicitly granted and called through their proper owner.
+
+```ts
+import { defineSurfaceExtension, defineSettingsPageMount } from "@varin/extension-sdk"
+
+export default defineSurfaceExtension(context => {
+  context.contribute({
+    id: "dev.example.notes.settings", kind: "settings-page", contractVersion: 1,
+    supports: ["desktop", "web", "mobile"],
+    data: { slug: "example-notes", title: "Example notes", group: "general" },
+  }, defineSettingsPageMount((container, mount) => {
+    const heading = document.createElement("h2")
+    heading.textContent = "Example notes"
+    container.append(heading)
+    return () => heading.remove()
+  }))
+})
+```
+
+Settings `kind: "single"` is the default. A `split` page mounts two independent instances with
+`mount.props.region` equal to `sidebar` or `content`; the sidebar may call `onItemSelect()` after
+navigation on mobile. Keep shared state in your extension, not in one mounted DOM instance. Labels
+are literal author-owned strings; built-in localized settings retain their existing private adapter.
+
+Renderer `matches` receives the same detached, read-only JSON presentation snapshot as its mount.
+The typed stable fields are exported as `VarinMessageRendererPropsV1`, `VarinToolRendererPropsV1`, and
+`VarinSessionDecorationPropsV1`; additional presentation fields are JSON and must be checked before
+use. This is not a tool execution, cancellation, or durable receipt API. Return a disposer and respect
+`mount.signal`: prop changes, owner replacement, disable, and host unmount release the old instance.
+
+```ts
+import { defineToolRenderer } from "@varin/extension-sdk"
+
+const renderer = defineToolRenderer({
+  matches: input => input.call.name === "dev.example.notes.lookup",
+  mount(container, mount) {
+    container.textContent = mount.props.result ? "Lookup finished" : "Looking up notes…"
+    return () => container.replaceChildren()
+  },
+})
+```
+
+React authors can use `defineReactSettingsPage`, `defineReactMessageRenderer`, `defineReactToolRenderer`,
+and `defineReactSessionDecoration`. Each owns its own React root and uses the same mount/dispose path.
+The callable command/matching contracts above are same-realm contracts, not functions serialized over
+an isolated MessagePort. Do not claim isolated support merely by changing the manifest's mode.
+
+Registration is not proof of a product consumer. `keybinding`, `menu-item`, `sidebar`, and `status-item`
+currently have no dedicated product consumer; their names do not create shortcuts, menus, or navigation.
+Use a supported mounted view in a Shell-declared slot when that is the intended presentation. A generic
+`page` without a hosted slot does not create a route. Declarative entries supply discovery/lazy-activation
+metadata, not a built-in data-only renderer or executable command. `varin-extension check` reports these
+boundaries as `authorDiagnostics`, separately from manifest validity and permission decisions.
 
 ### Shell seam contract
 
@@ -270,7 +345,8 @@ An extension can declare any combination of Host and Surface entrypoints.
 
 ### Surface modes
 
-- `declarative`: data-only contributions from the manifest; no extension JavaScript executes.
+- `declarative`: manifest-only discovery descriptors; no extension JavaScript executes. The current
+  product does not synthesize rendered views or executable commands from these descriptors.
 - `managed`: a framework-neutral bundle runs in the Surface realm. Varin tracks SDK registrations,
   while raw browser effects must register a disposer.
 - `isolated`: an application-host-materialized IIFE runs in a sandboxed iframe or Worker and
@@ -460,7 +536,9 @@ New code can open independent documents with
 `profile`, `workspace`, `surface`, and `session`; arbitrary keys let one extension separate unrelated
 state without inventing one product-wide schema. Every document has its own revision and update
 stream. Varin injects the current extension ID, so the request cannot address another extension's
-namespace. `context.storage.snapshot` and `update` remain the `application/state` compatibility
+namespace. Scope names are labels, not automatic per-profile, workspace, Surface or session identities:
+include a stable entity identity in `key` when separate entities need separate data. They are not
+permission boundaries. `context.storage.snapshot` and `update` remain the `application/state` compatibility
 document.
 
 The manifest's `storage.schemaVersion` drives `migrate({ data, fromSchemaVersion,
@@ -472,6 +550,9 @@ Other `storage.open` documents do not automatically invoke that migration callba
 `schemaVersion` selects the version written by subsequent updates; it does not convert existing data.
 Read the snapshot's actual schema version, transform the data explicitly, and update with its revision.
 Reopening the same document with a different schema version within one activation is rejected.
+A retained retiring generation cannot refresh or explicitly open a successor's schema; updates check
+the original snapshot schema under the storage lock. The current selected provider can still explicitly
+transform an additional document through `open` and revision-checked `update`.
 
 Required services control activation and dependency-safe teardown in their explicit `realms` array.
 Use `["host"]`, `["surface"]`, or both; an omitted realm declaration is invalid. Optional services
@@ -601,8 +682,10 @@ varin-extension test
 `check` validates the contract, version agreement, path containment, and published entrypoint files.
 The JSON output includes `incompatibleContributions` (contributions with unknown contract versions
 that are parsed but not executable), `missingFiles` (referenced entrypoint files that don't exist),
-and `referencedFiles` (all declared entrypoint file paths). A check with incompatible contributions
-still succeeds (exit 0) because the manifest is structurally valid.
+and `referencedFiles` (all declared entrypoint file paths). Unknown contribution contracts return a
+non-zero exit code. `authorDiagnostics` separately reports missing product consumers, unhosted views,
+and declarations without executable implementations; this guidance is nonfatal and is not a claim
+that a particular window mounted the extension.
 `test` rebuilds and executes the public conformance harnesses:
 
 - managed/native Surface activation, committed contribution/service state, deactivation, and leak
@@ -672,54 +755,17 @@ remain part of the existing operation lifecycle, not an extension-owned task or 
 
 ## Native retrieval plans
 
-A brokered Host extension can provide `varin.retrieval.plan@1` with
-`provideRetrievalPlan(context, { configurationId: 'my-plan-v1', structure: 'builtin' })`.
-Use `structure: 'disabled'` for keyword-only retrieval. Optional `semantic: 'builtin'` selects the
-native semantic owner; omission or `semantic: 'disabled'` disables it. Declare the service with `multiple: true`
-in the manifest and activate on `service-request`. `inspect([])` exposes the shared schemas;
-`describe([])` accepts no arguments and returns only these declared fields. The declaration must be
-immutable for the selected artifact. It is not a callback for reading files or calling models.
+The current `code_retrieval` is a background native Agent, using the ordinary model, tools,
+source, context and Operation owners. It does not consume `varin.retrieval.plan@1`; the former
+keyword/structure/semantic stage-selection packages are no longer distributed.
 
-Open **Settings → Varin Extensions → Service routing → Native code retrieval**. Select
-**Native Retrieval: Keyword and Structure**, **Native Retrieval: Keyword Only**, or
-**Native Retrieval: Keyword, Structure and Semantic** for **My default**
-or **This workspace**. Installed declarations are listed before activation; their status says they
-activate when used. The built-in structured package is the automatic default. An explicitly selected
-disabled, missing or invalid provider fails preparation instead of silently using another plan.
+The published contract and `provideRetrievalPlan` export remain deprecated compatibility APIs for
+existing packages and explicit custom service consumers. They do not change native retrieval.
+Saved routing rules remain intact and inspectable; an absent provider is unresolved, not silently
+mapped to a different policy. Remove an obsolete rule explicitly when it is no longer needed.
 
-The existing routing API can select a project or native Thread with a revision-checked rule:
-
-```json
-{
-  "serviceId": "varin.retrieval.plan",
-  "version": 1,
-  "providerKeys": ["varin.builtin.retrieval-keyword:host:varin.retrieval.plan@1"],
-  "scope": { "projectId": "YOUR_PROJECT_ID" },
-  "allowFallback": false
-}
-```
-
-Pass the routing document's current `expectedRevision` with the update. A Thread override uses its
-real native Thread ID in the existing routing `sessionId` dimension.
-The UI's workspace dimension is the canonical directory, distinct from a native workspace ID.
-Project scope comes from the Run's accepted context. Installing an unrelated provider does not select it.
-
-Each native query freezes the selected provider generation, executing artifact, configuration,
-stage method handles and plan provenance. A failed or superseded candidate leaves the previous
-prepared plan intact, but the failing query reports the error. Existing queries retain their own
-generation pins across ordinary package replacement; explicit disable/crash revokes them. The caller
-releases its pin on settlement or cancellation. Keyword/structure work remains with the existing
-Run-granted compute and Documents owners. The explicit semantic selection captures a fresh native-owner
-lease for each query: its backend configuration, credential/account generation, index recipe and
-published-reader generation stay fixed until release. It does not start indexing or wait for a first
-publication; a cold or unavailable publication is reported explicitly. Source candidates must match
-both their indexed file revision and chunk hash before entering results. The selected semantic owner
-may embed the query with the explicitly configured remote embedding model, using the original Run
-grant before dispatch. It never silently chooses a local backend, another model, or a paid probe.
-The model reranking stage remains disabled. Normal backend/index replacement preserves in-flight
-leases; explicit disable, owner/epoch loss, credential invalidation or Run revocation rejects further
-reads, inference and delivery. The plan records nonsecret backend/publication identity and actual
-inference receipts preserve unknown usage and indeterminate dispatch outcomes.
+Extend the actual Agent through the existing tool, policy and context contracts, and choose its
+ordinary model through the retrieval settings. See [retrieval ownership](../retrieval.md).
 
 ## Install and development workflow
 
@@ -732,10 +778,23 @@ extension project.
 
 An installed local extension has a **Reload local directory** action. Reload resolves the complete
 source identity already stored in the application-host catalog, so the UI neither receives nor
-resubmits the hidden path specifier. Unchanged content is a no-op. Changed content with no new
-capability request is applied to the current Surface through the normal candidate transaction; a
-failed candidate keeps the selected artifact and active generation. A candidate that adds a
-capability is only staged for review and still requires the explicit **Apply update** action afterward.
+resubmits the hidden path specifier. Unchanged content is a no-op. Changed content is staged as a
+candidate, even if its capability list is unchanged. Review the exact candidate version, source,
+and integrity, then choose **Apply update**. A failed candidate keeps the selected artifact and active
+generation; reviewing capabilities alone never approves the new code.
+
+The UI asks for explicit code trust before installing the exact source, enabling external code,
+or applying an exact candidate. Installation itself may execute code: the broker worker is not an
+OS sandbox, and managed/native Surface code shares its realm with the application. Capability grants
+constrain broker APIs, not trusted code's direct filesystem, network, or environment access. Code trust
+and capability decisions are separate; confirmation never creates a grant or a persistent allow rule.
+Confirmed mutations remain bound to their original Host and selected artifact. If the Host, artifact,
+or reviewed catalog/profile revision changes while waiting, review again instead of silently applying
+the confirmation to new code. An in-flight candidate remains attached to the original Host transport
+identity: switching endpoints rejects further publication rather than sending the operation or its
+cleanup to the new Host. Rejection does not claim that an already dispatched preparation was canceled;
+its original Host remains the authority for that result. Profile controls ask only when they would newly enable external code;
+ordinary navigation cannot approve a disabled external Shell implicitly.
 
 An extension without requested capabilities is enabled on first installation. An extension that
 requests Host or Surface capabilities is installed disabled; decide every request in its card, then
@@ -758,7 +817,7 @@ selected version.
 
 1. The host validates the manifest, engine range, artifacts, integrity, and capability delta.
 2. Added capabilities receive explicit decisions in the Extensions page.
-3. **Apply update** persists application intent and prepares the candidate through the existing Host
+3. **Apply update** confirms the candidate's code identity, persists application intent, and prepares it through the existing Host
    and Surface lifecycle. The exact publication barrier depends on the manifest's update group below.
 4. **Discard update** removes the candidate record and its prepared generation.
 

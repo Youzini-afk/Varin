@@ -333,8 +333,9 @@ export const createInitFiles = (options: {
           title: options.name,
         }
         : {
-          id: `${options.id}.surface.page`,
-          kind: "page",
+          id: `${options.id}.surface.action`,
+          kind: "composer-action",
+          placement: { slot: "chat.composer.actions.trailing", order: 40 },
           title: options.name,
         };
 
@@ -344,7 +345,7 @@ export const createInitFiles = (options: {
       ? `import { defineEditorMount, defineSurfaceExtension, type VarinManagedSurfaceContext } from "@varin/extension-sdk";\n\nexport default defineSurfaceExtension((context: VarinManagedSurfaceContext) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "editor",\n    contractVersion: 1,\n    data: { languageIds: ["markdown"], priority: 60 },\n    supports: ["desktop", "web"],\n    title: ${JSON.stringify(options.name)},\n  }, defineEditorMount((container, mount) => {\n    const textarea = container.ownerDocument.createElement("textarea");\n    textarea.setAttribute("aria-label", ${JSON.stringify(options.name)});\n    textarea.style.cssText = "width:100%;height:100%;resize:none;border:0;padding:12px;background:transparent;color:inherit;font:inherit";\n    const render = () => {\n      const snapshot = mount.props.document.getSnapshot();\n      if (textarea.value !== snapshot.content) textarea.value = snapshot.content;\n      textarea.readOnly = snapshot.status !== "ready";\n    };\n    const onInput = () => {\n      const snapshot = mount.props.document.getSnapshot();\n      const next = textarea.value;\n      let from = 0;\n      while (from < snapshot.content.length && from < next.length && snapshot.content[from] === next[from]) from += 1;\n      let previousTo = snapshot.content.length;\n      let nextTo = next.length;\n      while (previousTo > from && nextTo > from && snapshot.content[previousTo - 1] === next[nextTo - 1]) {\n        previousTo -= 1;\n        nextTo -= 1;\n      }\n      void mount.props.document.applyEdits([{ from, to: previousTo, insert: next.slice(from, nextTo) }], snapshot.documentVersion).then((result) => {\n        if (mount.signal.aborted) return;\n        switch (result.status) {\n          case "applied":\n            delete textarea.dataset.varinEditStatus;\n            return;\n          case "stale":\n          case "conflict":\n          case "invalid-range":\n          case "overlapping-ranges":\n          case "unsupported":\n            textarea.dataset.varinEditStatus = result.status;\n            render();\n            return;\n        }\n      });\n    };\n    const onKeyDown = (event: KeyboardEvent) => {\n      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;\n      event.preventDefault();\n      const version = mount.props.document.getSnapshot().documentVersion;\n      void mount.props.document.save(version).then((result) => {\n        if (mount.signal.aborted) return;\n        if (result.status !== "updated") textarea.dataset.varinEditStatus = result.status;\n        render();\n      });\n    };\n    textarea.addEventListener("input", onInput);\n    textarea.addEventListener("keydown", onKeyDown);\n    const unsubscribe = mount.props.document.subscribe(render);\n    container.replaceChildren(textarea);\n    render();\n    return () => {\n      unsubscribe();\n      textarea.removeEventListener("input", onInput);\n      textarea.removeEventListener("keydown", onKeyDown);\n      container.replaceChildren();\n    };\n  }));\n});\n`
       : options.template === "view"
         ? `import { defineViewMount, defineSurfaceExtension, type VarinManagedSurfaceContext } from "@varin/extension-sdk";\nimport { VARIN_WORKBENCH_SLOTS } from "@varin/extension-contract";\n\nexport default defineSurfaceExtension((context: VarinManagedSurfaceContext) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "view",\n    contractVersion: 1,\n    data: {},\n    supports: ["desktop", "web"],\n    title: ${JSON.stringify(options.name)},\n    placement: { slot: VARIN_WORKBENCH_SLOTS.primarySidebarViews, order: 40 },\n  }, defineViewMount((container) => {\n    container.textContent = ${JSON.stringify(options.name)};\n    return () => { container.replaceChildren(); };\n  }));\n});\n`
-        : `import type { VarinExtensionStaticContribution } from "@varin/extension-contract";\nimport { defineSurfaceExtension, type VarinManagedSurfaceContext } from "@varin/extension-sdk";\n\nconst contribution: VarinExtensionStaticContribution = {\n  id: ${JSON.stringify(contribution.id)},\n  kind: "page",\n  contractVersion: 1,\n  data: {},\n  supports: ["desktop", "mobile", "web"],\n  title: ${JSON.stringify(options.name)},\n};\n\nexport default defineSurfaceExtension((context: VarinManagedSurfaceContext) => {\n  context.contribute(contribution, {\n    render: () => undefined,\n  });\n});\n`;
+        : `import { defineSurfaceExtension, defineSurfaceMount, VARIN_CONVERSATION_SLOTS } from "@varin/extension-sdk";\n\nexport default defineSurfaceExtension((context) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "composer-action",\n    contractVersion: 1,\n    data: {},\n    supports: ["desktop", "mobile", "web"],\n    title: ${JSON.stringify(options.name)},\n    placement: { slot: VARIN_CONVERSATION_SLOTS.composerTrailing, order: 40 },\n  }, defineSurfaceMount((container) => {\n    const button = container.ownerDocument.createElement("button");\n    button.type = "button";\n    button.setAttribute("aria-label", ${JSON.stringify(options.name)});\n    button.style.cssText = "border:1px solid currentColor;border-radius:6px;padding:4px 8px;font:inherit";\n    let clicks = 0;\n    const render = () => { button.textContent = ${JSON.stringify(options.name)} + " · " + clicks; };\n    const click = () => { clicks += 1; render(); };\n    button.addEventListener("click", click);\n    render();\n    container.appendChild(button);\n    return () => { button.removeEventListener("click", click); button.remove(); };\n  }));\n});\n`;
 
   return {
     "varin.extension.json": json({
@@ -363,12 +364,13 @@ export const createInitFiles = (options: {
           supports: options.template === "surface" ? ["desktop", "mobile", "web"] : ["desktop", "web"],
         }],
       },
-      ...(options.template === "shell" ? {
+      ...(options.template === "shell" || options.template === "surface" ? {
         contributions: [{
+          data: {},
           ...contribution,
           contractVersion: 1,
           entrypoint: surfaceEntrypointId,
-          supports: ["desktop", "web"],
+          supports: options.template === "surface" ? ["desktop", "mobile", "web"] : ["desktop", "web"],
         }],
       } : {}),
     }),
@@ -387,7 +389,7 @@ export const createInitFiles = (options: {
           ? "A custom resource editor contribution. Document buffers stay in Varin DocumentsAPI."
           : options.template === "view"
             ? "A sidebar view contribution placed through a public workbench slot."
-            : "A managed Surface extension for Varin.",
+            : "An interactive action mounted beside the conversation composer. Enable it, open a conversation, and click its counter button.",
     }),
   };
 };

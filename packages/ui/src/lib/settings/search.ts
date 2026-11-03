@@ -16,7 +16,7 @@ import { getSettingsPageMeta, getSettingsPageMetadata } from './metadata';
 interface SettingsSearchItem {
   id: string;
   page: SettingsPageSlug;
-  titleKey: I18nKey;
+  titleKey?: I18nKey;
   descriptionKey?: I18nKey;
   keywords?: string[];
 }
@@ -121,7 +121,7 @@ export function buildSettingsSearchResults({
       return [];
     }
 
-    const title = t(item.titleKey);
+    const title = item.titleKey ? t(item.titleKey) : getPageTitle(item.page);
     const description = item.descriptionKey ? t(item.descriptionKey) : null;
     const haystack = normalizeSearchText([
       title,

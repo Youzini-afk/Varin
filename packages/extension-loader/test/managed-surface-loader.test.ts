@@ -2428,3 +2428,119 @@ test("product Surface scope preserves distinct configuration and document namesp
   assert.equal(scope.runtimeId, "runtime-p");
   assert.equal(scope.projectId, undefined);
 });
+
+for (const surfaceCode of [false, true]) {
+  test(`confirmed ${surfaceCode ? "managed Surface" : "Host-only"} candidate never retargets an in-flight prepare to another Host`, async () => {
+    const { captureSurfaceExtensionHost, createSurfaceExtensionHost } = await import('../../ui/src/lib/extensions/surface-host-adapter.js');
+    const nextIntegrity = integrityFor('same-candidate-on-two-hosts');
+    const candidateManifest: VarinExtensionManifest = { ...manifest('2.0.0'), entrypoints: surfaceCode
+      ? { host: { mode: 'brokered', file: 'host.js' }, surfaces: [{ id: 'main', mode: 'managed', file: 'surface.js', supports: ['web'] }] }
+      : { host: { mode: 'brokered', file: 'host.js' } } };
+    const entry = { ...catalogEntry('1.0.0', integrityFor('old')), candidate: {
+      applyRequested: false, capabilitiesReviewed: true, capabilityDelta: { added: [], removed: [] }, capabilityGrants: [],
+      integrity: nextIntegrity, manifest: candidateManifest, preparedAt: '2026-08-14T00:00:00.000Z', resolvedVersion: '2.0.0',
+      source: { kind: 'local' as const, display: 'Candidate' },
+    } };
+    const original = snapshot(1, entry), other = snapshot(1, entry, '55b455dc-555c-4d67-b82d-d2f94aa4a729');
+    const callsA: string[] = [], callsB: string[] = [];
+    let release!: () => void, entered!: () => void, preparationFinished = false;
+    const held = new Promise<void>(resolve => { release = resolve; }), ready = new Promise<void>(resolve => { entered = resolve; });
+    const makeHost = (catalog: VarinExtensionCatalogSnapshot, calls: string[]): SurfaceExtensionHost => ({
+      activateExtension: async () => undefined, catalog: async () => ({ supported: true, status: 'ready', snapshot: catalog }),
+      hostState: async () => hostState(catalog), waitForHostState: async () => hostState(catalog),
+      watchServiceLease: holdServiceLease, invokeService: async () => { throw new Error('No services'); },
+      requestCandidateApplication: async () => { calls.push('intent'); return catalog; },
+      prepareCandidate: async (extensionId, integrity) => {
+        calls.push('prepare'); entered(); await held; preparationFinished = true; return { extensionId, integrity, providers: [] };
+      },
+      selectCandidate: async () => { calls.push('select'); return catalog; },
+      discardPreparedCandidate: async () => { calls.push('discard'); },
+      readAsset: async () => { throw new Error('No assets'); }, readManagedEntrypoint: async () => { throw new Error('No module admission after Host change'); },
+      reportActualState: async () => undefined,
+    });
+    const hostA = makeHost(original, callsA), hostB = makeHost(other, callsB);
+    let endpoint = hostA, generation = 1;
+    const loader = new SurfaceExtensionLoader({ surface: 'web', surfaceRuntime: new SurfaceExtensionRuntime({ surface: 'web' }),
+      host: createSurfaceExtensionHost(() => endpoint) });
+    const applying = loader.applyCandidate(entry.manifest.id, nextIntegrity, 1, {
+      host: captureSurfaceExtensionHost(() => endpoint, () => generation), expectedHostId: hostId,
+    });
+    const rejected = assert.rejects(applying, /original operation was not retargeted/);
+    await ready; endpoint = hostB; generation += 1; release(); await rejected;
+    assert.equal(preparationFinished, true, 'the original prepare really finished; rejection does not invent cancellation');
+    assert.deepEqual(callsA, ['intent', 'prepare']);
+    assert.deepEqual(callsB, [], 'the new Host receives neither intent, preparation, selection nor cleanup');
+    assert.ok(loader.getSnapshot().diagnostics.some(diagnostic => diagnostic.code === 'candidate_application_failed'));
+    await assert.rejects(loader.applyCandidate(entry.manifest.id, nextIntegrity, 1, {
+      host: captureSurfaceExtensionHost(() => endpoint, () => generation), expectedHostId: hostId,
+    }), /Host changed after candidate confirmation/);
+    assert.deepEqual(callsB, []);
+    await loader.stop();
+  });
+}
+
+for (const retirement of ['candidate-removes-owner', 'later-disable'] as const) {
+  test(`confirmed owner ${retirement} does not report original actual state to a new Host after its disposer awaits`, async () => {
+    const { captureSurfaceExtensionHost, createSurfaceExtensionHost } = await import('../../ui/src/lib/extensions/surface-host-adapter.js');
+    const oldIntegrity = integrityFor('retiring-old'), nextIntegrity = integrityFor('retiring-candidate');
+    let current = snapshot(1, catalogEntry('1.0.0', oldIntegrity));
+    const reportsA: VarinExtensionActualState[] = [], reportsB: VarinExtensionActualState[] = [];
+    let release!: () => void, entered!: () => void, disposerFinished = false;
+    const held = new Promise<void>(resolve => { release = resolve; }), ready = new Promise<void>(resolve => { entered = resolve; });
+    const hostA: SurfaceExtensionHost = {
+      activateExtension: async () => undefined, catalog: async () => ({ supported: true, status: 'ready', snapshot: current }),
+      hostState: async () => hostState(current), waitForHostState: async () => hostState(current),
+      watchServiceLease: holdServiceLease, invokeService: async () => { throw new Error('No services'); },
+      requestCandidateApplication: async () => current,
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      selectCandidate: async () => {
+        const candidate = current.extensions[0]!.candidate!;
+        current = snapshot(current.revision + 1, { ...catalogEntry(candidate.resolvedVersion, candidate.integrity), manifest: candidate.manifest });
+        return current;
+      },
+      discardPreparedCandidate: async () => undefined,
+      readAsset: async () => { throw new Error('No assets'); },
+      readManagedEntrypoint: async request => ({ artifactIntegrity: request.integrity, entrypointId: request.entrypointId,
+        module: asset(request.integrity === oldIntegrity ? 'old' : 'candidate', request.integrity, 'runtime/surface/main/module.cjs'), styles: [] }),
+      reportActualState: async (_extensionId, state) => { reportsA.push(state); },
+    };
+    const hostB = { ...hostA, reportActualState: async (_extensionId: string, state: VarinExtensionActualState) => { reportsB.push(state); } };
+    let endpoint = hostA, generation = 1;
+    const runtime = new SurfaceExtensionRuntime({ surface: 'web' });
+    const loader = new SurfaceExtensionLoader({ surface: 'web', surfaceRuntime: runtime, realmId,
+      host: createSurfaceExtensionHost(() => endpoint),
+      evaluateModule: source => ({ default: { activate(context) {
+        if (source === (retirement === 'candidate-removes-owner' ? 'old' : 'candidate')) context.onDispose(async () => {
+          entered(); await held; disposerFinished = true;
+        });
+      } } }),
+    });
+    await loader.reconcile();
+    const candidateManifest: VarinExtensionManifest = retirement === 'candidate-removes-owner'
+      ? { ...manifest('2.0.0'), entrypoints: { host: { mode: 'brokered', file: 'host.js' } } }
+      : manifest('2.0.0');
+    current = snapshot(2, { ...current.extensions[0]!, candidate: {
+      applyRequested: false, capabilitiesReviewed: true, capabilityDelta: { added: [], removed: [] }, capabilityGrants: [],
+      integrity: nextIntegrity, manifest: candidateManifest, preparedAt: '2026-08-14T00:00:00.000Z', resolvedVersion: '2.0.0',
+      source: { kind: 'local', display: 'Candidate' },
+    } });
+    const applying = loader.applyCandidate('dev.example.managed', nextIntegrity, 2, {
+      host: captureSurfaceExtensionHost(() => endpoint, () => generation), expectedHostId: hostId,
+    });
+    let retiring: Promise<unknown> = applying;
+    if (retirement === 'later-disable') {
+      await applying;
+      retiring = loader.deactivateAll();
+    }
+    await ready;
+    assert.equal(current.extensions[0]?.integrity, nextIntegrity, 'publication on original Host committed before local cleanup');
+    const alreadyReported = reportsA.length;
+    endpoint = hostB; generation += 1; release(); await retiring;
+    assert.equal(disposerFinished, true, 'the original disposer actually finished');
+    assert.deepEqual(reportsB, [], 'not even an actual-state report may escape to the new Host');
+    assert.equal(reportsA.length, alreadyReported, 'the invalidated API facade does not pretend to reach the original Host');
+    assert.equal(runtime.getSnapshot().actual.every(state => state.status === 'inactive'), true);
+    await loader.stop();
+    assert.deepEqual(reportsB, []);
+  });
+}

@@ -23,17 +23,19 @@ import {
 
 export const BUILTIN_COMMANDS_EXTENSION_ID = 'varin.builtin.commands';
 
+type BuiltinCommandMeta = WorkbenchCommandMeta & Required<Pick<WorkbenchCommandMeta, 'titleKey'>>;
+
 interface BuiltinCommandDefinition {
   implementation: WorkbenchCommandImplementation;
-  meta: WorkbenchCommandMeta;
+  meta: BuiltinCommandMeta;
 }
 
 const command = (
-  meta: WorkbenchCommandMeta,
+  meta: BuiltinCommandMeta,
   execute: WorkbenchCommandImplementation['execute'],
 ): BuiltinCommandDefinition => ({ meta, implementation: { execute } });
 
-const editorCommand = (meta: WorkbenchCommandMeta, commandId: FileEditorCommandId): BuiltinCommandDefinition => ({
+const editorCommand = (meta: BuiltinCommandMeta, commandId: FileEditorCommandId): BuiltinCommandDefinition => ({
   meta,
   implementation: {
     execute: async () => {
