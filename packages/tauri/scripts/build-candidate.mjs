@@ -8,7 +8,8 @@ import {fileURLToPath} from 'node:url';
 import {verifyRuntimeManifest,inventory,sha256} from './runtime-manifest.mjs';
 import {stageWindowsBootstrap} from './windows-bootstrap.mjs';
 import {packageTransition} from './package.mjs';
-import {recordArtifact} from './release.mjs';
+import {recordArtifact,tauriSignFile} from './release.mjs';
+import {debianConfiguration,inspectDebian,verifyDebianCefFiles} from './linux-debian.mjs';
 import {pinnedCefLicense} from './cef-license.mjs';
 const repository=path.resolve(import.meta.dirname,'../../..'),packageRoot=path.resolve(import.meta.dirname,'..');
 const lock=JSON.parse(await fs.readFile(new URL('./cef-runtime.lock.json',import.meta.url),'utf8'));
@@ -47,7 +48,8 @@ export async function engineInventory(directory,{exclude}={}){
 }
 export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,signed=false,packageInstallers=true,allowDirty=false,mode='electron-to-tauri'}){
   if(!cef)throw new Error('Set CEF_PATH to one explicit build cache shared with staging');
-  runtime=path.resolve(runtime);output=path.resolve(output);
+  runtime=path.resolve(runtime);output=path.resolve(output);cef=path.resolve(cef);
+  const nativeEnvironment={...process.env,CEF_PATH:cef};
   const sourceSha=run('git',['rev-parse','HEAD'],{cwd:repository,stdio:'pipe',encoding:'utf8'}).trim();
   if(!allowDirty&&run('git',['status','--porcelain','--untracked-files=normal'],{cwd:repository,stdio:'pipe',encoding:'utf8'}).trim())throw new Error('Candidate builds require immutable committed source');
   const manifest=await verifyRuntimeManifest(runtime,{platform:process.platform,architecture:process.arch});
@@ -57,7 +59,7 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
   await fs.mkdir(output,{recursive:false});
   const cli=path.join(path.dirname(require.resolve('@tauri-apps/cli/package.json')),'tauri.js');
   const configs=['--config',JSON.stringify(candidateConfiguration(runtime))];
-  run(process.execPath,[cli,'build','--no-bundle','--ci','--features','desktop',...configs,...(process.platform==='win32'?['--','--lib']:[])]);
+  run(process.execPath,[cli,'build','--no-bundle','--ci','--features','desktop',...configs,...(process.platform==='win32'?['--','--lib']:[])],{env:nativeEnvironment});
   const metadata=JSON.parse(run(process.env.CARGO||'cargo',['metadata','--no-deps','--format-version','1'],{cwd:path.join(packageRoot,'src-tauri'),stdio:'pipe',encoding:'utf8'}));
   const cargo=path.join(metadata.target_directory,...(process.env.CARGO_BUILD_TARGET?[process.env.CARGO_BUILD_TARGET]:[]),'release');
   const sdk=await discoverCef(path.resolve(cef),process.platform,process.arch);
@@ -75,7 +77,7 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
     await fs.copyFile(path.join(cargo,'varin'),path.join(payload,'varin'));await fs.chmod(path.join(payload,'varin'),0o755);
     await fs.cp(runtime,path.join(payload,'usr/lib/Varin/runtime'),{recursive:true});
   }else if(process.platform==='darwin'){
-    run(process.execPath,[cli,'bundle','--ci','--no-sign','--bundles','app','--features','desktop',...configs]);
+    run(process.execPath,[cli,'bundle','--ci','--no-sign','--bundles','app','--features','desktop',...configs],{env:nativeEnvironment});
     payload=path.join(output,'Varin.app');await fs.cp(path.join(cargo,'bundle/macos/Varin.app'),payload,{recursive:true,verbatimSymlinks:true});
     await fs.copyFile(await pinnedCefLicense(sdk),path.join(payload,'Contents/Resources/CEF-LICENSE.txt'));
     await fs.copyFile(path.join(sdk,'CREDITS.html'),path.join(payload,'Contents/Resources/CEF-CREDITS.html'));
@@ -86,6 +88,25 @@ export async function buildCandidate({runtime,output,cef=process.env.CEF_PATH,si
   await fs.writeFile(path.join(runtimeDirectory,'runtime-manifest.json'),JSON.stringify(runtimeManifest,null,2)+'\n');
   const assets=path.join(output,'assets');await fs.mkdir(assets);
   let packaged=null;if(packageInstallers)packaged=await packageTransition({directory:payload,output:assets,signed,engineDirectory,mode});
+  if(packageInstallers&&process.platform==='linux'){
+    // AppImage remains an independent compatibility artifact. The official
+    // Debian bundler owns installed layout, format stamp and archive modes;
+    // it does not grant any host file privileges while constructing the tar.
+    const debConfigs=['--config',JSON.stringify(candidateConfiguration(runtimeDirectory)),
+      '--config',JSON.stringify(await debianConfiguration(sdk))];
+    run(process.execPath,[cli,'bundle','--ci','--no-sign','--bundles','deb','--features','desktop',...debConfigs],{env:{...nativeEnvironment,CEF_PATH:sdk}});
+    const packageArchitecture=process.arch==='x64'?'amd64':'arm64';
+    const deb=path.join(assets,`Varin-${manifest.version}-linux-${process.arch}.deb`);
+    await fs.copyFile(path.join(cargo,'bundle/deb',`Varin_${manifest.version}_${packageArchitecture}.deb`),deb,fs.constants.COPYFILE_EXCL);
+    const runtimeManifestSha256=await sha256(path.join(runtimeDirectory,'runtime-manifest.json'));
+    const debInventory=await inspectDebian(deb,{architecture:process.arch,version:manifest.version,sourceSha,runtimeManifestSha256,transition:mode==='electron-to-tauri'});
+    await verifyDebianCefFiles(debInventory,sdk);
+    const inventoryFile=path.join(assets,`linux-${process.arch}.deb-inventory.json`);
+    await fs.writeFile(inventoryFile,JSON.stringify(debInventory,null,2)+'\n',{flag:'wx'});
+    const signature=signed?await tauriSignFile(deb,manifest.version):undefined;
+    packaged.installed={format:'deb',updatePolicy:'package-manager',artifact:await recordArtifact(deb,{signature}),inventory:await recordArtifact(inventoryFile)};
+    await fs.writeFile(path.join(assets,`tauri-linux-${process.arch}.json`),JSON.stringify(packaged,null,2)+'\n');
+  }
   const target=`${process.platform}-${process.arch}`,runtimeName=`${target}.runtime.json`,engineName=`${target}.engine.json`;
   await fs.copyFile(path.join(runtimeDirectory,'runtime-manifest.json'),path.join(assets,runtimeName));
   const engine={schema:1,engine:'CEF',cefVersion:lock.version,architecture:process.arch,sandbox:'required',sourceSha,

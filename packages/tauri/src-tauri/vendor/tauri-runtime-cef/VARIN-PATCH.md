@@ -70,3 +70,13 @@ notification handler must not overwrite that owner's selected native action.
 `SandboxPolicy::Required` also clears executable-supplied Chromium switches in
 development builds. CEF's original deep-link restoration remains active; native
 acceptance cannot opt out with `--no-sandbox` or expose a remote debugging port.
+
+Linux helper discovery follows the pinned Chromium selection order: an existing
+adjacent `chrome-sandbox` shadows `CHROME_DEVEL_SANDBOX` even when its ownership,
+mode or AppImage `nosuid` mount makes it unusable. The environment fallback is
+eligible only without that adjacent file and when the executable belongs to the
+current real user. Discovery changes no permissions and does not make a missing
+sandbox acceptable under `SandboxPolicy::Required`.
+
+Pinned selection source:
+https://github.com/chromium/chromium/blob/156.0.8078.80/sandbox/linux/suid/client/setuid_sandbox_host.cc

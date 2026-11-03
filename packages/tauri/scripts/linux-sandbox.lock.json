@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "cefVersion": "156.0.15+gcf671c0+chromium-156.0.8078.80",
+  "electronVersion": "45.2.1",
+  "targets": {
+    "x64": {
+      "cef": "0855a27476b9cc378993e930acfacc0d78f243aaa495e24191027e301f3685d7",
+      "electron": "f16e2562837856845cfc8ebf4aa7f78b57fdadc6b69130509b1db87ce5d2f869"
+    },
+    "arm64": {
+      "cef": "ece444bc229faf17b24ab60b1834acecce3a6050760c5312a9bcb2e88cc8bf67",
+      "electron": "e0f790d4301b8c427d147792d9209939663a41d2bce5ffaef475eba60cf83151"
+    }
+  },
+  "sources": {
+    "cef": "https://cef-builds.spotifycdn.com/index.html",
+    "electron": "https://github.com/electron/electron/releases/tag/v45.2.1",
+    "selection": "https://github.com/chromium/chromium/blob/156.0.8078.80/sandbox/linux/suid/client/setuid_sandbox_host.cc"
+  }
+}

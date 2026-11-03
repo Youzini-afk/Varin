@@ -47,6 +47,13 @@ export async function collectCandidate({ inputs, acceptanceDirectory, output, so
       const runtimeManifest = await copyRecord(assets, build.runtimeManifest);
       const engineManifest = await copyRecord(assets, build.engineManifest);
       const update = await copyRecord(assets, packaged.update);
+      let installed;
+      if (packaged.installed) installed = {
+        format: packaged.installed.format, updatePolicy: packaged.installed.updatePolicy,
+        artifact: await copyRecord(assets, packaged.installed.artifact),
+        inventory: await copyRecord(assets, packaged.installed.inventory),
+      };
+      if (packaged.updateFormats) throw new Error('Additional in-app update formats are not qualified');
       const electron = [];
       for (const record of packaged.electron ?? []) electron.push(await copyRecord(assets, record));
       const acceptanceFile = path.join(acceptanceDirectory, `${target}.acceptance.json`);
@@ -54,7 +61,7 @@ export async function collectCandidate({ inputs, acceptanceDirectory, output, so
       for (const result of receipt.results ?? []) await copyRecord(acceptanceDirectory, result.evidence);
       const acceptance = await copyRecord(acceptanceDirectory, await recordArtifact(acceptanceFile));
       candidate.targets[target] = { runtimeManifest, engineManifest, runtimeManifestSha256: runtimeManifest.sha256,
-        engineManifestSha256: engineManifest.sha256, update, electron, acceptance };
+        engineManifestSha256: engineManifest.sha256, update, electron, acceptance, ...(installed ? { installed } : {}) };
     }
     await verifyCandidate(temporary, candidate, { publicKey });
     await fs.writeFile(path.join(temporary, 'tauri-candidate.json'), JSON.stringify(candidate, null, 2) + '\n', { flag: 'wx' });

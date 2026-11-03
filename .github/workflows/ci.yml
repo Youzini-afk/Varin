@@ -10,6 +10,10 @@ on:
         description: Run native Tauri builds after approval of the documented runner tool installations
         type: boolean
         default: false
+      tauri_linux_sandbox_install:
+        description: Explicit approval for this run to install the exact Debian candidate and pinned root-owned sandbox helpers
+        type: boolean
+        default: false
       tauri_full:
         description: Exercise every existing native desktop architecture (six runners)
         type: boolean
@@ -576,6 +580,7 @@ jobs:
     uses: ./.github/workflows/tauri-desktop.yml
     with:
       authorized_tools: true
+      authorized_linux_sandbox_install: ${{ inputs.tauri_linux_sandbox_install || false }}
       performance: ${{ inputs.tauri_performance || false }}
       target: ${{ inputs.tauri_target || '' }}
       source_sha: ${{ inputs.source_sha || github.sha }}

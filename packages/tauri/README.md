@@ -33,6 +33,12 @@ Linux 显示协议边界（x64、arm64 相同）：
 - Wayland 会话 + XWayland：通过 XWayland 运行同一 X11 路径；发行包必须声明 XWayland 会话依赖，不能把 X11 CI 当成完整 Wayland 会话验收。
 - 纯 Wayland、没有 XWayland：当前不支持原生 Browser 子窗口嵌入。CEF [嵌入 Ozone/Wayland 的上游问题](https://github.com/chromiumembedded/cef/issues/2804) 仍需架构实现。仅更改 Chromium 开关不能替代外部窗口嵌入；完整路线需要同一页的多图层 OSR 合成、输入/IME、拖放与原生弹窗父窗口接线，不得另建页面或用轮询截图降级。
 
+Linux 沙箱与安装格式另有独立边界：
+
+- AppImage 的挂载是 `nosuid`，包内 `chrome-sandbox` 不能取得所需权限。主机限制非特权 user namespace 时，该格式不可启动；不关闭沙箱、修改全局策略或用环境变量掩盖相邻 helper 的实际选择。
+- Debian 候选使用系统安装布局，由安装包提供 root 所有的固定版本 helper。构建归档及核验其权限不需要安装；真实安装、沙箱和 GUI 仍必须单独验收。临时 runner 上的安装与 SUID 配置需要明确许可，默认不执行。
+- Debian 候选当前由系统包管理器更新；应用内不会回退收集管理员密码，也不会接收 AppImage 更新包。AppImage 保留独立的签名更新链路。Debian 的完整应用内更新与取消体验仍未完成，不能据此宣布桌面替换完成。
+
 原生 smoke 使用显式临时数据目录与固定请求标识。它通过产品真实 Node BrowserOwner/Puppeteer/CEF 管道、认证 Host 二进制帧流和操作系统进程状态验证 11 条路径，并等待真实 native drain。它不开放任意远程 JS/CDP 端口，也不让超时变成操作完成。GUI smoke 不等于安装、跨屏、输入法、系统授权或性能验收。
 
 ## 数据、平台与发布

@@ -147,8 +147,8 @@ application preference storage. Actual data-root locking, application-credential
 recovery belong to the native migration owner. Preparing this bundle does not claim that
 an installed user's migration succeeded.
 
-Platform packaging deliberately wraps the **real Tauri payload** in the existing
-installer owner rather than changing installed identity:
+Platform packaging uses the **real Tauri payload**, retaining the existing installer
+identities and adding a separate native Linux system package:
 
 Every payload retains CEF's original redistribution license and Chromium credits.
 `download-cef` 3.0.0 removes the archive-root `LICENSE.txt` while flattening its cache;
@@ -172,13 +172,15 @@ also runs for Windows `--lib`, where the real executable is CEF's bootstrap.
   AppImage desktop integration stays, but its automatic `--no-sandbox` fallback is removed.
   X11 or an already enabled XWayland session is required; pure Wayland embedding is
   not supported by the current CEF runtime. GTK4 >= 4.14 is required by the current native dependency graph. This is not a claim of
-  compatibility with every older Electron-supported distribution.
+  compatibility with every older Electron-supported distribution. The additional native Debian
+  route below preserves the same product identity without reusing Electron's package hooks.
 
 Portable AppImages cannot use a setuid helper on a `nosuid` mount. On machines restricting
 unprivileged user namespaces, including common Ubuntu AppArmor configurations, a sandboxed
 portable launch can fail. The tests record that failure; they never disable sandboxing,
-change sysctls, or grant broad user-namespace access. A fixed-path system installation and
-administrator-approved policy/helper would require separate implementation and acceptance.
+change sysctls, or grant broad user-namespace access. The separate Debian route below supplies
+a fixed-path package-owned helper; its actual installation still requires explicit approval
+and its own acceptance evidence.
 See Chromium's [AppArmor guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
 
 ## Installed candidate and synthetic legacy profile smoke
@@ -196,7 +198,9 @@ suite twice, so it can replace that target's plain native-smoke step.
 Linux first runs `installer-smoke.mjs --preflight --output NEW-DIRECTORY
 --disposable-runner` under the same D-Bus/Xvfb environment, after the explicit
 `ensure-electron.mjs` preparation. This inexpensive check creates a separate
-synthetic profile under isolated HOME/XDG directories before native compilation.
+synthetic profile under isolated HOME/XDG directories. In the installed Debian workflow,
+this runs after candidate packaging and the explicitly authorized fixture-helper setup,
+so the development fixture modification cannot enter shipped resources.
 It does not touch the original OS Varin profile or replace the installed-product
 handoff. Failures report only fixed startup classifications and read-only Linux
 sandbox state, never raw child stderr or fixture values. No sandbox flag, sysctl,
@@ -235,7 +239,8 @@ request elevation. A dialog, permission failure or timeout fails the observation
 NSIS's trailing `/D=` and `_?=` paths remain unquoted as required by its
 [command-line contract](https://nsis.sourceforge.io/Docs/Chapter3.html).
 
-Linux has a portable AppImage, not a system installer/uninstaller. Its observation
+`installer-smoke.mjs` retains its portable AppImage path separately from the Debian
+system installer driver below. The portable observation
 copies the exact actual AppImage to a private installation path, starts it through
 its real launcher, replaces it with the same candidate after native drain, reopens
 retained target state and removes the portable file. It does **not** claim desktop
@@ -264,7 +269,7 @@ mounted app and the owned installed app may be unregistered using `lsregister -u
 <exact-path>`. The command never resets LaunchServices, scans/registers a domain
 or changes a default handler. Residual registrations/default handlers fail rather
 than silently widening cleanup. A normal unforced DMG detach must be observed
-before deleting the private session. A failed or timed-out attach, app, copy,
+before completing the installation observations. A failed or timed-out attach, app, copy,
 registration operation or detach stops the sequence and retains the private
 directory and any unresolved mount. There is no failure-path automatic detach.
 
@@ -292,10 +297,16 @@ The original Electron owner reopens its unchanged source records after uninstall
 Upload only observation JSON (including `tauri-fixture-preflight/*.json`), not private profiles, the
 runner's AppData or retained temporary roots. Any unverified process/native exit
 retains its private data with `cleanupUncertain: true`; a timeout kill does not
-permit deletion or another installation attempt. Successful installed-product
-runs with confirmed native drain remove only the
-private target test directory, leaving the synthetic original OS profile to show
-uninstall retention until the ephemeral runner is discarded.
+permit deletion or another installation attempt. All installed-product drivers retain
+both synthetic roots until the ephemeral runner is discarded. The final standalone
+Electron readback has direct-process close evidence, not original descendant-scope
+termination evidence. Successful observations therefore remain `qualified: false`,
+`fixtureCleanup: "not-verified"` and `cleanupUncertain: true`; each preceding Tauri
+launch retains its separate actual native-drain result. `complete: true` means only
+that the listed installation, replacement, removal and readback observations finished.
+The release verifier rejects this explicitly limited smoke receipt as the sole evidence
+for the full installer/update/uninstall domain. Broader acceptance must cover the
+remaining behaviors and reference the separate native-drain receipts.
 
 These observations do not qualify signed releases, automatic updates, upgrades
 from a different released version, migration of a real user's profile, default
@@ -306,6 +317,71 @@ with its existing owner suites; these synthetic records do not prove every legac
 data domain. A green tooling test proves only the script's refusal, integrity and
 process-observation behavior. Actual installation and migration remain unverified
 until these exact commands pass against the native candidate on their target OS.
+
+## Linux installed Debian candidate
+
+Linux candidate construction now produces **both** the existing AppImage and an additional
+`.deb` using the pinned Tauri CLI's native Debian bundler. The Debian executable and CEF
+live under `/usr/share/Varin`, `/usr/bin/varin` links to that executable, and the immutable
+Host/runtime lives under `/usr/lib/Varin/runtime`. The package retains the complete SDK
+locale inventory, CEF license and credits. Its dependencies explicitly require GTK4 4.14,
+current CEF system libraries, XDG portals and XWayland; pure Wayland remains unsupported.
+
+`linux-debian.mjs` reads the final archive streams without extracting or executing them.
+It checks package identity, architecture, binary bundle stamp, full runtime bytes, CEF
+assets and locale completeness, desktop URL activation, and package-owned paths. No
+maintainer scripts, AppArmor profiles or sysctl changes are included. Archive entries are
+root-owned and not group/world-writable. Only the exact pinned official CEF helper at
+`/usr/share/Varin/chrome-sandbox` and, in transition mode, Electron helper at
+`/usr/lib/Varin/runtime/legacy-electron/chrome-sandbox` may carry mode 4755.
+Their hashes are in `linux-sandbox.lock.json`; every helper ancestor must be a real,
+root-owned directory. The bundler sets these modes **inside archive metadata**, not on
+files on the build machine. `candidate.packaged.installed` binds the Debian artifact to
+its separate final inventory because the bundler stamps the executable and strips `.so`
+files after the portable payload is prepared.
+
+Actual installation requires a separate per-run approval, not just permission to install
+build tools. On an explicitly approved disposable GitHub-hosted Linux runner, after all
+native/exporter packaging has finished:
+
+```sh
+node packages/tauri/scripts/linux-fixture-sandbox.mjs --disposable-runner --authorized-linux-sandbox-install
+node packages/tauri/scripts/installer-smoke.mjs --preflight --output artifacts/tauri-fixture-preflight --disposable-runner
+node packages/tauri/scripts/linux-installed-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner --authorized-linux-sandbox-install
+```
+
+The GUI commands require the runner's ordinary-user D-Bus and display session. The first
+command creates a run/attempt-scoped, root-owned copy of the separately verified official
+Electron fixture helper under `/usr/local/libexec/varin-ci`. It then links only the
+prepared development fixture's adjacent helper there, after packaging so no shipped
+runtime can inherit that link. It never changes a user profile or global sandbox policy.
+The lifecycle re-inspects the actual `.deb` before installation. A fixed privileged
+operation then copies it into a run-scoped root-owned, read-only file, checks its SHA256,
+size and package metadata again, and gives only that immutable copy to dpkg. Existing
+mismatched copies are never overwritten. The driver checks dpkg ownership, installed
+hashes and permissions, then launches the real installed product as the normal
+runner user. Native renderer evidence must show seccomp, no-new-privileges, zero effective
+capabilities and a separate PID namespace. Migration, same-version replacement, reopening
+and package removal retain both synthetic data roots. A finished lifecycle reports
+`complete: true`, but the final original Electron fixture close does not prove its entire
+descendant scope drained. The report retains `cleanupUncertain: true`,
+`fixtureCleanup: "not-verified"`, `qualified: false` and the private session directory.
+Individual Tauri launch native-drain results remain separate. Real chat-history content,
+cross-version upgrades and signed release qualification are not proven by this fixture.
+
+AppImage remains a separate compatibility route. On hosts restricting unprivileged user
+namespaces, its adjacent helper on a `nosuid` mount cannot provide the required sandbox.
+Chromium prefers that adjacent path over `CHROME_DEVEL_SANDBOX`; an external helper does
+not make the unchanged AppImage pass. CI preserves that failure independently and does
+not count a successful Debian observation as AppImage qualification.
+
+Debian updates are currently **package-manager-owned**, an explicit candidate-stage gap
+rather than in-app update parity. The native stamped format rejects an in-app Debian
+update before drain, even if `APPIMAGE` is supplied; the existing UI displays the reason.
+Signed AppImage updates and historical Electron feeds remain separate. Completing Debian
+in-app updating still needs an owned, single system-authorization flow with real
+cancellation, installation and reopen validation. The pinned generic updater's password
+collection and retry-after-cancel fallback are not enabled.
 
 ## Signing and qualification
 
@@ -412,7 +488,12 @@ x64 and macOS arm64 for iteration. With `tauri_full: false`, an explicit `tauri_
 such as `win32-arm64` selects only that native target for focused diagnosis. Combining
 a focused target with `tauri_full: true` is rejected rather than silently reducing the
 requested coverage. An omitted native run is explicitly skipped, not a passed
-native qualification. The reusable workflow has its own `authorized_tools` gate. Existing
+native qualification. The reusable workflow has its own `authorized_tools` gate.
+`tauri_linux_sandbox_install` (or reusable/direct `authorized_linux_sandbox_install`) defaults
+to false and must represent approval for that particular run. Without it, construction and
+archive inspection remain unprivileged, installed checks are recorded as not executed,
+and the Linux job cannot claim native qualification. The final Linux gate requires both
+independent AppImage and installed Debian observations. Existing
 Electron release jobs are not replaced or disabled.
 
 Once `tauri-desktop.yml` is registered on the default branch, native-only iteration can
@@ -438,7 +519,7 @@ when a case fails. No real platform acceptance or signing is inferred from unit 
 Windows NSIS registers `varin://` in its selected scope and removes only a matching owned
 command on uninstall. macOS merges the real `CFBundleURLTypes` into the Tauri app before
 signing. Linux's generated desktop entry declares `x-scheme-handler/varin` and forwards
-URLs with `AppRun %U`; the packager extracts and validates that actual entry and launcher.
+URLs with `AppRun %U` for AppImage and `/usr/bin/varin %U` for Debian; the packager inspects the actual entry and launcher.
 These are installation contracts, not proof that a cold OS activation has been observed.
 
 On a **disposable OS user/session**, install the exact candidate using its normal installer,

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name={{name}}
+Comment={{comment}}
+Exec=/usr/bin/varin %U
+Icon={{icon}}
+Terminal=false
+Categories={{categories}}
+MimeType=x-scheme-handler/varin;
+StartupWMClass=Varin

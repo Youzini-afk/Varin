@@ -260,6 +260,8 @@ Catalog、Storage 和 Knowledge 由各自 owner 打开原数据；桌面迁移�
 
 macOS 保留 bundle 身份、签名、公证、菜单、输入法、系统授权和透明窗口行为。Linux 明确处理 X11／Wayland、窗口层级、托盘、CEF 依赖及现有发布格式，不以 Windows 结果推断其他平台已完成。
 
+Linux 的 AppImage 挂载不能提供有效的 setuid helper；在限制非特权 user namespace 的主机上，当前格式会保留明确的沙箱启动失败。新增 Debian 候选使用包管理器所有的系统布局和固定官方 helper，不修改全局 AppArmor 或 sysctl。安装归档检查、实际沙箱验收与原 AppImage 兼容性分别记录，不能相互代证。Debian 当前按系统包管理器更新，应用内单次授权、取消与签名更新的完整体验仍是待完成项，见 [桌面平台边界](../../packages/tauri/README.md)。
+
 每个现有目标架构需要可交付的浏览器二进制、原生库和签名方案。缺少某平台／架构的可用组件属于引擎组合未完成，不能发布时静默删掉 Browser Use 或该目标。
 
 Electron 与 Tauri 更新器的元数据和签名合同不同。过渡发行需让已安装 Electron 能获得正确的替换安装包，安装完成后再使用 Tauri 更新链路；不把两种 feed 直接互换，也不发布会重复下载／安装自身的循环更新。Tauri 更新签名与操作系统签名分别维护，密钥沿原发布秘密管理。[Tauri 更新器](https://v2.tauri.app/plugin/updater/)

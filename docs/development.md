@@ -16,9 +16,10 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-`dev` 启动 Web UI 和可信 API 服务，并输出本地 URL。Electron 使用 `bun run electron:dev`，
-已打包 UI 路径使用 `bun run electron:dev:bundled`。平台细节见 [Web](../packages/web/README.md)、
-[Electron](../packages/electron/README.md)、[Mobile](../packages/mobile/README.md)。
+`dev` 启动 Web UI 和可信 API 服务，并输出本地 URL。原生桌面候选使用 `bun run tauri:dev`，
+需要先准备固定运行时和平台依赖，见 [Tauri](../packages/tauri/README.md)。Electron 对照路径使用
+`bun run electron:dev`，已打包 UI 路径使用 `bun run electron:dev:bundled`。其余平台细节见
+[Web](../packages/web/README.md)、[Electron](../packages/electron/README.md)、[Mobile](../packages/mobile/README.md)。
 
 ## 修改与验证
 
@@ -85,7 +86,7 @@ PR 与 main 的镜像验证由主 CI 按容器输入调用只读 reusable workfl
 | 已核验 release kernel 的 Host 验收 / 平台 owner 子集 | `bun run test:kernel` / `bun run test:kernel -- --platform` |
 | Host 文件、凭据、锁与进程 owner | `bun run --cwd packages/web test:platform` |
 | 工具、发布与平台配置行为 | `bun run test:tooling` |
-| 共享浏览器产物 / 完整桌面包 | `bun run build:frontend` / `bun run electron:build` |
+| 共享浏览器产物 / 原生桌面候选 / Electron 对照包 | `bun run build:frontend` / `bun run tauri:build` / `bun run electron:build` |
 | 仅 Host 生产边界及 cloud layout helper | `bun run test:cloud` |
 | 文档链接 / public route 与工程文档 | `bun run docs:check` / `bun run docs:validate` |
 | 文档检查器本身 | `bun run test:docs` |

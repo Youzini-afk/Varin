@@ -6,6 +6,10 @@ on:
         description: Approval covers the documented official native runner tools
         type: boolean
         default: false
+      authorized_linux_sandbox_install:
+        description: Explicit approval for this run to install the exact Debian candidate and pinned root-owned sandbox helpers
+        type: boolean
+        default: false
       source_sha:
         description: Immutable committed source to build and exercise
         required: true
@@ -26,6 +30,10 @@ on:
     inputs:
       authorized_tools:
         description: Caller has explicit approval for documented native runner tool installations
+        type: boolean
+        default: false
+      authorized_linux_sandbox_install:
+        description: Explicit approval for this run to install the exact Debian candidate and pinned root-owned sandbox helpers
         type: boolean
         default: false
       source_sha:
@@ -116,7 +124,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential clang cmake ninja-build pkg-config libssl-dev libgtk-3-dev libgtk-4-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libegl1-mesa-dev libvulkan-dev libnss3 libasound2t64 libgbm1 libxss1 libxtst6 mesa-vulkan-drivers xauth xvfb xdotool openbox dbus-x11 fuse3 xdg-desktop-portal xdg-desktop-portal-gtk
+          sudo apt-get install -y --no-install-recommends build-essential clang cmake ninja-build pkg-config libssl-dev libgtk-3-dev libgtk-4-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libegl1-mesa-dev libvulkan-dev libnss3 libasound2t64 libgbm1 libxss1 libxtst6 mesa-vulkan-drivers xwayland xauth xvfb xdotool openbox dbus-x11 fuse3 xdg-desktop-portal xdg-desktop-portal-gtk
           pkg-config --atleast-version=4.14 gtk4
       - name: Select current macOS SDK
         if: matrix.platform == 'darwin'
@@ -150,11 +158,6 @@ jobs:
       - name: Prepare the explicit Linux fixture engine
         if: matrix.platform == 'linux'
         run: node packages/electron/scripts/ensure-electron.mjs
-      - name: Verify isolated Linux fixture startup before the native build
-        if: matrix.platform == 'linux'
-        run: |
-          mkdir -p artifacts
-          dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs --preflight --output artifacts/tauri-fixture-preflight --disposable-runner
       - uses: actions/download-artifact@v8
         with:
           name: tauri-shared-frontend
@@ -184,9 +187,40 @@ jobs:
       # This must precede a bare native smoke: only a known fresh OS profile may
       # be admitted for the synthetic old-engine fixture. The lifecycle driver
       # itself runs the complete native suite twice from the installed product.
-      - name: Exercise real Linux portable lifecycle and application-data handoff
+      # AppImage and Debian are separate distribution contracts. A nosuid
+      # AppImage failure must remain visible, not be replaced by a Debian pass.
+      - name: Observe the unchanged portable AppImage independently
+        id: linux-appimage
         if: matrix.platform == 'linux'
-        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
+        continue-on-error: true
+        run: |
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node --input-type=module <<'JS'
+          import fs from 'node:fs/promises';
+          import path from 'node:path';
+          import {smokeNative} from './packages/tauri/scripts/smoke-native.mjs';
+          const candidate=JSON.parse(await fs.readFile('artifacts/tauri-candidate/candidate.json','utf8'));
+          await smokeNative(candidate,{installedExecutable:path.join(candidate.assets,candidate.packaged.update.name),output:'artifacts/tauri-appimage-smoke.json',timeoutMs:300000});
+          JS
+      # Only after all native/exporter packaging: this fixture-only dependency
+      # gets an adjacent link to its root-owned helper, never shipped resources.
+      - name: Prepare the explicitly authorized isolated fixture sandbox
+        if: matrix.platform == 'linux' && inputs.authorized_linux_sandbox_install
+        run: node packages/tauri/scripts/linux-fixture-sandbox.mjs --disposable-runner --authorized-linux-sandbox-install
+      - name: Verify original Electron fixture startup with its own sandbox
+        if: matrix.platform == 'linux' && inputs.authorized_linux_sandbox_install
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/installer-smoke.mjs --preflight --output artifacts/tauri-fixture-preflight --disposable-runner
+      - name: Exercise authorized Debian installation, sandbox, migration and retained-data removal
+        id: linux-installed
+        if: matrix.platform == 'linux' && inputs.authorized_linux_sandbox_install
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' node packages/tauri/scripts/linux-installed-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner --authorized-linux-sandbox-install
+      - name: Record Linux checks which were not authorized
+        if: always() && matrix.platform == 'linux' && !inputs.authorized_linux_sandbox_install
+        run: |
+          mkdir -p artifacts
+          node --input-type=module <<'JS'
+          import fs from 'node:fs/promises';
+          await fs.writeFile('artifacts/tauri-linux-installation-status.json',JSON.stringify({schema:1,complete:false,status:'not-executed',reason:'Explicit per-run sandbox installation approval was not supplied',checks:['system-installation','installed-renderer-sandbox','migration-replacement-uninstall'],qualified:false},null,2)+'\n');
+          JS
       - name: Exercise real Windows installation, migration, reinstall and uninstall
         if: matrix.platform == 'win32'
         run: node packages/tauri/scripts/installer-smoke.mjs artifacts/tauri-candidate/candidate.json --output artifacts/tauri-installer-smoke --disposable-runner
@@ -216,6 +250,17 @@ jobs:
             artifacts/desktop-benchmark-evidence/measurements/**/*.jsonl
           if-no-files-found: warn
           retention-days: 14
+      - name: Require both independent Linux distribution observations
+        if: always() && matrix.platform == 'linux' && steps.candidate.outcome == 'success'
+        env:
+          INSTALL_AUTHORIZED: ${{ inputs.authorized_linux_sandbox_install }}
+          INSTALLED_OUTCOME: ${{ steps.linux-installed.outcome }}
+          APPIMAGE_OUTCOME: ${{ steps.linux-appimage.outcome }}
+        run: |
+          if [ "$INSTALL_AUTHORIZED" != true ] || [ "$INSTALLED_OUTCOME" != success ] || [ "$APPIMAGE_OUTCOME" != success ]; then
+            echo 'Linux distribution observations are incomplete. Inspect the independent Debian and AppImage observations; skipped approval and sandbox failures are not passes.' >&2
+            exit 1
+          fi
       # A failed native check must not force all six runners to download the
       # exact same verified sources/SDK again. Keep executable build outputs out.
       - name: Preserve downloaded build sources
@@ -242,6 +287,8 @@ jobs:
           name: tauri-observations-${{ matrix.platform }}-${{ matrix.architecture }}
           path: |
             artifacts/tauri-native-smoke.json
+            artifacts/tauri-appimage-smoke.json
+            artifacts/tauri-linux-installation-status.json
             artifacts/tauri-installer-smoke/*.json
             artifacts/tauri-fixture-preflight/*.json
           if-no-files-found: warn
@@ -255,6 +302,8 @@ jobs:
             artifacts/tauri-candidate/assets/
             artifacts/tauri-candidate/candidate.json
             artifacts/tauri-native-smoke.json
+            artifacts/tauri-appimage-smoke.json
+            artifacts/tauri-linux-installation-status.json
             artifacts/tauri-installer-smoke/*.json
           include-hidden-files: true
           if-no-files-found: warn

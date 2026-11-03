@@ -57,6 +57,8 @@ mod platform;
 pub mod geometry;
 pub mod window_geometry;
 
+#[cfg(any(all(feature = "desktop", target_os = "linux"), test))]
+mod update_format;
 pub mod update_metadata;
 #[cfg(feature = "desktop")]
 pub mod updater;

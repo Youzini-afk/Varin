@@ -25,7 +25,8 @@
 //!
 //! Tauri's AppImage bundler does copy `chrome-sandbox` next to the main binary, so the
 //! helper is *present* in every CEF AppImage and finding a file by that name proves
-//! nothing; one inside an AppImage is never treated as available. Outside an AppImage
+//! nothing; one inside an AppImage is never treated as available. Its presence still
+//! prevents Chromium from selecting `CHROME_DEVEL_SANDBOX`. Outside an AppImage
 //! the file is stat'ed against the same conditions Chromium's zygote host applies —
 //! owned by root, setuid, executable by others — because Chromium treats a helper that
 //! fails them as a fatal error rather than falling back to another sandbox.
@@ -268,13 +269,11 @@ fn running_from_appimage() -> bool {
 
 /// Whether Chromium can find *and use* the setuid `chrome-sandbox` helper.
 ///
-/// The helper next to the executable is disregarded entirely when running from an
-/// AppImage: the bundler always copies `chrome-sandbox` there, and the AppImage runtime
-/// mounts the payload `nosuid`, so the setuid bit `stat` still reports has no effect.
-///
-/// `CHROME_DEVEL_SANDBOX` is somebody deliberately pointing at a helper outside the
-/// application, so it is honoured on every layout, but it is stat'ed like any other
-/// candidate.
+/// Match the pinned Chromium helper selection before testing the selected file.
+/// An existing adjacent helper wins even when it cannot be used. In particular, an
+/// AppImage's adjacent helper is on a `nosuid` mount; an environment override cannot
+/// make Chromium skip it. The override is only a fallback for a user-owned executable
+/// with no adjacent helper.
 #[cfg(any(
   target_os = "linux",
   target_os = "dragonfly",
@@ -283,18 +282,69 @@ fn running_from_appimage() -> bool {
   target_os = "openbsd"
 ))]
 fn sandbox_helper_available(running_from_appimage: bool) -> bool {
-  if let Some(path) = std::env::var_os("CHROME_DEVEL_SANDBOX").filter(|path| !path.is_empty()) {
-    return helper_path_is_usable(std::path::Path::new(&path));
-  }
+  use std::os::unix::fs::MetadataExt;
 
-  if running_from_appimage {
-    return false;
-  }
-
-  std::env::current_exe()
+  let executable = std::env::current_exe().ok();
+  // Chromium stats /proc/self/exe, not the possibly replaced pathname returned by
+  // current_exe(). The latter is the available equivalent on the BSD targets.
+  #[cfg(target_os = "linux")]
+  let executable_uid = std::fs::metadata("/proc/self/exe")
     .ok()
-    .and_then(|exe| exe.parent().map(|dir| dir.join("chrome-sandbox")))
-    .is_some_and(|helper| helper_path_is_usable(&helper))
+    .map(|stat| stat.uid());
+  #[cfg(not(target_os = "linux"))]
+  let executable_uid = executable
+    .as_ref()
+    .and_then(|path| std::fs::metadata(path).ok())
+    .map(|stat| stat.uid());
+  // SAFETY: getuid has no preconditions and does not change process credentials.
+  let current_uid = unsafe { libc::getuid() };
+  let devel_sandbox = std::env::var_os("CHROME_DEVEL_SANDBOX");
+
+  sandbox_helper_path(
+    executable.as_deref(),
+    executable_uid,
+    current_uid,
+    running_from_appimage,
+    devel_sandbox.as_deref(),
+  )
+  .is_some_and(|helper| helper_path_is_usable(&helper))
+}
+
+/// Return only the helper Chromium will select, excluding the known `nosuid`
+/// AppImage location. File existence is deliberately distinct from usable ownership
+/// and mode: an invalid adjacent helper must not fall through to the override.
+/// Source: Chromium 156.0.8078.80 sandbox/linux/suid/client/setuid_sandbox_host.cc,
+/// SetuidSandboxHost::GetSandboxBinaryPath (also unchanged in Electron's .75).
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+fn sandbox_helper_path(
+  executable: Option<&std::path::Path>,
+  executable_uid: Option<u32>,
+  current_uid: u32,
+  running_from_appimage: bool,
+  devel_sandbox: Option<&std::ffi::OsStr>,
+) -> Option<std::path::PathBuf> {
+  if let Some(adjacent) = executable
+    .and_then(|path| path.parent())
+    .map(|dir| dir.join("chrome-sandbox"))
+  {
+    // Like Chromium's PathExists, this follows links; a dangling link is absent.
+    if adjacent.exists() {
+      return (!running_from_appimage).then_some(adjacent);
+    }
+  }
+
+  if executable_uid != Some(current_uid) {
+    return None;
+  }
+  devel_sandbox
+    .filter(|path| !path.is_empty())
+    .map(std::path::PathBuf::from)
 }
 
 /// Stats `path` and hands what it reports to [`helper_stat_is_usable`].
@@ -539,5 +589,159 @@ mod tests {
     );
     // What `fs::copy` produces in an AppDir: right name, none of the bits.
     assert!(!helper_stat_is_usable(1000, 0o100644));
+  }
+
+  #[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  ))]
+  mod helper_selection {
+    use super::*;
+    use std::{
+      ffi::OsStr,
+      fs,
+      path::PathBuf,
+      sync::atomic::{AtomicU64, Ordering},
+    };
+
+    struct Fixture {
+      root: PathBuf,
+      executable: PathBuf,
+      adjacent: PathBuf,
+      external: PathBuf,
+    }
+
+    impl Fixture {
+      fn new() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+          "varin-cef-sandbox-test-{}-{}",
+          std::process::id(),
+          NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        let executable = root.join("varin");
+        let external = root.join("external-helper");
+        fs::write(&executable, b"test executable, never invoked").unwrap();
+        fs::write(&external, b"test helper, never invoked").unwrap();
+        Self {
+          adjacent: root.join("chrome-sandbox"),
+          root,
+          executable,
+          external,
+        }
+      }
+
+      fn selected(
+        &self,
+        owner: Option<u32>,
+        appimage: bool,
+        devel: Option<&OsStr>,
+      ) -> Option<PathBuf> {
+        sandbox_helper_path(Some(&self.executable), owner, 1000, appimage, devel)
+      }
+    }
+
+    impl Drop for Fixture {
+      fn drop(&mut self) {
+        fs::remove_dir_all(&self.root).unwrap();
+      }
+    }
+
+    #[test]
+    fn an_invalid_adjacent_helper_shadows_the_environment_override() {
+      let fixture = Fixture::new();
+      fs::write(&fixture.adjacent, b"not a privileged helper").unwrap();
+      assert!(!helper_path_is_usable(&fixture.adjacent));
+      for owner in [None, Some(0), Some(1000)] {
+        for devel in [
+          None,
+          Some(OsStr::new("")),
+          Some(fixture.external.as_os_str()),
+        ] {
+          assert_eq!(
+            fixture.selected(owner, false, devel),
+            Some(fixture.adjacent.clone())
+          );
+        }
+      }
+    }
+
+    #[test]
+    fn appimage_adjacent_helper_cannot_fall_back_outside_its_nosuid_mount() {
+      let fixture = Fixture::new();
+      fs::write(&fixture.adjacent, b"bundled helper").unwrap();
+      assert_eq!(
+        fixture.selected(Some(1000), true, Some(fixture.external.as_os_str())),
+        None
+      );
+      // The same environment override becomes eligible only when the adjacent
+      // helper is actually absent, not merely known to be unusable.
+      fs::remove_file(&fixture.adjacent).unwrap();
+      assert_eq!(
+        fixture.selected(Some(1000), true, Some(fixture.external.as_os_str())),
+        Some(fixture.external.clone())
+      );
+    }
+
+    #[test]
+    fn environment_fallback_requires_observed_current_user_executable_ownership() {
+      let fixture = Fixture::new();
+      for appimage in [false, true] {
+        assert_eq!(
+          fixture.selected(Some(1000), appimage, Some(fixture.external.as_os_str())),
+          Some(fixture.external.clone())
+        );
+        for owner in [None, Some(0), Some(1001)] {
+          assert_eq!(
+            fixture.selected(owner, appimage, Some(fixture.external.as_os_str())),
+            None
+          );
+        }
+        for devel in [None, Some(OsStr::new(""))] {
+          assert_eq!(fixture.selected(Some(1000), appimage, devel), None);
+        }
+      }
+    }
+
+    #[test]
+    fn adjacent_symlink_presence_matches_its_target_not_the_link_entry() {
+      let fixture = Fixture::new();
+      let target = fixture.root.join("adjacent-target");
+      std::os::unix::fs::symlink(&target, &fixture.adjacent).unwrap();
+      assert_eq!(
+        fixture.selected(Some(1000), false, Some(fixture.external.as_os_str())),
+        Some(fixture.external.clone())
+      );
+      fs::write(target, b"unusable adjacent target").unwrap();
+      assert_eq!(
+        fixture.selected(Some(1000), false, Some(fixture.external.as_os_str())),
+        Some(fixture.adjacent.clone())
+      );
+    }
+
+    #[test]
+    fn executable_path_failure_does_not_invent_an_ownership_observation() {
+      let fixture = Fixture::new();
+      assert_eq!(
+        sandbox_helper_path(None, None, 1000, false, Some(fixture.external.as_os_str())),
+        None
+      );
+      // Chromium's separate /proc/self/exe stat can still authorize the fallback
+      // when obtaining the executable directory failed.
+      assert_eq!(
+        sandbox_helper_path(
+          None,
+          Some(1000),
+          1000,
+          false,
+          Some(fixture.external.as_os_str())
+        ),
+        Some(fixture.external.clone())
+      );
+    }
   }
 }

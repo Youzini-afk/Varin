@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { validateDebianInventory } from './linux-debian.mjs';
 import { verifyPerformanceEvidence } from './performance-evidence.mjs';
 import { canonicalJson, metadataBytes, verifyMinisign, verifySignedMetadata } from '../../../scripts/desktop-update-signatures.mjs';
 export const releaseTargets = ['darwin-x64','darwin-arm64','linux-x64','linux-arm64','win32-x64','win32-arm64'];
@@ -39,6 +40,17 @@ export async function verifyAcceptance(root,receipt,{target,sourceSha,version,ru
     // signed updater verification procedure, rather than inventing an OS signer.
     const evidence = await bytesFor(root, matches[0].evidence);
     if (!evidence.length) throw new Error(`Empty platform evidence: ${target}/${domain}`);
+    if (domain === 'installer-update-uninstall') {
+      // Operator reports may be plain text or describe broader acceptance with
+      // separate Tauri native-drain receipts. A direct, explicitly incomplete
+      // smoke receipt cannot stand in for that full-domain evidence.
+      let observation;
+      try { observation = JSON.parse(evidence); } catch { /* Plain operator report. */ }
+      if (observation?.product === 'varin-installed-product-smoke'
+        && (observation.complete !== true || observation.cleanupUncertain === true || observation.qualified === false)) {
+        throw new Error(`Installed smoke is not full-domain acceptance: ${target}; provide broader installer/update/uninstall evidence referencing separate Tauri native-drain receipts`);
+      }
+    }
     if (domain === 'resource-performance') verifyPerformanceEvidence(JSON.parse(evidence), { target, sourceSha, version, runtimeManifestSha256, engineManifestSha256, artifacts });
   }
   return receipt;
@@ -98,7 +110,17 @@ export async function verifyCandidate(root,candidate,{publicKey}){
       throw new Error(`Runtime/engine receipt source mismatch: ${target}`);
     if(candidate.transition.mode==='tauri' && runtime.legacyElectron) throw new Error(`Steady-state Tauri must not retain the old browser engine: ${target}`);
     if(candidate.transition.mode==='electron-to-tauri'&&(!runtime.legacyElectron||runtime.legacyElectron.sourceSha!==candidate.sourceSha||runtime.legacyElectron.protocol!==1))throw new Error(`Transition must retain the controlled legacy reader: ${target}`);
-    const artifacts=[entry.update,...(entry.electron??[])];
+    const installed = entry.installed;
+    if (target.startsWith('linux')) {
+      if (installed?.format !== 'deb' || installed.updatePolicy !== 'package-manager'
+        || !installed.artifact?.name?.endsWith('.deb') || !installed.inventory) throw new Error(`Missing package-manager-owned Debian installation: ${target}`);
+      const inventory = JSON.parse(await bytesFor(root, installed.inventory));
+      validateDebianInventory(inventory, { architecture: runtime.architecture, version: candidate.version,
+        sourceSha: candidate.sourceSha, runtimeManifestSha256: entry.runtimeManifestSha256,
+        artifactSha256: installed.artifact.sha256, transition: candidate.transition.mode === 'electron-to-tauri' });
+    } else if (installed) throw new Error(`Unexpected installed format: ${target}`);
+    if (entry.updateFormats) throw new Error('Additional in-app update formats are not qualified');
+    const artifacts=[entry.update,...(entry.electron??[]),...(installed ? [installed.artifact, installed.inventory] : [])];
     if(!entry.update||entry.electron?.length!==(target.startsWith('darwin')?2:1))throw new Error(`Missing updater or legacy installer format: ${target}`);
     const expectedElectron=target.startsWith('win32')?['.exe']:target.startsWith('darwin')?['.dmg','.zip']:['.AppImage'];
     for(const extension of expectedElectron)if(!entry.electron.some(file=>file.name.endsWith(extension)))throw new Error(`Missing ${extension} transition artifact: ${target}`);
@@ -106,7 +128,7 @@ export async function verifyCandidate(root,candidate,{publicKey}){
     for(const record of artifacts){
       const bytes=await bytesFor(root,record);
       if(record.sha512!==createHash('sha512').update(bytes).digest('base64'))throw new Error(`Electron checksum mismatch: ${record.name}`);
-      if(record===entry.update)verifyMinisign(bytes,record.signature,publicKey,{version:candidate.version});
+      if(record===entry.update||record===installed?.artifact)verifyMinisign(bytes,record.signature,publicKey,{version:candidate.version});
       if(names.has(record.name)&&names.get(record.name)!==target)throw new Error('Artifact names collide across targets');
       names.set(record.name,target);
     }
@@ -128,7 +150,12 @@ export async function assembleRelease(root,candidate,{publicKey,sign,notes='',da
   const electron=new Map();
   for(const target of releaseTargets){
     const entry=candidate.targets[target];
-    feed.platforms[target]={url:downloadUrl(base,entry.update.name),signature:entry.update.signature,sha256:entry.update.sha256,size:entry.update.size};
+    const format = target.startsWith('linux') ? 'appimage' : target.startsWith('win32') ? 'nsis' : 'app';
+    const artifact = {url:downloadUrl(base,entry.update.name),signature:entry.update.signature,sha256:entry.update.sha256,size:entry.update.size,format};
+    // Retain the historical AppImage key for already installed Tauri builds;
+    // current Linux builds select the format-specific key without fallback.
+    feed.platforms[target]=artifact;
+    if (target.startsWith('linux')) feed.platforms[`${target}-appimage`]={...artifact};
     qualification.targets[target]={runtimeManifestSha256:entry.runtimeManifestSha256,engineManifestSha256:entry.engineManifestSha256,acceptanceSha256:entry.acceptance.sha256,acceptedDomains:acceptanceDomains};
     const channel=target.startsWith('win32')?(target.endsWith('arm64')?'latest-arm64.yml':'latest.yml'):target.startsWith('darwin')?'latest-mac.yml':target.endsWith('arm64')?'latest-linux-arm64.yml':'latest-linux.yml';
     const selected=entry.electron.filter(record=>!record.name.endsWith('.dmg')).map(record=>({url:downloadUrl(base,record.name),sha512:record.sha512,size:record.size}));

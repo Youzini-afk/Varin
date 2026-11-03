@@ -29,9 +29,14 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::DynRuntime, tauri_plugin_up
 }
 fn target() -> String {
     format!(
-        "{}-{}",
+        "{}-{}{}",
         crate::manifest::platform(),
-        crate::manifest::architecture()
+        crate::manifest::architecture(),
+        if cfg!(target_os = "linux") {
+            "-appimage"
+        } else {
+            ""
+        }
     )
 }
 fn public_key() -> Result<&'static str, String> {
@@ -40,6 +45,18 @@ fn public_key() -> Result<&'static str, String> {
         .ok_or_else(|| "Updates are unavailable: this build has no release verification key".into())
 }
 fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    #[cfg(target_os = "linux")]
+    let appimage = {
+        use crate::update_format::{LinuxBundle, appimage_path};
+        use tauri::utils::{config::BundleType, platform::bundle_type};
+        let bundle = match bundle_type() {
+            Some(BundleType::Deb) => LinuxBundle::Deb,
+            Some(BundleType::AppImage) => LinuxBundle::AppImage,
+            None => LinuxBundle::Unstamped,
+            _ => LinuxBundle::Other,
+        };
+        appimage_path(bundle, app.env().appimage.map(PathBuf::from))?
+    };
     public_key()?;
     let mut builder = app
         .updater_builder()
@@ -50,14 +67,6 @@ fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
         .timeout(Duration::from_secs(120));
     #[cfg(target_os = "linux")]
     {
-        let appimage = PathBuf::from(
-            app.env()
-                .appimage
-                .ok_or("Updates require the installed AppImage, not an extracted application")?,
-        );
-        if !appimage.is_absolute() || !appimage.is_file() {
-            return Err("The installed AppImage is unavailable".into());
-        }
         builder = builder.executable_path(appimage);
     }
     let handle = app.clone();
@@ -70,7 +79,20 @@ fn validate_bytes(update: &Update, bytes: &[u8]) -> Result<(), String> {
     update
         .verify(bytes)
         .map_err(|_| "Update package signature verification failed")?;
+    crate::update_metadata::verify(&update.raw_json, public_key()?, &target())?;
     let artifact = &update.raw_json["platforms"][target()];
+    // Bind the plugin-selected package to the independently authenticated record.
+    // A valid signature on a different format must never authorize installation.
+    if update.target != target()
+        || artifact["url"].as_str() != Some(update.download_url.as_str())
+        || artifact["signature"].as_str() != Some(update.signature.as_str())
+    {
+        return Err("Update selection differs from its signed release metadata".into());
+    }
+    #[cfg(target_os = "linux")]
+    if artifact["format"] != "appimage" {
+        return Err("The update is not an AppImage package".into());
+    }
     let sha = format!("{:x}", Sha256::digest(bytes));
     if artifact["size"].as_u64() != Some(bytes.len() as u64)
         || artifact["sha256"].as_str() != Some(sha.as_str())
@@ -271,7 +293,7 @@ impl Owner {
             .as_mut()
             .ok_or("No pending update; check for updates first")?;
         public_key()?;
-        let _ = app;
+        updater(app)?;
         emit(
             json!({"event":"Started","data":{"contentLength":pending.update.raw_json["platforms"][target()]["size"]}}),
         );
@@ -327,6 +349,7 @@ impl Owner {
                 "Downloaded update is unavailable; download it again".into(),
             )
         })?;
+        updater(app).map_err(InstallFailure::Preparation)?;
         validate_bytes(&pending.update, &bytes).map_err(InstallFailure::Preparation)?;
         // Distinguish reversible preparation/close cancellation from a platform
         // installer which may have modified files after every local scope ended.

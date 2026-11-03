@@ -20,7 +20,7 @@ export async function createSmokeSession(){
   const data=path.join(root,'data'),home=path.join(root,'home');
   await fs.mkdir(data);await fs.mkdir(home);return{root,data,home};
 }
-export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWarm=false,installedExecutable,disposableUser=false,session,retainData=false,legacyFixtureNonce,restart=false,useOsProfile=false}={}){
+export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWarm=false,installedExecutable,installedInventory,disposableUser=false,session,retainData=false,legacyFixtureNonce,restart=false,useOsProfile=false}={}){
   if(useOsProfile&&!disposableUser)throw new Error('The original OS profile requires an explicit disposable OS user/session');
   if(legacyFixtureNonce&&(!/^[0-9a-f-]{36}$/u.test(legacyFixtureNonce)||!disposableUser||!useOsProfile))throw new Error('Synthetic legacy smoke requires its nonce and an explicit disposable OS profile');
   if(restart&&!session)throw new Error('Restart smoke requires the original private session');
@@ -30,8 +30,13 @@ export async function smokeNative(candidate,{output,timeoutMs=180_000,protocolWa
     await verifyProtocolRegistration(installedExecutable);
   }
   if(installedExecutable){
+    if(installedInventory){
+      const entry=installedInventory.entries?.find(e=>e.path==='usr/share/Varin/varin');
+      if(process.platform!=='linux'||installedExecutable!=='/usr/share/Varin/varin'||installedInventory.sourceSha!==candidate.sourceSha||installedInventory.artifactSha256!==candidate.packaged?.installed?.artifact?.sha256||entry?.type!=='file'||await sha256(installedExecutable)!==entry.sha256)throw new Error('Installed Debian executable differs from its candidate inventory');
+    }else{
     const source=process.platform==='linux'?path.join(candidate.assets,candidate.packaged.update.name):path.join(candidate.payload,process.platform==='darwin'?'Contents/MacOS/varin':'varin.exe');
     if(await sha256(installedExecutable)!==await sha256(source))throw new Error('Installed executable differs from the candidate');
+    }
   }
   const {root,data,home}=session??await createSmokeSession();
   const temporary=await fs.realpath(os.tmpdir()),resolved=await fs.realpath(root);
