@@ -324,7 +324,9 @@ export class ThreadCollaboration {
     if (child.source?.kind === 'absent') return null;
     if (child.source?.kind !== 'ready' && child.source?.kind !== 'shared') throw new Error('Child source is not ready');
     const fixed = child.source.selection;
-    const tools = sourceToolSchemas(child.launch).map(tool => tool.name as ThreadSource['tools'][number]);
+    // A continuation's retained launch template has no source. Hybrid file tools
+    // follow its separately prepared child selection without rewriting that template.
+    const tools = sourceToolSchemas({ ...child.launch, source: fixed }).map(tool => tool.name as ThreadSource['tools'][number]);
     if (fixed.mode === 'live_root' && fixed.live_root) return {
       resourceOwner: fixed.resource_owner, mode: fixed.mode, liveRoot: fixed.live_root,
       workspaceId: fixed.workspace_id, executionWorkspaceId: fixed.execution_workspace_id, tools,

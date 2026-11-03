@@ -60,7 +60,9 @@ export async function withManagedChildSource<T>(
     try { await service.service({ ...incomingAddress, requestId: randomUUID(), operation: { kind: 'child_refresh_capture', execution: child } }, signal); }
     finally { await service.release({ ...incomingAddress, mode: 'retire' }); }
   }
-  const selection = savedSourceLaunch(child.parent_run_id, source, sourceToolSchemas(child.launch).map(tool => tool.name));
+  // This reader owns the original preparation basis, not the ready child's Run
+  // source. The continuation launch template intentionally has no source.
+  const selection = savedSourceLaunch(child.parent_run_id, source, sourceToolSchemas({ ...child.launch, source }).map(tool => tool.name));
   const { runId: _run, ...preparedSource } = selection;
   const handoff = child.source && child.source.kind !== 'absent' ? child.source.handoff : null;
   if (child.trigger.kind === 'dispatch' && !handoff) throw new Error('Original child handoff is unavailable');

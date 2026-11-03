@@ -2477,11 +2477,14 @@ it.each(['user_continuation', 'message_request'] as const)('%s continues a compl
   await expect.poll(async () => {
     const child = await reopened.runtime.childExecution(accepted.execution_id);
     if (child.code_result.kind === 'unavailable') throw new Error(JSON.stringify(child.report));
-    return child.code_result.kind;
-  }, { timeout: 15_000 }).toBe('published');
+    return { codeResult: child.code_result.kind, runState: child.receipt ? (await reopened.runtime.run(child.receipt.run_id)).state : null,
+      errors: reopened.errors.map(String) };
+  }, { timeout: 15_000 }).toEqual({ codeResult: 'published', runState: 'completed', errors: [] });
   const finished = await reopened.runtime.childExecution(accepted.execution_id);
-  if (!finished.receipt || finished.code_result.kind !== 'published' || !finished.report) throw new Error('Continuation did not fix its result');
+  if (!finished.receipt || finished.code_result.kind !== 'published' || !finished.report || finished.source?.kind !== 'ready') throw new Error('Continuation did not fix its result');
   expect(finished.receipt.run_id).not.toBe(original.receipt.run_id);
+  expect(finished.launch.source).toBeNull();
+  expect((await reopened.runtime.launch(finished.receipt.run_id))!.selection.source).toEqual(finished.source.selection);
   expect(finished.source).toMatchObject({ kind: 'ready', handoff: null, pin: { root: original.code_result.result.root } });
   expect(finished.code_result.result.publication_id).not.toBe(original.code_result.result.publication_id);
   expect(finished.code_result.result.base_root).toBe(original.code_result.result.root);
