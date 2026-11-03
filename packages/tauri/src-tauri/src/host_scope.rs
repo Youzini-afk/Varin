@@ -166,7 +166,9 @@ pub(crate) mod windows {
         ptr::null_mut,
     };
     use windows_sys::Win32::{
-        Foundation::{ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, WAIT_OBJECT_0, WAIT_TIMEOUT},
+        Foundation::{
+            ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, STILL_ACTIVE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        },
         System::{
             JobObjects::{
                 IsProcessInJob, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
@@ -174,8 +176,8 @@ pub(crate) mod windows {
                 JobObjectBasicProcessIdList, QueryInformationJobObject,
             },
             Threading::{
-                OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-                WaitForSingleObject,
+                GetExitCodeProcess, INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+                PROCESS_SYNCHRONIZE, WaitForSingleObject,
             },
         },
     };
@@ -193,6 +195,7 @@ pub(crate) mod windows {
             &scope.job,
             &scope.original_process,
             scope.original_pid,
+            false,
             after_snapshot,
         )
     }
@@ -202,13 +205,25 @@ pub(crate) mod windows {
         original_process: &OwnedHandle,
         original_pid: u32,
     ) -> Result<bool, String> {
-        empty_original_after_snapshot(job, original_process, original_pid, |_| {})
+        empty_original_after_snapshot(job, original_process, original_pid, false, |_| {})
+    }
+
+    /// Only the independent guardian may block during settlement. An exiting
+    /// member is still unconfirmed until its retained process object signals;
+    /// ordinary empty queries must report that pending state without waiting.
+    pub(crate) fn settle_original(
+        job: &OwnedHandle,
+        original_process: &OwnedHandle,
+        original_pid: u32,
+    ) -> Result<bool, String> {
+        empty_original_after_snapshot(job, original_process, original_pid, true, |_| {})
     }
 
     fn empty_original_after_snapshot(
         job: &OwnedHandle,
         original_process: &OwnedHandle,
         original_pid: u32,
+        wait_for_rundown: bool,
         after_snapshot: impl FnOnce(&[u32]),
     ) -> Result<bool, String> {
         let mut after_snapshot = Some(after_snapshot);
@@ -244,6 +259,10 @@ pub(crate) mod windows {
             return Err("Managed process Job termination could not be observed".into());
         }
         if accounting.ActiveProcesses == 0 {
+            // The retained original Job's documented count is decremented only
+            // after a terminated process exits and all its references release.
+            // This is not Job-name absence, a PID lookup or an exit-code guess.
+            // https://learn.microsoft.com/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information
             return Ok(true);
         }
         // ActiveProcesses includes terminated objects retained by any external
@@ -255,6 +274,7 @@ pub(crate) mod windows {
                 after_snapshot(&ids);
             }
             let mut handles = std::collections::HashMap::with_capacity(ids.len());
+            let mut rundown = Vec::new();
             for pid in ids {
                 if pid == original_pid {
                     continue;
@@ -302,22 +322,60 @@ pub(crate) mod windows {
                             WAIT_TIMEOUT,
                             Some(true),
                         );
-                        return Ok(false);
+                        if !wait_for_rundown {
+                            return Ok(false);
+                        }
+                        let mut code = STILL_ACTIVE as u32;
+                        if unsafe { GetExitCodeProcess(handle.as_raw_handle(), &mut code) } == 0 {
+                            return Err("Managed Job member rundown is unknown".into());
+                        }
+                        if code == STILL_ACTIVE as u32 {
+                            return Ok(false);
+                        }
+                        // This result selects an eventual original-object
+                        // wait, never a completion receipt or name exemption.
+                        // Classify the whole snapshot first: a truly live later
+                        // member must still trigger Job cleanup promptly.
+                        rundown.push(pid);
+                        handles.insert(pid, handle);
                     }
                     _ => return Err("Managed Job process termination is unknown".into()),
                 }
             }
             // A member could spawn a child after the snapshot and then exit
-            // before our signal check. Re-read the complete Job membership while
-            // every proven process object is still pinned. Only a set contained
-            // in these signaled objects is stable: none can now create a child.
-            // A new member is still live/unknown work, never a stopped receipt.
+            // before our observation. Re-read complete membership while every
+            // observed object is pinned, before any rundown waits. A new member
+            // is still live/unknown work and requires cleanup, not a clean wait.
             let current = members(job, handles.len().saturating_add(1))?;
-            let stopped = current
+            let unchanged = current
                 .iter()
                 .all(|pid| *pid == original_pid || handles.contains_key(pid));
-            drop(handles);
-            return Ok(stopped);
+            if !unchanged {
+                return Ok(false);
+            }
+            // Windows can publish an exit result before native rundown signals
+            // the process object. Only the guardian waits here, with independent
+            // shell/control cancellation watchers still active. Pending I/O or
+            // caller timeouts cannot fabricate a successful completion.
+            for pid in &rundown {
+                if unsafe { WaitForSingleObject(handles[pid].as_raw_handle(), INFINITE) }
+                    != WAIT_OBJECT_0
+                {
+                    return Err("Managed Job member termination is unconfirmed".into());
+                }
+            }
+            if !rundown.is_empty() {
+                // All retained objects now signal and cannot create children.
+                // Only membership contained in this pinned set proves stopping.
+                let current = members(job, handles.len().saturating_add(1))?;
+                if !current
+                    .iter()
+                    .all(|pid| *pid == original_pid || handles.contains_key(pid))
+                {
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
         }
     }
 

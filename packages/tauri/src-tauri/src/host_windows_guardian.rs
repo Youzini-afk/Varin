@@ -495,7 +495,7 @@ fn run_inner(arguments: Vec<OsString>) -> Result<(), String> {
         }
         let mut clean = !cancelled.load(Ordering::Acquire)
             && unsafe { WaitForSingleObject(shell.as_raw_handle(), 0) } == WAIT_TIMEOUT
-            && crate::host_scope::windows::empty_original(&job, process, pid)?;
+            && crate::host_scope::windows::settle_original(&job, process, pid)?;
         if !clean && unsafe { TerminateJobObject(job.as_raw_handle(), 1) } == 0 {
             return Err("Original Job termination was not accepted".into());
         }
@@ -680,7 +680,7 @@ fn create_service(
             // snapshot regression requires only its explicitly synchronized native
             // actors, so that fixture has no console at all. This flag never permits
             // Job breakaway and does not alter production service startup.
-        // https://github.com/microsoft/terminal/blob/main/doc/specs/%23492%20-%20Default%20Terminal/spec.md
+            // https://github.com/microsoft/terminal/blob/main/doc/specs/%23492%20-%20Default%20Terminal/spec.md
             windows_sys::Win32::System::Threading::DETACHED_PROCESS
         } else {
             CREATE_NO_WINDOW
